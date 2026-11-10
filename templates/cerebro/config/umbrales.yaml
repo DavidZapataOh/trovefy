@@ -323,14 +323,14 @@ corte.anuncio.cpc_max_usd:
 
 corte.oferta.sin_ventas_usd:
   valor: 25
-  fuente: "Usuario (PU-01); C1 1:24:15"
+  fuente: "Usuario (PU-01, 2026-11-09): «matar el producto a los ~US$ 25 sin ventas»; C1 1:24:15"
   fecha: "2026-11-09"
   gana_sobre: "3× CPA_BE (HTML); 72 h"
   regla: R-006
 
 corte.oferta.factor_cpa_be:
   valor: 2
-  fuente: "Usuario (PU-01)"
+  fuente: "Usuario (PU-01, 2026-11-09): «matar el producto a los ~US$ 25 sin ventas»; C1 1:24:15"
   fecha: "2026-11-09"
   gana_sobre: "3× (HTML)"
   regla: R-006
@@ -351,7 +351,7 @@ test.conjuntos:
 
 test.spend_cap_usd:
   valor: 30
-  fuente: "Usuario (PU-01) + [D-09]"
+  fuente: "Usuario (PU-01, 2026-11-09): «matar el producto a los ~US$ 25 sin ventas»; [D-09]"
   fecha: "2026-11-09"
   gana_sobre: "100 USD (documento ABO, C1 18:10)"
   regla: R-007

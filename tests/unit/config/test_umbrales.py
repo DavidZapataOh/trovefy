@@ -52,3 +52,13 @@ def test_valor_lee_del_vault_y_falta(tmp_path):
     assert valor(tmp_path, "roas.apagar") == 1.4
     with pytest.raises(UmbralFaltante, match="no.existe"):
         valor(tmp_path, "no.existe")
+
+
+def test_valor_no_finito_se_rechaza(tmp_path):
+    import pytest
+    from trovify.config.umbrales import UmbralInvalido, cargar
+    for malo in (".nan", ".inf", "-.inf"):
+        p = tmp_path / "u.yaml"
+        p.write_text(f'a.b:\n  valor: {malo}\n  fuente: "x"\n  fecha: "2026-11-09"\n  gana_sobre: "—"\n  regla: R-001\n')
+        with pytest.raises(UmbralInvalido):
+            cargar(p)
