@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime
 import pytest
 from trovify.caza.parser import (
     FormatoDesconocido,
+    parsear_detalle,
     parsear_respuestas,
     sin_resultados,
     total_aproximado,
@@ -104,8 +105,53 @@ def test_ausentes_son_none_y_duplicados_una_vez():
     assert a.texto == ""
 
 
-def test_anuncio_sin_campo_obligatorio_es_formato_desconocido():
+def test_anuncio_malo_se_descarta_y_se_cuenta():
+    malo = _anuncio(ad_archive_id="2")
+    del malo["start_date"]
+    r = parsear_detalle([_cuerpo(malo, _anuncio())], "AR")
+    assert [a.library_id for a in r.anuncios] == ["1"]
+    assert r.descartados == 1
+    assert r.total_json is None
+
+
+def test_todos_malos_es_formato_desconocido():
     malo = _anuncio()
     del malo["start_date"]
     with pytest.raises(FormatoDesconocido):
-        parsear_respuestas([_cuerpo(malo)], "AR")
+        parsear_detalle([_cuerpo(malo)], "AR")
+
+
+def test_edge_sin_collated_results_se_descarta():
+    cuerpo = json.dumps({"data": {"ad_library_main": {"search_results_connection": {"edges": [
+        {"node": {}}, {"node": {"collated_results": [_anuncio()]}}]}}}})
+    r = parsear_detalle([cuerpo], "AR")
+    assert len(r.anuncios) == 1 and r.descartados == 1
+
+
+def test_total_json_del_html_real():
+    _, html = cuerpos("pagina_therapy_toolkit.json")
+    assert parsear_detalle([], "ALL", html=html).total_json == 234
+    _, html = cuerpos("vacio.json")
+    assert parsear_detalle([], "RO", html=html).total_json == 0
+
+
+def test_total_no_toma_texto_suelto():
+    assert total_aproximado("2026-11-10 resultados") is None
+    assert total_aproximado("Logra 3 resultados en 30 dias\n~230 resultados") == 230
+    assert total_aproximado("Logra 3 resultados en 30 dias ~230 resultados") == 230
+    assert total_aproximado("Logra 3 resultados garantizados") is None
+    assert total_aproximado('<div role="heading">1 resultado</div>') == 1
+    assert total_aproximado("0 resultados") == 0
+
+
+def _html_con_json(doc):
+    return "<html><body><script type=\"application/json\">" + json.dumps(doc) + "</script></body></html>"
+
+
+def test_sin_resultados_manda_el_json():
+    vacio = {"x": {"search_results_connection": {"count": 0, "edges": []}}}
+    assert sin_resultados(_html_con_json(vacio))
+    con = {"x": {"search_results_connection": {"count": 1, "edges": [
+        {"node": {"collated_results": [_anuncio(snapshot={"body": {"text": "No ads match your search criteria"}})]}}]}}}
+    html = _html_con_json(con) + "<p>No ads match your search criteria</p>"
+    assert not sin_resultados(html)
