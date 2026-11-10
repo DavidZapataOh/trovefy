@@ -18,12 +18,28 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     c.add_argument("servicio", metavar="SERVICIO")
     c.add_argument("url", metavar="URL")
     c.add_argument("--png", required=True, metavar="RUTA",
-                   help="dónde guardar la captura; el texto de la página se guarda al lado (.txt) salvo si parece llevar un secreto")
+                   help="dónde guardar la captura; si está en config/evidencia/provisional/ del vault, el texto de la página se guarda "
+                   "al lado (.txt) salvo si parece llevar un secreto")
 
 
 def _error(msg: str, codigo: int = 2) -> int:
     print(f"Error: {msg}", file=sys.stderr)
     return codigo
+
+
+def _provisional() -> Path:
+    from trovify.vault.rutas import vault_root
+
+    return vault_root() / "config" / "evidencia" / "provisional"
+
+
+def _en_provisional(destino: Path) -> bool:
+    """El texto de una pantalla con sesión solo se guarda en config/evidencia/provisional/ del vault."""
+    try:
+        destino.resolve().relative_to(_provisional().resolve())
+    except ValueError:
+        return False
+    return True
 
 
 def _guardar_texto(destino: Path, url_final: str, texto: str) -> str:
@@ -66,7 +82,11 @@ def _ejecutar(args: argparse.Namespace) -> int:
     except OSError as exc:
         return _error(f"no se pudo escribir: {exc.strerror or exc}", 1)
     print(f"Captura guardada en {c.png}.")
-    print(_guardar_texto(Path(args.png).with_suffix(".txt"), c.url_final, c.texto))
+    destino = Path(args.png).with_suffix(".txt")
+    if _en_provisional(destino):
+        print(_guardar_texto(destino, c.url_final, c.texto))
+    else:
+        print(f"Texto no guardado: solo se guarda dentro de {_provisional()}/ (fuera del vault no se deja texto de tu sesión).")
     if navegador.sesion_caducada(c.url_final):
         print("Aviso: parece que la sesión ha caducado (pantalla de inicio de sesión). Ejecuta «trovify navegador abrir».")
     return 0

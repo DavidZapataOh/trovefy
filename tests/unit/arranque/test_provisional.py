@@ -121,7 +121,8 @@ def test_navegador_capturar_guarda_el_texto(tmp_path, monkeypatch, capsys):
         return Captura(url + "?token=1", "<html>", "Plan actual: Free", captura_png)
 
     monkeypatch.setattr(navegador, "capturar", capturar)
-    destino = tmp_path / "c" / "pantalla.png"
+    monkeypatch.setenv("TROVIFY_VAULT", str(tmp_path / "v"))
+    destino = tmp_path / "v/config/evidencia/provisional/pantalla.png"
     assert main(["navegador", "capturar", "impultienda", "https://app.impultienda.ar/x", "--png", str(destino)]) == 0
     txt = destino.with_suffix(".txt")
     assert "Plan actual: Free" in txt.read_text() and "token" not in txt.read_text()
@@ -136,12 +137,34 @@ def test_navegador_capturar_no_guarda_texto_con_secreto(tmp_path, monkeypatch, c
     monkeypatch.setenv("HOME", str(tmp_path))
 
     def capturar(servicio, url, captura_png=None, **kw):
+        captura_png.parent.mkdir(parents=True, exist_ok=True)
         captura_png.write_bytes(PNG)
         return Captura(url, "", "clave " + _sk(), captura_png)
 
     monkeypatch.setattr(navegador, "capturar", capturar)
-    destino = tmp_path / "pantalla.png"
+    monkeypatch.setenv("TROVIFY_VAULT", str(tmp_path / "v"))
+    destino = tmp_path / "v/config/evidencia/provisional/pantalla.png"
     assert main(["navegador", "capturar", "impultienda", "https://app.impultienda.ar/x", "--png", str(destino)]) == 0
     assert not destino.with_suffix(".txt").exists()
     out = capsys.readouterr().out
     assert "secreto" in out and _sk() not in out
+
+
+def test_navegador_capturar_fuera_del_vault_solo_png(tmp_path, monkeypatch, capsys):
+    from trovify import navegador
+    from trovify.cli import main
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("TROVIFY_VAULT", str(tmp_path / "v"))
+
+    def capturar(servicio, url, captura_png=None, **kw):
+        captura_png.parent.mkdir(parents=True, exist_ok=True)
+        captura_png.write_bytes(PNG)
+        return Captura(url, "", "Plan actual: Free · ana@example.com", captura_png)
+
+    monkeypatch.setattr(navegador, "capturar", capturar)
+    for destino in (tmp_path / "repo/tests/fixtures/x.png", tmp_path / "v/config/evidencia/x.png"):
+        assert main(["navegador", "capturar", "impultienda", "https://app.impultienda.ar/x", "--png", str(destino)]) == 0
+        assert destino.exists() and not destino.with_suffix(".txt").exists()
+        out = capsys.readouterr().out
+        assert "config/evidencia/provisional/" in out and len([ln for ln in out.splitlines() if "Texto" in ln]) == 1
