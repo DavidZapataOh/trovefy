@@ -7,6 +7,7 @@ from pathlib import Path
 
 import yaml
 
+from trovify.cerebro.destilado import pendientes, validar_todo
 from trovify.cerebro.ingesta import ingerir
 from trovify.cli import registrar
 from trovify.vault.andamio import crear_vault
@@ -41,6 +42,11 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     ing = sub.add_parser("ingerir", help="copia fuentes (.md/.html) a raw/ sin duplicar")
     ing.add_argument("rutas", nargs="+", metavar="RUTA", help="archivos .md o .html a ingerir")
     ing.add_argument("--vault", help="ruta del vault (por defecto, TROVIFY_VAULT o ~/trovify-cerebro)")
+    des = sub.add_parser("destilar", help="lista fuentes pendientes o valida las citas de wiki/metodo/")
+    grupo = des.add_mutually_exclusive_group(required=True)
+    grupo.add_argument("--pendientes", action="store_true", help="lista las fuentes de raw/ sin destilar")
+    grupo.add_argument("--validar", action="store_true", help="valida las citas de todo wiki/metodo/")
+    des.add_argument("--vault", help="ruta del vault (por defecto, TROVIFY_VAULT o ~/trovify-cerebro)")
 
 
 def _error(msg: str) -> int:
@@ -169,6 +175,25 @@ def _ingerir(args: argparse.Namespace, destino: Path) -> int:
     return 2 if faltan else 0
 
 
+def _destilar(args: argparse.Namespace, destino: Path) -> int:
+    if not destino.is_dir():
+        return _error(f"no existe el vault {destino}")
+    if args.pendientes:
+        lista = pendientes(destino)
+        for f in lista:
+            print(f.relative_to(destino).as_posix())
+        if not lista:
+            print("No hay fuentes pendientes.")
+        return 0
+    problemas = validar_todo(destino)
+    for p in problemas:
+        print(p)
+    if problemas:
+        return 1
+    print("Método sin problemas de citas.")
+    return 0
+
+
 def _ejecutar(args: argparse.Namespace) -> int:
     destino = Path(args.vault).expanduser() if args.vault else vault_root()
     if args.accion == "regla":
@@ -181,6 +206,8 @@ def _ejecutar(args: argparse.Namespace) -> int:
         return _lint(destino)
     if args.accion == "ingerir":
         return _ingerir(args, destino)
+    if args.accion == "destilar":
+        return _destilar(args, destino)
     if args.accion == "permisos":
         escribir_settings(destino, sobrescribir=True)
         print(f"Permisos regenerados en {destino / '.claude' / 'settings.json'}.")
