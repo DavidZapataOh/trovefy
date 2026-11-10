@@ -17,9 +17,11 @@ from trovify.arranque.verificadores.base import (
     MOTIVO_SIN_CONFIRMAR,
     Confirmacion,
     PantallaProvisional,
+    confirmacion_de,
     guardar_evidencia,
     guardar_provisional,
     lineas_provisionales,
+    registrar_lector,
 )
 from trovify.arranque.verificadores.meta_ids import (
     capturar_por_defecto,
@@ -105,14 +107,34 @@ def verificar_dominio(vault: Path | None = None, consultar: Callable = consultar
     return r
 
 
+def _posicion_dominio(texto: str, dominio: str) -> int:
+    return texto.lower().find(dominio)
+
+
+def estado_del_dominio(texto: str, dominio: str) -> str | None:
+    """«verificado» / «no verificado» justo después del dominio; None si no aparece o no se lee."""
+    i = _posicion_dominio(texto, dominio)
+    if i < 0:
+        return None
+    tramo = texto[i + len(dominio): i + len(dominio) + 120]
+    if _NO_VERIFICADO.search(tramo):
+        return "no verificado"
+    return "verificado" if _VERIFICADO.search(tramo) else None
+
+
 def _estado_verificado(texto: str, dominio: str) -> bool:
     """El dominio aparece y, justo después, el estado es «verificado» (no «no verificado»)."""
-    bajo = texto.lower()
-    i = bajo.find(dominio)
-    if i < 0:
-        return False
-    tramo = texto[i + len(dominio): i + len(dominio) + 120]
-    return bool(_VERIFICADO.search(tramo)) and not _NO_VERIFICADO.search(tramo)
+    return estado_del_dominio(texto, dominio) == "verificado"
+
+
+def _leer_08(textos: dict[str, str], vault: Path) -> dict[str, str | None]:
+    dominio, texto = _dominio_guardado(vault), textos.get("pagina", "")
+    if dominio is None or _posicion_dominio(texto, dominio) < 0:
+        return {"dominio": None, "estado": None}
+    return {"dominio": dominio, "estado": estado_del_dominio(texto, dominio)}
+
+
+registrar_lector("08", _leer_08, ("dominio", "estado"))
 
 
 def verificar_verificacion_meta(
@@ -122,6 +144,7 @@ def verificar_verificacion_meta(
     confirmacion: Confirmacion = CONFIRMACION_08,
 ) -> ResultadoVerificacion:
     vault = vault_root() if vault is None else Path(vault)
+    confirmacion = confirmacion_de(vault, "08", confirmacion)
     dominio = _dominio_guardado(vault)
     if dominio is None:
         return _sin_dominio()

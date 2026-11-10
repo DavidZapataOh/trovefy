@@ -18,7 +18,12 @@ from pathlib import Path
 
 from trovify.arranque.estado import ResultadoVerificacion
 from trovify.arranque.verificadores import verificador
-from trovify.arranque.verificadores.base import guardar_evidencia
+from trovify.arranque.verificadores.base import (
+    guardar_evidencia,
+    lector_de_mapa,
+    mapa_confirmado,
+    registrar_lector,
+)
 from trovify.arranque.verificadores.impultienda import normalizar_pasarelas
 from trovify.arranque.verificadores.meta_ids import capturar_por_defecto, no_medido
 from trovify.arranque.verificadores.pantallas import (
@@ -275,8 +280,8 @@ def verificar_whop(
         return no_medido(m)
     linea_co = f"✓ la documentación pública de Whop lista a Colombia ({URL_DOCS_WHOP})"
     try:
-        mapa = _mapa("templates/whop/mapa.yaml", mapa)
-        mapa_imp = _mapa("templates/impultienda/mapa.yaml", mapa_impultienda)
+        mapa = mapa_confirmado(vault, "10", _mapa("templates/whop/mapa.yaml", mapa))
+        mapa_imp = mapa_confirmado(vault, "09", _mapa("templates/impultienda/mapa.yaml", mapa_impultienda))
     except MapaInvalido as exc:
         return no_medido(f"no medido: {exc}")
     cap_fn = capturar or capturar_por_defecto
@@ -333,7 +338,7 @@ def verificar_hotmart(
 ) -> ResultadoVerificacion:
     vault = vault_root() if vault is None else Path(vault)
     try:
-        mapa = _mapa("templates/hotmart/mapa.yaml", mapa)
+        mapa = mapa_confirmado(vault, "10b", _mapa("templates/hotmart/mapa.yaml", mapa))
     except MapaInvalido as exc:
         return no_medido(f"no medido: {exc}")
     nombres = ["productos", "datos_financieros"]
@@ -357,6 +362,14 @@ def verificar_hotmart(
     datos = {"producto_prueba": "si", "retiro_registrado": "si"}
     evidencia.append(guardar_evidencia(vault, "10b", "datos", {"mapa_capturado": mapa["capturado"], **datos}))
     return ResultadoVerificacion(True, evidencia, r.motivo, [], datos, r.lineas)
+
+
+registrar_lector("10", lector_de_mapa(lambda: _mapa("templates/whop/mapa.yaml", None)))
+registrar_lector(
+    "10b",
+    lector_de_mapa(lambda: _mapa("templates/hotmart/mapa.yaml", None)),
+    ("productos.firma", "productos.productos", "datos_financieros.firma", "datos_financieros.cuentas"),
+)
 
 
 @verificador("10")

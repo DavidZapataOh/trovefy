@@ -18,6 +18,13 @@ from trovify.arranque.estado import (
     siguiente,
 )
 from trovify.arranque.verificadores import REGISTRO
+from trovify.arranque.verificadores.base import (
+    LECTORES,
+    RUTA_CONFIRMACIONES,
+    leer_texto_provisional,
+    registrar_confirmacion,
+    ultimo_texto_provisional,
+)
 from trovify.arranque.verificadores.checklist import CHECKLISTS, verificar_checklist
 from trovify.cli import registrar
 from trovify.dns import normalizar as normalizar_dominio
@@ -45,6 +52,10 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     c.add_argument("id", metavar="ID")
     c.add_argument("--respuesta", action="append", default=[], metavar="CLAVE=si|no", help="respuesta a una comprobación (repetible)")
     c.add_argument("--vault", help=_VAULT_AYUDA)
+    cf = sub.add_parser("confirmar", help="muestra lo leído de tu pantalla real y, con tu sí, confirma el patrón del paso")
+    cf.add_argument("id", metavar="ID", help="04, 05, 06, 08, 09, 10 o 10b")
+    cf.add_argument("--respuesta", metavar="si|no", help="tu respuesta: ¿coincide con lo que ves en tu pantalla?")
+    cf.add_argument("--vault", help=_VAULT_AYUDA)
     b = sub.add_parser("bloqueado", help="marca un paso como bloqueado")
     b.add_argument("id", metavar="ID")
     b.add_argument("--motivo", required=True, help="por qué está bloqueado")
@@ -101,14 +112,63 @@ def _parsear_datos(items: list[str]) -> dict[str, str]:
     return datos
 
 
+def _si_no(valor: str) -> bool | None:
+    """`si`/`sí`/`no` sin distinguir mayúsculas; None si no es ninguno."""
+    v = valor.strip().lower()
+    return True if v in ("si", "sí") else False if v == "no" else None
+
+
 def _parsear_respuestas(items: list[str]) -> dict[str, bool]:
     respuestas: dict[str, bool] = {}
     for item in items:
         clave, _, valor = item.partition("=")
-        if valor not in ("si", "no"):
+        r = _si_no(valor)
+        if r is None:
             raise ValueError(f"--respuesta {clave or item}: responde `si` o `no`")
-        respuestas[clave] = valor == "si"
+        respuestas[clave] = r
     return respuestas
+
+
+def _mostrable(valor: str | None) -> str:
+    if valor is None:
+        return "(no encontrado)"
+    return "(oculto: parece un secreto)" if buscar_secreto(valor) else valor
+
+
+def _confirmar(vault: Path, id_: str, respuesta: str | None) -> int:
+    lector = LECTORES.get(id_)
+    if lector is None:
+        return _error(f"el paso {id_} no tiene un patrón que confirmar (solo {', '.join(sorted(LECTORES))})")
+    si = None if respuesta is None else _si_no(respuesta)
+    if respuesta is not None and si is None:
+        return _error("--respuesta: responde `si` o `no`")
+    archivo = ultimo_texto_provisional(vault, id_)
+    if archivo is None:
+        return _error(
+            f"no hay texto provisional del paso {id_}: ejecuta antes `trovify arranque verificar {id_}` con la sesión iniciada"
+        )
+    valores = lector.leer(leer_texto_provisional(archivo), vault)
+    rel = archivo.relative_to(vault).as_posix()
+    print(f"Leído de tu pantalla real ({rel}):")
+    for campo, valor in valores.items():
+        print(f"  {campo}: {_mostrable(valor)}")
+    requeridos = lector.requeridos if lector.requeridos is not None else tuple(valores)
+    faltan = [c for c in requeridos if valores.get(c) is None]
+    if faltan:
+        return _error(
+            f"el patrón no casa con tu pantalla real (falta: {', '.join(faltan)}); "
+            "hay que ajustar el mapa (cambio en el repo). No se confirma nada."
+        )
+    if si is None:
+        print(f"\n¿Coincide con lo que ves en tu pantalla? Solo con tu «sí»: `trovify arranque confirmar {id_} --respuesta si`.")
+        return 0
+    if not si:
+        print(f"\nNo se guarda nada. Avisa del desajuste del paso {id_} (qué campo no coincide): hay que ajustar el patrón en el repo.")
+        return 1
+    entrada = registrar_confirmacion(vault, id_, archivo)
+    anadir_log(vault, "arranque", f"confirmar {id_}: patrón confirmado por el usuario con su pantalla real", [RUTA_CONFIRMACIONES, rel])
+    print(f"\nPatrón del paso {id_} confirmado ({entrada['fecha']}). Ahora: `trovify arranque verificar {id_}`.")
+    return 0
 
 
 def _checklist(vault: Path, id_: str, items: list[str]) -> int:
@@ -169,6 +229,8 @@ def _ejecutar(args: argparse.Namespace) -> int:
             return _verificar(destino, args.id)
         if args.accion == "checklist":
             return _checklist(destino, args.id, args.respuesta)
+        if args.accion == "confirmar":
+            return _confirmar(destino, args.id, args.respuesta)
         if args.accion == "bloqueado":
             if not args.motivo.strip():
                 return _error("--motivo no puede estar vacío")

@@ -11,7 +11,12 @@ from pathlib import Path
 
 from trovify.arranque.estado import ResultadoVerificacion
 from trovify.arranque.verificadores import verificador
-from trovify.arranque.verificadores.base import guardar_evidencia
+from trovify.arranque.verificadores.base import (
+    guardar_evidencia,
+    lector_de_mapa,
+    mapa_confirmado,
+    registrar_lector,
+)
 from trovify.arranque.verificadores.meta_ids import capturar_por_defecto, no_medido
 from trovify.arranque.verificadores.pantallas import (
     campos_de,
@@ -62,6 +67,7 @@ def verificar_impultienda(
         mapa = cargar(RUTA_MAPA) if mapa is None else mapa
     except MapaInvalido as exc:
         return no_medido(f"no medido: {exc}")
+    mapa = mapa_confirmado(vault, "09", mapa)
     capturas, motivo = capturar_pantallas("impultienda", mapa, PANTALLAS, capturar or capturar_por_defecto)
     if motivo:
         return no_medido(motivo)
@@ -77,6 +83,9 @@ def verificar_impultienda(
     evidencia = [guardar_evidencia(vault, "09", f"captura-{n}", png) for n, (_, png) in capturas.items() if png]
     evidencia.append(guardar_evidencia(vault, "09", "datos", {"mapa_capturado": mapa["capturado"], **r.datos}))
     return ResultadoVerificacion(True, evidencia, r.motivo, [], r.datos, r.lineas)
+
+
+registrar_lector("09", lector_de_mapa(lambda: cargar(RUTA_MAPA)))
 
 
 @verificador("09")

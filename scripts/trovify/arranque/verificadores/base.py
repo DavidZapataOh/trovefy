@@ -1,15 +1,19 @@
 """Utilidades comunes de los verificadores: ejecutar comandos sin colgarse y guardar evidencia."""
 
+import hashlib
 import json
 import os
 import re
 import signal
 import subprocess
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
+
+import yaml
 
 from trovify.arranque.estado import ResultadoVerificacion
 from trovify.vault.escritura import ZONA_NEGOCIO
@@ -264,3 +268,130 @@ def resultado_provisional(
     rutas, avisos = guardar_provisional(vault, id, pantallas, patrones_extracto, contexto)
     lineas = [f"? {MOTIVO_SIN_CONFIRMAR}", *lineas_provisionales(rutas, avisos)]
     return ResultadoVerificacion(None, [], MOTIVO_SIN_CONFIRMAR, [], {}, lineas)
+
+
+# --- Confirmación del patrón por el usuario (config/confirmaciones.yaml en el vault) ---------------
+#
+# Dos mecanismos equivalentes: la fecha en el código (`Confirmacion.fecha`, mapa `capturado`) o una
+# confirmación del usuario en el vault, hecha con `trovify arranque confirmar <paso> --respuesta si`
+# sobre el texto provisional de su pantalla real. La del vault solo vale si su `texto_sha256` coincide
+# con un texto provisional que existe: una edición a mano del yaml no certifica nada.
+
+RUTA_CONFIRMACIONES = "config/confirmaciones.yaml"
+_SHA = re.compile(r"[0-9a-f]{64}")
+_FECHA = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+class ConfirmacionesIlegibles(ValueError):
+    """config/confirmaciones.yaml no se puede leer; nunca se sobrescribe."""
+
+
+@dataclass(frozen=True)
+class Lector:
+    """Cómo lee un paso su texto provisional: {pantalla: texto} → {campo: valor | None}."""
+
+    leer: Callable[[dict[str, str], Path], dict[str, str | None]]
+    requeridos: tuple[str, ...] | None  # None: todos los campos que devuelve `leer`
+
+
+LECTORES: dict[str, Lector] = {}
+
+
+def registrar_lector(
+    id_: str, leer: Callable[[dict[str, str], Path], dict[str, str | None]], requeridos: tuple[str, ...] | None = None
+) -> None:
+    LECTORES[id_] = Lector(leer, requeridos)
+
+
+def lector_de_mapa(mapa: Callable[[], dict]) -> Callable[[dict[str, str], Path], dict]:
+    """Lector para un mapa.yaml: «<pantalla>.firma» y «<pantalla>.<campo>» de cada pantalla."""
+    from trovify.mapa import FirmaAusente, leer_pantalla
+
+    def leer(textos: dict[str, str], _vault: Path) -> dict[str, str | None]:
+        m = mapa()
+        salida: dict[str, str | None] = {}
+        for nombre, pantalla in m["pantallas"].items():
+            texto = textos.get(nombre)
+            try:
+                campos = leer_pantalla(pantalla, texto) if texto is not None else None
+            except FirmaAusente:
+                campos = None
+            salida[f"{nombre}.firma"] = None if campos is None else "presente"
+            for campo in pantalla.get("campos", {}):
+                salida[f"{nombre}.{campo}"] = None if campos is None else campos.get(campo)
+        return salida
+
+    return leer
+
+
+def _sha256(ruta: Path) -> str:
+    return hashlib.sha256(Path(ruta).read_bytes()).hexdigest()
+
+
+def _leer_confirmaciones(vault: Path) -> dict:
+    """Contenido de config/confirmaciones.yaml; lanza ConfirmacionesIlegibles si no se puede leer (nunca se pisa)."""
+    ruta = Path(vault) / RUTA_CONFIRMACIONES
+    if not ruta.exists():
+        return {}
+    try:
+        datos = yaml.safe_load(ruta.read_text(encoding="utf-8"))
+    except (yaml.YAMLError, UnicodeDecodeError) as exc:
+        raise ConfirmacionesIlegibles(f"{ruta} no se puede leer ({type(exc).__name__}); no se sobrescribe") from exc
+    if datos is None:
+        return {}
+    if not isinstance(datos, dict):
+        raise ConfirmacionesIlegibles(f"{ruta} no es un mapa; no se sobrescribe")
+    return datos
+
+
+def fecha_confirmada(vault: Path, paso: str) -> str | None:
+    """Fecha de la confirmación del usuario si su sha256 coincide con un texto provisional existente."""
+    try:
+        entrada = _leer_confirmaciones(vault).get(paso)
+    except (ValueError, OSError):
+        return None
+    if not isinstance(entrada, dict):
+        return None
+    fecha, sha = entrada.get("fecha"), entrada.get("texto_sha256")
+    fecha = fecha.isoformat() if isinstance(fecha, date) else fecha
+    if not isinstance(fecha, str) or not _FECHA.fullmatch(fecha) or not isinstance(sha, str) or not _SHA.fullmatch(sha):
+        return None
+    try:
+        if any(_sha256(f) == sha for f in textos_provisionales(vault, paso)):
+            return fecha
+    except OSError:
+        return None
+    return None
+
+
+def confirmacion_de(vault: Path, paso: str, codigo: Confirmacion) -> Confirmacion:
+    """La confirmación del código o, si no la hay, la del usuario en el vault (misma regla para todos)."""
+    if codigo.confirmada:
+        return codigo
+    fecha = fecha_confirmada(vault, paso)
+    if fecha is None:
+        return codigo
+    return Confirmacion(fecha=fecha, fuente=f"confirmado por el usuario con su pantalla real ({RUTA_CONFIRMACIONES})")
+
+
+def mapa_confirmado(vault: Path, paso: str, mapa: dict) -> dict:
+    """El mapa con `capturado` puesto si el usuario confirmó el paso en el vault."""
+    if mapa.get("capturado") is not None:
+        return mapa
+    fecha = fecha_confirmada(vault, paso)
+    return mapa if fecha is None else {**mapa, "capturado": fecha}
+
+
+def registrar_confirmacion(vault: Path, paso: str, archivo: Path) -> dict:
+    """Escribe (atómico) la confirmación del paso en config/confirmaciones.yaml del vault."""
+    from trovify.vault.escritura import escribir_atomico
+
+    datos = _leer_confirmaciones(vault)
+    entrada = {
+        "fecha": f"{datetime.now(ZONA_NEGOCIO):%Y-%m-%d}",
+        "texto_sha256": _sha256(archivo),
+        "archivo": Path(archivo).relative_to(vault).as_posix(),
+    }
+    datos[paso] = entrada
+    escribir_atomico(Path(vault) / RUTA_CONFIRMACIONES, yaml.safe_dump(datos, allow_unicode=True, sort_keys=True))
+    return entrada

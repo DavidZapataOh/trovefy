@@ -18,7 +18,9 @@ from trovify.arranque.estado import ResultadoVerificacion, cargar
 from trovify.arranque.verificadores import verificador
 from trovify.arranque.verificadores.base import (
     Confirmacion,
+    confirmacion_de,
     guardar_evidencia,
+    registrar_lector,
     resultado_provisional,
     sin_query,
 )
@@ -100,6 +102,7 @@ def verificar_business(
     vault: Path | None = None, capturar: Callable | None = None, confirmacion: Confirmacion = CONFIRMACION_04
 ) -> ResultadoVerificacion:
     vault = vault_root() if vault is None else Path(vault)
+    confirmacion = confirmacion_de(vault, "04", confirmacion)
     cap, png, motivo = leer_pagina(URL_BUSINESS, capturar or capturar_por_defecto)
     if cap is None:
         return no_medido(motivo)
@@ -147,6 +150,7 @@ def verificar_pagina(
     vault: Path | None = None, capturar: Callable | None = None, confirmacion: Confirmacion = CONFIRMACION_05_SESION
 ) -> ResultadoVerificacion:
     vault = vault_root() if vault is None else Path(vault)
+    confirmacion = confirmacion_de(vault, "05", confirmacion)
     url = _url_pagina(vault)
     if url is None:
         m = "no medido: falta la URL de la página (https://www.facebook.com/…)"
@@ -168,6 +172,10 @@ def verificar_pagina(
         return ResultadoVerificacion(False, [], m, ["comprueba que la URL es la de tu página y que está publicada"], {}, [f"✗ {m}"])
     ev = _evidencia(vault, "05", png, {"url": url, "url_final": sin_query(cap.url_final), "page_id": pid})
     return ResultadoVerificacion(True, ev, f"página de Facebook con ID {pid}", [], {"page_id": pid}, [f"✓ page_id {pid}"])
+
+
+registrar_lector("04", lambda textos, _v: {"business_id": extraer_business_id(textos.get("pagina", "").strip())}, ("business_id",))
+registrar_lector("05", lambda textos, _v: {"page_id": extraer_page_id(textos.get("pagina", ""))}, ("page_id",))
 
 
 @verificador("04")

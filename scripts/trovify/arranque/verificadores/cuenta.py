@@ -19,7 +19,9 @@ from trovify.arranque.estado import ResultadoVerificacion, cargar
 from trovify.arranque.verificadores import verificador
 from trovify.arranque.verificadores.base import (
     Confirmacion,
+    confirmacion_de,
     guardar_evidencia,
+    registrar_lector,
     resultado_provisional,
 )
 from trovify.arranque.verificadores.meta_ids import (
@@ -172,6 +174,7 @@ def verificar_cuenta(
     vault: Path | None = None, capturar: Callable | None = None, confirmacion: Confirmacion = CONFIRMACION_06
 ) -> ResultadoVerificacion:
     vault = vault_root() if vault is None else Path(vault)
+    confirmacion = confirmacion_de(vault, "06", confirmacion)
     act = _act_guardado(vault)
     url = f"{URL_AJUSTES}?act={act}" if act else URL_AJUSTES
     cap, png, motivo = leer_pagina(url, capturar or capturar_por_defecto)
@@ -191,6 +194,9 @@ def verificar_cuenta(
     ev = [guardar_evidencia(vault, "06", "captura", png)] if png else []
     ev.append(guardar_evidencia(vault, "06", "ajustes", {"act_id": act, **ajustes}))
     return ResultadoVerificacion(True, ev, r.motivo, [], {"act_id": act}, r.lineas)
+
+
+registrar_lector("06", lambda textos, _v: leer_ajustes_cuenta(textos.get("pagina", "")), ("moneda", "zona"))
 
 
 @verificador("06")
