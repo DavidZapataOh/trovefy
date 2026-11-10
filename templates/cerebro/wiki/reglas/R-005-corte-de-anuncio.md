@@ -12,7 +12,7 @@ estado: vigente
 
 ## Regla
 
-Con un gasto de al menos `corte.anuncio.gasto_usd` (3) US$ en un anuncio **y** (0 pagos iniciados **o** CPC mayor que `corte.anuncio.cpc_max_usd` (0,6) US$), se propone apagar el anuncio o el conjunto. Nunca solo por el CTR. Mientras el anuncio no llegue a ese gasto **ni** a `corte.anuncio.impresiones_min` (1000) impresiones, el estado es ESPERAR (diseño §4.13), sin propuesta.
+Con un gasto de al menos `corte.anuncio.gasto_usd` (3) US$ en un anuncio **y** (0 pagos iniciados **o** CPC mayor que `corte.anuncio.cpc_max_usd` (0,6) US$), se propone apagar el anuncio o el conjunto. Nunca solo por el CTR. Si el gasto es menor que `corte.anuncio.gasto_usd` (3) US$ **o** las impresiones son menos de `corte.anuncio.impresiones_min` (1000), el estado es ESPERAR (diseño §4.13), sin propuesta.
 
 ## Por qué
 

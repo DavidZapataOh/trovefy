@@ -62,6 +62,18 @@ def test_r005_aplica_a_todo_anuncio_y_cita_esperar():
     assert "corte.anuncio.impresiones_min" in (raiz / "config/umbrales.yaml").read_text(encoding="utf-8")
 
 
+def test_r005_esperar_usa_o_no_ni():
+    from pathlib import Path
+    raiz =Path(__file__).resolve().parents[3] / "templates" / "cerebro"
+    t = (raiz / "wiki/reglas/R-005-corte-de-anuncio.md").read_text(encoding="utf-8")
+    regla = t.split("## Regla")[1].split("## ")[0]
+    frase = next(f for f in regla.split(". ") if "ESPERAR" in f)
+    assert not re.search(r"\bni\b", frase), frase
+    partes = re.split(r"`corte\.anuncio\.impresiones_min`", frase)
+    assert len(partes) == 2 and "`corte.anuncio.gasto_usd`" in partes[0], frase
+    assert re.search(r"\s\*{0,2}o\*{0,2}\s", partes[0]), frase
+
+
 def test_valores_desactualizados_comparte_implementacion(tmp_path):
     from trovify.vault.reglas import valores_citados
     crear_vault(tmp_path / "v")
