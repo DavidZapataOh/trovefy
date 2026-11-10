@@ -22,7 +22,7 @@ def test_redireccion():
 
 def test_gateway_y_clave():
     plat, chk = detectar_gateway(["https://kits.netlify.app/", "https://pay.hotmart.com/X1234567Y?off=abc"])
-    assert plat == "hotmart" and clave_oferta("https://kits.netlify.app/", chk) == "hotmart:pay.hotmart.com/X1234567Y"
+    assert plat == "hotmart" and clave_oferta("https://kits.netlify.app/", chk) == "hotmart:X1234567Y"
     assert clave_oferta("https://jogosdenatal.netlify.app/oferta/natal", None) == "jogosdenatal.netlify.app/oferta/natal"
     assert clave_oferta("https://www.therapytoolkit.com/es/pagina", None) == "therapytoolkit.com"
 
@@ -36,7 +36,7 @@ def test_gateway_otros():
 
 
 def test_clave_whop_no_colapsa_checkouts():
-    assert clave_oferta("https://a.com/", "https://whop.com/checkout/plan_1") == "whop:whop.com/plan_1"
+    assert clave_oferta("https://a.com/", "https://whop.com/checkout/plan_1") == "whop:plan_1"
 
 
 def test_oferta_id_estable():
@@ -125,8 +125,8 @@ def test_resolver_cloaker_por_host_titulo_y_longitud():
     assert resolver_destino("https://tienda.example.com/", Falso(p), lambda u: ("https://otra.com/", "x" * 400)).cloaker
     assert resolver_destino(
         "https://tienda.example.com/", Falso(p), lambda u: (u, "<title>Blog</title>" + "Kit completo " * 20)
-    ).cloaker
-    assert resolver_destino("https://tienda.example.com/", Falso(p), lambda u: (u, "hola")).cloaker is True
+    ).cloaker is True
+    assert resolver_destino("https://tienda.example.com/", Falso(p), lambda u: (u, "hola")).cloaker is None
 
 
 def test_resolver_robot_falla_cloaker_none():
@@ -182,3 +182,75 @@ def test_fixture_html_minima():
     urls = urls_en_html(html)
     assert detectar_gateway(urls) == ("hotmart", "https://pay.hotmart.com/X1234567Y?off=abc")
     assert detectar_tracker(urls) == "voluum"
+
+
+def test_gateway_ignora_sdk_y_recursos():
+    assert detectar_gateway(["https://sdk.mercadopago.com/js/v2"]) is None
+    assert detectar_gateway(["https://gumroad.com/js/gumroad.js"]) is None
+    assert detectar_gateway(["https://x.gumroad.com/l/abc"])[0] == "gumroad"
+
+
+def test_resolver_gateway_no_sale_de_scripts_ni_peticiones_de_recursos():
+    p = pagina(
+        html='<script src="https://sdk.mercadopago.com/js/v2"></script><img src="https://buy.stripe.com/i.png">',
+        peticiones=["https://sdk.mercadopago.com/js/v2", "https://pay.hotmart.com/X1234567Y/img.png"],
+        documentos=[],
+    )
+    d = resolver_destino("https://tienda.example.com/", Falso(p), robot_igual)
+    assert d.gateway is None
+    p = pagina(documentos=["https://pay.kiwify.com.br/AbC123"])
+    assert resolver_destino("https://tienda.example.com/", Falso(p), robot_igual).gateway == "kiwify"
+
+
+def test_clave_misma_oferta_entre_hosts_hotmart():
+    ks = {clave_oferta("https://a.com/", u) for u in (
+        "https://pay.hotmart.com/X1234567Y?off=abc", "https://go.hotmart.com/X1234567Y", "https://hotm.art/X1234567Y")}
+    assert ks == {"hotmart:X1234567Y"}
+    assert clave_oferta("https://a.com/", "https://pay.hotmart.com/Z999") != "hotmart:X1234567Y"
+
+
+def test_clave_stripe_sesiones_no_se_juntan():
+    a = clave_oferta("https://a.com/", "https://checkout.stripe.com/c/pay/cs_live_a1")
+    b = clave_oferta("https://b.com/", "https://checkout.stripe.com/c/pay/cs_live_b2")
+    assert a == "a.com" and b == "b.com"
+    assert clave_oferta("https://a.com/", "https://buy.stripe.com/abc123") == "stripe:abc123"
+
+
+def test_clave_otras_plataformas():
+    assert clave_oferta("https://a.com/", "https://pay.kiwify.com.br/AbC") == "kiwify:AbC"
+    assert clave_oferta("https://a.com/", "https://whop.com/mi-empresa/") == "whop:mi-empresa"
+    assert clave_oferta("https://a.com/", "https://t.impultienda.ar/checkout") == "impultienda:t"
+    assert clave_oferta("https://a.com/", "https://x.gumroad.com/l/slug") == "gumroad:x.gumroad.com/slug"
+
+
+def test_url_no_valida_no_llega_al_navegador():
+    nav = Falso(pagina())
+    for u in ("file:///etc/passwd", "http://localhost:8000/", "http://127.0.0.1/", "http://192.168.1.5/x",
+              "http://169.254.169.254/latest", "javascript:alert(1)", "data:text/html,hola", "http://intranet/x"):
+        d = resolver_destino(u, nav, robot_igual)
+        assert d.estado == "no_medido" and d.motivo == "enlace no válido", u
+    assert nav.abiertas == []
+
+
+def test_robot_http_rechaza_url_no_valida():
+    import pytest
+    from trovify.caza.destino import pedir_como_robot_http
+
+    with pytest.raises(ValueError):
+        pedir_como_robot_http("file:///etc/passwd")
+
+
+def test_cloaker_spa_es_no_medido():
+    p = pagina()
+    d = resolver_destino("https://tienda.example.com/", Falso(p), lambda u: (u, "<title>Kit</title><div id=root></div>"))
+    assert d.cloaker is None and "JavaScript" in d.motivo
+    # el texto se compara sin etiquetas ni scripts: HTML largo pero casi sin texto sigue siendo un cascarón
+    html = "<title>Kit</title>" + "<script>var a=1;</script><div class=x></div>" * 200
+    assert resolver_destino("https://tienda.example.com/", Falso(p), lambda u: (u, html)).cloaker is None
+
+
+def test_precio_cuotas_sin_x_y_envio():
+    assert extraer_precio("3 cuotas de $ 33 o $ 99") == (99.0, "USD")
+    assert extraer_precio("3 parcelas de R$ 33,00 ou R$ 97,00") == (97.0, "BRL")
+    assert extraer_precio("Envío 2,50 € Total 29 €") == (29.0, "EUR")
+    assert extraer_precio("Shipping $5 Price $40") == (40.0, "USD")

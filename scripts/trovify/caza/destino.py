@@ -7,6 +7,7 @@ Nunca se abre ``facebook.com``/``l.facebook.com``: el salto ``l.php?u=`` se dese
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -23,7 +24,7 @@ _SEGUNDO_NIVEL = {"com", "co", "org", "net", "gov", "edu", "ac"}
 _RED_SOCIAL = (
     "facebook.com", "fb.com", "fb.me", "fb.watch", "messenger.com", "m.me", "instagram.com", "ig.me",
     "wa.me", "whatsapp.com", "api.whatsapp.com", "play.google.com", "apps.apple.com", "itunes.apple.com",
-    "onelink.me", "t.me",
+    "onelink.me", "t.me", "facebook.net",
 )
 _MOVIL_UA = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 "
@@ -44,11 +45,29 @@ def deshacer_redireccion_fb(url: str) -> str:
     """Saca ``u=`` de ``l.facebook.com/l.php`` (y ``lm.``/``www.facebook.com/l.php``). No abre nada."""
     p = urlparse(url)
     host = (p.hostname or "").lower()
-    if host.endswith("facebook.com") and p.path.rstrip("/") == "/l.php":
+    if (host.endswith("facebook.com") and p.path.rstrip("/") == "/l.php") or (
+        host == "l.instagram.com"
+    ):
         destino = parse_qs(p.query).get("u")
         if destino:
             return destino[0]
     return url
+
+
+def url_valida(url: str) -> bool:
+    """Solo http/https con un nombre de host público: nada de localhost, IP privadas, ``file:`` ni ``data:``."""
+    try:
+        p = urlparse(url)
+        host = (p.hostname or "").lower()
+    except ValueError:
+        return False
+    if p.scheme not in ("http", "https") or not host:
+        return False
+    try:
+        return ipaddress.ip_address(host).is_global
+    except ValueError:
+        pass
+    return "." in host and not host.endswith((".local", ".localhost", ".internal", ".lan", ".home.arpa"))
 
 
 def _en_dominio(host: str, dominio: str) -> bool:
@@ -74,13 +93,26 @@ def _coincide(url: str, patron: str) -> bool:
     return ruta.startswith("/" + pref) if pref else True
 
 
+_EXT_RECURSO = (".js", ".mjs", ".css", ".map", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".ico", ".woff", ".woff2")
+
+
+def _es_recurso(url: str) -> bool:
+    """Rutas de SDK o de recursos estáticos (``/js``, ``/sdk``, ``*.js``...): no son un checkout."""
+    ruta = (urlparse(url).path or "/").lower()
+    primero = ruta.strip("/").split("/")[0]
+    return primero in ("js", "sdk") or ruta.endswith(_EXT_RECURSO)
+
+
 def detectar_gateway(urls: list[str]) -> tuple[str, str] | None:
     """``(plataforma, url_checkout)`` de la primera URL que coincide, en el orden dado.
 
     Quien llama pasa las URLs en el orden de confianza de §4.7: cadena de redirecciones, peticiones
-    de red, marcadores del HTML.
+    de red, marcadores del HTML. Quien llama solo pasa navegaciones (cadena, documentos de primer nivel)
+    y enlaces/acciones de formulario; nunca scripts, imágenes ni XHR. Las rutas de SDK se ignoran.
     """
     for url in urls:
+        if _es_recurso(url):
+            continue
         for plataforma, patrones in GATEWAYS.items():
             if any(_coincide(url, pat) for pat in patrones):
                 return plataforma, url
@@ -104,6 +136,14 @@ def urls_en_html(html: str) -> list[str]:
     return list(vistas)
 
 
+_ENLACE = re.compile(r"""\b(?:href|action)\s*=\s*["']?(https?://[^\s"'<>]+)""", re.IGNORECASE)
+
+
+def enlaces_en_html(html: str) -> list[str]:
+    """URLs de ``<a href>`` y ``<form action>`` (no scripts, imágenes ni hojas de estilo), sin repetir."""
+    return list(dict.fromkeys(m.rstrip(".,;") for m in _ENLACE.findall(html or "")))
+
+
 # --- clave de oferta ------------------------------------------------------------------------
 
 
@@ -119,17 +159,46 @@ def _segmentos(url: str) -> list[str]:
     return [s for s in urlparse(url).path.split("/") if s]
 
 
+def _id_producto(segs: list[str]) -> str | None:
+    """Primer segmento no genérico (se saltan TODOS los genéricos iniciales)."""
+    for seg in segs:
+        if seg not in _GENERICOS:
+            return seg
+    return None
+
+
 def clave_oferta(url_final: str, checkout: str | None) -> str:
-    """``<plataforma>:<host>/<primer-segmento>`` con checkout; ``host/seg1/seg2`` en dominios
-    compartidos; si no, el dominio registrable."""
+    """Clave de oferta por producto: ``<plataforma>:<id>`` si hay checkout estable.
+
+    Hotmart: código de producto (igual en pay./go.hotmart.com y hotm.art); Kiwify: código del checkout;
+    Whop: ``plan_…`` si está, si no la empresa; Stripe: ``buy.stripe.com/<enlace>`` (las sesiones
+    ``checkout.stripe.com/c/pay/cs_…`` son efímeras y caen al dominio de la landing); Impultienda: el
+    subdominio de la tienda; el resto: ``<plataforma>:<host>/<primer segmento no genérico>``. Sin checkout:
+    ``host/seg1/seg2`` en dominios compartidos (netlify.app...) o el dominio registrable.
+
+    Limitación: Whop ``whop.com/<empresa>/…`` (clave por empresa, junta planes) y
+    ``whop.com/checkout/plan_…`` (clave por plan) nunca coinciden entre sí.
+    """
     if checkout:
         det = detectar_gateway([checkout])
         plataforma = det[0] if det else "checkout"
         host = _host(checkout)
         segs = _segmentos(checkout)
-        if segs and segs[0] in _GENERICOS:
-            segs = segs[1:]
-        return f"{plataforma}:{host}" + (f"/{segs[0]}" if segs else "")
+        id_ = _id_producto(segs)
+        if plataforma in ("hotmart", "kiwify") and id_:
+            return f"{plataforma}:{id_}"
+        if plataforma == "whop":
+            plan = next((x for x in segs if x.startswith("plan_")), None)
+            if plan or id_:
+                return f"whop:{plan or id_}"
+        elif plataforma == "impultienda":
+            return f"impultienda:{host.removeprefix('www.').split('.')[0]}"
+        elif plataforma == "stripe":
+            if host == "buy.stripe.com" and id_:
+                return f"stripe:{id_}"
+            # sesión efímera: se usa la landing
+        elif plataforma != "checkout":
+            return f"{plataforma}:{host}" + (f"/{id_}" if id_ else "")
     host = _host(url_final).removeprefix("www.")
     if any(_en_dominio(host, d) for d in _DOMINIOS_COMPARTIDOS):
         return "/".join([host, *_segmentos(url_final)[:2]])
@@ -153,7 +222,17 @@ _MONEDAS = {
 _CUR = r"(?:US\$|R\$|\$|€|(?<![A-Za-z])(?:EUR|RON|lei|CZK|PLN)(?![A-Za-z])|Kč|zł)"
 _NUM = r"\d[\d.,]*\d|\d"
 _PRECIO = re.compile(rf"(?:(?P<c1>{_CUR})\s*(?P<n1>{_NUM})|(?P<n2>{_NUM})\s*(?P<c2>{_CUR}))", re.IGNORECASE)
-_PARCELA = re.compile(rf"\b\d{{1,2}}\s*[x×]\s*(?:de\s*)?(?:{_CUR}\s*(?:{_NUM})|(?:{_NUM})\s*{_CUR})", re.IGNORECASE)
+_P = rf"(?:{_CUR}\s*(?:{_NUM})|(?:{_NUM})\s*{_CUR})"
+_PARCELA = re.compile(
+    rf"\b\d{{1,2}}\s*(?:[x×]|cuotas?|parcelas?|pagos?|installments?|payments?|rate|plăți)\s*(?:de|of|à|a)?\s*{_P}",
+    re.IGNORECASE,
+)
+# gastos de envío y descuentos no son el precio del producto
+_NO_PRECIO = re.compile(
+    rf"(?:env[ií]o|frete|shipping|livrare|doprava|dostawa|wysyłka|ahorras?|desconto|descuento|discount|save|"
+    rf"economiza|poupa)\b[^\d€$]{{0,15}}{_P}",
+    re.IGNORECASE,
+)
 
 
 def _numero(s: str) -> float | None:
@@ -171,7 +250,7 @@ def _numero(s: str) -> float | None:
 
 def extraer_precio(texto: str) -> tuple[float, str] | None:
     """Precio al contado y moneda: ignora parcelas («12x de») y devuelve el menor (el ancla es el mayor)."""
-    limpio = _PARCELA.sub(" ", texto or "")
+    limpio = _NO_PRECIO.sub(" ", _PARCELA.sub(" ", texto or ""))
     precios = []
     for m in _PRECIO.finditer(limpio):
         cur = m.group("c1") or m.group("c2")
@@ -224,7 +303,8 @@ class PaginaLanding:
     titulo: str
     estado_http: int | None
     cadena: list[str] = field(default_factory=list)  # redirecciones del documento, en orden
-    peticiones: list[str] = field(default_factory=list)  # URLs pedidas por la página
+    peticiones: list[str] = field(default_factory=list)  # todas las URLs pedidas (sirve para rastreadores)
+    documentos: list[str] = field(default_factory=list)  # solo documentos de primer nivel (navegaciones)
     reproductor: bool = False  # hay un reproductor de vídeo renderizado y visible
 
 
@@ -256,8 +336,20 @@ class NavegadorLandingEfimero:
             try:
                 pagina = ctx.new_page()
                 peticiones: list[str] = []
-                pagina.on("request", lambda r: peticiones.append(r.url))
-                pagina.route("**/*", lambda ruta: ruta.abort() if es_red_social(ruta.request.url) else ruta.continue_())
+                documentos: list[str] = []
+
+                def al_pedir(r):
+                    peticiones.append(r.url)
+                    if r.resource_type == "document":
+                        documentos.append(r.url)
+
+                def filtrar(ruta):
+                    u = ruta.request.url
+                    prohibido = es_red_social(u) or not (url_valida(u) or u.startswith(("data:", "blob:", "about:")))
+                    ruta.abort() if prohibido else ruta.continue_()
+
+                pagina.on("request", al_pedir)
+                pagina.route("**/*", filtrar)
                 try:
                     resp = pagina.goto(url, wait_until="domcontentloaded", timeout=45_000)
                     pagina.wait_for_timeout(int(espera_s * 1000))
@@ -268,7 +360,7 @@ class NavegadorLandingEfimero:
                     texto = pagina.evaluate("() => document.body ? document.body.innerText : ''") or ""
                     return PaginaLanding(
                         pagina.url, pagina.content(), texto, pagina.title(), getattr(resp, "status", None),
-                        cadena, peticiones, bool(pagina.evaluate(_JS_REPRODUCTOR)),
+                        cadena, peticiones, documentos, bool(pagina.evaluate(_JS_REPRODUCTOR)),
                     )
                 except PlaywrightError as exc:
                     raise NavegadorError(f"no se pudo abrir la landing ({type(exc).__name__})") from exc
@@ -280,6 +372,8 @@ def pedir_como_robot_http(url: str) -> tuple[str, str]:
     """Pide la URL con el UA del robot de Meta (``facebookexternalhit/1.1``); devuelve ``(url_final, texto)``."""
     import urllib.request
 
+    if not url_valida(url):
+        raise ValueError("enlace no válido")
     req = urllib.request.Request(url, headers={"User-Agent": _UA_ROBOT})
     with urllib.request.urlopen(req, timeout=20) as r:
         return r.geturl(), r.read(2_000_000).decode("utf-8", "replace")
@@ -303,18 +397,29 @@ def _sin_www(host: str) -> str:
     return host.removeprefix("www.")
 
 
-def _cloaker(url_movil: str, pagina: PaginaLanding, pedir_como_robot: Callable[[str], tuple[str, str]], url: str) -> bool | None:
+_MOTIVO_JS = "no medido: la landing se arma con JavaScript"
+
+
+def _cloaker(
+    url_movil: str, pagina: PaginaLanding, pedir_como_robot: Callable[[str], tuple[str, str]], url: str
+) -> tuple[bool | None, str | None]:
+    """``(cloaker, motivo)``. True solo si difieren el host final o el título entre robot y móvil.
+
+    Si el texto visible del robot es < 20 % del móvil (ambos sin etiquetas ni scripts) con mismo host y
+    título, la página es un cascarón de JavaScript: no se puede decidir (None con motivo)."""
     try:
         url_robot, bruto = pedir_como_robot(url)
     except Exception:  # noqa: BLE001 - cualquier fallo del robot = no medido
-        return None
+        return None, "no medido: el robot no pudo pedir la landing"
     if _sin_www(_host(url_robot)) != _sin_www(_host(url_movil)):
-        return True
+        return True, None
     t_robot, t_movil = _titulo(bruto), (pagina.titulo or _titulo(pagina.html)).strip().lower()
     if t_robot and t_movil and t_robot != t_movil:
-        return True
+        return True, None
     texto_movil = re.sub(r"\s+", " ", pagina.texto).strip()
-    return bool(texto_movil) and len(_texto_visible(bruto)) < 0.2 * len(texto_movil)
+    if texto_movil and len(_texto_visible(bruto)) < 0.2 * len(texto_movil):
+        return None, _MOTIVO_JS
+    return False, None
 
 
 def resolver_destino(
@@ -323,13 +428,16 @@ def resolver_destino(
     """Abre la landing (vista móvil), la compara con lo que ve el robot de Meta y detecta checkout y precio."""
     destino = Destino(url, None, None, None, None, None, None, None, False, "ok", None)
     real = deshacer_redireccion_fb(url)
-    if es_red_social(real):
-        destino.url_final, destino.red_social = real, True
-        return destino
 
     def no_medido(motivo: str) -> Destino:
         destino.estado, destino.motivo = "no_medido", motivo
         return destino
+
+    if es_red_social(real) and url_valida(real):
+        destino.url_final, destino.red_social = real, True
+        return destino
+    if not url_valida(real):
+        return no_medido("enlace no válido")
 
     try:
         p = navegador.abrir_landing(real)
@@ -346,13 +454,16 @@ def resolver_destino(
     if sesion_caducada(p.url_final):
         return no_medido("la landing pide login")
 
-    html_urls = urls_en_html(p.html)
-    chk = detectar_gateway([*p.cadena, p.url_final]) or detectar_gateway(p.peticiones) or detectar_gateway(html_urls)
+    chk = (
+        detectar_gateway([*p.cadena, p.url_final])
+        or detectar_gateway(p.documentos)
+        or detectar_gateway(enlaces_en_html(p.html))
+    )
     if chk:
         destino.gateway, destino.checkout = chk
-    destino.tracker = detectar_tracker([*p.cadena, *p.peticiones, *html_urls])
+    destino.tracker = detectar_tracker([*p.cadena, *p.peticiones, *urls_en_html(p.html)])
     destino.vsl = p.reproductor
-    destino.cloaker = _cloaker(p.url_final, p, pedir_como_robot, real)
+    destino.cloaker, destino.motivo = _cloaker(p.url_final, p, pedir_como_robot, real)
 
     precio = extraer_precio(p.texto)
     if precio is None and destino.checkout and not es_red_social(destino.checkout) and destino.checkout != p.url_final:

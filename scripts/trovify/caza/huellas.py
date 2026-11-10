@@ -19,7 +19,7 @@ GATEWAYS: dict[str, list[str]] = {
 }
 
 # Plataformas cuya huella no se ha confirmado con tiendas reales (ver notas abajo).
-POR_VERIFICAR: set[str] = {"impultienda", "whop", "cartpanda"}
+POR_VERIFICAR: set[str] = {"whop", "cartpanda"}  # Impultienda quedó verificada (ver VERIFICACION)
 
 # Rastreadores de afiliación/redirecciones: nombre -> hosts.
 TRACKERS_POR_NOMBRE: dict[str, list[str]] = {
@@ -34,15 +34,15 @@ TRACKERS: list[str] = [h for hosts in TRACKERS_POR_NOMBRE.values() for h in host
 # Verificación de las huellas «por verificar» (§4.7), con Chromium efímero móvil y sin tocar Meta:
 VERIFICACION: dict[str, str] = {
     "impultienda": (
-        "verificado el 2026-11-10 con 3 tiendas de palabra_impultienda.json (geriactiva, wholechild, "
-        "nervio-vago): la tienda es el propio subdominio *.impultienda.ar (página de venta y pedido en el "
+        "verificado el 2026-11-10 con 3 tiendas de palabra_impultienda.json: "
+        "la tienda es el propio subdominio *.impultienda.ar (página de venta y pedido en el "
         "mismo host, sin salto a otra pasarela); una tienda borrada devuelve HTTP 404 y «Tienda no "
-        "encontrada», que se trata como landing no medida; geriactiva muestra precio (17 USD) y un "
+        "encontrada», que se trata como landing no medida; una muestra precio (17 USD) y un "
         "reproductor Wistia renderizado; las tres cargan scripts de supabase.co y del pixel de Facebook"
     ),
     "whop": (
-        "no verificado (2026-11-10, ninguna tienda de Whop en las fixtures); indicio: nervio-vago."
-        "impultienda.ar pide t.whop.tw (rastreo de Whop), sin enlace de checkout visible"
+        "no verificado (2026-11-10, ninguna tienda de Whop en las fixtures); indicio: una tienda "
+        "Impultienda pide t.whop.tw (rastreo de Whop), sin enlace de checkout visible"
     ),
     "cartpanda": "no verificado (2026-11-10, ninguna tienda de Cartpanda en las fixtures)",
 }
