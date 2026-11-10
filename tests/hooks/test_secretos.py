@@ -132,3 +132,4 @@ def test_patrones_token_se_eligen_por_nombre():
     nombres = {nombre for nombre, _ in mod.PATRONES_TOKEN}
     assert nombres == {"token de Meta", "token de bot de Telegram", "clave sk-"}
     assert "access_token=" not in nombres
+    assert {n for n, _ in mod.PATRONES_BASH} == {"token de Meta", "token de bot de Telegram"}
