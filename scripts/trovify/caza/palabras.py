@@ -13,38 +13,52 @@ from __future__ import annotations
 import re
 import unicodedata
 
-FISICO: list[str] = [
-    # es
-    "cápsulas", "capsulas", "comprimidos", "pastillas", "gotas", "crema", "mg", "talla", "tallas",
-    "envío", "stock", "unidades", "suplemento", "sérum", "serum",
-    # pt
-    "cápsulas", "comprimidos", "gotas", "tamanho", "frete", "estoque", "unidades", "suplemento",
-    # en
-    "capsules", "tablets", "pills", "drops", "cream", "size", "sizes", "shipping", "units",
-    "supplement",
-    # ro
-    "capsule", "pastile", "picaturi", "cremă", "marime", "marimi", "livrare", "transport", "stoc", "bucati",
-    # it
-    "capsule", "compresse", "pillole", "gocce", "crema", "taglia", "taglie", "spedizione", "scorte", "pezzi",
-    # fr
-    "gélules", "gelules", "comprimés", "pilules", "gouttes", "crème", "taille", "tailles", "livraison",
-    "expédition", "exemplaires",
+# Cada grupo es un concepto (singular/plural y variantes cuentan una sola vez).
+# Fuertes: dosis/unidades de medida, consumibles y entrega física explícita.
+FISICO_FUERTE: list[list[str]] = [
+    ["mg"], ["ml"],
+    ["cápsulas", "capsulas", "cápsula", "capsule", "capsules", "gélules", "gelules"],
+    ["comprimidos", "comprimés", "compresse", "tablets", "pills", "pastillas", "pastile", "pilules", "pillole"],
+    ["gotas", "gouttes", "gocce", "picaturi", "drops"],
+    ["envío a domicilio", "envio a domicilio", "home delivery", "livraison à domicile", "consegna a domicilio"],
+    ["contra entrega", "pago contra entrega", "contrareembolso", "pago contra reembolso", "cash on delivery",
+     "pagamento na entrega", "plata la livrare", "pagamento alla consegna", "paiement à la livraison"],
+    ["llega a tu casa", "chega na sua casa", "arrives at your door", "ajunge la tine acasa"],
+    ["envío gratis", "envio gratis", "frete grátis", "free shipping", "livrare gratuită", "spedizione gratuita",
+     "livraison gratuite"],
+    ["correos", "seur", "dhl", "ups", "fedex", "correios", "colissimo", "poste italiane", "fan courier"],
 ]
+# Débiles: palabras corrientes también en ofertas digitales; solo cuentan sin marcadores digitales.
+FISICO_DEBIL: list[list[str]] = [
+    ["talla", "tallas", "size", "sizes", "taille", "tailles", "taglia", "taglie", "mărime", "marime", "marimi",
+     "tamanho", "tamaño", "tamano"],
+    ["stock", "estoque", "stoc", "scorte"],
+    ["envío", "envio", "frete", "shipping", "livrare", "transport", "spedizione", "livraison", "expédition"],
+    ["unidades", "units", "bucati", "pezzi", "exemplaires"],
+    ["crema", "cream", "cremă", "crème", "serum", "sérum"],
+    ["suplemento", "supplement"],
+]
+# Marcadores de producto digital: con ellos, las señales débiles de FISICO no cuentan.
+DIGITAL: list[str] = [
+    "pdf", "digital", "descargable", "descarga", "download", "downloadable", "ebook", "e-book", "printable",
+    "imprimible", "plantilla", "plantillas", "template", "templates", "acceso inmediato", "instant access",
+    "curso online", "online course", "app", "zoom", "webinar", "audiolibro", "baixar", "descarregar",
+    "acces imediat", "descărcare", "scaricabile", "télécharger", "téléchargeable", "accesso immediato",
+    "accès immédiat", "acesso imediato", "curso online",
+]
+FISICO: list[str] = [t for g in FISICO_FUERTE + FISICO_DEBIL for t in g]
 
+# Solo señales de retail de bienes; las garantías de devolución son comunes en ofertas digitales.
 TIENDA: list[str] = [
-    # es
-    "añadir al carrito", "agregar al carrito", "pago contra reembolso", "contrareembolso",
-    "pago contra entrega", "envío gratis", "devolución gratuita", "garantía de devolución",
-    # pt
-    "adicionar ao carrinho", "pagamento na entrega", "frete grátis", "troca grátis",
-    # en
-    "add to cart", "shopping cart", "cash on delivery", "free shipping", "free returns", "money back",
-    # ro
-    "adaugă în coș", "coș de cumpărături", "plata la livrare", "livrare gratuită", "retur gratuit",
-    # it
-    "aggiungi al carrello", "pagamento alla consegna", "spedizione gratuita", "reso gratuito",
-    # fr
-    "ajouter au panier", "paiement à la livraison", "livraison gratuite", "retour gratuit",
+    "añadir al carrito", "agregar al carrito", "adicionar ao carrinho", "add to cart", "adaugă în coș",
+    "aggiungi al carrello", "ajouter au panier", "devolución gratuita", "troca grátis", "free returns",
+    "retur gratuit", "reso gratuito", "retour gratuit", "colección", "collection", "coleção", "colecție",
+    "collezione", "collection printemps", "carrito de compras", "shopping cart", "coș de cumpărături",
+    "pago contra reembolso", "cash on delivery", "plata la livrare", "pagamento alla consegna",
+    "paiement à la livraison", "pagamento na entrega", "envío gratis en compras", "free shipping on orders",
+    "talla s", "talla m", "talla l", "talla xl", "size s", "size m", "size l", "size xl",
+    "taille s", "taille m", "taille l", "taglia s", "taglia m", "taglia l", "tamanho p", "tamanho m",
+    "tamanho g", "mărime s", "mărime m", "mărime l",
 ]
 
 # Solo bandera: los vídeos de la Biblioteca no descartan la academia (idea de un repo de referencia).
@@ -60,13 +74,13 @@ ACADEMIA: list[str] = [
 ]
 
 MARCA_PERSONAL: list[str] = [
-    "mi método", "mi metodo", "mentoría", "mentoria", "mi historia", "mi programa", "mis alumnos",
+    "mi método", "mi metodo", "mentoría", "mentoria", "mi historia", "mis alumnos",
     "trabaja conmigo", "sesión 1 a 1", "coaching personal",
     "meu método", "minha mentoria", "minha história", "meus alunos", "trabalhe comigo",
-    "my method", "my story", "mentorship", "work with me", "1:1 coaching", "my students", "my program",
-    "metoda mea", "mentorat", "povestea mea", "elevii mei", "lucrează cu mine", "programul meu",
+    "my method", "my story", "mentorship", "work with me", "1:1 coaching", "my students",
+    "metoda mea", "mentorat", "povestea mea", "elevii mei", "lucrează cu mine",
     "il mio metodo", "mentorship personale", "la mia storia", "i miei studenti", "lavora con me",
-    "ma méthode", "mentorat", "mon histoire", "mes élèves", "travaille avec moi", "mon programme",
+    "ma méthode", "mentorat", "mon histoire", "mes élèves", "travaille avec moi",
 ]
 
 BACKEND: list[str] = [
@@ -110,3 +124,8 @@ def encontradas(texto: str, lista: list[str]) -> set[str]:
 
 def contar(texto: str, lista: list[str]) -> int:
     return len(encontradas(texto, lista))
+
+
+def conceptos(texto: str, grupos: list[list[str]]) -> set[str]:
+    """Grupos de ``grupos`` con al menos una variante en ``texto`` (se devuelve la primera variante)."""
+    return {g[0] for g in grupos if encontradas(texto, g)}

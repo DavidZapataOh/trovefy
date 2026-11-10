@@ -1,7 +1,7 @@
 """Filtros eliminatorios con motivo (§4.3 del diseño; auditoría §4.5).
 
-Devuelve el primer descarte que aplica, en este orden: destino social, producto físico, marca
-personal, cebo de back-end, embudo no verificable, cloaker, tracker, posible copia, ya visto.
+Devuelve el primer descarte que aplica, en este orden: ya visto, destino social, producto físico, marca
+personal, cebo de back-end, embudo no verificable, cloaker, tracker, posible copia.
 
 Oferta sin destino (anuncios agrupados por ``pagina:<page_id>`` porque su enlace no se resolvió):
 los filtros de texto (físico, marca personal) siguen aplicando a los anuncios; los que necesitan
@@ -20,6 +20,7 @@ from trovify.caza.destino import Destino, motivo_dudoso
 from trovify.caza.oferta import Oferta
 from trovify.config.umbrales import Umbral
 
+# Constante técnica, sin clave en umbrales (los vaults reales no la tienen).
 _MIN_MARCA_PERSONAL = 2  # auditoría §4.5 punto 3: nunca descartar por una sola palabra ambigua
 
 
@@ -55,14 +56,22 @@ def _umbral(ctx: ContextoFiltros, clave: str) -> float:
 
 
 def filtrar(oferta: Oferta, ctx: ContextoFiltros) -> Descarte | None:
+    # Lo ya visto, excluido o propio se informa como tal sin volver a juzgarlo.
+    if {oferta.oferta_id, oferta.clave} & (ctx.excluidas | ctx.propias):
+        return Descarte("ya_visto", "ya visto, excluida o propia")
+
     destinos = _destinos(oferta)
     anuncios, landing = _texto_anuncios(oferta), _texto_landing(oferta, ctx)
+    # Aviso para el llamador (Tarea 8): quitar de ``ctx.landings`` el texto repetido de pie y avisos legales.
     todo = f"{anuncios}\n{landing}"
 
     if any(d.red_social for d in destinos):
         return Descarte("destino_social", "el destino es una red social, WhatsApp o una app")
 
-    fis = palabras.encontradas(todo, palabras.FISICO)
+    # Con marcadores digitales (pdf, plantilla, curso online...) solo cuentan las señales fuertes.
+    fis = palabras.conceptos(todo, palabras.FISICO_FUERTE)
+    if not palabras.encontradas(todo, palabras.DIGITAL):
+        fis |= palabras.conceptos(todo, palabras.FISICO_DEBIL)
     tie = palabras.encontradas(todo, palabras.TIENDA)
     if len(fis) >= _umbral(ctx, "caza.filtro.fisico_min_senales") or len(tie) >= _umbral(
         ctx, "caza.filtro.tienda_min_senales"
@@ -92,8 +101,6 @@ def filtrar(oferta: Oferta, ctx: ContextoFiltros) -> Descarte | None:
     if oferta.origen == "copia":
         return Descarte("posible_copia", f"hay una página más antigua con la misma oferta ({oferta.original_page_id})")
 
-    if {oferta.oferta_id, oferta.clave} & (ctx.excluidas | ctx.propias):
-        return Descarte("ya_visto", "ya visto, excluida o propia")
     return None
 
 

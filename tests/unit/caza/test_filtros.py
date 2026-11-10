@@ -145,3 +145,37 @@ def test_estacional():
 def test_listas_no_vacias_y_en_seis_idiomas(nombre):
     lista = getattr(palabras, nombre)
     assert isinstance(lista, list) and len(lista) >= 12
+
+
+@pytest.mark.parametrize("texto", [
+    "Envío inmediato por email del PDF. Talla única digital",
+    "Kit digital con envío inmediato, stock ilimitado",
+    "Patrón de costura PDF, tallas, unidades",
+    "Stock photos pack descargable, size 4000px",
+    "Planner PDF para tablets, size A4",
+    "Ebook de recetas: crema, gotas de limón, unidades",
+    "Livraison instantanée du PDF, taille unique",
+    "Spedizione immediata via email, taglia unica, PDF",
+    "Livrare imediată pe email, marime A4, stoc nelimitat, PDF",
+    "Frete imediato por email, tamanho A4, estoque ilimitado, ebook",
+    "Garantía de devolución de 30 días. Money back guarantee. Free returns. Ebook PDF",
+    "Garantía de 7 días, money back, reembolso total",
+])
+def test_ofertas_digitales_no_se_descartan(texto):
+    assert filtrar(oferta(texto), CTX) is None
+
+
+def test_camiseta_se_descarta_por_tienda():
+    d = filtrar(oferta("Camiseta talla M, devolución gratuita, añadir al carrito"), CTX)
+    assert d.codigo == "producto_fisico"
+
+
+def test_ya_visto_va_primero():
+    o = oferta("Cápsulas 500 mg, envío gratis")
+    assert filtrar(o, ContextoFiltros({o.oferta_id}, set(), U)).codigo == "ya_visto"
+    nm = oferta(destino=dataclasses.replace(D, estado="no_medido", motivo="x"))
+    assert filtrar(nm, ContextoFiltros(set(), {nm.clave}, U)).codigo == "ya_visto"
+
+
+def test_programa_suelto_no_es_marca_personal():
+    assert filtrar(oferta("Mi programa y mentoría con plantilla"), CTX) is None
