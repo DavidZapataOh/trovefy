@@ -114,3 +114,12 @@ def test_sin_stop_escrituras_en_propuestas_se_permiten(correr_hook, vault_tmp):
     (vault_tmp / "propuestas").mkdir()
     e = ev("Bash", cwd=str(vault_tmp / "propuestas"), command="echo x >> P.md")
     assert correr_hook("stop", e, vault_tmp)[0] == "allow"
+
+
+def test_file_ya_no_es_de_solo_lectura(correr_hook, vault_tmp):
+    activar(vault_tmp)
+    (vault_tmp / "propuestas").mkdir()
+    p = str(vault_tmp / "propuestas")
+    for cmd in ("file -C -m magic", "file P.md"):
+        decision, motivo = correr_hook("stop", ev("Bash", cwd=p, command=cmd), vault_tmp)
+        assert decision == "deny" and "STOP activo" in motivo, cmd

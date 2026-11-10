@@ -21,6 +21,18 @@ class EntradaIlegible(Exception):
     """La entrada del hook no es un objeto JSON válido."""
 
 
+def en_vault(entrada: dict, vault: pathlib.Path) -> bool:
+    """¿El ``cwd`` del evento (resuelto) está dentro del vault (resuelto)?"""
+    cwd = entrada.get("cwd")
+    if not isinstance(cwd, str) or not cwd:
+        return False
+    try:
+        pathlib.Path(cwd).expanduser().resolve().relative_to(vault.resolve())
+    except (ValueError, OSError):
+        return False
+    return True
+
+
 def leer_entrada() -> dict:
     try:
         crudo = sys.stdin.buffer.read().decode("utf-8")

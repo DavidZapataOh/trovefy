@@ -31,7 +31,7 @@ def _cadena(valor: object) -> str:
 
 _ESCRIBE = re.compile(r"\b(?:touch|mkdir|dd|rsync|tee)\b|>>")
 _SOLO_LECTURA = frozenset(
-    {"ls", "cat", "head", "tail", "less", "wc", "grep", "find", "stat", "file", "pwd", "echo", "cd", "pushd"}
+    {"ls", "cat", "head", "tail", "less", "wc", "grep", "find", "stat", "pwd", "echo", "cd", "pushd"}
 )
 _REDIRECCION_INOFENSIVA = re.compile(r"\d?>\s*/dev/null|\d>&\d|>&-")
 _FIND_PELIGROSO = re.compile(r"-(?:delete|exec|execdir|ok|okdir|fprint\w*|fls)\b")

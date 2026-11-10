@@ -61,17 +61,6 @@ def recordatorio(vault: pathlib.Path) -> str | None:
     return None
 
 
-def _en_vault(entrada: dict, vault: pathlib.Path) -> bool:
-    cwd = entrada.get("cwd")
-    if not isinstance(cwd, str) or not cwd:
-        return False
-    try:
-        pathlib.Path(cwd).expanduser().resolve().relative_to(vault.resolve())
-    except (ValueError, OSError):
-        return False
-    return True
-
-
 def _enfriado(vault: pathlib.Path) -> bool:
     """True si ya se avisó hace menos de una hora (mtime del marcador)."""
     try:
@@ -91,10 +80,10 @@ def _marcar(vault: pathlib.Path) -> None:
 
 def main() -> None:
     try:
-        from _comun import leer_entrada, vault_root
+        from _comun import en_vault, leer_entrada, vault_root
 
         vault = vault_root()
-        if not _en_vault(leer_entrada(), vault) or _enfriado(vault):
+        if not en_vault(leer_entrada(), vault) or _enfriado(vault):
             sys.exit(0)
         mensaje = recordatorio(vault)
         if mensaje:

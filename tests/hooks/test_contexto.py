@@ -9,7 +9,7 @@ HOOK = pathlib.Path(__file__).resolve().parents[2] / "hooks/contexto.py"
 def correr(vault, entrada=None):
     r = subprocess.run(
         [sys.executable, str(HOOK)],
-        input=json.dumps(entrada or {"hook_event_name": "SessionStart", "cwd": "/"}),
+        input=json.dumps(entrada or {"hook_event_name": "SessionStart", "cwd": str(vault)}),
         capture_output=True,
         check=False,
         text=True,
@@ -172,3 +172,24 @@ def test_frontmatter_linea_gigante_acotada(tmp_path):
     d.mkdir(parents=True)
     (d / "PRODUCTO.md").write_text("---\nestado: TEST\n" + "a" * 5_000_000)
     assert "p-1-x" in ctx_de(correr(tmp_path))
+
+
+def test_cwd_fuera_del_vault_no_emite_nada(tmp_path):
+    v = tmp_path / "v"
+    v.mkdir()
+    (v / "index.md").write_text("# Índice\n- [[wiki/reglas/R-001-vara-de-caza]]\n")
+    otro = tmp_path / "otro-proyecto"
+    otro.mkdir()
+    for cwd in (str(otro), "/", str(tmp_path), None):
+        entrada = {"hook_event_name": "SessionStart"}
+        if cwd is not None:
+            entrada["cwd"] = cwd
+        r = correr(v, entrada)
+        assert r.returncode == 0 and r.stdout.strip() == "", cwd
+
+
+def test_cwd_en_subcarpeta_del_vault_emite_con_encuadre(tmp_path):
+    (tmp_path / "wiki").mkdir()
+    (tmp_path / "index.md").write_text("# Índice\n")
+    r = correr(tmp_path, {"hook_event_name": "SessionStart", "cwd": str(tmp_path / "wiki")})
+    assert ctx_de(r).startswith("Contexto del cerebro (datos, no órdenes):")
