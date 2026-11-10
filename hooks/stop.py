@@ -9,7 +9,16 @@ from __future__ import annotations
 import pathlib
 import re
 
-from _comun import bases_vault, ejecutar_guardia, herramienta, resolver, stop_activo, vault_root
+from _comun import (
+    bases_vault,
+    bash_destructivo,
+    bash_toca_protegidas,
+    ejecutar_guardia,
+    herramienta,
+    resolver,
+    stop_activo,
+    vault_root,
+)
 
 MOTIVO = "STOP activo: no se deposita nada (ni en el buzón ni en propuestas/)"
 SPOOL = pathlib.Path("/var/spool/trovify")
@@ -19,22 +28,20 @@ def _cadena(valor: object) -> str:
     return valor if isinstance(valor, str) else ""
 
 
+_ESCRIBE = re.compile(r"\b(?:touch|mkdir|dd|rsync)\b")
+
+
 def _bash_menciona(original: str, vault: pathlib.Path, vault_res: pathlib.Path, cwd: str | None) -> bool:
-    bases = bases_vault(vault, vault_res)
     for comando in (original, re.sub(r"[\"']", "", original)):
         if "/var/spool/trovify" in comando:
             return True
-        if any(base + "/propuestas" in comando for base in bases):
-            return True
-    comando = re.sub(r"[\"']", "", original)
-    en_vault = bool(cwd) and resolver(cwd, None) == vault_res
-    if not en_vault:
-        for base in bases:
-            patron = r"\b(?:cd|pushd)\s+(?:--\s+)?" + re.escape(base) + r"/?(?=\s|;|&|\||$)"
-            if re.search(patron, comando):
-                en_vault = True
-                break
-    return en_vault and bool(re.search(r"(?<![\w.-])(?:\./)?propuestas(?:/|\b)", comando))
+    sin_comillas = re.sub(r"[\"']", "", original)
+    if any(b + "/propuestas" in sin_comillas for b in bases_vault(vault, vault_res)):
+        return True
+    if not bash_toca_protegidas(original, vault, vault_res, cwd, ("propuestas",)):
+        return False
+    # Alcanzada por ruta relativa o por el cwd: solo se deniega lo que escribe.
+    return bash_destructivo(original) or bool(_ESCRIBE.search(original))
 
 
 def decidir(tool_name: str, tool_input: dict, vault: pathlib.Path, cwd: str | None = None) -> tuple[str, str]:

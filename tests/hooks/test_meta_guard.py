@@ -1,4 +1,5 @@
 import pytest
+
 CASOS = [
     ("mcp__meta-ads__ads_update_entity", {"id": "1", "daily_budget": 2500}, "deny"),
     ("mcp__meta-ads__ads_create_campaign", {"name": "x"}, "deny"),
@@ -63,3 +64,22 @@ def test_stop_no_cambia_lecturas(correr_hook, vault_tmp):
 def test_webfetch_sin_esquema(correr_hook, vault_tmp):
     e = {"tool_name": "WebFetch", "tool_input": {"url": "graph.facebook.com/me?access_token=x"}}
     assert correr_hook("meta_guard", e, vault_tmp)[0] == "deny"
+
+
+def test_graph_video_y_subdominios_graph(correr_hook, vault_tmp):
+    cmd = "curl -X POST -F source=@v.mp4 https://graph-video.facebook.com/v21.0/act_1/advideos"
+    assert correr_hook("meta_guard", {"tool_name": "Bash", "tool_input": {"command": cmd}}, vault_tmp)[0] == "deny"
+    e = {"tool_name": "WebFetch", "tool_input": {"url": "https://graph-video.facebook.com/v21.0/act_1/advideos"}}
+    assert correr_hook("meta_guard", e, vault_tmp)[0] == "deny"
+    e = {"tool_name": "mcp__playwright__browser_navigate", "tool_input": {"url": "https://graph-video.facebook.com/x"}}
+    assert correr_hook("meta_guard", e, vault_tmp)[0] == "deny"
+    e = {"tool_name": "WebFetch", "tool_input": {"url": "https://www.facebook.com/help"}}
+    assert correr_hook("meta_guard", e, vault_tmp)[0] == "allow"
+
+
+def test_servidor_meta_por_token_no_por_subcadena(correr_hook, vault_tmp):
+    for nombre in ("mcp__metabase__run_query", "mcp__obsidian-metadata__get"):
+        assert correr_hook("meta_guard", {"tool_name": nombre, "tool_input": {}}, vault_tmp)[0] == "allow", nombre
+    for nombre in ("mcp__meta-ads__ads_update_entity", "mcp__claude_ai_Meta_Ads__ads_update_entity",
+                   "mcp__facebook__x", "mcp__fb__x", "mcp__metaads__x"):
+        assert correr_hook("meta_guard", {"tool_name": nombre, "tool_input": {}}, vault_tmp)[0] == "deny", nombre

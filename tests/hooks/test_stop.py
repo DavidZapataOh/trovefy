@@ -61,3 +61,18 @@ def test_stop_bash(correr_hook, vault_tmp):
         decision, motivo = correr_hook("stop", ev("Bash", command=cmd), vault_tmp)
         assert decision == "deny" and "STOP activo" in motivo, cmd
     assert correr_hook("stop", ev("Bash", command="ls /tmp && echo hola"), vault_tmp)[0] == "allow"
+
+
+def test_stop_bash_cwd_en_subdirectorio_del_vault(correr_hook, vault_tmp):
+    activar(vault_tmp)
+    (vault_tmp / "propuestas").mkdir()
+    casos = [
+        (str(vault_tmp / "propuestas"), "echo x > P.md"),
+        (str(vault_tmp / "wiki"), "echo x > ../propuestas/P.md"),
+        (str(vault_tmp), "cd propuestas && touch P.md"),
+    ]
+    for cwd, cmd in casos:
+        decision, motivo = correr_hook("stop", ev("Bash", cwd=cwd, command=cmd), vault_tmp)
+        assert decision == "deny" and "STOP activo" in motivo, (cwd, cmd)
+    for cwd, cmd in [(str(vault_tmp / "propuestas"), "ls"), (str(vault_tmp / "wiki"), "echo x > n.md")]:
+        assert correr_hook("stop", ev("Bash", cwd=cwd, command=cmd), vault_tmp)[0] == "allow", (cwd, cmd)

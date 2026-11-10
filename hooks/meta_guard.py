@@ -7,15 +7,24 @@ vía «allow con ticket». Solo biblioteca estándar; falla cerrado.
 from __future__ import annotations
 
 import json
+import re
 from urllib.parse import unquote, urlsplit
 
 from _comun import ejecutar_guardia, herramienta
 
 MOTIVO = "escritura en Meta: solo la hace el ejecutor tras Aceptar"
-_SERVIDORES = ("meta", "facebook", "fb")
+_TOKENS_SERVIDOR = ("meta", "facebook", "fb")
 _PREFIJOS_LECTURA = ("ads_get_", "ads_insights_")
 _LECTURA_EXACTA = ("ads_library_search", "ads_account_get_activity_logs")
-_HOSTS_GRAPH = ("graph.facebook.com", "graph.fb.com")
+_HOST_GRAPH = re.compile(r"graph[\w.-]*\.facebook\.com|graph\.fb\.com", re.IGNORECASE)
+
+
+def _servidor_es_meta(servidor: str) -> bool:
+    """Por token (separado por no letras), no por subcadena: «metabase» no es Meta."""
+    for t in re.split(r"[^a-z]+", servidor.lower()):
+        if t in _TOKENS_SERVIDOR or t.startswith(("metaads", "facebookads")):
+            return True
+    return False
 
 
 def _es_meta_mcp(nombre: str) -> tuple[bool, str]:
@@ -28,14 +37,14 @@ def _es_meta_mcp(nombre: str) -> tuple[bool, str]:
     else:
         servidor = "__".join(partes[1:-1])
     meta = (
-        any(s in servidor for s in _SERVIDORES)
+        _servidor_es_meta(servidor)
         or any(p.startswith("ads_") for p in partes[1:])
     )
     return meta, corto
 
 
 def _menciona_graph(texto: str) -> bool:
-    return any(h in texto for h in _HOSTS_GRAPH)
+    return bool(_HOST_GRAPH.search(texto))
 
 
 def _host(url: str) -> str:
@@ -67,7 +76,7 @@ def clasificar(tool_name: str, tool_input: dict) -> tuple[str, str]:
         # Siempre deny hacia Graph, con o sin token: Graph acepta method=post en GET
         # y el token puede ir codificado en porcentaje.
         url = str(tool_input.get("url", ""))
-        if _host(url) in _HOSTS_GRAPH or _menciona_graph(unquote(url).lower()):
+        if _HOST_GRAPH.fullmatch(_host(url)) or _menciona_graph(unquote(url).lower()):
             return "deny", MOTIVO
     return "allow", ""
 

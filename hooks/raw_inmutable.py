@@ -6,24 +6,19 @@ cerrado.
 """
 from __future__ import annotations
 
-import os
 import pathlib
-import re
 
-from _comun import bases_vault, ejecutar_guardia, herramienta, resolver, vault_root
+from _comun import (
+    bash_destructivo,
+    bash_toca_protegidas,
+    ejecutar_guardia,
+    herramienta,
+    resolver,
+    vault_root,
+)
 
 MOTIVO_RAW = "raw/ es inmutable: no se editan fuentes existentes"
 MOTIVO_LOG = "log.md solo se amplía: no se reescribe ni se borra contenido"
-
-_OPERADORES = re.compile(
-    r"\brm\b|\bmv\b|\btruncate\b|\bchmod\b|\bln\b"
-    r"|\b(?:cp|install)\b|(?<!>)>(?!>|&[\d-])"
-)
-_SED = re.compile(r"\bsed\b")
-_SED_INPLACE = re.compile(r"(?<![\w-])(?:-[a-zA-Z]*i|--in-place)")
-_TEE = re.compile(r"\btee\b((?:\s+-\S+)*)")
-_TEE_APPEND = re.compile(r"(?:^|\s)(?:-[a-zA-Z]*a[a-zA-Z]*|--append)(?=\s|$)")
-
 
 def _cadena(valor: object) -> str:
     return valor if isinstance(valor, str) else ""
@@ -35,31 +30,6 @@ def _en_raw(destino: pathlib.Path, raw: pathlib.Path) -> bool:
 
 def _solo_amplia(actual: str, nuevo: str) -> bool:
     return nuevo.startswith(actual)
-
-
-def _bash_destructivo(comando: str) -> bool:
-    if _OPERADORES.search(comando):
-        return True
-    if _SED.search(comando) and _SED_INPLACE.search(comando):
-        return True
-    return any(not _TEE_APPEND.search(m.group(1)) for m in _TEE.finditer(comando))
-
-
-def _bash_menciona(original: str, bases: set[str], vault_res: pathlib.Path, cwd: str | None) -> bool:
-    comando = re.sub(r"[\"']", "", original)
-    for base in bases:
-        if base + "/raw" in comando or base + "/log.md" in comando:
-            return True
-    en_vault = bool(cwd) and resolver(cwd, None) == vault_res
-    if not en_vault:
-        for base in bases:
-            patron = r"\b(?:cd|pushd)\s+(?:--\s+)?" + re.escape(base) + r"/?(?=\s|;|&|\||$)"
-            if re.search(patron, comando):
-                en_vault = True
-                break
-    if en_vault:
-        return bool(re.search(r"(?<![\w.-])(?:\./)?(?:raw(?:/|\b)|log\.md)", comando))
-    return False
 
 
 def _edicion_solo_amplia(actual: str, e: object) -> str | None:
@@ -81,7 +51,7 @@ def decidir(tool_name: str, tool_input: dict, cwd: str | None, vault: pathlib.Pa
 
     if tool_name == "Bash":
         comando = _cadena(tool_input.get("command"))
-        if _bash_menciona(comando, bases_vault(vault, vault_res), vault_res, cwd) and _bash_destructivo(comando):
+        if bash_destructivo(comando) and bash_toca_protegidas(comando, vault, vault_res, cwd, ("raw", "log.md")):
             return "deny", "raw/ es inmutable y log.md solo se amplía: comando destructivo sobre ellos"
         return "allow", ""
 

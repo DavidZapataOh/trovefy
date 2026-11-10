@@ -129,7 +129,7 @@ def test_bash_tee_sin_append_aunque_haya_otro_con_append(correr_hook, vault_tmp)
 
 def test_bash_cd_al_vault_y_relativo(correr_hook, vault_tmp):
     v = str(vault_tmp)
-    for c in (f'cd "$TROVIFY_VAULT" && rm -rf raw/x', f"cd {v}; rm -rf raw/x",
+    for c in ('cd "$TROVIFY_VAULT" && rm -rf raw/x', f"cd {v}; rm -rf raw/x",
               "cd ${TROVIFY_VAULT} && rm log.md"):
         assert _bash(correr_hook, vault_tmp, c) == "deny", c
     assert _bash(correr_hook, vault_tmp, "cd /tmp && rm -rf raw/x") == "allow"
@@ -177,3 +177,28 @@ def test_bash_comillas_entre_base_y_subruta(correr_hook, vault_tmp, tmp_path, mo
               f'cd -- {v} && rm raw/x', f'pushd "{v}" && rm raw/x'):
         assert _bash(correr_hook, v, c) == "deny", c
     assert _bash(correr_hook, v, 'cat "$TROVIFY_VAULT"/raw/x') == "allow"
+
+
+def test_bash_cwd_en_subdirectorio_del_vault(correr_hook, vault_tmp):
+    (vault_tmp / "raw/2026-11-10").mkdir()
+    r, w = str(vault_tmp / "raw"), str(vault_tmp / "wiki")
+    dia = str(vault_tmp / "raw/2026-11-10")
+    casos = [
+        (r, "rm -rf 2026-11-10"),
+        (dia, "echo y > x.md"),
+        (w, "rm -rf ../raw/2026-11-10"),
+        (w, "echo x >> ../log.md; truncate -s 0 ../log.md"),
+        (str(vault_tmp), "cd raw && rm -rf 2026-11-10"),
+        (w, "cd ../raw && rm -rf x"),
+        (w, "cd " + r + " && rm x"),
+    ]
+    for cwd, cmd in casos:
+        assert _bash(correr_hook, vault_tmp, cmd, cwd) == "deny", (cwd, cmd)
+
+
+def test_bash_cwd_en_subdirectorio_sin_falsos_positivos(correr_hook, vault_tmp):
+    w = str(vault_tmp / "wiki")
+    assert _bash(correr_hook, vault_tmp, "rm -rf notas-viejas", w) == "allow"
+    assert _bash(correr_hook, vault_tmp, "ls ../raw", w) == "allow"
+    assert _bash(correr_hook, vault_tmp, "cat 2026-11-10/x.md", str(vault_tmp / "raw")) == "allow"
+    assert _bash(correr_hook, vault_tmp, "rm x", "/tmp") == "allow"

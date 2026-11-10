@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import sys
 from collections.abc import Callable
 from typing import NoReturn
@@ -74,7 +75,7 @@ def bases_vault(vault: pathlib.Path, vault_res: pathlib.Path) -> set[str]:
         bases.add(os.path.expanduser(os.path.expandvars(literal)))
     home = os.environ.get("HOME") or os.path.expanduser("~")
     home = home.rstrip("/")
-    for base in list(bases):
+    for base in tuple(bases):  # copia: el conjunto se amplía dentro del bucle
         if home and base.startswith(home + "/"):
             resto = base[len(home):]
             bases.update({"~" + resto, "$HOME" + resto, "${HOME}" + resto})
@@ -144,3 +145,85 @@ def ejecutar_guardia(decidir: Callable[[dict], tuple[str, str]]) -> NoReturn:
     if decision == "deny" and not motivo:
         motivo = "denegado por política de Trovify"
     _emitir(decision, motivo)
+
+
+# --- Detección de Bash que alcanza rutas protegidas del vault -----------------
+
+_CD = re.compile(r"\b(?:cd|pushd)\s+(?:--\s+)?([^\s;&|()]+)")
+_SEPARADORES = re.compile(r"[\s;&|()<>`=]+")
+_OPERADORES_DESTRUCTIVOS = re.compile(
+    r"\brm\b|\bmv\b|\btruncate\b|\bchmod\b|\bln\b"
+    r"|\b(?:cp|install)\b|(?<!>)>(?!>|&[\d-])"
+)
+_SED = re.compile(r"\bsed\b")
+_SED_INPLACE = re.compile(r"(?<![\w-])(?:-[a-zA-Z]*i|--in-place)")
+_TEE = re.compile(r"\btee\b((?:\s+-\S+)*)")
+_TEE_APPEND = re.compile(r"(?:^|\s)(?:-[a-zA-Z]*a[a-zA-Z]*|--append)(?=\s|$)")
+
+
+def bash_destructivo(comando: str) -> bool:
+    if _OPERADORES_DESTRUCTIVOS.search(comando):
+        return True
+    if _SED.search(comando) and _SED_INPLACE.search(comando):
+        return True
+    return any(not _TEE_APPEND.search(m.group(1)) for m in _TEE.finditer(comando))
+
+
+def _dentro(ruta: pathlib.Path, protegida: pathlib.Path) -> bool:
+    return ruta == protegida or protegida in ruta.parents
+
+
+def _directorio_efectivo(
+    comando: str, bases: set[str], vault_res: pathlib.Path, cwd: str | None
+) -> pathlib.Path | None:
+    """Directorio del vault desde el que corre el comando (cwd o un ``cd``), si lo hay."""
+    inicial = resolver(cwd, None) if cwd else None
+    if inicial is not None and _dentro(inicial, vault_res):
+        return inicial
+    ordenadas = sorted(bases, key=len, reverse=True)
+    for m in _CD.finditer(comando):
+        destino = m.group(1)
+        for base in ordenadas:
+            if destino == base or destino.startswith(base + "/"):
+                destino = str(vault_res) + destino[len(base):]
+                break
+        else:
+            if destino.startswith(("~", "$")):
+                continue
+        candidato = resolver(destino, str(inicial) if inicial else None)
+        if _dentro(candidato, vault_res):
+            return candidato
+    return None
+
+
+def bash_toca_protegidas(
+    original: str,
+    vault: pathlib.Path,
+    vault_res: pathlib.Path,
+    cwd: str | None,
+    protegidas: tuple[str, ...],
+) -> bool:
+    """¿El comando alcanza alguna ruta ``<vault>/<protegida>``?
+
+    Cubre rutas absolutas (todas las grafías del vault), cwd dentro del vault
+    o de una protegida, ``cd`` al vault o a un subdirectorio, y rutas relativas
+    con ``..`` resueltas contra ese directorio.
+    """
+    bases = bases_vault(vault, vault_res)
+    comando = re.sub(r"[\"']", "", original)
+    for base in bases:
+        if any(f"{base}/{nombre}" in comando for nombre in protegidas):
+            return True
+    efectivo = _directorio_efectivo(comando, bases, vault_res, cwd)
+    if efectivo is None:
+        return False
+    rutas = [vault_res / nombre for nombre in protegidas]
+    if any(_dentro(efectivo, r) for r in rutas):
+        return True
+    for ficha in _SEPARADORES.split(comando):
+        if not ficha or ficha.startswith(("-", "~", "$")):
+            continue
+        destino = resolver(ficha, str(efectivo))
+        if any(_dentro(destino, r) for r in rutas):
+            return True
+    return False

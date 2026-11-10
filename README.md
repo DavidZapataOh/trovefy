@@ -14,4 +14,4 @@ uv tool install --python 3.12 --editable .
 
 ## Diseño
 
-El diseño está en `/home/david/trovefy/docs/superpowers/specs/2026-11-09-trovify-design.md`.
+El diseño vive fuera de este repositorio (en el espacio de trabajo del proyecto), no se incluye aquí.

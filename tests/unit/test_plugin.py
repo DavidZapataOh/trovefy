@@ -1,4 +1,8 @@
-import json, pathlib, yaml
+import json
+import pathlib
+
+import yaml
+
 RAIZ = pathlib.Path(__file__).resolve().parents[2]
 
 def test_manifiesto_del_plugin():

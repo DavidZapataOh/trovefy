@@ -22,7 +22,7 @@ def vault_tmp(tmp_path):
 def correr_hook_crudo():
     """Ejecuta el hook y devuelve el CompletedProcess sin interpretar."""
 
-    def _correr(nombre, entrada, vault):
+    def _correr(nombre, entrada, vault, env_extra=None):
         script = RAIZ / "hooks" / f"{nombre}.py"
         if not script.exists():
             script = RAIZ / "tests" / "hooks" / f"{nombre}.py"
@@ -32,6 +32,7 @@ def correr_hook_crudo():
             "TROVIFY_VAULT": str(vault),
             "HOME": os.environ.get("HOME", ""),
             "PATH": os.environ.get("PATH", ""),
+            **(env_extra or {}),
         }
         return subprocess.run(
             ["python3", str(script)],
@@ -44,8 +45,8 @@ def correr_hook_crudo():
 
 @pytest.fixture
 def correr_hook(correr_hook_crudo):
-    def _correr(nombre, entrada, vault):
-        proc = correr_hook_crudo(nombre, entrada, vault)
+    def _correr(nombre, entrada, vault, env_extra=None):
+        proc = correr_hook_crudo(nombre, entrada, vault, env_extra)
         assert proc.returncode == 0, f"código {proc.returncode}: {proc.stderr}"
         if not proc.stdout.strip():
             return ("allow", "")
