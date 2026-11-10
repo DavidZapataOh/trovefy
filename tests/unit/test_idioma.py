@@ -10,3 +10,7 @@ def test_detectar():
 def test_un_solo_candidato_o_ninguno():
     assert detectar("Schede pronte per il sostegno scolastico, accesso immediato", []) is None
     assert detectar("Schede pronte per il sostegno scolastico, accesso immediato", ["xx"]) is None
+
+
+def test_baja_confianza_devuelve_none():
+    assert detectar("ok ok ok ok ok ok ok ok ok ok ok ok", ["ro", "it", "es", "pt", "fr"]) is None

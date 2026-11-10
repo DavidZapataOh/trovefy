@@ -114,7 +114,9 @@ def test_expansion_cuenta_paises_idiomas_y_paginas():
     o = agrupar([ro, it], {URL_TIENDA: D})[0]
     s = calc(o, mercados=M)
     assert sorted(s.idiomas) == ["it", "ro"] and s.expansion.valor == 2 + 2 + 2
-    assert calc(o).expansion.valor is None
+    sin = calc(o).expansion
+    assert sin.valor == 4 and sin.suelo is True  # países + páginas, sin idiomas
+    assert s.expansion.suelo is False
 
 
 def test_alcance_ue_nunca_medido():
@@ -140,3 +142,44 @@ def test_moneda_distinta():
     o3 = agrupar([anuncio("1", "100", HOY, "RO")], {URL_TIENDA: replace(D, moneda=None)})[0]
     assert "moneda_distinta" not in calc(o3, mercados=M).banderas
     assert "moneda_distinta" not in calc(o).banderas
+
+
+def test_supervivencia_en_lectura_parcial_es_no_medido_con_cota_en_el_motivo():
+    s = calc(oferta_con([20, 20, 3, 3]), completo=False)
+    assert s.supervivencia.valor is None and "≥ 0,50" in s.supervivencia.motivo
+
+
+def snap_total(o, dias, total, activos=None):
+    return Snapshot(o.oferta_id, "RO", HOY - timedelta(days=dias), total, activos, None, None, None, None, None, "x")
+
+
+def test_crecimiento_lectura_parcial_con_total_meta():
+    o = oferta_con([20] * 30)
+    s = calc(o, historial=[snap_total(o, 7, 180)], completo=False, total_meta=234)
+    assert s.crecimiento_7d.valor == pytest.approx(0.3) and "acelerando" in s.banderas
+    assert s.total.valor == 234 and s.total.suelo is False and s.c8.suelo is True
+
+
+def test_crecimiento_lectura_parcial_sin_total_meta_no_medido():
+    o = oferta_con([20] * 30)
+    s = calc(o, historial=[snap_total(o, 7, 180)], completo=False, total_aprox=234)
+    assert s.crecimiento_7d.valor is None and "parcial" in s.crecimiento_7d.motivo
+
+
+def test_crecimiento_lectura_completa_usa_cargados_y_foto_sin_cifras_no_medido():
+    o = oferta_con([20] * 13)
+    assert calc(o, historial=[snap_total(o, 7, 10)], completo=True).crecimiento_7d.valor == 0.3
+    assert calc(o, historial=[snap_total(o, 7, None)], completo=True).crecimiento_7d.valor is None
+
+
+def test_duplicacion_con_collation_parcial_es_suelo():
+    ads = [replace(anuncio("1", "100", HOY - timedelta(days=10)), collation_count=3),
+           anuncio("2", "100", HOY - timedelta(days=10))]
+    o = agrupar(ads, {URL_TIENDA: D})[0]
+    d = calc(o).duplicacion
+    assert d.valor == 2 and d.suelo is True
+
+
+def test_nuevos_sin_corrida_completa_previa():
+    s = calc(oferta_con([9]), vistos=(None, None, None), completo=True)
+    assert "sin corrida completa previa" in s.nuevos.motivo

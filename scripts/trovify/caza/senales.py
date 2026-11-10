@@ -59,20 +59,22 @@ def _edad(a: AnuncioBiblioteca, hoy: date) -> int:
 
 
 def _crecimiento(
-    activos_hoy: int, historial: list[Snapshot], hoy: date, incompleto: bool
+    n_hoy: int | None, historial: list[Snapshot], hoy: date
 ) -> Medida:
-    if incompleto:
-        return _nm("muestra parcial (la lectura no llegó a todos los anuncios)")
+    if n_hoy is None:
+        return _nm("muestra parcial (lectura parcial sin total exacto de Meta)")
     candidatas = [
         s for s in historial
-        if _VENTANA_FOTO[0] <= (hoy - s.dia).days <= _VENTANA_FOTO[1] and s.activos is not None
+        if _VENTANA_FOTO[0] <= (hoy - s.dia).days <= _VENTANA_FOTO[1]
+        and (s.total is not None or s.activos is not None)
     ]
     if not candidatas:
         return _nm("primera caza" if not historial else "sin foto de hace 6–8 días")
     foto = min(candidatas, key=lambda s: (abs((hoy - s.dia).days - 7), s.dia))
-    if foto.activos == 0:
+    n_foto = foto.total if foto.total is not None else foto.activos
+    if n_foto == 0:
         return _nm("la foto de hace una semana tenía 0 anuncios activos")
-    return Medida((activos_hoy - foto.activos) / foto.activos)
+    return Medida((n_hoy - n_foto) / n_foto)
 
 
 def calcular_senales(
@@ -84,6 +86,7 @@ def calcular_senales(
     total_aprox: int | None,
     completo: bool | None = None,
     *,
+    total_meta: int | None = None,
     umbrales: dict[str, Umbral],
     vistos: tuple[int | None, int | None, date | None] | None = None,
     mercados: dict[str, Mercado] | None = None,
@@ -93,6 +96,18 @@ def calcular_senales(
     - ``completo``: ``ResultadoBusqueda.completo``. Las cifras son suelo («≥») si ``completo`` es
       False o ``total_aprox`` supera los anuncios cargados; None = desconocido, y entonces solo
       decide ``total_aprox``.
+    - ``total_meta``: número EXACTO de anuncios activos de esta oferta en ``pais`` según Meta (suma
+      de las páginas de la oferta); nunca una cota ni un tope: si Meta solo dijo «más de N», el
+      llamador pasa None. Con él, ``total`` es exacto (``suelo=False``) y el crecimiento se mide
+      aunque la lectura sea parcial; sin él, el crecimiento usa los anuncios cargados solo si la
+      lectura es completa.
+    - Contrato de las fotos (Tarea 8): ``Snapshot.total`` se escribe solo desde una cuenta exacta
+      (``total_meta`` o los cargados de una lectura completa), si no NULL; ``Snapshot.activos`` es
+      NULL en lecturas parciales. El crecimiento compara contra ``foto.total`` (o ``foto.activos``
+      si ``total`` es NULL).
+    - ``inactivos``: la Tarea 8 pasa None si esa búsqueda fue parcial (la vida mediana saldría
+      sesgada hacia anuncios longevos).
+    - ``pais="ALL"`` no evalúa ``moneda_distinta`` (no hay una moneda de país única).
     - ``vistos``: ``(nuevos, parados, dia_anterior)`` ya calculado por el llamador con
       ``snapshots.registrar_vistos(..., completo=True)`` y ``snapshots.dia_anterior``. Aquí nunca
       se calculan desde una lectura parcial: con ``completo=False`` o sin datos quedan «no medido».
@@ -117,13 +132,14 @@ def calcular_senales(
         "total": Medida(float(len(en_pais)), suelo=suelo),
     }
 
-    if en_pais:
-        sup = Medida(
-            len(c7) / len(en_pais),
-            "sobre una muestra parcial" if incompleto else None,
-        )
-    else:
+    if not en_pais:
         sup = _nm("sin anuncios cargados")
+    elif incompleto:
+        # Los primeros por impresiones sesgan hacia anuncios viejos: no es una cifra, solo cota.
+        cota = f"{len(c7) / len(en_pais):.2f}".replace(".", ",")
+        sup = _nm(f"muestra parcial (≥ {cota} sobre los cargados)")
+    else:
+        sup = Medida(len(c7) / len(en_pais))
 
     semanas = {a.inicio.isocalendar()[:2] for a in c7}
     escalonado = Medida(float(len(semanas)), suelo=suelo) if c7 else _nm("sin anuncios con 7 días o más")
@@ -144,7 +160,13 @@ def calcular_senales(
         ]
         vida = Medida(float(median(vidas)), suelo=False) if vidas else _nm("sin anuncios inactivos con fecha de fin")
 
-    crec = _crecimiento(len(activos), historial, hoy, incompleto)
+    if total_meta is not None:
+        n_hoy: int | None = total_meta
+    else:
+        n_hoy = None if incompleto else len(activos)
+    crec = _crecimiento(n_hoy, historial, hoy)
+    if total_meta is not None:
+        senales_medida["total"] = Medida(float(total_meta))
 
     candidatos_idioma = sorted({m.idioma for m in (mercados or {}).values()})
     idiomas: list[str] = []
@@ -154,24 +176,30 @@ def calcular_senales(
             if i and i not in idiomas:
                 idiomas.append(i)
         paises = {a.pais for a in todos}
-        expansion = Medida(float(len(paises) + len(idiomas) + len(oferta.page_ids)))
-    else:
-        expansion = _nm("sin mercados para detectar idiomas")
+        expansion = Medida(float(len(paises) + len(idiomas) + len(oferta.page_ids)), suelo=suelo)
+    else:  # sin mercados no se cuentan idiomas: países + páginas es una cota inferior
+        paises = {a.pais for a in todos}
+        expansion = Medida(float(len(paises) + len(oferta.page_ids)), suelo=True)
 
     if not c7:
         dup = _nm("cohorte C7 vacía")
     elif all(a.collation_count is None for a in c7):
         dup = _nm("la Biblioteca no informa collation_count")
     else:
-        dup = Medida(float(sum(max((a.collation_count or 1) - 1, 0) for a in c7)), suelo=suelo)
+        faltan = any(a.collation_count is None for a in c7)
+        dup = Medida(
+            float(sum(max((a.collation_count or 1) - 1, 0) for a in c7)), suelo=suelo or faltan
+        )
 
     alcance = _nm("requiere /ads_archive (paso 15)")
 
     nuevos = _nm("primera caza")
     parados = _nm("primera caza")
-    if completo is False:
+    if vistos is not None and incompleto is False:
+        nuevos = parados = _nm("sin corrida completa previa")
+    if incompleto:
         nuevos = parados = _nm("muestra parcial")
-    elif vistos is not None and vistos[0] is not None and vistos[1] is not None:
+    if not incompleto and vistos is not None and vistos[0] is not None and vistos[1] is not None:
         ventana = f"desde {vistos[2].isoformat()}" if vistos[2] else None
         nuevos = Medida(float(vistos[0]), ventana)
         parados = Medida(float(vistos[1]), ventana)
