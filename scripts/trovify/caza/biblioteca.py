@@ -1,5 +1,6 @@
 """URLs reproducibles de la Biblioteca de anuncios y detección de bloqueos."""
 
+import re
 from typing import Literal
 from urllib.parse import urlencode, urlsplit
 
@@ -13,6 +14,9 @@ def url_biblioteca(
     estado: Literal["active", "all"] = "active",
 ) -> str:
     """Enlace reproducible; parámetros siempre en orden alfabético."""
+    if pais != "ALL" and not re.fullmatch(r"[A-Z]{2}", pais):
+        raise ValueError(f"País inválido: {pais!r}; usa «ALL» o un código ISO-2 en mayúsculas.")
+    q = q.strip() if q else None
     if not q and not page_id:
         raise ValueError("Hace falta al menos una palabra (q) o una página (page_id).")
     params: dict[str, str] = {
@@ -33,8 +37,8 @@ def detectar_bloqueo(url_final: str, html: str) -> Literal["captcha", "login", "
     if "xfb_ad_library_is_captcha_required" in html:
         return "captcha"
     ruta = urlsplit(url_final).path
-    if ruta.startswith("/login"):
+    if ruta == "/login" or ruta.startswith("/login/"):
         return "login"
-    if ruta.startswith("/checkpoint"):
+    if ruta == "/checkpoint" or ruta.startswith("/checkpoint/"):
         return "checkpoint"
     return None

@@ -41,6 +41,15 @@ def abrir(ruta: Path) -> sqlite3.Connection:
             primera_vez TEXT NOT NULL, ultima_vez TEXT NOT NULL,
             PRIMARY KEY (library_id, oferta_id, pais)
         );
+        CREATE TABLE IF NOT EXISTS corridas (
+            oferta_id TEXT NOT NULL, pais TEXT NOT NULL, dia TEXT NOT NULL,
+            PRIMARY KEY (oferta_id, pais, dia)
+        );
+        CREATE TABLE IF NOT EXISTS vistos_dia (
+            oferta_id TEXT NOT NULL, pais TEXT NOT NULL, dia TEXT NOT NULL,
+            library_id TEXT NOT NULL,
+            PRIMARY KEY (oferta_id, pais, dia, library_id)
+        );
         """
     )
     return conn
@@ -68,36 +77,45 @@ def historial(conn: sqlite3.Connection, oferta_id: str, pais: str, desde: date) 
 def registrar_vistos(
     conn: sqlite3.Connection, oferta_id: str, pais: str, library_ids: set[str], dia: date
 ) -> tuple[int | None, int | None]:
-    """(nuevos, parados) frente a la foto anterior; la primera vez, (None, None)."""
+    """(nuevos, parados) frente a la corrida del día anterior más reciente.
+
+    Cada corrida guarda su conjunto completo; repetir el día lo reemplaza.
+    Sin corrida previa, (None, None).
+    """
     d = dia.isoformat()
-    previa = conn.execute(
-        "SELECT MAX(ultima_vez) FROM anuncios_vistos WHERE oferta_id = ? AND pais = ? AND ultima_vez < ?",
-        (oferta_id, pais, d),
-    ).fetchone()[0]
-    conocidos = {
-        r[0]
-        for r in conn.execute(
-            "SELECT library_id FROM anuncios_vistos WHERE oferta_id = ? AND pais = ? AND primera_vez < ?",
+    with conn:
+        conn.execute(
+            "DELETE FROM vistos_dia WHERE oferta_id = ? AND pais = ? AND dia = ?",
             (oferta_id, pais, d),
         )
-    }
-    anteriores = set()
-    if previa is not None:
+        conn.executemany(
+            "INSERT INTO vistos_dia (oferta_id, pais, dia, library_id) VALUES (?, ?, ?, ?)",
+            [(oferta_id, pais, d, lid) for lid in library_ids],
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO corridas (oferta_id, pais, dia) VALUES (?, ?, ?)",
+            (oferta_id, pais, d),
+        )
+        conn.execute(
+            "DELETE FROM anuncios_vistos WHERE oferta_id = ? AND pais = ?", (oferta_id, pais)
+        )
+        conn.execute(
+            "INSERT INTO anuncios_vistos (library_id, oferta_id, pais, primera_vez, ultima_vez) "
+            "SELECT library_id, oferta_id, pais, MIN(dia), MAX(dia) FROM vistos_dia "
+            "WHERE oferta_id = ? AND pais = ? GROUP BY library_id",
+            (oferta_id, pais),
+        )
+        previa = conn.execute(
+            "SELECT MAX(dia) FROM corridas WHERE oferta_id = ? AND pais = ? AND dia < ?",
+            (oferta_id, pais, d),
+        ).fetchone()[0]
+        if previa is None:
+            return (None, None)
         anteriores = {
             r[0]
             for r in conn.execute(
-                "SELECT library_id FROM anuncios_vistos WHERE oferta_id = ? AND pais = ? AND ultima_vez = ?",
+                "SELECT library_id FROM vistos_dia WHERE oferta_id = ? AND pais = ? AND dia = ?",
                 (oferta_id, pais, previa),
             )
         }
-    for lid in library_ids:
-        conn.execute(
-            "INSERT INTO anuncios_vistos (library_id, oferta_id, pais, primera_vez, ultima_vez) "
-            "VALUES (?, ?, ?, ?, ?) ON CONFLICT(library_id, oferta_id, pais) "
-            "DO UPDATE SET ultima_vez = excluded.ultima_vez",
-            (lid, oferta_id, pais, d, d),
-        )
-    conn.commit()
-    if previa is None:
-        return (None, None)
-    return (len(library_ids - conocidos), len(anteriores - library_ids))
+    return (len(library_ids - anteriores), len(anteriores - library_ids))

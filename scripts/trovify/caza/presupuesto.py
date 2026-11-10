@@ -45,6 +45,10 @@ class Presupuesto:
             )
         self.usadas += 1
 
+    def exito(self) -> None:
+        """El cliente la llama tras una búsqueda correcta: reinicia los errores seguidos."""
+        self._errores = 0
+
     def pausa(self) -> float:
         s = self._azar.uniform(self.pausa_min_s, self.pausa_max_s)
         self._dormir(s)
@@ -60,8 +64,13 @@ class Presupuesto:
     @classmethod
     def desde_umbrales(cls, vault: Path, hoy: date | None = None) -> "Presupuesto":
         # `hoy` queda reservado: el plan 07 añade el contador diario persistente.
-        return cls(
-            int(umbrales.valor(vault, "caza.max_busquedas_sesion")),
-            umbrales.valor(vault, "caza.pausa_min_s"),
-            umbrales.valor(vault, "caza.pausa_max_s"),
-        )
+        maximo = int(umbrales.valor(vault, "caza.max_busquedas_sesion"))
+        pmin = umbrales.valor(vault, "caza.pausa_min_s")
+        pmax = umbrales.valor(vault, "caza.pausa_max_s")
+        if maximo < 1:
+            raise ValueError("caza.max_busquedas_sesion debe ser al menos 1.")
+        if pmin < 0 or pmax < 0:
+            raise ValueError("Las pausas de caza no pueden ser negativas.")
+        if pmin > pmax:
+            raise ValueError("caza.pausa_min_s no puede ser mayor que caza.pausa_max_s.")
+        return cls(maximo, pmin, pmax)

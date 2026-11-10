@@ -20,3 +20,25 @@ def test_bloqueos():
     assert detectar_bloqueo("https://www.facebook.com/login/?next=x", "") == "login"
     assert detectar_bloqueo("https://www.facebook.com/checkpoint/123/", "") == "checkpoint"
     assert detectar_bloqueo("https://www.facebook.com/ads/library/?q=x", "<html>ok</html>") is None
+
+
+def test_pais_invalido_o_minusculas():
+    import pytest
+    for p in ("ro", "ROM", "", "R1", "all"):
+        with pytest.raises(ValueError):
+            url_biblioteca(p, q="x")
+
+
+def test_sin_q_ni_page_id_o_q_vacia():
+    import pytest
+    for q in (None, "", "   "):
+        with pytest.raises(ValueError):
+            url_biblioteca("RO", q=q)
+    assert "view_all_page_id=1" in url_biblioteca("RO", q="  ", page_id="1")
+    assert "q=" not in url_biblioteca("RO", q="  ", page_id="1")
+
+
+def test_bloqueo_por_segmento_exacto():
+    assert detectar_bloqueo("https://www.facebook.com/login", "") == "login"
+    assert detectar_bloqueo("https://www.facebook.com/loginfoo", "") is None
+    assert detectar_bloqueo("https://www.facebook.com/checkpointx/", "") is None

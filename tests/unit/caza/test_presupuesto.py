@@ -35,3 +35,27 @@ def test_desde_umbrales_vault_temporal(tmp_path):
         encoding="utf-8")
     p = Presupuesto.desde_umbrales(tmp_path, hoy=date(2026, 11, 10))
     assert (p.max_busquedas, p.pausa_min_s, p.pausa_max_s) == (7, 1.5, 4)
+
+
+def _vault(tmp_path, mx, mn, ma):
+    (tmp_path / "config").mkdir(exist_ok=True)
+    def u(v):
+        return f'  valor: {v}\n  fuente: "t"\n  fecha: "2026-11-10"\n  gana_sobre: "t"\n  regla: R-001\n'
+    (tmp_path / "config" / "umbrales.yaml").write_text(
+        "caza.max_busquedas_sesion:\n" + u(mx) + "caza.pausa_min_s:\n" + u(mn) + "caza.pausa_max_s:\n" + u(ma),
+        encoding="utf-8")
+    return tmp_path
+
+
+@pytest.mark.parametrize("mx,mn,ma", [(7, 5, 2), (7, -1, 2), (0, 1, 2), (7, 1, -2)])
+def test_desde_umbrales_valores_invalidos(tmp_path, mx, mn, ma):
+    with pytest.raises(ValueError):
+        Presupuesto.desde_umbrales(_vault(tmp_path, mx, mn, ma))
+
+
+def test_exito_reinicia_errores():
+    dormidos = []
+    p = Presupuesto(30, 2, 5, dormir=dormidos.append)
+    p.tras_error(); p.tras_error(); p.exito()
+    p.tras_error()
+    assert dormidos == [30, 90, 30]
