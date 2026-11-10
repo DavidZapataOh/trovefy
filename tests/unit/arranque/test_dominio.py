@@ -151,3 +151,11 @@ def test_dominio_se_busca_con_limites():
     assert not _estado_verificado("shop.kits.com Verificado", "kits.com")
     assert _estado_verificado("mikits.com No verificado\nkits.com Verificado", "kits.com")
     assert _estado_verificado("Dominio: kits.com — Verificado", "kits.com")
+
+
+def test_07_fallo_guarda_la_medida_como_provisional(tmp_path):
+    paso(tmp_path)
+    r = verificar_dominio(tmp_path, consultar=dns_falso({"NS": ["ns1.otro.com."]}))
+    assert r.ok is False and not r.evidencia
+    assert not list((tmp_path / "config/evidencia").glob("07-ns-*.json"))
+    assert list((tmp_path / "config/evidencia/provisional").glob("07-ns-*.json"))

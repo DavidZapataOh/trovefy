@@ -270,3 +270,11 @@ def test_10_guarda_la_medida_en_la_evidencia_provisional(tmp_path):
     verificar_whop(v, capturar=falso(), fetch=_docs_ok, mapa=MAPA_WHOP, mapa_impultienda=IMP_OK)
     f = next((v / "config/evidencia").glob("10-pago-a-co-*.json"))
     assert '"pago_a_co": "si"' in f.read_text() and URL_DOCS_WHOP in f.read_text()
+
+
+def test_10_docs_ilegibles_no_dejan_evidencia_en_la_raiz(tmp_path):
+    v = _vault_con_pasos(tmp_path)
+    r = verificar_whop(v, capturar=falso(), fetch=lambda u: "nada", mapa=WHOP_OK, mapa_impultienda=IMP_OK)
+    assert r.ok is None
+    assert not list((v / "config/evidencia").glob("10-pago-a-co-*.json"))
+    assert list((v / "config/evidencia/provisional").glob("10-pago-a-co-*.json"))

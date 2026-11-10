@@ -101,9 +101,13 @@ def verificar_dominio(vault: Path | None = None, consultar: Callable = consultar
     except SinRed:
         return _sin_red()
     r = evaluar_ns(ns)
-    ev = guardar_evidencia(vault, "07", "ns", {"dominio": dominio, "ns": ns, "fecha": f"{datetime.now(ZONA_NEGOCIO):%Y-%m-%d}"})
-    r.evidencia = [ev]
-    r.datos = {"dominio": dominio}
+    medida = {"dominio": dominio, "ns": ns, "fecha": f"{datetime.now(ZONA_NEGOCIO):%Y-%m-%d}"}
+    ev = guardar_evidencia(vault, "07", "ns", medida, provisional=r.ok is not True)  # solo lo que certifica va a la raíz
+    if r.ok is True:
+        r.evidencia = [ev]
+        r.datos = {"dominio": dominio}
+    else:
+        r.lineas.append(f"  medida guardada: {ev}")
     return r
 
 

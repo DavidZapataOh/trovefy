@@ -268,6 +268,7 @@ def verificar_whop(
     nota_pago = guardar_evidencia(
         vault, "10", "pago-a-co",
         {"pago_a_co": {True: "si", False: "no", None: "no medido"}[pago], "fuente": URL_DOCS_WHOP, "fecha": f"{datetime.now(ZONA_NEGOCIO):%Y-%m-%d}"},
+        provisional=pago is None,  # sin medida no hay evidencia
     )
     if pago is False:
         # Solo documentación: no se bloquea el paso; lo marca el usuario (o la skill tras confirmarlo con él).

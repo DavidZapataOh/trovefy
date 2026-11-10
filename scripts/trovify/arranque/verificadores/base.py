@@ -50,12 +50,16 @@ def correr(cmd: list[str], timeout: float = 10) -> tuple[int | None, str]:
     return proc.returncode, salida.decode("utf-8", errors="replace").strip()
 
 
-def guardar_evidencia(vault: Path, id: str, nombre: str, datos: dict | bytes) -> str:
-    """Escribe la evidencia en config/evidencia/ y devuelve su ruta relativa al vault."""
+def guardar_evidencia(vault: Path, id: str, nombre: str, datos: dict | bytes, provisional: bool = False) -> str:
+    """Escribe la evidencia en config/evidencia/ y devuelve su ruta relativa al vault.
+
+    `provisional=True`: una medida que no certifica nada va a config/evidencia/provisional/.
+    """
     if not _SEGURO.match(id) or not _SEGURO.match(nombre):
         raise ValueError("id y nombre de evidencia solo admiten letras, números, - y _")
     ext = "png" if isinstance(datos, bytes) else "json"
-    rel = f"config/evidencia/{id}-{nombre}-{datetime.now(ZONA_NEGOCIO):%Y-%m-%d}.{ext}"
+    carpeta = "config/evidencia/provisional" if provisional else "config/evidencia"
+    rel = f"{carpeta}/{id}-{nombre}-{datetime.now(ZONA_NEGOCIO):%Y-%m-%d}.{ext}"
     destino = Path(vault) / rel
     destino.parent.mkdir(parents=True, exist_ok=True)
     contenido = datos if isinstance(datos, bytes) else json.dumps(datos, ensure_ascii=False, indent=2).encode("utf-8")
