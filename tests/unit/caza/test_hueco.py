@@ -153,7 +153,9 @@ def test_texto_indetectable_del_original_es_desconocido(umbrales):
     mezcla = ClienteFalso([con([ad("a", "9", 90, EN), ad("b", "9", 60, "PDF")])])
     assert original_presente(mezcla, ["9"], "RO", "ro", HOY, umbrales) == "no_medido"
     joven = ClienteFalso([con([ad("a", "9", 90, EN), ad("b", "9", 2, "PDF")])])
-    assert original_presente(joven, ["9"], "RO", "ro", HOY, umbrales) == "sin_traducir"
+    assert original_presente(joven, ["9"], "RO", "ro", HOY, umbrales) == "no_medido"
+    reciente = ClienteFalso([con([ad("a", "9", 10, EN), ad("b", "9", 2, "PDF")])])
+    assert original_presente(reciente, ["9"], "RO", "ro", HOY, umbrales) == "ausente_reciente"
 
 
 def test_original_sin_paginas_no_busca(umbrales):

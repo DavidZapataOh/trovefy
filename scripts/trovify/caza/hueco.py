@@ -166,7 +166,11 @@ def _original(cliente, page_ids, pais, idioma, hoy, u) -> tuple[Original, list[s
     if viejos_dudosos:  # idioma desconocido no es «sin traducir»
         return "no_medido", enlaces
     mas_viejo = max((hoy - a.inicio).days for a in en_otro_idioma) if en_otro_idioma else -1
-    return ("sin_traducir" if mas_viejo >= minimo else "ausente_reciente"), enlaces
+    if mas_viejo < minimo:
+        return "ausente_reciente", enlaces
+    if sin_detectar:  # cualquier anuncio en el idioma local sería «traducido», sea cual sea su edad
+        return "no_medido", enlaces
+    return "sin_traducir", enlaces
 
 
 def original_presente(
