@@ -1,0 +1,420 @@
+# Umbrales de negocio: cada uno con fuente, fecha y la regla del vídeo que supera.
+caza.perfil.tomi.c8_min:
+  valor: 15
+  fuente: "C1 10:55; T3 25:25"
+  fecha: "2026-11-09"
+  gana_sobre: "Santino 30–50/7 días; skill 50/3 días"
+  regla: R-001
+
+caza.perfil.santino.c7_min:
+  valor: 30
+  fuente: "Santino (S1); auditoría de caza §4.2"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-001
+
+caza.perfil.europa_caro.c8_min:
+  valor: 20
+  fuente: "R10, auditoría de caza §4.2"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-001
+
+caza.saturado.activos_jugador:
+  valor: 150
+  fuente: "Santino; auditoría de caza §4.5 punto 8"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-002
+
+caza.nota.a_min:
+  valor: 70
+  fuente: "auditoría de caza §4.6"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.nota.b_min:
+  valor: 50
+  fuente: "auditoría de caza §4.6"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.supervivencia.min:
+  valor: 0.3
+  fuente: "un repo de referencia, una skill de referencia (ideas); auditoría §4.4"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.vida_mediana.min_dias:
+  valor: 14
+  fuente: "Verificación de la Biblioteca 2026-11-09 (copias: mediana 6 días)"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.crecimiento.acelerando:
+  valor: 0.30
+  fuente: "R3; auditoría §4.4"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.crecimiento.cayendo:
+  valor: -0.30
+  fuente: "R3; auditoría §4.4"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.max_nuevas_por_ejecucion:
+  valor: 3
+  fuente: "R14 («de a tres»); T1 49:58"
+  fecha: "2026-11-09"
+  gana_sobre: "«370 de golpe»"
+  regla: R-012
+
+caza.max_busquedas_sesion:
+  valor: 30
+  fuente: "auditoría §4.9 (429 hacia las 35 búsquedas)"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-012
+
+caza.pausa_min_s:
+  valor: 2
+  fuente: "auditoría §4.9"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-012
+
+caza.pausa_max_s:
+  valor: 5
+  fuente: "auditoría §4.9"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-012
+
+caza.max_destinos_por_ejecucion:
+  valor: 10
+  fuente: "Diseño §2 (cuota de Claude) y §4.3; auditoría §4.9"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-012
+
+caza.filtro.fisico_min_senales:
+  valor: 2
+  fuente: "un repo de referencia (idea); auditoría §4.5 punto 2"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.filtro.tienda_min_senales:
+  valor: 3
+  fuente: "un repo de referencia (idea); auditoría §4.5 punto 2"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.peso.c8:
+  valor: 25
+  fuente: "Auditoría §4.6; diseño §4.3"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.peso.longevidad:
+  valor: 20
+  fuente: "Auditoría §4.6"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.peso.crecimiento:
+  valor: 15
+  fuente: "Auditoría §4.6"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.peso.expansion:
+  valor: 15
+  fuente: "Auditoría §4.6"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.peso.duplicacion:
+  valor: 10
+  fuente: "Auditoría §4.6"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.peso.alcance_ue:
+  valor: 10
+  fuente: "Auditoría §4.6"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.peso.supervivencia:
+  valor: 5
+  fuente: "Auditoría §4.6"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.tope.c8:
+  valor: 50
+  fuente: "Auditoría §4.6 (tope de 50 por llamada)"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.tope.edad_dias:
+  valor: 90
+  fuente: "Auditoría §4.6"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.tope.semanas:
+  valor: 6
+  fuente: "Auditoría §4.6"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.tope.expansion:
+  valor: 8
+  fuente: "Auditoría §4.6"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.tope.duplicacion:
+  valor: 20
+  fuente: "Auditoría §4.6"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.tope.supervivencia:
+  valor: 1
+  fuente: "Auditoría §4.6"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.mult.supervivencia_baja:
+  valor: 0.7
+  fuente: "Auditoría §4.6"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.mult.cayendo:
+  valor: 0.5
+  fuente: "Auditoría §4.6"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+caza.mult.vida_corta:
+  valor: 0.7
+  fuente: "Auditoría §4.6 (copias: mediana 6 días)"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-003
+
+hueco.sin_traducir_min_dias:
+  valor: 30
+  fuente: "R8; diseño §4.3 («pauta sin traducir durante 30+ días»)"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-004
+
+caza.palabra.min_resultados:
+  valor: 20
+  fuente: "un repo de referencia y Radar (ideas); auditoría §4.2"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-012
+
+caza.poda.strikes:
+  valor: 3
+  fuente: "Radar (idea); auditoría §4.8"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-012
+
+hueco.competidor_c7_min:
+  valor: 3
+  fuente: "R5; auditoría §4.6"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-004
+
+hueco.max_competencia_local:
+  valor: 0
+  fuente: "Tomi: país donde nadie la vende en el idioma local"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-004
+
+hueco.intentos_para_cero:
+  valor: 2
+  fuente: "R5; auditoría §4.6"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-004
+
+auditar.peso.demanda:
+  valor: 35
+  fuente: "[D-13]"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-004
+
+auditar.peso.hueco:
+  valor: 30
+  fuente: "[D-13]"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-004
+
+auditar.peso.precio:
+  valor: 15
+  fuente: "[D-13]"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-004
+
+auditar.peso.cpm:
+  valor: 10
+  fuente: "[D-13]"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-004
+
+auditar.peso.cultural:
+  valor: 10
+  fuente: "[D-13]"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-004
+
+corte.anuncio.gasto_usd:
+  valor: 3
+  fuente: "L2 19:55; S1 10:00"
+  fecha: "2026-11-09"
+  gana_sobre: "2 USD (T3 14:12)"
+  regla: R-005
+
+corte.anuncio.cpc_max_usd:
+  valor: 0.60
+  fuente: "L2; diseño §4.1"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-005
+
+corte.oferta.sin_ventas_usd:
+  valor: 25
+  fuente: "Usuario (PU-01); C1 1:24:15"
+  fecha: "2026-11-09"
+  gana_sobre: "3× CPA_BE (HTML); 72 h"
+  regla: R-006
+
+corte.oferta.factor_cpa_be:
+  valor: 2
+  fuente: "Usuario (PU-01)"
+  fecha: "2026-11-09"
+  gana_sobre: "3× (HTML)"
+  regla: R-006
+
+test.presupuesto_conjunto_usd:
+  valor: 5
+  fuente: "Candy y Franco (4–5 × 5) por capital [D-08]"
+  fecha: "2026-11-09"
+  gana_sobre: "6 USD (Tomi)"
+  regla: R-007
+
+test.conjuntos:
+  valor: 5
+  fuente: "Diseño §4.1 [D-08]"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-007
+
+test.spend_cap_usd:
+  valor: 30
+  fuente: "Usuario (PU-01) + [D-09]"
+  fecha: "2026-11-09"
+  gana_sobre: "100 USD (documento ABO, C1 18:10)"
+  regla: R-007
+
+test.spend_cap_prorroga_usd:
+  valor: 55
+  fuente: "[D-09]"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-007
+
+roas.apagar:
+  valor: 1.4
+  fuente: "CLAUDE.md del vídeo (C1 34:25)"
+  fecha: "2026-11-09"
+  gana_sobre: "< 2 (T3 14:30)"
+  regla: R-008
+
+roas.escalar:
+  valor: 2.0
+  fuente: "«El piso que usamos» (T3 10:05)"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-008
+
+preescala.min_ventas:
+  valor: 5
+  fuente: "[D-09]"
+  fecha: "2026-11-09"
+  gana_sobre: "10 ventas (Santino)"
+  regla: R-009
+
+surf.paso_pct:
+  valor: 0.30
+  fuente: "T3; playbook HTML"
+  fecha: "2026-11-09"
+  gana_sobre: "×2 (T3)"
+  regla: R-010
+
+surf.paso_max_pct:
+  valor: 0.50
+  fuente: "fluxo (idea); diseño §4.1"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-010
+
+surf.cadencia_min_h:
+  valor: 2
+  fuente: "Diseño §4.1"
+  fecha: "2026-11-09"
+  gana_sobre: "+30 %/h (T3)"
+  regla: R-010
+
+paciencia.con_ventas_h:
+  valor: 72
+  fuente: "T3; PU-01"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-011
+
+cuenta.limite_gasto_inicial_usd:
+  valor: 250
+  fuente: "Diseño §4.2 paso 06 y §4.17 (sobre de tests + reserva aprobada)"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-007

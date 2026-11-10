@@ -1,0 +1,181 @@
+# Mercados semilla (P-14). /auditar refina la banda y el estado.
+
+RO:
+  idioma: ro
+  moneda: RON
+  zona: Europe/Bucharest
+  banda_eur: [11.90, 15.90]
+  fuente_banda: "vídeos: 11,90–15,90 €"
+  precio_referencia: "79 RON"
+  estado: candidato
+  tienda: null
+  dataset: null
+  cuenta: null
+
+MD:
+  idioma: ro
+  moneda: MDL
+  zona: Europe/Chisinau
+  banda_eur: [11.90, 15.90]
+  fuente_banda: "vídeos: 11,90–15,90 €"
+  precio_referencia: null
+  estado: candidato
+  tienda: null
+  dataset: null
+  cuenta: null
+
+CZ:
+  idioma: cs
+  moneda: CZK
+  zona: Europe/Prague
+  banda_eur: [11.90, 15.90]
+  fuente_banda: "vídeos: 11,90–15,90 €"
+  precio_referencia: "449 CZK"
+  estado: candidato
+  tienda: null
+  dataset: null
+  cuenta: null
+
+HU:
+  idioma: hu
+  moneda: HUF
+  zona: Europe/Budapest
+  banda_eur: [11.90, 15.90]
+  fuente_banda: "vídeos: 11,90–15,90 €"
+  precio_referencia: null
+  estado: candidato
+  tienda: null
+  dataset: null
+  cuenta: null
+
+BG:
+  idioma: bg
+  moneda: EUR
+  zona: Europe/Sofia
+  banda_eur: [11.90, 15.90]
+  fuente_banda: "vídeos: 11,90–15,90 €"
+  precio_referencia: null
+  estado: candidato
+  tienda: null
+  dataset: null
+  cuenta: null
+
+IT:
+  idioma: it
+  moneda: EUR
+  zona: Europe/Rome
+  banda_eur: [11.90, 15.90]
+  fuente_banda: "vídeos: 11,90–15,90 €"
+  precio_referencia: null
+  estado: candidato
+  tienda: null
+  dataset: null
+  cuenta: null
+
+FR:
+  idioma: fr
+  moneda: EUR
+  zona: Europe/Paris
+  banda_eur: [11.90, 15.90]
+  fuente_banda: "vídeos: 11,90–15,90 €"
+  precio_referencia: null
+  estado: candidato
+  tienda: null
+  dataset: null
+  cuenta: null
+
+ES:
+  idioma: es
+  moneda: EUR
+  zona: Europe/Madrid
+  banda_eur: [11.90, 15.90]
+  fuente_banda: "vídeos: 11,90–15,90 €"
+  precio_referencia: null
+  estado: candidato
+  tienda: null
+  dataset: null
+  cuenta: null
+
+PT:
+  idioma: pt
+  moneda: EUR
+  zona: Europe/Lisbon
+  banda_eur: [11.90, 15.90]
+  fuente_banda: "vídeos: 11,90–15,90 €"
+  precio_referencia: null
+  estado: candidato
+  tienda: null
+  dataset: null
+  cuenta: null
+
+PL:
+  idioma: pl
+  moneda: PLN
+  zona: Europe/Warsaw
+  banda_eur: [11.90, 15.90]
+  fuente_banda: "vídeos: 11,90–15,90 €"
+  precio_referencia: null
+  estado: candidato
+  tienda: null
+  dataset: null
+  cuenta: null
+
+GR:
+  idioma: el
+  moneda: EUR
+  zona: Europe/Athens
+  banda_eur: [11.90, 15.90]
+  fuente_banda: "vídeos: 11,90–15,90 €"
+  precio_referencia: null
+  estado: candidato
+  tienda: null
+  dataset: null
+  cuenta: null
+
+SE:
+  idioma: sv
+  moneda: SEK
+  zona: Europe/Stockholm
+  banda_eur: [11.90, 15.90]
+  fuente_banda: "vídeos: 11,90–15,90 €"
+  precio_referencia: null
+  estado: candidato
+  tienda: null
+  dataset: null
+  cuenta: null
+
+NO:
+  idioma: nb
+  moneda: NOK
+  zona: Europe/Oslo
+  banda_eur: [11.90, 15.90]
+  fuente_banda: "vídeos: 11,90–15,90 €"
+  precio_referencia: null
+  estado: candidato
+  tienda: null
+  dataset: null
+  cuenta: null
+
+DK:
+  idioma: da
+  moneda: DKK
+  zona: Europe/Copenhagen
+  banda_eur: [11.90, 15.90]
+  fuente_banda: "vídeos: 11,90–15,90 €"
+  precio_referencia: null
+  estado: candidato
+  tienda: null
+  dataset: null
+  cuenta: null
+
+FI:
+  idioma: fi
+  moneda: EUR
+  zona: Europe/Helsinki
+  banda_eur: [11.90, 15.90]
+  fuente_banda: "vídeos: 11,90–15,90 €"
+  precio_referencia: null
+  estado: candidato
+  tienda: null
+  dataset: null
+  cuenta: null
