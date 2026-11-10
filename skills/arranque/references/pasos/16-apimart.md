@@ -18,6 +18,7 @@ Dejar tu cuenta de APIMart conectada, con clave guardada de forma segura y saldo
 7. Escribe `APIMART_API_KEY=` y pega justo después tu clave. En Windows Terminal, pega con clic derecho o con Ctrl+Shift+V (Ctrl+V no pega en nano).
 8. Guarda con Ctrl+O, Enter, y sal con Ctrl+X.
 9. Opcional: si APIMart te dio otra dirección, añade `APIMART_BASE_URL=https://...`. Solo se acepta https. Si no la pones, se usa la oficial.
+9b. Opcional: si tienes cuenta de Firecrawl, añade en el mismo archivo la línea `FIRECRAWL_API_KEY=` y pega tu clave justo después (como en el paso 7). Con ella, Trovify pide la Biblioteca de anuncios por Firecrawl, que gasta créditos de tu cuenta; sin ella usa el navegador propio.
 10. Pide la verificación: `trovify arranque verificar 16`.
 
 **Errores típicos**

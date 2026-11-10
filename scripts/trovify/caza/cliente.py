@@ -314,10 +314,25 @@ def _cota_en_texto(texto: str) -> bool:
 
 class ClienteBibliotecaPublica:
     def __init__(
-        self, presupuesto: Presupuesto, navegador: Navegador | None = None, cache: Cache | None = None
+        self,
+        presupuesto: Presupuesto,
+        navegador: Navegador | None = None,
+        cache: Cache | None = None,
+        firecrawl: Navegador | None = None,
     ):
+        """``navegador`` es la vía Playwright (lecturas completas y respaldo). ``firecrawl`` es la
+        vía principal [D-11b]; si no se pasa ni ``navegador`` ni ``firecrawl`` (uso real), sale de
+        ``FIRECRAWL_API_KEY`` en ``claude.env`` si existe. Con un ``navegador`` inyectado y sin
+        ``firecrawl`` no hay Firecrawl (las pruebas no tocan el HOME real)."""
         self.presupuesto = presupuesto
+        if firecrawl is None and navegador is None:
+            from trovify.caza.firecrawl import NavegadorFirecrawl, clave_firecrawl
+
+            clave = clave_firecrawl()
+            firecrawl = NavegadorFirecrawl(clave) if clave else None
         self.navegador = navegador or NavegadorEfimero()
+        self.firecrawl = firecrawl
+        self._firecrawl_caido = False
         self.cache = cache
         self._bloqueada = False
         self._errores_seguidos = 0
@@ -330,7 +345,10 @@ class ClienteBibliotecaPublica:
         page_id: str | None = None,
         estado: Literal["active", "all"] = "active",
         max_anuncios: int = 60,
+        completa: bool = False,
     ) -> ResultadoBusqueda:
+        """``completa=True`` usa Playwright (desplazamiento, ``completo`` real); si no, la primera
+        página se pide por Firecrawl si hay clave y sigue disponible, si no por Playwright."""
         if self._bloqueada:
             raise SesionBloqueada("Meta bloqueó la sesión: se detiene la caza; no se fuerza ni se reintenta.")
         if self._parada is not None:
@@ -343,8 +361,21 @@ class ClienteBibliotecaPublica:
                 # (ese contador es de búsquedas navegadas).
                 return en_cache
         self.presupuesto.antes_de_buscar()
+        via: Literal["firecrawl", "playwright"] = "playwright"
+        aviso: str | None = None
         try:
-            pagina = self._abrir_con_reintentos(url, max_anuncios)
+            if not completa and self.firecrawl is not None and not self._firecrawl_caido:
+                from trovify.caza.firecrawl import FirecrawlNoDisponible
+
+                try:
+                    pagina = self._abrir_con_reintentos(url, max_anuncios, self.firecrawl)
+                    via = "firecrawl"
+                except FirecrawlNoDisponible as exc:
+                    self._firecrawl_caido = True  # el resto de la sesión, Playwright; el aviso sale una vez
+                    aviso = f"{exc}; se usa Playwright"
+                    pagina = self._abrir_con_reintentos(url, max_anuncios)
+            else:
+                pagina = self._abrir_con_reintentos(url, max_anuncios)
         except ParadaPorErrores as exc:
             self._parada = str(exc)  # parada persistente: la siguiente búsqueda no vuelve a tocar Meta
             raise
@@ -353,6 +384,8 @@ class ClienteBibliotecaPublica:
             r = self._interpretar(url, pais, pagina, max_anuncios)
         finally:
             self.presupuesto.pausa()
+        r.via = via
+        r.creditos = getattr(self.firecrawl, "creditos", None) if via == "firecrawl" else None
         if r.estado == "bloqueado":
             self.presupuesto.bloqueos += 1
             self._bloqueada = True
@@ -362,18 +395,21 @@ class ClienteBibliotecaPublica:
             if r.estado in ("ok", "vacio"):
                 self._errores_seguidos = 0
                 if self.cache is not None:
-                    self.cache.guardar(url, r, max_anuncios)
+                    self.cache.guardar(url, r, max_anuncios)  # sin el aviso de la sesión
             else:
                 self._errores_seguidos += 1
                 if self._errores_seguidos >= _MAX_ERRORES_SEGUIDOS:
                     self._parada = f"{_MOTIVO_ERRORES} (última: {r.motivo})" if r.motivo else _MOTIVO_ERRORES
                     raise ParadaPorErrores(self._parada)
+        if aviso:
+            r.motivo = f"{r.motivo}; {aviso}" if r.motivo else aviso
         return r
 
-    def _abrir_con_reintentos(self, url: str, max_anuncios: int) -> PaginaCapturada:
+    def _abrir_con_reintentos(self, url: str, max_anuncios: int, navegador: Navegador | None = None) -> PaginaCapturada:
+        navegador = navegador or self.navegador
         while True:
             try:
-                pagina = self.navegador.abrir(url, max_anuncios)
+                pagina = navegador.abrir(url, max_anuncios)
                 if pagina.estado_http is not None and pagina.estado_http >= 500:
                     raise ErrorDeRed(f"HTTP {pagina.estado_http}")
                 return pagina

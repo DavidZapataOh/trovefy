@@ -60,3 +60,5 @@ class ResultadoBusqueda:
     motivo: str | None
     capturado_en: datetime
     completo: bool = False
+    via: Literal["firecrawl", "playwright"] = "playwright"
+    creditos: int | None = None  # metadata.creditsUsed de Firecrawl; None con Playwright

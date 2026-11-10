@@ -70,6 +70,8 @@ class Cache:
             return ResultadoBusqueda(
                 d["estado"], d["url"], d["total_aprox"],
                 [_anuncio_de_dict(a) for a in d["anuncios"]], d["motivo"], capturado, completo,
+                "firecrawl" if d.get("via") == "firecrawl" else "playwright",
+                d["creditos"] if isinstance(d.get("creditos"), int) else None,
             )
         except (OSError, ValueError, KeyError, TypeError):
             return None  # ausente o ilegible: es un fallo de caché, no un error
@@ -79,6 +81,7 @@ class Cache:
             return
         d = {
             "url": url, "estado": r.estado, "total_aprox": r.total_aprox, "motivo": r.motivo,
-            "capturado_en": r.capturado_en.isoformat(), "completo": r.completo, "anuncios": [_anuncio_a_dict(a) for a in r.anuncios],
+            "capturado_en": r.capturado_en.isoformat(), "completo": r.completo, "via": r.via, "creditos": r.creditos,
+            "anuncios": [_anuncio_a_dict(a) for a in r.anuncios],
         }
         escribir_atomico(self._ruta(url, max_anuncios), json.dumps(d, ensure_ascii=False, indent=1) + "\n")
