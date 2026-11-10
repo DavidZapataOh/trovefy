@@ -230,3 +230,22 @@ def test_cli_excepcion_del_verificador_es_no_medido(tmp_path, capsys, monkeypatc
     assert "secreto-sk-123" not in cap.out + cap.err and "Traceback" not in cap.err
     log = (tmp_path / "log.md").read_text()
     assert log.count("verificar 03") == 1 and "secreto-sk-123" not in log
+
+
+def test_siguiente_no_manda_a_hotmart_si_whop_esta_hecho(tmp_path):
+    for i in [f"{n:02d}" for n in range(10)]:
+        marcar_bloqueado(tmp_path, i, "x")
+    marcar_hecho(tmp_path, "10")
+    s = siguiente(cargar(tmp_path))
+    assert s is None or s.id != "10b"
+    aplicar_verificacion(tmp_path, "10", _ok())
+    s = siguiente(cargar(tmp_path))
+    assert s is None or s.id != "10b"
+
+
+def test_siguiente_ofrece_hotmart_solo_con_whop_bloqueado(tmp_path):
+    for i in [f"{n:02d}" for n in range(10)]:
+        marcar_bloqueado(tmp_path, i, "x")
+    assert siguiente(cargar(tmp_path)).id == "10"
+    marcar_bloqueado(tmp_path, "10", "Whop no paga a Colombia")
+    assert siguiente(cargar(tmp_path)).id == "10b"

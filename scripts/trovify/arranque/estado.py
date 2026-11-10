@@ -211,16 +211,19 @@ def porcentaje_fase(pasos: list[Paso], fase: int = 0) -> float:
 
 
 def siguiente(pasos: list[Paso]) -> Paso | None:
-    """Primer paso por hacer de la fase 0 (el cobro cuenta como uno: 10, o 10b si 10 está bloqueado).
+    """Primer paso por hacer de la fase 0 (el cobro cuenta como uno: 10, o 10b solo si 10 está bloqueado).
 
     Salta los verificados, los bloqueados y los «hecho» (el usuario ya hizo su parte; espera verificación).
     """
     fase0 = sorted((p for p in pasos if p.fase == 0), key=lambda p: _orden(p.id))
     cobro_ok = _cobro_verificado(pasos)
+    whop = next((p for p in pasos if p.id == "10"), None)
     for p in fase0:
         if p.id in _COBRO:
             if cobro_ok:
                 continue
+            if p.id == "10b" and (whop is None or whop.estado != "bloqueado"):
+                continue  # Hotmart es el respaldo: solo si Whop está bloqueado
         elif p.estado == "verificado":
             continue
         if p.estado not in ("bloqueado", "hecho"):
