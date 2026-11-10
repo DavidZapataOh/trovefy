@@ -116,3 +116,18 @@ def test_cli_canarios(tmp_path, monkeypatch, capsys):
     assert "c1\tfalla\tfaltan: 3" in capsys.readouterr().out
     args.solo = "zz"
     assert cerebro_cli._ejecutar(args) == 2
+
+
+def test_c2_acepta_parafrasis():
+    c2 = {c.id: c for c in cargar(CANARIOS)}["c2"]
+    ok = "No hay que esperar ningún plazo: se corta con 2 × CPA_BE, o 25 USD."
+    assert evaluar(ok, c2).estado == "ok"
+
+
+def test_c4_techo_viejo_descartado_y_techo_prohibido():
+    c4 = {c.id: c for c in cargar(CANARIOS)}["c4"]
+    base = "5 conjuntos, prórroga hasta 55. "
+    bien = base + "El techo es 30 y el viejo documento decía 100 USD (descartado)."
+    mal = base + "El techo es de 100 USD, con 30 de partida."
+    assert evaluar(bien, c4).estado == "ok"
+    assert evaluar(mal, c4).estado == "falla"

@@ -13,8 +13,8 @@
   pregunta: "¿Cuándo se mata una oferta que no vende?"
   debe_contener:
     - ["25"]
-    - ["cpa"]
-    - ["sin esperar", "no espera", "sin plazo", "sin ningun plazo"]
+    - ["cpa", "cpa_be", "cpa de equilibrio"]
+    - ["sin esperar", "no espera", "no hay que esperar", "no se espera", "sin plazo", "sin ningun plazo", "a cualquier hora"]
   no_debe_contener: ["72 horas sin ventas"]
 - id: c3
   pregunta: "¿Qué vara usa Trovify para decir que una oferta está escalando?"
@@ -29,7 +29,7 @@
     - ["5 conjuntos", "cinco conjuntos"]
     - ["30"]
     - ["55"]
-  no_debe_contener: ["100 usd", "us$ 100"]
+  no_debe_contener: ["techo de 100", "tope de 100", "techo es de 100", "techo: 100"]
 - id: c5
   pregunta: "¿Cuándo se pasa una oferta a pre-escala?"
   debe_contener:
