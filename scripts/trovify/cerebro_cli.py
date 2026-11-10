@@ -7,6 +7,7 @@ from pathlib import Path
 
 import yaml
 
+from trovify.cerebro.ingesta import ingerir
 from trovify.cli import registrar
 from trovify.vault.andamio import crear_vault
 from trovify.vault.escritura import anadir_log
@@ -37,6 +38,9 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     ret.add_argument("--vault", help="ruta del vault (por defecto, TROVIFY_VAULT o ~/trovify-cerebro)")
     lin = sub.add_parser("lint", help="revisa enlaces rotos, páginas huérfanas y frontmatter")
     lin.add_argument("--vault", help="ruta del vault (por defecto, TROVIFY_VAULT o ~/trovify-cerebro)")
+    ing = sub.add_parser("ingerir", help="copia fuentes (.md/.html) a raw/ sin duplicar")
+    ing.add_argument("rutas", nargs="+", metavar="RUTA", help="archivos .md o .html a ingerir")
+    ing.add_argument("--vault", help="ruta del vault (por defecto, TROVIFY_VAULT o ~/trovify-cerebro)")
 
 
 def _error(msg: str) -> int:
@@ -139,6 +143,31 @@ def _lint(destino: Path) -> int:
     return 0
 
 
+def _ingerir(args: argparse.Namespace, destino: Path) -> int:
+    nuevos, repetidos, faltan, archivos = 0, 0, 0, []
+    for crudo in args.rutas:
+        ruta = Path(crudo).expanduser()
+        if not ruta.is_file():
+            print(f"Error: no existe el archivo {crudo}", file=sys.stderr)
+            faltan += 1
+            continue
+        try:
+            en_raw, creado = ingerir(destino, ruta)
+        except OSError as exc:
+            print(f"Error: no se pudo ingerir {crudo}: {exc.strerror or exc}", file=sys.stderr)
+            faltan += 1
+            continue
+        print(f"{'nuevo' if creado else 'ya estaba'}: {crudo}")
+        if creado:
+            nuevos += 1
+            archivos.append(en_raw.relative_to(destino).as_posix())
+        else:
+            repetidos += 1
+    if nuevos or repetidos:
+        anadir_log(destino, "ingerir", f"{nuevos} nuevo(s), {repetidos} ya estaba(n)", archivos or ["—"])
+    return 2 if faltan else 0
+
+
 def _ejecutar(args: argparse.Namespace) -> int:
     destino = Path(args.vault).expanduser() if args.vault else vault_root()
     if args.accion == "regla":
@@ -149,6 +178,8 @@ def _ejecutar(args: argparse.Namespace) -> int:
         return _retomar(destino)
     if args.accion == "lint":
         return _lint(destino)
+    if args.accion == "ingerir":
+        return _ingerir(args, destino)
     if args.accion == "permisos":
         escribir_settings(destino, sobrescribir=True)
         print(f"Permisos regenerados en {destino / '.claude' / 'settings.json'}.")
