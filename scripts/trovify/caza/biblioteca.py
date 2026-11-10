@@ -33,9 +33,18 @@ def url_biblioteca(
     return f"{_BASE}?{urlencode(dict(sorted(params.items())))}"
 
 
+_CAPTCHA = "xfb_ad_library_is_captcha_required"
+# Las páginas normales traen la clave con valor false (grabado real del 2026-11-10).
+_CAPTCHA_FALSE = re.compile(r'\\?"?\s*:\s*false\b')
+
+
 def detectar_bloqueo(url_final: str, html: str) -> Literal["captcha", "login", "checkpoint"] | None:
-    if "xfb_ad_library_is_captcha_required" in html:
-        return "captcha"
+    inicio = html.find(_CAPTCHA)
+    while inicio != -1:
+        fin = inicio + len(_CAPTCHA)
+        if not _CAPTCHA_FALSE.match(html, fin):
+            return "captcha"
+        inicio = html.find(_CAPTCHA, fin)
     ruta = urlsplit(url_final).path
     if ruta == "/login" or ruta.startswith("/login/"):
         return "login"

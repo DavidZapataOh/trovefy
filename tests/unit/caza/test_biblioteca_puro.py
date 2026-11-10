@@ -42,3 +42,15 @@ def test_bloqueo_por_segmento_exacto():
     assert detectar_bloqueo("https://www.facebook.com/login", "") == "login"
     assert detectar_bloqueo("https://www.facebook.com/loginfoo", "") is None
     assert detectar_bloqueo("https://www.facebook.com/checkpointx/", "") is None
+
+
+def test_captcha_false_no_es_bloqueo():
+    # Grabado real (2026-11-10): la página normal trae la clave con valor false.
+    normal = '..."xfb_ad_library_is_captcha_required":false,"ad_library_main":{...'
+    assert detectar_bloqueo("https://www.facebook.com/ads/library/?q=x", normal) is None
+    escapado = '\\"xfb_ad_library_is_captcha_required\\": false'
+    assert detectar_bloqueo("https://www.facebook.com/ads/library/?q=x", escapado) is None
+    assert detectar_bloqueo("https://www.facebook.com/ads/library/",
+                            '"xfb_ad_library_is_captcha_required":true') == "captcha"
+    assert detectar_bloqueo("https://www.facebook.com/ads/library/",
+                            normal + '"xfb_ad_library_is_captcha_required":true') == "captcha"

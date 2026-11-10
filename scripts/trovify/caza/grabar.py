@@ -70,6 +70,10 @@ class SecretoEnCaptura(Exception):
 class BloqueoBiblioteca(Exception):
     """Meta mostró captcha, login o comprobación de seguridad."""
 
+    def __init__(self, mensaje: str, captura: dict | None = None) -> None:
+        super().__init__(mensaje)
+        self.captura = captura  # ya redactada; solo para diagnóstico con --crudo
+
 
 def _es_media(url: str) -> bool:
     m = _HOST.match(url)
@@ -238,9 +242,11 @@ def _capturar(url: str, max_respuestas: int, desplazamientos: int = 4) -> dict:
             pagina.on("response", al_responder)
             pagina.goto(url, wait_until="domcontentloaded", timeout=60_000)
             pagina.wait_for_timeout(6_000)
-            bloqueo = detectar_bloqueo(pagina.url, pagina.content())
+            html = pagina.content()
+            bloqueo = detectar_bloqueo(pagina.url, html)
             if bloqueo:
-                raise BloqueoBiblioteca(f"Meta mostró {bloqueo} en {pagina.url}; no se fuerza")
+                raise BloqueoBiblioteca(f"Meta mostró {bloqueo} en {pagina.url}; no se fuerza",
+                                        componer(url, pagina.url, html, respuestas))
             for _ in range(desplazamientos):
                 if len(respuestas) >= max_respuestas:
                     break
@@ -250,7 +256,8 @@ def _capturar(url: str, max_respuestas: int, desplazamientos: int = 4) -> dict:
             html = pagina.content()
             bloqueo = detectar_bloqueo(pagina.url, html)
             if bloqueo:
-                raise BloqueoBiblioteca(f"Meta mostró {bloqueo} en {pagina.url}; no se fuerza")
+                raise BloqueoBiblioteca(f"Meta mostró {bloqueo} en {pagina.url}; no se fuerza",
+                                        componer(url, pagina.url, html, respuestas))
             return componer(url, pagina.url, html, respuestas)
         finally:
             navegador.close()
@@ -258,7 +265,12 @@ def _capturar(url: str, max_respuestas: int, desplazamientos: int = 4) -> dict:
 
 def grabar(url: str, salida: Path, max_respuestas: int = 20, crudo: Path | None = None) -> None:
     """Graba la URL (contexto efímero, sin sesión) y guarda la fixture redactada y recortada."""
-    captura = _capturar(url, max_respuestas)
+    try:
+        captura = _capturar(url, max_respuestas)
+    except BloqueoBiblioteca as exc:
+        if crudo is not None and exc.captura is not None:
+            guardar(exc.captura, Path(crudo))  # diagnóstico; nunca se guarda como fixture
+        raise
     if crudo is not None:
         guardar(captura, Path(crudo))
     guardar(recortar(captura), Path(salida))
