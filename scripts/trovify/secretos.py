@@ -1,5 +1,7 @@
 """Lectura de secretos desde ~/.config/trovify/*.env (modo 0600). Nunca registra valores."""
 
+import errno
+import os
 import stat
 from pathlib import Path
 
@@ -18,6 +20,10 @@ class PermisosInseguros(Exception):
         return f"{self.ruta} tiene permisos {self.modo:o}; deben ser 600"
 
 
+class EnvNoSeguro(Exception):
+    """El archivo de secretos es un enlace simbólico, no es regular o no es del usuario."""
+
+
 def leer_env(ruta: Path) -> dict[str, str]:
     """Lee líneas CLAVE=VALOR (ignora vacías y comentarios, quita comillas envolventes).
 
@@ -25,11 +31,24 @@ def leer_env(ruta: Path) -> dict[str, str]:
     (se comprueba antes de leer el contenido).
     """
     ruta = Path(ruta)
-    modo = stat.S_IMODE(ruta.stat().st_mode)
-    if modo != 0o600:
-        raise PermisosInseguros(ruta, modo)
+    try:
+        fd = os.open(ruta, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise EnvNoSeguro("es un enlace simbólico") from None
+        raise
+    with os.fdopen(fd, "r", encoding="utf-8") as f:
+        info = os.fstat(f.fileno())
+        if not stat.S_ISREG(info.st_mode):
+            raise EnvNoSeguro("no es un archivo regular")
+        if info.st_uid != os.getuid():
+            raise EnvNoSeguro("no pertenece a tu usuario")
+        modo = stat.S_IMODE(info.st_mode)
+        if modo != 0o600:
+            raise PermisosInseguros(ruta, modo)
+        texto = f.read()
     valores: dict[str, str] = {}
-    for linea in ruta.read_text(encoding="utf-8").splitlines():
+    for linea in texto.splitlines():
         linea = linea.strip()
         if not linea or linea.startswith("#") or "=" not in linea:
             continue
