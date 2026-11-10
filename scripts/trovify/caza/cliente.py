@@ -7,10 +7,10 @@ presupuesto y no hace pausa. Nunca se usa un perfil, ``storage_state`` ni contex
 
 from __future__ import annotations
 
-import math
+import json
 import re
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from html import unescape
 from typing import ClassVar, Literal, Protocol
@@ -29,10 +29,19 @@ from trovify.caza.presupuesto import ParadaPorErrores, Presupuesto
 from trovify.navegador import NavegadorError, _un_navegador_a_la_vez
 
 TOPE_META = 50_000
-_POR_PAGINA = 30  # anuncios de la primera carga (observado en la grabación del 2026-11-10); cada scroll trae otro tramo
 _MAX_ERRORES_SEGUIDOS = 3
 _LIMITADO = (403, 429)
-_MAX_DESPLAZAMIENTOS = 10
+# Tope técnico de desplazamientos por búsqueda. Se desplaza mientras haya progreso real (ver
+# _desplazar); el tope solo evita un bucle si Meta nunca dice que acabó. En la grabación del
+# 2026-11-10 cada desplazamiento trajo 10 anuncios: 30 del HTML + 15 × 10 = 180.
+_MAX_DESPLAZAMIENTOS = 15
+# Tope de respuestas de /api/graphql que se guardan (cuenta todas, no solo las de la búsqueda).
+_MAX_RESPUESTAS = 80
+# Errores de GraphQL que indican que Meta limita las peticiones (códigos de la Graph API y textos).
+_CODIGOS_LIMITE = frozenset({4, 17, 32, 368, 613, 1675004})
+_TEXTO_LIMITE = re.compile(
+    r"rate.?limit|too many|limit reached|temporarily blocked|demasiad|bloquead|limitad", re.IGNORECASE
+)
 _MOTIVO_TOPE = "más de 50.000 (tope de Meta)"
 _MOTIVO_ERRORES = "3 búsquedas seguidas con error; se para para no forzar a Meta"
 _MAYOR_QUE = re.compile(r">\s*\d[\d.,]*\s*(?:results?|resultados?)", re.IGNORECASE)
@@ -55,10 +64,95 @@ class PaginaCapturada:
     texto: str  # texto de los encabezados (role="heading"), donde Meta muestra el total
     cuerpos: list[str]
     estado_http: int | None = None  # estado HTTP del documento principal; None si no se conoce
+    # estado HTTP de cada respuesta de datos, en el orden de ``cuerpos``; vacío si no se conoce
+    estados_datos: list[int] = field(default_factory=list)
 
 
 class Navegador(Protocol):
-    def abrir(self, url: str, desplazar: int) -> PaginaCapturada: ...
+    def abrir(self, url: str, max_anuncios: int) -> PaginaCapturada: ...
+
+
+# --- respuestas de datos y desplazamiento ----------------------------------------------------
+
+
+def _json_de(cuerpo: str):
+    t = (cuerpo or "").strip()
+    t = t.removeprefix("for (;;);")
+    for candidato in (t, t.split("\n", 1)[0]):
+        try:
+            return json.loads(candidato)
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def fallo_de_datos(estado: int | None, cuerpo: str) -> tuple[Literal["limitado", "error"], str] | None:
+    """¿Falló una respuesta de datos? ``("limitado", "HTTP N")`` si Meta limita (403/429 o un error
+    de GraphQL de límite); ``("error", "HTTP N")`` si falló de otro modo (estado no 2xx, o errores
+    de GraphQL sin datos); ``None`` si está bien."""
+    if estado in _LIMITADO:
+        return "limitado", f"HTTP {estado}"
+    if estado is not None and not 200 <= estado < 300:
+        return "error", f"HTTP {estado}"
+    doc = _json_de(cuerpo)
+    errores = doc.get("errors") if isinstance(doc, dict) else None
+    if not isinstance(errores, list) or not errores:
+        return None
+    for e in errores:
+        if not isinstance(e, dict):
+            continue
+        texto = " ".join(str(e.get(k, "")) for k in ("message", "summary", "description"))
+        if e.get("code") in _CODIGOS_LIMITE or _TEXTO_LIMITE.search(texto):
+            return "limitado", f"HTTP {estado or 200}"
+    if not doc.get("data"):
+        return "error", f"HTTP {estado or 200}"
+    return None  # errores parciales con datos: no impiden leer
+
+
+def _fallos(estados: list[int | None], cuerpos: list[str]):
+    estados = list(estados) + [None] * (len(cuerpos) - len(estados))
+    return [f for f in (fallo_de_datos(e, c) for e, c in zip(estados, cuerpos, strict=False)) if f]
+
+
+def _progreso(respuestas: list[dict], html: str) -> tuple[int, bool | None]:
+    """Anuncios distintos leídos hasta ahora y el último ``has_next_page``."""
+    try:
+        p = parsear_detalle([r["cuerpo"] for r in respuestas], "ALL", html)
+    except FormatoDesconocido:
+        return 0, None
+    return len(p.anuncios), p.hay_mas
+
+
+def _fallo_desde(respuestas: list[dict], antes: int) -> bool:
+    nuevas = respuestas[antes:]
+    return bool(_fallos([r["estado"] for r in nuevas], [r["cuerpo"] for r in nuevas]))
+
+
+def _desplazar(pagina, respuestas: list[dict], html: str, max_anuncios: int) -> None:
+    """Desplaza la página mientras haya progreso real, sin suponer cuántos anuncios trae cada tramo.
+
+    Para cuando: ya hay ``max_anuncios``; Meta dice ``has_next_page`` false; un desplazamiento no
+    trae ningún anuncio nuevo; llega una respuesta de datos fallida (el cliente decide si es
+    bloqueo o lectura parcial; no se insiste); o se alcanza ``_MAX_DESPLAZAMIENTOS``. Sin anuncios
+    en la primera página no hay nada que paginar.
+    """
+    n, hay_mas = _progreso(respuestas, html)
+    if n == 0:
+        return
+    for _ in range(_MAX_DESPLAZAMIENTOS):
+        if n >= max_anuncios or hay_mas is False:
+            return
+        antes = len(respuestas)
+        pagina.mouse.wheel(0, 20_000)
+        pagina.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        pagina.wait_for_timeout(2_500)
+        nuevo, hay_mas = _progreso(respuestas, html)
+        if nuevo <= n and not _fallo_desde(respuestas, antes):
+            pagina.wait_for_timeout(2_500)  # la respuesta puede tardar: se espera una vez más
+            nuevo, hay_mas = _progreso(respuestas, html)
+        if _fallo_desde(respuestas, antes) or nuevo <= n:
+            return
+        n = nuevo
 
 
 # --- navegador real ------------------------------------------------------------------------
@@ -125,36 +219,53 @@ class _ChromiumFalso:
         return ""
 
 
+def _encabezados(pagina) -> str:
+    from playwright.sync_api import Error as PlaywrightError
+
+    try:
+        return pagina.evaluate(_JS_ENCABEZADOS) or ""
+    except PlaywrightError:
+        return ""  # sin encabezados no hay total de texto; no es un fallo de red
+
+
+def _se_puede_desplazar(estado_http: int | None, url_final: str, html: str, texto: str, respuestas) -> bool:
+    """Nunca se desplaza sobre un documento limitado, fallido o bloqueado, ni tras un límite en datos."""
+    if estado_http in _LIMITADO or (estado_http is not None and estado_http >= 500):
+        return False
+    if detectar_bloqueo(url_final, html) or aviso_de_bloqueo(texto):
+        return False
+    fallos = _fallos([r["estado"] for r in respuestas], [r["cuerpo"] for r in respuestas])
+    return not any(tipo == "limitado" for tipo, _ in fallos)
+
+
 class NavegadorEfimero:
     """Chromium sin interfaz con contexto nuevo en cada apertura; se cierra todo al terminar."""
 
-    def abrir(self, url: str, desplazar: int) -> PaginaCapturada:
+    def abrir(self, url: str, max_anuncios: int) -> PaginaCapturada:
         from playwright.sync_api import Error as PlaywrightError
 
         with _un_navegador_a_la_vez(), _lanzar_chromium(headless=True, chromium_sandbox=True) as navegador:
             ctx = navegador.new_context()  # efímero: sin storage_state ni user_data_dir
             try:
                 pagina = ctx.new_page()
-                # tope de 40: cuenta todas las respuestas de /api/graphql, no solo las de la búsqueda
-                respuestas = escuchar_respuestas(pagina, max_respuestas=40)
+                respuestas = escuchar_respuestas(pagina, max_respuestas=_MAX_RESPUESTAS)
                 try:
                     respuesta = pagina.goto(url, wait_until="domcontentloaded", timeout=60_000)
                     estado_http = getattr(respuesta, "status", None)
                     pagina.wait_for_timeout(6_000)
-                    if not detectar_bloqueo(pagina.url, pagina.content()):
-                        for _ in range(desplazar):
-                            pagina.mouse.wheel(0, 20_000)
-                            pagina.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                            pagina.wait_for_timeout(2_500)
                     html = pagina.content()
+                    texto = _encabezados(pagina)
+                    if _se_puede_desplazar(estado_http, pagina.url, html, texto, respuestas):
+                        _desplazar(pagina, respuestas, html, max_anuncios)
+                        html = pagina.content()
+                        texto = _encabezados(pagina)
                     url_final = pagina.url
                 except PlaywrightError as exc:
                     raise ErrorDeRed(f"no se pudo cargar la Biblioteca ({type(exc).__name__})") from exc
-                try:
-                    texto = pagina.evaluate(_JS_ENCABEZADOS) or ""
-                except PlaywrightError:
-                    texto = ""  # sin encabezados no hay total de texto; no es un fallo de red
-                return PaginaCapturada(url_final, html, texto, [r["cuerpo"] for r in respuestas], estado_http)
+                return PaginaCapturada(
+                    url_final, html, texto, [r["cuerpo"] for r in respuestas], estado_http,
+                    [r["estado"] for r in respuestas],
+                )
             finally:
                 ctx.close()
 
@@ -197,9 +308,8 @@ class ClienteBibliotecaPublica:
                 # (ese contador es de búsquedas navegadas).
                 return en_cache
         self.presupuesto.antes_de_buscar()
-        desplazar = min(_MAX_DESPLAZAMIENTOS, max(0, math.ceil(max_anuncios / _POR_PAGINA) - 1))
         try:
-            pagina = self._abrir_con_reintentos(url, desplazar)
+            pagina = self._abrir_con_reintentos(url, max_anuncios)
         except ParadaPorErrores as exc:
             self._parada = str(exc)  # parada persistente: la siguiente búsqueda no vuelve a tocar Meta
             raise
@@ -225,10 +335,10 @@ class ClienteBibliotecaPublica:
                     raise ParadaPorErrores(self._parada)
         return r
 
-    def _abrir_con_reintentos(self, url: str, desplazar: int) -> PaginaCapturada:
+    def _abrir_con_reintentos(self, url: str, max_anuncios: int) -> PaginaCapturada:
         while True:
             try:
-                pagina = self.navegador.abrir(url, desplazar)
+                pagina = self.navegador.abrir(url, max_anuncios)
                 if pagina.estado_http is not None and pagina.estado_http >= 500:
                     raise ErrorDeRed(f"HTTP {pagina.estado_http}")
                 return pagina
@@ -248,6 +358,13 @@ class ClienteBibliotecaPublica:
             return resultado("bloqueado", motivo=f"Meta mostró {bloqueo}; se detiene la sesión")
         if aviso_de_bloqueo(p.texto):
             return resultado("bloqueado", motivo="Meta mostró un aviso de bloqueo temporal; se detiene la sesión")
+        fallos = _fallos(p.estados_datos, p.cuerpos)
+        limite = next((d for tipo, d in fallos if tipo == "limitado"), None)
+        if limite:
+            return resultado("bloqueado", motivo=f"Meta limitó las búsquedas durante el desplazamiento ({limite})")
+        parcial = (
+            f"lectura parcial: Meta respondió {', '.join(d for _, d in fallos)} al desplazar" if fallos else None
+        )
         try:
             parseo = parsear_detalle(p.cuerpos, pais, p.html)
         except FormatoDesconocido as exc:
@@ -257,7 +374,8 @@ class ClienteBibliotecaPublica:
         if not parseo.anuncios:
             if sin_resultados(p.html):
                 return resultado("vacio", total=0, completo=True)
-            return resultado("error", motivo="la página no trae anuncios ni aviso de «sin resultados»")
+            motivo = "la página no trae anuncios ni aviso de «sin resultados»"
+            return resultado("error", motivo=f"{motivo}; {parcial}" if parcial else motivo)
         total, motivo_total = parseo.total_json, None
         if total is not None:
             if total > TOPE_META:
@@ -276,10 +394,12 @@ class ClienteBibliotecaPublica:
             motivos.append("total no medido: Meta no mostró recuento")
         if parseo.descartados:
             motivos.append(f"{parseo.descartados} anuncios descartados por formato")
+        if parcial:
+            motivos.append(parcial)
         leidos = parseo.anuncios
         anuncios = leidos[:max_anuncios]
         # Completo solo si Meta dice que no hay más (o su count no pasa de lo leído) y no se recortó
         # ni se descartó nada: si no, es una muestra y sus cifras son «≥».
         sin_mas = parseo.hay_mas is False or (parseo.total_json is not None and parseo.total_json <= len(leidos))
-        completo = sin_mas and len(anuncios) == len(leidos) and not parseo.descartados
+        completo = sin_mas and len(anuncios) == len(leidos) and not parseo.descartados and not parcial
         return resultado("ok", total, anuncios, "; ".join(motivos) or None, completo)

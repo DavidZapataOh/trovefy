@@ -21,8 +21,8 @@ class NavegadorFalso:
     def __init__(self, paginas):
         self.paginas, self.llamadas = paginas, []
 
-    def abrir(self, url, desplazar):
-        self.llamadas.append((url, desplazar))
+    def abrir(self, url, max_anuncios):
+        self.llamadas.append((url, max_anuncios))
         p = self.paginas.pop(0)
         if isinstance(p, Exception):
             raise p
@@ -68,7 +68,7 @@ def test_contexto_efimero(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     llamadas = []
     monkeypatch.setattr(m, "_lanzar_chromium", lambda **kw: llamadas.append(kw) or m._ChromiumFalso())
-    m.NavegadorEfimero().abrir("https://www.facebook.com/ads/library/?q=x", desplazar=0)
+    m.NavegadorEfimero().abrir("https://www.facebook.com/ads/library/?q=x", max_anuncios=0)
     assert llamadas and all("user_data_dir" not in kw and "storage_state" not in kw for kw in llamadas)
     assert all(kw.get("chromium_sandbox") is True and kw.get("headless") is True for kw in llamadas)
     assert m._ChromiumFalso.nuevos_contextos == [{}]  # new_context() sin storage_state
@@ -206,11 +206,12 @@ def test_descartados_en_el_motivo(monkeypatch):
     assert r.estado == "ok" and "3 anuncios descartados por formato" in r.motivo
 
 
-def test_max_anuncios_recorta_y_decide_desplazamiento():
-    c = cliente([de_fixture("pagina_therapy_toolkit.json")])
+def test_max_anuncios_recorta_y_llega_al_navegador():
+    c = cliente([de_fixture("pagina_therapy_toolkit.json"), de_fixture("pagina_therapy_toolkit.json")])
     r = c.buscar("ALL", page_id="102506312071455", max_anuncios=5)
     assert len(r.anuncios) == 5
-    assert c.navegador.llamadas[0][1] == 0
+    c.buscar("ALL", page_id="102506312071455")
+    assert [x[1] for x in c.navegador.llamadas] == [5, 60]
 
 
 def test_cache_distingue_max_anuncios(tmp_path):
@@ -383,3 +384,187 @@ def test_aviso_de_bloqueo_con_http_200_detiene_la_sesion():
     assert r.estado == "bloqueado" and "bloqueo temporal" in r.motivo and r.anuncios == []
     with pytest.raises(SesionBloqueada):
         c.buscar("ALL", page_id="2")
+
+
+# --- desplazamiento por progreso real (la grabación trae 10 anuncios por desplazamiento) ---------
+
+_GRAPHQL = "https://www.facebook.com/api/graphql/"
+
+
+def _resp(estado, cuerpo):
+    return {"url": _GRAPHQL, "estado": estado, "cuerpo": cuerpo}
+
+
+def _tramo(desde, n=10, hay_mas=True):
+    return json.dumps({"data": {"ad_library_main": {"search_results_connection": _con(
+        [str(i) for i in range(desde, desde + n)], hay_mas=hay_mas)["x"]["search_results_connection"]}}})
+
+
+def _html_primera(n=30, hay_mas=True, count=None):
+    return _pagina(_con([str(i) for i in range(n)], hay_mas=hay_mas, count=count)).html
+
+
+class PaginaQueSeDesplaza:
+    """Página de Playwright de pega: cada rueda entrega la siguiente respuesta de datos."""
+
+    def __init__(self, tramos):
+        self.tramos, self.ruedas, self.respuestas = list(tramos), 0, []
+        self.mouse = self
+
+    def wheel(self, *_a):
+        self.ruedas += 1
+        if self.tramos:
+            self.respuestas.append(self.tramos.pop(0))
+
+    def evaluate(self, *_a):
+        return None
+
+    def wait_for_timeout(self, *_a):
+        return None
+
+
+def _infinitos(desde=30):
+    return [_resp(200, _tramo(desde + 10 * k)) for k in range(100)]
+
+
+def test_desplaza_hasta_max_anuncios_con_10_por_tramo():
+    p = PaginaQueSeDesplaza(_infinitos())
+    m._desplazar(p, p.respuestas, _html_primera(), max_anuncios=60)
+    assert p.ruedas == 3  # 30 del HTML + 3 × 10
+
+
+def test_desplaza_hasta_que_meta_dice_que_no_hay_mas():
+    p = PaginaQueSeDesplaza([_resp(200, _tramo(30)), _resp(200, _tramo(40, hay_mas=False))] + _infinitos(50))
+    m._desplazar(p, p.respuestas, _html_primera(), max_anuncios=500)
+    assert p.ruedas == 2
+    p = PaginaQueSeDesplaza(_infinitos())
+    m._desplazar(p, p.respuestas, _html_primera(hay_mas=False), max_anuncios=500)
+    assert p.ruedas == 0
+
+
+def test_para_si_un_desplazamiento_no_trae_anuncios_nuevos():
+    p = PaginaQueSeDesplaza([_resp(200, _tramo(30)), _resp(200, _tramo(30))] + _infinitos(40))
+    m._desplazar(p, p.respuestas, _html_primera(), max_anuncios=500)
+    assert p.ruedas == 2
+
+
+def test_tope_tecnico_de_desplazamientos():
+    p = PaginaQueSeDesplaza(_infinitos())
+    m._desplazar(p, p.respuestas, _html_primera(), max_anuncios=10_000)
+    assert p.ruedas == m._MAX_DESPLAZAMIENTOS
+
+
+def test_sin_anuncios_no_desplaza():
+    p = PaginaQueSeDesplaza(_infinitos())
+    m._desplazar(p, p.respuestas, "<html></html>", max_anuncios=60)
+    assert p.ruedas == 0
+
+
+@pytest.mark.parametrize("estado", [429, 403, 500])
+def test_para_de_desplazar_ante_un_fallo_de_datos(estado):
+    p = PaginaQueSeDesplaza([_resp(200, _tramo(30)), _resp(estado, "")] + _infinitos(40))
+    m._desplazar(p, p.respuestas, _html_primera(), max_anuncios=500)
+    assert p.ruedas == 2
+
+
+class _RespuestaFalsa:
+    def __init__(self, url, status, cuerpo=""):
+        self.url, self.status, self._cuerpo = url, status, cuerpo
+
+    def text(self):
+        return self._cuerpo
+
+
+class _ChromiumQueSeDesplaza(PaginaQueSeDesplaza):
+    """Navegador, contexto y página de pega a la vez, con escucha de respuestas."""
+
+    def __init__(self, estado_doc, html, tramos):
+        super().__init__(tramos)
+        self.estado_doc, self.html, self.url, self._oyentes = estado_doc, html, "", []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return None
+
+    def new_context(self, **_k):
+        return self
+
+    def new_page(self):
+        return self
+
+    def close(self):
+        return None
+
+    def on(self, _evento, oyente):
+        self._oyentes.append(oyente)
+
+    def goto(self, url, **_k):
+        self.url = url
+        return _RespuestaFalsa(url, self.estado_doc)
+
+    def wheel(self, *_a):
+        self.ruedas += 1
+        if self.tramos:
+            r = self.tramos.pop(0)
+            for o in self._oyentes:
+                o(_RespuestaFalsa(r["url"], r["estado"], r["cuerpo"]))
+
+    def content(self):
+        return self.html
+
+    def evaluate(self, *_a):
+        return ""
+
+
+def _abrir_con(monkeypatch, tmp_path, falso, max_anuncios=60):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(m, "_lanzar_chromium", lambda **kw: falso)
+    return m.NavegadorEfimero().abrir("https://www.facebook.com/ads/library/?q=x", max_anuncios)
+
+
+def test_navegador_desplaza_y_guarda_estados(monkeypatch, tmp_path):
+    falso = _ChromiumQueSeDesplaza(200, _html_primera(), _infinitos())
+    p = _abrir_con(monkeypatch, tmp_path, falso)
+    assert falso.ruedas == 3 and len(p.cuerpos) == 3 and p.estados_datos == [200, 200, 200]
+
+
+@pytest.mark.parametrize("estado", [429, 403])
+def test_navegador_no_desplaza_si_el_documento_esta_limitado(monkeypatch, tmp_path, estado):
+    falso = _ChromiumQueSeDesplaza(estado, _html_primera(), _infinitos())
+    p = _abrir_con(monkeypatch, tmp_path, falso)
+    assert falso.ruedas == 0 and p.estado_http == estado
+
+
+def _con_datos(estados_y_cuerpos, html=None):
+    estados = [e for e, _ in estados_y_cuerpos]
+    return PaginaCapturada("https://www.facebook.com/ads/library/?q=x", html or _html_primera(), "",
+                           [c for _, c in estados_y_cuerpos], estados_datos=estados)
+
+
+@pytest.mark.parametrize("estado", [429, 403])
+def test_limite_al_desplazar_es_bloqueo_y_para_la_sesion(estado):
+    c = cliente([_con_datos([(200, _tramo(30)), (estado, "")])])
+    r = c.buscar("RO", q="x")
+    assert r.estado == "bloqueado" and r.completo is False
+    assert r.motivo == f"Meta limitó las búsquedas durante el desplazamiento (HTTP {estado})"
+    with pytest.raises(SesionBloqueada):
+        c.buscar("RO", q="y")
+    assert len(c.navegador.llamadas) == 1
+
+
+def test_error_graphql_de_limite_es_bloqueo():
+    cuerpo = json.dumps({"errors": [{"message": "Rate limit exceeded", "code": 1675004}]})
+    r = cliente([_con_datos([(200, _tramo(30)), (200, cuerpo)])]).buscar("RO", q="x")
+    assert r.estado == "bloqueado" and "HTTP 200" in r.motivo
+
+
+def test_otro_fallo_al_desplazar_es_lectura_parcial():
+    html = _html_primera(count=40)
+    r = cliente([_con_datos([(200, _tramo(30, hay_mas=False)), (500, "")], html)]).buscar("RO", q="x")
+    assert r.estado == "ok" and len(r.anuncios) == 40
+    assert r.completo is False and "lectura parcial: Meta respondió HTTP 500 al desplazar" in r.motivo
+    sin_datos = json.dumps({"errors": [{"message": "Something went wrong"}], "data": None})
+    r = cliente([_con_datos([(200, _tramo(30)), (200, sin_datos)])]).buscar("RO", q="x")
+    assert r.estado == "ok" and r.completo is False and "lectura parcial" in r.motivo
