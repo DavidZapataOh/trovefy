@@ -62,14 +62,15 @@ def _bases_vault(vault: pathlib.Path, vault_res: pathlib.Path) -> set[str]:
     return {b.rstrip("/") for b in bases if b.rstrip("/")}
 
 
-def _bash_menciona(comando: str, bases: set[str], vault_res: pathlib.Path, cwd: str | None) -> bool:
+def _bash_menciona(original: str, bases: set[str], vault_res: pathlib.Path, cwd: str | None) -> bool:
+    comando = re.sub(r"[\"']", "", original)
     for base in bases:
         if base + "/raw" in comando or base + "/log.md" in comando:
             return True
     en_vault = bool(cwd) and resolver(cwd, None) == vault_res
     if not en_vault:
         for base in bases:
-            patron = r"\bcd\s+[\"']?" + re.escape(base) + r"/?[\"']?(?=\s|;|&|\||$)"
+            patron = r"\b(?:cd|pushd)\s+(?:--\s+)?" + re.escape(base) + r"/?(?=\s|;|&|\||$)"
             if re.search(patron, comando):
                 en_vault = True
                 break
@@ -83,7 +84,9 @@ def _edicion_solo_amplia(actual: str, e: object) -> str | None:
     if not isinstance(e, dict):
         return None
     viejo, nuevo = _cadena(e.get("old_string")), _cadena(e.get("new_string"))
-    if not viejo or not actual.endswith(viejo) or not nuevo.startswith(viejo):
+    if e.get("replace_all"):
+        return None
+    if not viejo or actual.count(viejo) != 1 or not actual.endswith(viejo) or not nuevo.startswith(viejo):
         return None
     return actual[: len(actual) - len(viejo)] + nuevo
 

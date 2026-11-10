@@ -150,3 +150,30 @@ def test_multiedit_log_malformado(correr_hook, vault_tmp):
     for edits in ("no-lista", [], ["texto"], [{"old_string": "", "new_string": "x"}]):
         e = ev("MultiEdit", file_path=str(log), edits=edits)
         assert correr_hook("raw_inmutable", e, vault_tmp)[0] == "deny", edits
+
+
+def test_edit_log_replace_all_y_ocurrencias_repetidas(correr_hook, vault_tmp):
+    log = vault_tmp / "log.md"; log.write_text("- a\n- b\n- a\n")
+    e = ev("Edit", file_path=str(log), old_string="- a\n", new_string="- a\n- x\n")
+    assert correr_hook("raw_inmutable", e, vault_tmp)[0] == "deny"
+    e = ev("Edit", file_path=str(log), old_string="- a\n", new_string="- a\n- x\n", replace_all=True)
+    assert correr_hook("raw_inmutable", e, vault_tmp)[0] == "deny"
+    log.write_text("- b\n- a\n")
+    e["tool_input"]["replace_all"] = True
+    assert correr_hook("raw_inmutable", e, vault_tmp)[0] == "deny"
+    e["tool_input"]["replace_all"] = False
+    assert correr_hook("raw_inmutable", e, vault_tmp)[0] == "allow"
+    m = ev("MultiEdit", file_path=str(log), edits=[
+        {"old_string": "- a\n", "new_string": "- a\n- x\n", "replace_all": True}])
+    assert correr_hook("raw_inmutable", m, vault_tmp)[0] == "deny"
+
+
+def test_bash_comillas_entre_base_y_subruta(correr_hook, vault_tmp, tmp_path, monkeypatch):
+    home = tmp_path / "casa"; (home / "trovify-cerebro").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    v = home / "trovify-cerebro"
+    for c in ('rm "$TROVIFY_VAULT"/raw/x', 'rm "$HOME"/trovify-cerebro/raw/x',
+              "rm '$HOME'/trovify-cerebro/log.md", 'cd "$TROVIFY_VAULT"/ && rm raw/x',
+              f'cd -- {v} && rm raw/x', f'pushd "{v}" && rm raw/x'):
+        assert _bash(correr_hook, v, c) == "deny", c
+    assert _bash(correr_hook, v, 'cat "$TROVIFY_VAULT"/raw/x') == "allow"
