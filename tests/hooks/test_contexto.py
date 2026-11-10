@@ -102,3 +102,44 @@ def test_registrado_en_session_start():
     reg = json.loads((raiz / "hooks/hooks.json").read_text())
     cmds = [h["command"] for g in reg["hooks"]["SessionStart"] for h in g["hooks"]]
     assert cmds == ['python3 "${CLAUDE_PLUGIN_ROOT}/hooks/contexto.py"']
+
+
+def test_indice_enorme_rapido(tmp_path):
+    import time
+
+    with (tmp_path / "index.md").open("w") as f:
+        for i in range(50000):
+            f.write(f"L{i:05d} {'x' * 20}\n")
+    t = time.monotonic()
+    ctx = ctx_de(correr(tmp_path))
+    assert "L00039" in ctx and "L00040" not in ctx
+    assert time.monotonic() - t < 2
+
+
+def test_producto_con_cuerpo_enorme_detecta_estado(tmp_path):
+    d = tmp_path / "productos/p-9-grande"
+    d.mkdir(parents=True)
+    with (d / "PRODUCTO.md").open("w") as f:
+        f.write("---\nestado: ESCALA\n---\n")
+        f.write("cuerpo\n" * 100000)
+    assert "p-9-grande" in ctx_de(correr(tmp_path))
+
+
+def test_nombres_largos_no_tapan_ultimas_secciones(tmp_path):
+    (tmp_path / "index.md").write_text("\n".join("i" * 200 for _ in range(40)))
+    (tmp_path / "propuestas").mkdir()
+    for i in range(20):
+        n = f"prop-{i:02d}-{'z' * 200}.md"
+        (tmp_path / "propuestas" / n).write_text("---\nestado: pendiente\n---\n")
+    d = tmp_path / "productos/p-1-ultimo"
+    d.mkdir(parents=True)
+    (d / "PRODUCTO.md").write_text("---\nestado: TEST\n---\n")
+    (tmp_path / "sesiones").mkdir()
+    (tmp_path / "sesiones/2026-03-03-fin.md").write_text("x")
+    ctx = ctx_de(correr(tmp_path))
+    assert "p-1-ultimo" in ctx and "2026-03-03-fin.md" in ctx and len(ctx) <= 4000
+
+
+def test_timeout_en_hooks_json():
+    reg = json.loads((HOOK.parents[1] / "hooks/hooks.json").read_text())
+    assert reg["hooks"]["SessionStart"][0]["hooks"][0]["timeout"] == 5

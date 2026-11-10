@@ -43,7 +43,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/contexto.py\""
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/contexto.py\"",
+            "timeout": 5
           }
         ]
       }

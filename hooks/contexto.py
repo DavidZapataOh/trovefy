@@ -9,6 +9,7 @@ Formato (docs de Claude Code, SessionStart): se imprime por stdout
 """
 from __future__ import annotations
 
+import itertools
 import json
 import pathlib
 import sys
@@ -19,22 +20,35 @@ LINEAS_INDICE = 40
 MAX_INDICE = 1800
 MAX_TOTAL = 4000
 MAX_ITEMS = 15
+MAX_ITEM_CHARS = 120
+MAX_LINEAS_FM = 200
+MAX_ARCHIVOS = 200
+MAX_BYTES_INDICE = 8192
 ESTADOS_VIVOS = {"TEST", "CANDIDATO", "PRE_ESCALA", "ESCALA"}
 
 
 def _estados(ruta: pathlib.Path) -> list[str]:
-    """Valores de ``estado:`` (de cualquier nivel) entre los dos primeros ``---``."""
-    lineas = ruta.read_text(encoding="utf-8", errors="replace").splitlines()
-    if not lineas or lineas[0].strip() != "---":
-        return []
+    """Valores de ``estado:`` (de cualquier nivel) entre los dos primeros ``---``.
+
+    Lee de forma incremental: se detiene en el ``---`` de cierre o tras
+    ``MAX_LINEAS_FM`` líneas.
+    """
     valores = []
-    for linea in lineas[1:]:
-        if linea.strip() == "---":
-            break
-        clave, sep, valor = linea.strip().partition(":")
-        if sep and clave == "estado":
-            valores.append(valor.strip().strip("\"'"))
+    with ruta.open(encoding="utf-8", errors="replace") as f:
+        primera = f.readline(1024)
+        if primera.strip() != "---":
+            return []
+        for linea in itertools.islice(f, MAX_LINEAS_FM):
+            if linea.strip() == "---":
+                break
+            clave, sep, valor = linea[:1024].strip().partition(":")
+            if sep and clave == "estado":
+                valores.append(valor.strip().strip("\"'"))
     return valores
+
+
+def _archivos(patron_dir: pathlib.Path, patron: str) -> list[pathlib.Path]:
+    return sorted(patron_dir.glob(patron))[:MAX_ARCHIVOS]
 
 
 def _lista(titulo: str, items: list[str]) -> str | None:
@@ -42,7 +56,7 @@ def _lista(titulo: str, items: list[str]) -> str | None:
         return None
     items = sorted(items)
     extra = len(items) - MAX_ITEMS
-    cuerpo = [f"- {i}" for i in items[:MAX_ITEMS]]
+    cuerpo = [f"- {i[:MAX_ITEM_CHARS]}" for i in items[:MAX_ITEMS]]
     if extra > 0:
         cuerpo.append(f"- … y {extra} más")
     return f"## {titulo}\n" + "\n".join(cuerpo)
@@ -56,7 +70,8 @@ def _seguro(f, *args):
 
 
 def _indice(vault: pathlib.Path) -> str | None:
-    texto = (vault / "index.md").read_text(encoding="utf-8", errors="replace")
+    with (vault / "index.md").open(encoding="utf-8", errors="replace") as f:
+        texto = f.read(MAX_BYTES_INDICE)
     cab = "\n".join(texto.splitlines()[:LINEAS_INDICE])
     if len(cab) > MAX_INDICE:
         cab = cab[:MAX_INDICE] + "…"
@@ -72,14 +87,14 @@ def _stop(vault: pathlib.Path) -> str | None:
 
 
 def _propuestas(vault: pathlib.Path) -> str | None:
-    pend = [p.name for p in (vault / "propuestas").glob("*.md") if "pendiente" in _estados(p)]
+    pend = [p.name for p in _archivos(vault / "propuestas", "*.md") if "pendiente" in _estados(p)]
     return _lista("Propuestas pendientes", pend)
 
 
 def _productos(vault: pathlib.Path) -> str | None:
     vivos = [
         p.parent.name
-        for p in (vault / "productos").glob("*/PRODUCTO.md")
+        for p in _archivos(vault / "productos", "*/PRODUCTO.md")
         if ESTADOS_VIVOS & set(_estados(p))
     ]
     return _lista("Productos en marcha", vivos)
