@@ -238,8 +238,8 @@ class ClienteBibliotecaPublica:
     def _interpretar(self, url: str, pais: str, p: PaginaCapturada, max_anuncios: int) -> ResultadoBusqueda:
         ahora = datetime.now(UTC)
 
-        def resultado(estado, total=None, anuncios=(), motivo=None):
-            return ResultadoBusqueda(estado, url, total, list(anuncios), motivo, ahora)
+        def resultado(estado, total=None, anuncios=(), motivo=None, completo=False):
+            return ResultadoBusqueda(estado, url, total, list(anuncios), motivo, ahora, completo)
 
         if p.estado_http in _LIMITADO:
             return resultado("bloqueado", motivo=f"Meta limitó las búsquedas (HTTP {p.estado_http})")
@@ -250,11 +250,11 @@ class ClienteBibliotecaPublica:
             parseo = parsear_detalle(p.cuerpos, pais, p.html)
         except FormatoDesconocido as exc:
             if sin_resultados(p.html):
-                return resultado("vacio", total=0)
+                return resultado("vacio", total=0, completo=True)
             return resultado("error", motivo=f"formato de la Biblioteca no reconocido: {exc}")
         if not parseo.anuncios:
             if sin_resultados(p.html):
-                return resultado("vacio", total=0)
+                return resultado("vacio", total=0, completo=True)
             return resultado("error", motivo="la página no trae anuncios ni aviso de «sin resultados»")
         total, motivo_total = parseo.total_json, None
         if total is not None:
@@ -270,6 +270,14 @@ class ClienteBibliotecaPublica:
         motivos = []
         if motivo_total:
             motivos.append(motivo_total)
+        elif total is None:
+            motivos.append("total no medido: Meta no mostró recuento")
         if parseo.descartados:
             motivos.append(f"{parseo.descartados} anuncios descartados por formato")
-        return resultado("ok", total, parseo.anuncios[:max_anuncios], "; ".join(motivos) or None)
+        leidos = parseo.anuncios
+        anuncios = leidos[:max_anuncios]
+        # Completo solo si Meta dice que no hay más (o su count no pasa de lo leído) y no se recortó
+        # ni se descartó nada: si no, es una muestra y sus cifras son «≥».
+        sin_mas = parseo.hay_mas is False or (parseo.total_json is not None and parseo.total_json <= len(leidos))
+        completo = sin_mas and len(anuncios) == len(leidos) and not parseo.descartados
+        return resultado("ok", total, anuncios, "; ".join(motivos) or None, completo)

@@ -60,16 +60,16 @@ class Cache:
             d = json.loads(self._ruta(url, max_anuncios).read_text(encoding="utf-8"))
             if d["url"] != url or d["estado"] not in _GUARDABLES:
                 return None
-            n, total = len(d["anuncios"]), d["total_aprox"]
-            # Con menos anuncios de los pedidos, solo vale si era exhaustivo (no hay más páginas).
-            if d["estado"] == "ok" and n < max_anuncios and not (total is not None and total <= n):
+            completo = d.get("completo") is True
+            # Con menos anuncios de los pedidos, solo vale si era completo (Meta no tenía más).
+            if d["estado"] == "ok" and len(d["anuncios"]) < max_anuncios and not completo:
                 return None
             capturado = datetime.fromisoformat(d["capturado_en"])
             if self._ahora() - capturado > self.ttl:
                 return None
             return ResultadoBusqueda(
                 d["estado"], d["url"], d["total_aprox"],
-                [_anuncio_de_dict(a) for a in d["anuncios"]], d["motivo"], capturado,
+                [_anuncio_de_dict(a) for a in d["anuncios"]], d["motivo"], capturado, completo,
             )
         except (OSError, ValueError, KeyError, TypeError):
             return None  # ausente o ilegible: es un fallo de caché, no un error
@@ -79,6 +79,6 @@ class Cache:
             return
         d = {
             "url": url, "estado": r.estado, "total_aprox": r.total_aprox, "motivo": r.motivo,
-            "capturado_en": r.capturado_en.isoformat(), "anuncios": [_anuncio_a_dict(a) for a in r.anuncios],
+            "capturado_en": r.capturado_en.isoformat(), "completo": r.completo, "anuncios": [_anuncio_a_dict(a) for a in r.anuncios],
         }
         escribir_atomico(self._ruta(url, max_anuncios), json.dumps(d, ensure_ascii=False, indent=1) + "\n")

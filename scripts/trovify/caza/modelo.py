@@ -43,9 +43,20 @@ class Parseo:
 
 @dataclass
 class ResultadoBusqueda:
+    """Una búsqueda en la Biblioteca.
+
+    ``completo`` es True solo cuando Meta dice que no hay más páginas (``has_next_page`` false) o
+    su ``count`` no supera los anuncios leídos, sin recortar por ``max_anuncios`` ni descartar
+    ninguno; un ``vacio`` es completo; ``bloqueado`` y ``error`` nunca. Un resultado incompleto es
+    una muestra (los primeros por impresiones): sus recuentos son «≥» (cota inferior) y no sirven
+    para calcular anuncios nuevos o parados (``snapshots.registrar_vistos(..., completo=False)``
+    no registra nada).
+    """
+
     estado: Literal["ok", "vacio", "bloqueado", "error"]
     url: str
     total_aprox: int | None
     anuncios: list[AnuncioBiblioteca]
     motivo: str | None
     capturado_en: datetime
+    completo: bool = False

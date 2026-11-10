@@ -225,13 +225,14 @@ def test_cache_distingue_max_anuncios(tmp_path):
 def test_cache_no_sirve_resultado_incompleto(tmp_path):
     url = "https://www.facebook.com/ads/library/?q=x"
     base = cliente([de_fixture("pagina_therapy_toolkit.json")]).buscar("ALL", page_id="102506312071455")
-    parcial = ResultadoBusqueda("ok", url, 500, base.anuncios[:3], None, datetime.now(UTC))
-    exhaustivo = ResultadoBusqueda("ok", url, 3, base.anuncios[:3], None, datetime.now(UTC))
+    parcial = ResultadoBusqueda("ok", url, 3, base.anuncios[:3], None, datetime.now(UTC), completo=False)
+    exhaustivo = ResultadoBusqueda("ok", url, None, base.anuncios[:3], None, datetime.now(UTC), completo=True)
     cache = Cache(tmp_path)
     cache.guardar(url, parcial, 60)
     assert cache.leer(url, 60) is None
     cache.guardar(url, exhaustivo, 60)
-    assert cache.leer(url, 60) is not None
+    leido = cache.leer(url, 60)
+    assert leido is not None and leido.completo is True
 
 
 def test_error_cargado_reinicia_errores_de_red():
@@ -316,3 +317,58 @@ def test_tercer_error_conserva_su_motivo():
         c.buscar("RO", q="c")
     with pytest.raises(ParadaPorErrores, match="última: formato de la Biblioteca no reconocido"):
         c.buscar("RO", q="d")
+
+
+def _pagina(conexion_html, texto=""):
+    html = f'<html><script type="application/json">{json.dumps(conexion_html)}</script></html>'
+    return PaginaCapturada("https://www.facebook.com/ads/library/?q=x", html, texto, [])
+
+
+def _con(ids, hay_mas=None, count=None):
+    nodos = [{"node": {"collated_results": [{
+        "ad_archive_id": i, "page_id": "2", "page_name": "P", "start_date": 1700000000, "end_date": None,
+        "is_active": True, "publisher_platform": ["FACEBOOK"], "snapshot": {"body": {"text": "t"}}}]}} for i in ids]
+    con = {"edges": nodos}
+    if hay_mas is not None:
+        con["page_info"] = {"has_next_page": hay_mas}
+    if count is not None:
+        con["count"] = count
+    return {"x": {"search_results_connection": con}}
+
+
+def test_completo_solo_cuando_meta_dice_que_no_hay_mas():
+    # primera página real: 30 de 234, has_next_page true
+    assert cliente([de_fixture("pagina_therapy_toolkit.json")]).buscar("ALL", page_id="1").completo is False
+    assert cliente([de_fixture("vacio.json")]).buscar("RO", q="zzqxv").completo is True
+    assert cliente([_pagina(_con(["1", "2"], hay_mas=False))]).buscar("RO", q="x").completo is True
+    assert cliente([_pagina(_con(["1", "2"], count=2))]).buscar("RO", q="x").completo is True
+    assert cliente([_pagina(_con(["1", "2"], count=3))]).buscar("RO", q="x").completo is False
+    assert cliente([_pagina(_con(["1", "2"]))]).buscar("RO", q="x").completo is False  # no se sabe
+
+
+def test_recortar_o_descartar_no_es_completo(monkeypatch):
+    r = cliente([_pagina(_con(["1", "2", "3"], hay_mas=False))]).buscar("RO", q="x", max_anuncios=2)
+    assert len(r.anuncios) == 2 and r.completo is False
+    from trovify.caza.modelo import Parseo
+
+    real = m.parsear_detalle
+    monkeypatch.setattr(m, "parsear_detalle", lambda *a, **k: Parseo(real(*a, **k).anuncios, 1, None, False))
+    assert cliente([_pagina(_con(["1"], hay_mas=False))]).buscar("RO", q="x").completo is False
+
+
+def test_bloqueo_y_error_no_son_completos():
+    assert cliente([PaginaCapturada("https://www.facebook.com/login/", "", "", [])]).buscar("RO", q="x").completo is False
+    roto = PaginaCapturada("https://www.facebook.com/ads/library/?q=x", "<html></html>", "", [])
+    assert cliente([roto]).buscar("RO", q="x").completo is False
+
+
+def test_ok_sin_total_lo_dice():
+    r = cliente([_pagina(_con(["1"], hay_mas=False))]).buscar("RO", q="x")
+    assert r.total_aprox is None and "total no medido: Meta no mostró recuento" in r.motivo
+
+
+def test_marcador_sin_resultados_en_js_con_formato_desconocido_es_error():
+    html = ("<html><script>var t = 'No hay ningún anuncio que coincida';</script>"
+            '<script type="application/json">{"data": {"otra_cosa": 1}}</script></html>')
+    p = PaginaCapturada("https://www.facebook.com/ads/library/?q=x", html, "", [])
+    assert cliente([p]).buscar("RO", q="x").estado == "error"

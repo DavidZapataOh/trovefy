@@ -18,6 +18,8 @@ class Snapshot:
     nuevos: int | None
     parados: int | None
     alcance_ue: float | None
+    # El enlace reproducible que dio la cifra: ``ResultadoBusqueda.url``; si la oferta abarca varias
+    # páginas (varias búsquedas), sus URLs unidas con " | ".
     fuente: str
 
 
@@ -75,13 +77,25 @@ def historial(conn: sqlite3.Connection, oferta_id: str, pais: str, desde: date) 
 
 
 def registrar_vistos(
-    conn: sqlite3.Connection, oferta_id: str, pais: str, library_ids: set[str], dia: date
+    conn: sqlite3.Connection,
+    oferta_id: str,
+    pais: str,
+    library_ids: set[str],
+    dia: date,
+    *,
+    completo: bool,
 ) -> tuple[int | None, int | None]:
     """(nuevos, parados) frente a la corrida del día anterior más reciente.
 
     Cada corrida guarda su conjunto completo; repetir el día lo reemplaza.
     Sin corrida previa, (None, None).
+
+    ``completo`` (obligatorio) es ``ResultadoBusqueda.completo``: con False el conjunto es solo una
+    muestra (los primeros por impresiones) y compararlo inventaría arranques y paradas, así que no
+    se registra nada y se devuelve (None, None) («no medido: muestra parcial»).
     """
+    if not completo:
+        return (None, None)
     d = dia.isoformat()
     with conn:
         conn.execute(
