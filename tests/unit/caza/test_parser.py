@@ -1,0 +1,111 @@
+import json
+import pathlib
+from datetime import UTC, date, datetime
+
+import pytest
+from trovify.caza.parser import (
+    FormatoDesconocido,
+    parsear_respuestas,
+    sin_resultados,
+    total_aproximado,
+)
+
+FIX = pathlib.Path(__file__).resolve().parents[2] / "fixtures/biblioteca"
+
+
+def cuerpos(nombre):
+    d = json.loads((FIX / nombre).read_text())
+    return [r["cuerpo"] for r in d["respuestas"]], d["html_final"]
+
+
+def test_pagina_therapy_toolkit():
+    c, html_final = cuerpos("pagina_therapy_toolkit.json")
+    anuncios = parsear_respuestas(c, "ALL", html=html_final)
+    assert len(anuncios) >= 20
+    assert {a.page_id for a in anuncios} == {"102506312071455"}
+    assert all(isinstance(a.inicio, date) and a.inicio <= date(2026, 11, 10) for a in anuncios)
+    assert len({a.library_id for a in anuncios}) == len(anuncios)
+
+
+def test_varias_paginas_en_impultienda():
+    c, _ = cuerpos("palabra_impultienda.json")
+    assert len({a.page_id for a in parsear_respuestas(c, "ALL")}) >= 10
+
+
+def test_vacio_y_totales():
+    _, html = cuerpos("vacio.json")
+    assert sin_resultados(html)
+    assert total_aproximado("~1,700 results") == 1700
+    assert total_aproximado("~1.700 resultados") == 1700
+    assert total_aproximado("1 result") == 1
+    assert total_aproximado("sin cifra") is None
+
+
+def test_formato_desconocido_no_inventa():
+    with pytest.raises(FormatoDesconocido):
+        parsear_respuestas(['{"data": {"otra_cosa": 1}}', "no es json"], "RO")
+
+
+def test_totales_reales_y_variantes():
+    assert total_aproximado("~230 resultados") == 230
+    assert total_aproximado(">50.000 resultados") == 50000
+    assert total_aproximado("&gt;50.000 resultados") == 50000
+    assert total_aproximado("Aproximadamente 450 resultados") == 450
+    assert total_aproximado("About 1,200 results") == 1200
+    assert total_aproximado("1 resultado") == 1
+    assert total_aproximado("~1.5 results") is None
+    assert total_aproximado("") is None
+
+
+def test_sin_resultados_en_ambos_idiomas():
+    assert sin_resultados("No hay ningún anuncio que coincida con los criterios de búsqueda")
+    assert sin_resultados("<div>No ads match your search criteria</div>")
+    assert not sin_resultados("~230 resultados")
+
+
+def test_vacio_con_estructura_conocida_devuelve_lista_vacia():
+    _, html = cuerpos("vacio.json")
+    assert parsear_respuestas([], "RO", html=html) == []
+
+
+def test_campos_y_fechas_utc_y_opcionales():
+    c, html_final = cuerpos("pagina_therapy_toolkit.json")
+    a = parsear_respuestas(c, "ALL", html=html_final)[0]
+    assert a.library_id == "2363595284386790"
+    assert a.pais == "ALL"
+    assert a.inicio == datetime.fromtimestamp(1791270000, UTC).date()
+    assert a.fin == datetime.fromtimestamp(1794297600, UTC).date()
+    assert a.activo is True
+    assert "FACEBOOK" in a.plataformas
+    assert a.collation_id == "1117578817420071"
+    assert a.collation_count == 1
+    assert a.enlace_destino == "https://learning-skills-activity.online/en/"
+    assert a.titulo
+
+
+def _cuerpo(*nodos):
+    edges = [{"node": {"collated_results": [n]}} for n in nodos]
+    return json.dumps({"data": {"ad_library_main": {"search_results_connection": {"edges": edges}}}})
+
+
+def _anuncio(**extra):
+    base = {"ad_archive_id": "1", "page_id": "9", "page_name": "P", "start_date": 1791270000,
+            "is_active": True, "publisher_platform": ["FACEBOOK"], "snapshot": {}}
+    base.update(extra)
+    return base
+
+
+def test_ausentes_son_none_y_duplicados_una_vez():
+    r = parsear_respuestas([_cuerpo(_anuncio(), _anuncio())], "AR")
+    assert len(r) == 1
+    a = r[0]
+    assert a.fin is None and a.titulo is None and a.enlace_destino is None
+    assert a.collation_id is None and a.collation_count is None
+    assert a.texto == ""
+
+
+def test_anuncio_sin_campo_obligatorio_es_formato_desconocido():
+    malo = _anuncio()
+    del malo["start_date"]
+    with pytest.raises(FormatoDesconocido):
+        parsear_respuestas([_cuerpo(malo)], "AR")
