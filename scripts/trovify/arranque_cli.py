@@ -19,9 +19,9 @@ from trovify.arranque.estado import (
 )
 from trovify.arranque.verificadores import REGISTRO
 from trovify.arranque.verificadores.checklist import CHECKLISTS, verificar_checklist
-from trovify.cerebro.ingesta import _buscar_secreto
 from trovify.cli import registrar
 from trovify.dns import normalizar as normalizar_dominio
+from trovify.secretos import RevisionSecretosNoDisponible, buscar_secreto
 from trovify.vault.escritura import anadir_log
 from trovify.vault.rutas import vault_root
 
@@ -87,7 +87,7 @@ def _parsear_datos(items: list[str]) -> dict[str, str]:
             raise ValueError(f"--dato «{clave}» debe ser CLAVE=VALOR con la clave en minúsculas y _")
         if not valor.strip() or "\n" in valor or "\r" in valor:
             raise ValueError(f"--dato {clave}: el valor no puede estar vacío ni tener saltos de línea")
-        if _buscar_secreto(valor):
+        if buscar_secreto(valor):
             raise ValueError(f"--dato {clave}: el valor parece un secreto; los secretos no se guardan en el vault")
         if clave == "url":
             datos[clave] = _url_limpia(valor)
@@ -178,7 +178,7 @@ def _ejecutar(args: argparse.Namespace) -> int:
         pasos = cargar(destino)
     except (PasoDesconocido, ValueError) as exc:
         return _error(str(exc))
-    except ArranqueCorrupto as exc:
+    except (ArranqueCorrupto, RevisionSecretosNoDisponible) as exc:
         return _error(str(exc))
     except OSError as exc:
         return _error(f"no se pudo escribir en el vault: {exc.strerror or exc}")

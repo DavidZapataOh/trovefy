@@ -1,8 +1,13 @@
-"""Lectura de secretos desde ~/.config/trovify/*.env (modo 0600). Nunca registra valores."""
+"""Lectura de secretos desde ~/.config/trovify/*.env (modo 0600) y detección de secretos en texto.
+
+Nunca registra valores.
+"""
 
 import errno
+import importlib.util
 import os
 import stat
+import sys
 from pathlib import Path
 
 RUTA_CLAUDE_ENV = Path.home() / ".config/trovify/claude.env"
@@ -58,3 +63,36 @@ def leer_env(ruta: Path) -> dict[str, str]:
             valor = valor[1:-1]
         valores[clave.strip().removeprefix("export ").strip()] = valor
     return valores
+
+
+class RevisionSecretosNoDisponible(FileNotFoundError):
+    """No se encuentra hooks/secretos.py: no se puede revisar si un texto lleva secretos."""
+
+    def __str__(self) -> str:
+        return (
+            "no encuentro hooks/secretos.py (la instalación de Trovify está incompleta); "
+            "no se puede revisar si hay secretos, así que no se guarda nada"
+        )
+
+
+def _candidatos_hooks() -> list[Path]:
+    return [padre / "hooks" for padre in Path(__file__).resolve().parents]
+
+
+def buscar_secreto(texto: str) -> str | None:
+    """Nombre del patrón de secreto que aparece en `texto` (o None).
+
+    Usa los patrones de hooks/secretos.py (una sola fuente), sin la mención `access_token=`.
+    Lanza `RevisionSecretosNoDisponible` si no encuentra los hooks.
+    """
+    hooks = next((h for h in _candidatos_hooks() if (h / "secretos.py").is_file() and (h / "_comun.py").is_file()), None)
+    if hooks is None:
+        raise RevisionSecretosNoDisponible()
+    sys.path.insert(0, str(hooks))
+    try:
+        spec = importlib.util.spec_from_file_location("_trovify_hook_secretos", hooks / "secretos.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.remove(str(hooks))
+    return mod.buscar_secreto(texto, mod.PATRONES_TOKEN)
