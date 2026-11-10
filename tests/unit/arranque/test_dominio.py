@@ -159,3 +159,20 @@ def test_07_fallo_guarda_la_medida_como_provisional(tmp_path):
     assert r.ok is False and not r.evidencia
     assert not list((tmp_path / "config/evidencia").glob("07-ns-*.json"))
     assert list((tmp_path / "config/evidencia/provisional").glob("07-ns-*.json"))
+
+
+def test_confirmar_08_solo_con_dominio_verificado(tmp_path, capsys):
+    import yaml
+    from trovify.arranque.verificadores.dominio import verificar_verificacion_meta
+
+    paso(tmp_path)
+    dns = dns_falso({"TXT": TXT_OK})
+    verificar_verificacion_meta(tmp_path, capturar=falso("kits-docentes.com No verificado"), consultar=dns)
+    assert main(["arranque", "confirmar", "08", "--respuesta", "si", "--vault", str(tmp_path)]) == 2
+    assert "confirma cuando Meta muestre el dominio verificado" in capsys.readouterr().err
+    assert not (tmp_path / "config/confirmaciones.yaml").exists()
+    verificar_verificacion_meta(tmp_path, capturar=falso("kits-docentes.com Verificado"), consultar=dns)
+    assert main(["arranque", "confirmar", "08", "--respuesta", "si", "--vault", str(tmp_path)]) == 0
+    assert "08" in yaml.safe_load((tmp_path / "config/confirmaciones.yaml").read_text())
+    r = verificar_verificacion_meta(tmp_path, capturar=falso("kits-docentes.com Verificado"), consultar=dns)
+    assert r.ok is True

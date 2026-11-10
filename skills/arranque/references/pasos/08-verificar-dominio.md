@@ -20,6 +20,7 @@ Que Meta confirme que el dominio es tuyo, requisito para usarlo en anuncios y ev
 **Errores típicos**
 - Síntoma: «no hay un TXT de Meta en el dominio». Arreglo: revisa que el registro sea TXT, con nombre `@` y el contenido completo; si lo acabas de crear, espera y repite.
 - Síntoma: «TXT de Meta encontrado; falta confirmar el estado en Business Settings». Arreglo: el TXT está, pero falta pulsar «Verificar» en Meta o confirmar con tu pantalla real; el paso aún no se da por verificado.
+- Síntoma: «confirma cuando Meta muestre el dominio verificado» al confirmar. Arreglo: el patrón del 08 solo se confirma con tu dominio ya verificado en Meta; termina los pasos 5 y 6, vuelve a verificar y confirma entonces.
 - Síntoma: «Meta no muestra el dominio como verificado». Arreglo: pulsa «Verificar» en Business Settings → Dominios y repite más tarde.
 - Síntoma: «no medido: inicia sesión en el navegador de Trovify». Arreglo: repite el paso 1 y entra con tu perfil.
 - Síntoma: «no medido: falta el dominio». Arreglo: guarda el dominio con `trovify arranque hecho 07 --dato dominio=<tu-dominio>`.

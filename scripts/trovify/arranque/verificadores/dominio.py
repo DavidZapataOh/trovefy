@@ -140,7 +140,12 @@ def _leer_08(textos: dict[str, str], vault: Path) -> dict[str, str | None]:
     return {"dominio": dominio, "estado": estado_del_dominio(texto, dominio)}
 
 
-registrar_lector("08", _leer_08, ("dominio", "estado"))
+def _aceptar_08(valores: dict[str, str | None]) -> str | None:
+    # sin haber visto nunca «verificado», la rama positiva del patrón no está confirmada
+    return None if valores.get("estado") == "verificado" else "confirma cuando Meta muestre el dominio verificado"
+
+
+registrar_lector("08", _leer_08, ("dominio", "estado"), _aceptar_08)
 
 
 def verificar_verificacion_meta(
