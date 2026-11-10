@@ -109,3 +109,26 @@ def test_bash_solo_meta_y_telegram_en_cualquier_cwd(correr_hook, vault_tmp):
     assert correr_hook("secretos", _b(f"echo bot{TOKEN_BOT}", cwd=str(vault_tmp)), vault_tmp)[0] == "deny"
     assert correr_hook("secretos", _b("export K=sk-" + "a" * 30), vault_tmp)[0] == "allow"
     assert correr_hook("secretos", _b("curl 'https://x.test/?access_token=abc'"), vault_tmp)[0] == "allow"
+
+
+def _cargar_secretos():
+    import importlib.util
+    import pathlib
+    import sys
+
+    hooks = pathlib.Path(__file__).resolve().parents[2] / "hooks"
+    sys.path.insert(0, str(hooks))
+    try:
+        spec = importlib.util.spec_from_file_location("_test_secretos", hooks / "secretos.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.remove(str(hooks))
+    return mod
+
+
+def test_patrones_token_se_eligen_por_nombre():
+    mod = _cargar_secretos()
+    nombres = {nombre for nombre, _ in mod.PATRONES_TOKEN}
+    assert nombres == {"token de Meta", "token de bot de Telegram", "clave sk-"}
+    assert "access_token=" not in nombres

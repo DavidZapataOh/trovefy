@@ -215,7 +215,7 @@ def _buscar_secreto(texto: str) -> str | None:
         spec.loader.exec_module(mod)
     finally:
         sys.path.remove(str(hooks))
-    return mod.buscar_secreto(texto, mod.PATRONES[:3])
+    return mod.buscar_secreto(texto, mod.PATRONES_TOKEN)
 
 
 def ingerir(vault: Path, origen: Path, fecha: date | None = None) -> tuple[Path, bool]:

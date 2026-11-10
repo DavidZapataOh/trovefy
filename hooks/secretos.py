@@ -25,7 +25,12 @@ PATRONES: tuple[tuple[str, re.Pattern[str]], ...] = (
 )
 
 
-PATRONES_BASH = PATRONES[:2]
+_NOMBRES_BASH = ("token de Meta", "token de bot de Telegram")
+_NOMBRE_MENCION = "access_token="
+
+# Por nombre, no por posición: reordenar PATRONES no cambia qué escanea cada consumidor.
+PATRONES_BASH = tuple(p for p in PATRONES if p[0] in _NOMBRES_BASH)
+PATRONES_TOKEN = tuple(p for p in PATRONES if p[0] != _NOMBRE_MENCION)
 
 
 def buscar_secreto(texto: str, patrones=PATRONES) -> str | None:
