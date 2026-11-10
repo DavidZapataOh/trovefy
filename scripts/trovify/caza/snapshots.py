@@ -87,6 +87,9 @@ def registrar_vistos(
 ) -> tuple[int | None, int | None]:
     """(nuevos, parados) frente a la corrida del día anterior más reciente.
 
+    Idea de ``diff_advertiser`` de un repo de referencia (MIT), reescrita sin
+    copiar código; ver avisos privados.
+
     Cada corrida guarda su conjunto completo; repetir el día lo reemplaza.
     Sin corrida previa, (None, None).
 
