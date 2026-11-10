@@ -1,6 +1,7 @@
 """Subcomando `trovify arranque`."""
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -16,6 +17,8 @@ from trovify.arranque.estado import (
     siguiente,
 )
 from trovify.arranque.verificadores import REGISTRO
+from trovify.arranque.verificadores.checklist import CHECKLISTS, verificar_checklist
+from trovify.cerebro.ingesta import _buscar_secreto
 from trovify.cli import registrar
 from trovify.vault.escritura import anadir_log
 from trovify.vault.rutas import vault_root
@@ -30,10 +33,16 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     h = sub.add_parser("hecho", help="marca un paso como hecho (no verificado)")
     h.add_argument("id", metavar="ID")
     h.add_argument("--nota", help="nota breve")
+    h.add_argument("--dato", action="append", default=[], metavar="CLAVE=VALOR",
+                   help="dato del paso (repetible), p. ej. url=https://www.facebook.com/tu-pagina; nunca un secreto")
     h.add_argument("--vault", help=_VAULT_AYUDA)
     v = sub.add_parser("verificar", help="ejecuta el verificador de un paso")
     v.add_argument("id", metavar="ID")
     v.add_argument("--vault", help=_VAULT_AYUDA)
+    c = sub.add_parser("checklist", help="verifica un paso con una lista de comprobaciones (paso 03)")
+    c.add_argument("id", metavar="ID")
+    c.add_argument("--respuesta", action="append", default=[], metavar="CLAVE=si|no", help="respuesta a una comprobación (repetible)")
+    c.add_argument("--vault", help=_VAULT_AYUDA)
     b = sub.add_parser("bloqueado", help="marca un paso como bloqueado")
     b.add_argument("id", metavar="ID")
     b.add_argument("--motivo", required=True, help="por qué está bloqueado")
@@ -43,6 +52,50 @@ def _configurar(p: argparse.ArgumentParser) -> None:
 def _error(msg: str) -> int:
     print(f"Error: {msg}", file=sys.stderr)
     return 2
+
+
+_CLAVE_DATO = re.compile(r"[a-z_]+")
+
+
+def _parsear_datos(items: list[str]) -> dict[str, str]:
+    datos: dict[str, str] = {}
+    for item in items:
+        clave, sep, valor = item.partition("=")
+        if not sep or not _CLAVE_DATO.fullmatch(clave):
+            raise ValueError(f"--dato «{clave}» debe ser CLAVE=VALOR con la clave en minúsculas y _")
+        if not valor.strip() or "\n" in valor or "\r" in valor:
+            raise ValueError(f"--dato {clave}: el valor no puede estar vacío ni tener saltos de línea")
+        if _buscar_secreto(valor):
+            raise ValueError(f"--dato {clave}: el valor parece un secreto; los secretos no se guardan en el vault")
+        datos[clave] = valor
+    return datos
+
+
+def _parsear_respuestas(items: list[str]) -> dict[str, bool]:
+    respuestas: dict[str, bool] = {}
+    for item in items:
+        clave, _, valor = item.partition("=")
+        if valor not in ("si", "no"):
+            raise ValueError(f"--respuesta {clave or item}: responde `si` o `no`")
+        respuestas[clave] = valor == "si"
+    return respuestas
+
+
+def _checklist(vault: Path, id_: str, items: list[str]) -> int:
+    if id_ not in CHECKLISTS:
+        raise ValueError(f"el paso {id_} no tiene lista de comprobaciones")
+    cargado = next((p for p in cargar(vault) if p.id == id_), None)
+    if cargado is None:
+        raise PasoDesconocido(id_)
+    r = verificar_checklist(vault, id_, _parsear_respuestas(items))
+    p = aplicar_verificacion(vault, id_, r)
+    for linea in r.lineas:
+        print(linea)
+    texto, codigo = _RESULTADO[r.ok]
+    print(f"\nPaso {p.id} ({p.nombre}): {texto} — {r.motivo}. Estado: {p.estado}.")
+    for a in r.arreglos:
+        print(f"  - {a}")
+    return codigo
 
 
 _RESULTADO = {True: ("ok", 0), False: ("falló", 1), None: ("no medido", 3)}
@@ -79,11 +132,13 @@ def _ejecutar(args: argparse.Namespace) -> int:
     destino = Path(args.vault).expanduser() if args.vault else vault_root()
     try:
         if args.accion == "hecho":
-            p = marcar_hecho(destino, args.id, args.nota)
+            p = marcar_hecho(destino, args.id, args.nota, _parsear_datos(args.dato))
             print(f"Paso {p.id} ({p.nombre}): {p.estado}.")
             return 0
         if args.accion == "verificar":
             return _verificar(destino, args.id)
+        if args.accion == "checklist":
+            return _checklist(destino, args.id, args.respuesta)
         if args.accion == "bloqueado":
             if not args.motivo.strip():
                 return _error("--motivo no puede estar vacío")
@@ -91,7 +146,7 @@ def _ejecutar(args: argparse.Namespace) -> int:
             print(f"Paso {p.id} ({p.nombre}): {p.estado}.")
             return 0
         pasos = cargar(destino)
-    except PasoDesconocido as exc:
+    except (PasoDesconocido, ValueError) as exc:
         return _error(str(exc))
     except ArranqueCorrupto as exc:
         return _error(str(exc))

@@ -136,7 +136,7 @@ def _cambiar(vault: Path, pasos: list[Paso], p: Paso, antes: Estado, que: str) -
     return p
 
 
-def marcar_hecho(vault: Path, id_: str, nota: str | None = None) -> Paso:
+def marcar_hecho(vault: Path, id_: str, nota: str | None = None, datos: dict[str, str] | None = None) -> Paso:
     pasos = cargar(vault)
     p = _buscar(pasos, id_)
     antes = p.estado
@@ -145,6 +145,8 @@ def marcar_hecho(vault: Path, id_: str, nota: str | None = None) -> Paso:
         p.fecha = _hoy()
     if nota is not None:
         p.nota = nota
+    if datos:
+        p.datos.update(datos)
     return _cambiar(vault, pasos, p, antes, nota or p.nombre)
 
 

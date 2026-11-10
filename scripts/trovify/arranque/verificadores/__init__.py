@@ -18,9 +18,10 @@ def verificador(id_: str) -> Callable[[Callable[[Path], ResultadoVerificacion]],
     return registrar
 
 
-from trovify.arranque.verificadores import (  # noqa: F401  (registran los pasos 01 y 02)
+from trovify.arranque.verificadores import (  # noqa: F401  (registran los verificadores)
     apimart,
     caza,
     cerebro,
+    checklist,
     entorno,
 )
