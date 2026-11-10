@@ -37,11 +37,20 @@ _LIMITADO = (403, 429)
 _MAX_DESPLAZAMIENTOS = 15
 # Tope de respuestas de /api/graphql que se guardan (cuenta todas, no solo las de la búsqueda).
 _MAX_RESPUESTAS = 80
-# Errores de GraphQL que indican que Meta limita las peticiones (códigos de la Graph API y textos).
+# Errores de GraphQL que indican que Meta limita las peticiones: códigos conocidos de la Graph API
+# y frases concretas (nunca raíces sueltas como «limitad»: otras consultas de la página las usan).
 _CODIGOS_LIMITE = frozenset({4, 17, 32, 368, 613, 1675004})
-_TEXTO_LIMITE = re.compile(
-    r"rate.?limit|too many|limit reached|temporarily blocked|demasiad|bloquead|limitad", re.IGNORECASE
+_FRASES_LIMITE = (
+    "has usado esta función demasiado rápido",
+    "you're temporarily blocked",
+    "temporarily blocked",
+    "bloqueado temporalmente",
+    "rate limit",
+    "too many requests",
 )
+# Consultas de la búsqueda (primera carga y paginación); el resto de /api/graphql es ajeno.
+_CONSULTA_BUSQUEDA = re.compile(r"^AdLibrary\w*(?:Search|Pagination)\w*Query$")
+_MARCAS_BUSQUEDA = ("ad_library_main", "search_results_connection")
 _MOTIVO_TOPE = "más de 50.000 (tope de Meta)"
 _MOTIVO_ERRORES = "3 búsquedas seguidas con error; se para para no forzar a Meta"
 _MAYOR_QUE = re.compile(r">\s*\d[\d.,]*\s*(?:results?|resultados?)", re.IGNORECASE)
@@ -66,6 +75,8 @@ class PaginaCapturada:
     estado_http: int | None = None  # estado HTTP del documento principal; None si no se conoce
     # estado HTTP de cada respuesta de datos, en el orden de ``cuerpos``; vacío si no se conoce
     estados_datos: list[int] = field(default_factory=list)
+    # nombre de la consulta GraphQL de cada respuesta (fb_api_req_friendly_name); None si no se sabe
+    consultas: list[str | None] = field(default_factory=list)
 
 
 class Navegador(Protocol):
@@ -86,32 +97,57 @@ def _json_de(cuerpo: str):
     return None
 
 
-def fallo_de_datos(estado: int | None, cuerpo: str) -> tuple[Literal["limitado", "error"], str] | None:
-    """¿Falló una respuesta de datos? ``("limitado", "HTTP N")`` si Meta limita (403/429 o un error
-    de GraphQL de límite); ``("error", "HTTP N")`` si falló de otro modo (estado no 2xx, o errores
-    de GraphQL sin datos); ``None`` si está bien."""
+def es_de_busqueda(cuerpo: str, consulta: str | None) -> bool:
+    """¿Es una respuesta de la búsqueda (no otra consulta de la página)? Por el nombre de la
+    consulta o porque el cuerpo trae ``ad_library_main``/``search_results_connection``."""
+    if consulta and _CONSULTA_BUSQUEDA.match(consulta):
+        return True
+    return any(marca in (cuerpo or "") for marca in _MARCAS_BUSQUEDA)
+
+
+def _error_de_limite(e) -> bool:
+    if not isinstance(e, dict):
+        return False
+    texto = " ".join(str(e.get(k, "")) for k in ("message", "summary", "description"))
+    texto = texto.replace("\u2019", "'").casefold()
+    return e.get("code") in _CODIGOS_LIMITE or any(f in texto for f in _FRASES_LIMITE)
+
+
+def fallo_de_datos(
+    estado: int | None, cuerpo: str, consulta: str | None = None
+) -> tuple[Literal["limitado", "error"], str] | None:
+    """¿Falló una respuesta de datos?
+
+    - HTTP 403/429 en cualquier ``/api/graphql/``: ``("limitado", "HTTP N")``.
+    - Solo en respuestas de la búsqueda (:func:`es_de_busqueda`): un error de GraphQL de límite
+      (código o frase conocida) es ``("limitado", …)``; otro estado no 2xx es ``("error", …)``.
+    - Las demás consultas de la página se ignoran: sus errores no dicen nada de la búsqueda.
+    Una página de resultados fallida sin estos signos ya deja ``has_next_page`` en true, así que
+    el resultado no sale ``completo``.
+    """
     if estado in _LIMITADO:
         return "limitado", f"HTTP {estado}"
+    if not es_de_busqueda(cuerpo, consulta):
+        return None
     if estado is not None and not 200 <= estado < 300:
         return "error", f"HTTP {estado}"
     doc = _json_de(cuerpo)
     errores = doc.get("errors") if isinstance(doc, dict) else None
-    if not isinstance(errores, list) or not errores:
-        return None
-    for e in errores:
-        if not isinstance(e, dict):
-            continue
-        texto = " ".join(str(e.get(k, "")) for k in ("message", "summary", "description"))
-        if e.get("code") in _CODIGOS_LIMITE or _TEXTO_LIMITE.search(texto):
-            return "limitado", f"HTTP {estado or 200}"
-    if not doc.get("data"):
-        return "error", f"HTTP {estado or 200}"
-    return None  # errores parciales con datos: no impiden leer
+    if isinstance(errores, list) and any(_error_de_limite(e) for e in errores):
+        return "limitado", f"HTTP {estado or 200}"
+    return None
 
 
-def _fallos(estados: list[int | None], cuerpos: list[str]):
-    estados = list(estados) + [None] * (len(cuerpos) - len(estados))
-    return [f for f in (fallo_de_datos(e, c) for e, c in zip(estados, cuerpos, strict=False)) if f]
+def _fallos(respuestas: list[dict]):
+    return [f for f in (fallo_de_datos(r.get("estado"), r.get("cuerpo", ""), r.get("consulta"))
+                        for r in respuestas) if f]
+
+
+def _como_respuestas(p: PaginaCapturada) -> list[dict]:
+    n = len(p.cuerpos)
+    estados = list(p.estados_datos) + [None] * (n - len(p.estados_datos))
+    consultas = list(p.consultas) + [None] * (n - len(p.consultas))
+    return [{"estado": e, "cuerpo": c, "consulta": q} for e, c, q in zip(estados, p.cuerpos, consultas, strict=False)]
 
 
 def _progreso(respuestas: list[dict], html: str) -> tuple[int, bool | None]:
@@ -124,8 +160,7 @@ def _progreso(respuestas: list[dict], html: str) -> tuple[int, bool | None]:
 
 
 def _fallo_desde(respuestas: list[dict], antes: int) -> bool:
-    nuevas = respuestas[antes:]
-    return bool(_fallos([r["estado"] for r in nuevas], [r["cuerpo"] for r in nuevas]))
+    return bool(_fallos(respuestas[antes:]))
 
 
 def _desplazar(pagina, respuestas: list[dict], html: str, max_anuncios: int) -> None:
@@ -234,7 +269,7 @@ def _se_puede_desplazar(estado_http: int | None, url_final: str, html: str, text
         return False
     if detectar_bloqueo(url_final, html) or aviso_de_bloqueo(texto):
         return False
-    fallos = _fallos([r["estado"] for r in respuestas], [r["cuerpo"] for r in respuestas])
+    fallos = _fallos(respuestas)
     return not any(tipo == "limitado" for tipo, _ in fallos)
 
 
@@ -264,7 +299,7 @@ class NavegadorEfimero:
                     raise ErrorDeRed(f"no se pudo cargar la Biblioteca ({type(exc).__name__})") from exc
                 return PaginaCapturada(
                     url_final, html, texto, [r["cuerpo"] for r in respuestas], estado_http,
-                    [r["estado"] for r in respuestas],
+                    [r["estado"] for r in respuestas], [r.get("consulta") for r in respuestas],
                 )
             finally:
                 ctx.close()
@@ -358,7 +393,7 @@ class ClienteBibliotecaPublica:
             return resultado("bloqueado", motivo=f"Meta mostró {bloqueo}; se detiene la sesión")
         if aviso_de_bloqueo(p.texto):
             return resultado("bloqueado", motivo="Meta mostró un aviso de bloqueo temporal; se detiene la sesión")
-        fallos = _fallos(p.estados_datos, p.cuerpos)
+        fallos = _fallos(_como_respuestas(p))
         limite = next((d for tipo, d in fallos if tipo == "limitado"), None)
         if limite:
             return resultado("bloqueado", motivo=f"Meta limitó las búsquedas durante el desplazamiento ({limite})")

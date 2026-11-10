@@ -391,8 +391,11 @@ def test_aviso_de_bloqueo_con_http_200_detiene_la_sesion():
 _GRAPHQL = "https://www.facebook.com/api/graphql/"
 
 
-def _resp(estado, cuerpo):
-    return {"url": _GRAPHQL, "estado": estado, "cuerpo": cuerpo}
+_PAGINACION = "AdLibrarySearchPaginationQuery"
+
+
+def _resp(estado, cuerpo, consulta=None):
+    return {"url": _GRAPHQL, "estado": estado, "cuerpo": cuerpo, "consulta": consulta}
 
 
 def _tramo(desde, n=10, hay_mas=True):
@@ -414,7 +417,8 @@ class PaginaQueSeDesplaza:
     def wheel(self, *_a):
         self.ruedas += 1
         if self.tramos:
-            self.respuestas.append(self.tramos.pop(0))
+            t = self.tramos.pop(0)
+            self.respuestas.extend(t if isinstance(t, list) else [t])
 
     def evaluate(self, *_a):
         return None
@@ -462,7 +466,7 @@ def test_sin_anuncios_no_desplaza():
 
 @pytest.mark.parametrize("estado", [429, 403, 500])
 def test_para_de_desplazar_ante_un_fallo_de_datos(estado):
-    p = PaginaQueSeDesplaza([_resp(200, _tramo(30)), _resp(estado, "")] + _infinitos(40))
+    p = PaginaQueSeDesplaza([_resp(200, _tramo(30)), _resp(estado, "", _PAGINACION)] + _infinitos(40))
     m._desplazar(p, p.respuestas, _html_primera(), max_anuncios=500)
     assert p.ruedas == 2
 
@@ -554,17 +558,57 @@ def test_limite_al_desplazar_es_bloqueo_y_para_la_sesion(estado):
     assert len(c.navegador.llamadas) == 1
 
 
-def test_error_graphql_de_limite_es_bloqueo():
-    cuerpo = json.dumps({"errors": [{"message": "Rate limit exceeded", "code": 1675004}]})
-    r = cliente([_con_datos([(200, _tramo(30)), (200, cuerpo)])]).buscar("RO", q="x")
+@pytest.mark.parametrize("cuerpo,consulta", [
+    # respuesta de búsqueda reconocida por el cuerpo
+    (json.dumps({"errors": [{"message": "Rate limit exceeded"}], "data": {"ad_library_main": None}}), None),
+    # reconocida por el nombre de la consulta (fb_api_req_friendly_name)
+    (json.dumps({"errors": [{"message": "Has usado esta función demasiado rápido"}]}),
+     "AdLibrarySearchPaginationQuery"),
+    (json.dumps({"errors": [{"message": "x", "code": 1675004}]}), "AdLibrarySearchPaginationQuery"),
+])
+def test_error_de_limite_en_una_respuesta_de_busqueda_es_bloqueo(cuerpo, consulta):
+    p = _con_datos([(200, _tramo(30)), (200, cuerpo)])
+    p.consultas = [None, consulta]
+    r = cliente([p]).buscar("RO", q="x")
     assert r.estado == "bloqueado" and "HTTP 200" in r.motivo
+
+
+_AJENAS = [
+    (200, json.dumps({"errors": [{"message": "Función limitada para usuarios no conectados"}]})),
+    (200, json.dumps({"errors": [{"message": "Please log in to continue.", "code": 1357001}]})),
+    (200, json.dumps({"errors": [{"message": "Something went wrong"}], "data": {"viewer": None}})),
+    (400, ""),
+    (304, ""),
+]
+
+
+def test_respuestas_ajenas_que_fallan_no_afectan_a_la_busqueda():
+    base = cliente([_con_datos([(200, _tramo(30, hay_mas=False))])]).buscar("RO", q="x")
+    p = _con_datos([(200, _tramo(30, hay_mas=False))] + _AJENAS)
+    p.consultas = [None] + ["CometNotificationsQuery"] * len(_AJENAS)
+    r = cliente([p]).buscar("RO", q="x")
+    assert r.estado == "ok" and r.completo is base.completo is True
+    assert r.motivo == base.motivo and len(r.anuncios) == len(base.anuncios)
+
+
+def test_respuestas_ajenas_no_paran_el_desplazamiento():
+    # cada rueda trae su tramo de búsqueda junto a respuestas ajenas que fallan
+    ajenas = [_resp(e, c, "CometNotificationsQuery") for e, c in _AJENAS]
+    p = PaginaQueSeDesplaza([[_resp(200, _tramo(30 + 10 * k))] + ajenas for k in range(10)])
+    m._desplazar(p, p.respuestas, _html_primera(), max_anuncios=60)
+    assert p.ruedas == 3
+
+
+def test_403_en_respuesta_ajena_es_bloqueo():
+    p = _con_datos([(200, _tramo(30)), (403, "")])
+    p.consultas = [None, "CometNotificationsQuery"]
+    assert cliente([p]).buscar("RO", q="x").estado == "bloqueado"
 
 
 def test_otro_fallo_al_desplazar_es_lectura_parcial():
     html = _html_primera(count=40)
-    r = cliente([_con_datos([(200, _tramo(30, hay_mas=False)), (500, "")], html)]).buscar("RO", q="x")
+    p = _con_datos([(200, _tramo(30, hay_mas=False)), (500, "")], html)
+    p.consultas = [None, "AdLibrarySearchPaginationQuery"]
+    r = cliente([p]).buscar("RO", q="x")
     assert r.estado == "ok" and len(r.anuncios) == 40
     assert r.completo is False and "lectura parcial: Meta respondió HTTP 500 al desplazar" in r.motivo
-    sin_datos = json.dumps({"errors": [{"message": "Something went wrong"}], "data": None})
-    r = cliente([_con_datos([(200, _tramo(30)), (200, sin_datos)])]).buscar("RO", q="x")
-    assert r.estado == "ok" and r.completo is False and "lectura parcial" in r.motivo
