@@ -155,25 +155,31 @@ def marcar_bloqueado(vault: Path, id_: str, motivo: str) -> Paso:
     return _cambiar(vault, pasos, p, antes, motivo)
 
 
+def _anotar(p: Paso, texto: str) -> None:
+    """Un paso verificado conserva la nota de su verificación: se añade, no se pisa."""
+    p.nota = f"{p.nota} · {texto}" if p.estado == "verificado" and p.nota else texto
+
+
 def aplicar_verificacion(vault: Path, id_: str, r: ResultadoVerificacion) -> Paso:
     pasos = cargar(vault)
     p = _buscar(pasos, id_)
     antes = p.estado
     if r.ok is True and r.evidencia:
         p.estado = "verificado"
-        p.evidencia = list(dict.fromkeys(p.evidencia + list(r.evidencia)))
+        p.evidencia = list(dict.fromkeys(r.evidencia))
         p.datos.update({str(k): str(v) for k, v in r.datos.items()})
         p.fecha = _hoy()
         p.nota = r.motivo
     elif r.ok is True:
-        p.nota = f"sin evidencia: {r.motivo}".strip(": ")
+        _anotar(p, f"sin evidencia: {r.motivo}".strip(": "))
     elif r.ok is False:
         if p.estado == "verificado":
             p.estado = "hecho"
+            p.evidencia = []  # la evidencia anterior ya no vale
         p.fecha = _hoy()
         p.nota = r.motivo
     else:
-        p.nota = r.motivo
+        _anotar(p, r.motivo)
     return _cambiar(vault, pasos, p, antes, r.motivo)
 
 

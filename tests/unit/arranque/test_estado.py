@@ -107,3 +107,33 @@ def test_cli(tmp_path, capsys):
     assert "Siguiente: 00" in capsys.readouterr().out
     assert main(["arranque", "hecho", "99", "--vault", v]) == 2
     assert "99" in capsys.readouterr().err
+
+
+def test_evidencia_vieja_no_revive_un_paso(tmp_path):
+    aplicar_verificacion(tmp_path, "04", _ok())
+    p = aplicar_verificacion(tmp_path, "04", ResultadoVerificacion(False, [], "cambió", []))
+    assert p.estado == "hecho" and p.evidencia == []
+    p = aplicar_verificacion(tmp_path, "04", ResultadoVerificacion(True, [], "ok", []))
+    assert p.estado == "hecho" and p.evidencia == []
+
+
+def test_reverificacion_reemplaza_evidencia_y_conserva_nota(tmp_path):
+    aplicar_verificacion(tmp_path, "04", ResultadoVerificacion(True, ["vieja"], "ID 1", [], {"a": "1"}))
+    p = aplicar_verificacion(tmp_path, "04", ResultadoVerificacion(True, ["nueva"], "ID 2", [], {"b": "2"}))
+    assert p.evidencia == ["nueva"] and p.datos == {"a": "1", "b": "2"}
+    p = aplicar_verificacion(tmp_path, "04", ResultadoVerificacion(True, [], "x", []))
+    assert p.estado == "verificado" and p.nota.startswith("ID 2") and "sin evidencia" in p.nota
+    p = aplicar_verificacion(tmp_path, "04", ResultadoVerificacion(None, [], "no medido: red", []))
+    assert p.nota.startswith("ID 2") and "no medido: red" in p.nota
+
+
+def test_siguiente_con_bloqueados_no_dice_completa(tmp_path, capsys):
+    v = str(tmp_path)
+    for i in [f"{n:02d}" for n in range(10)] + ["16"]:
+        aplicar_verificacion(tmp_path, i, _ok())
+    marcar_bloqueado(tmp_path, "10", "sin pago a CO")
+    marcar_bloqueado(tmp_path, "10b", "sin KYC")
+    capsys.readouterr()
+    assert main(["arranque", "siguiente", "--vault", v]) == 0
+    out = capsys.readouterr().out
+    assert "completa" not in out and "sin pago a CO" in out and "sin KYC" in out

@@ -60,7 +60,16 @@ def _ejecutar(args: argparse.Namespace) -> int:
         return _error(f"no se pudo escribir en el vault: {exc.strerror or exc}")
     if args.accion == "siguiente":
         s = siguiente(pasos)
-        print("Fase 0 completa: todos los pasos están verificados." if s is None else f"Siguiente: {s.id} · {s.nombre} ({s.estado})")
+        if s is not None:
+            print(f"Siguiente: {s.id} · {s.nombre} ({s.estado})")
+            return 0
+        bloqueados = [p for p in pasos if p.fase == 0 and p.estado == "bloqueado"]
+        if not bloqueados:
+            print("Fase 0 completa: todos los pasos están verificados.")
+        else:
+            print("No hay un paso siguiente: lo que falta de la fase 0 está bloqueado.")
+            for p in bloqueados:
+                print(f"  {p.id} · {p.nombre}: {p.nota or 'sin motivo'}")
         return 0
     print(f"{'ID':<4} {'Paso':<40} {'Estado':<11} Fecha")
     for p in pasos:
