@@ -78,7 +78,7 @@ def comprobar_entorno(
     else:
         elementos.append(Elemento(
             "playwright", False, "no hay navegador de Playwright en ~/.cache/ms-playwright",
-            "Playwright para Python se instala en el plan 05; después, en una terminal de Ubuntu aparte: `uv run playwright install chromium`",
+            "en una terminal de Ubuntu (WSL) aparte: `cd ~/trovefy/trovify && uv run playwright install chromium`",
         ))
     codigo, salida = correr(["systemctl", "is-system-running"], timeout=10)
     estado = _primera_linea(salida)

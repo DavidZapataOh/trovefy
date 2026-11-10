@@ -18,7 +18,7 @@ Dejar tu computador (Windows con WSL) con todas las herramientas que Trovify nec
    - **ffmpeg** (`ffmpeg`): `sudo apt install -y ffmpeg`. Debe ser el de apt, no el de snap: el de snap se queda colgado en WSL.
    - **poppler** (`poppler`, para leer PDFs): `sudo apt install -y poppler-utils`
    - **Librerías de Pango** (`weasyprint`, para generar PDFs): `sudo apt install -y libpango-1.0-0 libpangoft2-1.0-0`
-   - **Navegador de Playwright** (`playwright`): llega con el plan 05; no puedes arreglarlo todavía. Después se instala con `uv run playwright install chromium`.
+   - **Navegador de Playwright** (`playwright`): en una terminal de Ubuntu (WSL) aparte, `cd ~/trovefy/trovify && uv run playwright install chromium`.
    - **systemd** (`systemd`): ver el paso 3.
    - **Obsidian** (`obsidian`): instálalo en Windows (no en WSL) desde https://obsidian.md.
 3. Para activar systemd:
@@ -27,13 +27,13 @@ Dejar tu computador (Windows con WSL) con todas las herramientas que Trovify nec
    3. Si ya hay una sección `[boot]`, añade la línea `systemd=true` debajo de ella. Si no la hay, añade al FINAL del archivo estas dos líneas: `[boot]` y debajo `systemd=true`. No borres ni reemplaces nada de lo que ya estaba. Guarda con Ctrl+O, Enter y sal con Ctrl+X.
    4. Abre **PowerShell de Windows** (no la terminal de Linux) y escribe `wsl --shutdown`. Ojo: esto también cierra Claude Code.
    5. Vuelve a abrir Ubuntu, entra con `cd ~/trovify-cerebro` y ejecuta `claude` otra vez.
-4. Repite `trovify arranque verificar 00` hasta que no quede ningún ✗. Hasta el plan 05 puede quedar ✗ solo Playwright: entonces marca el paso con `trovify arranque hecho 00` (el verificador lo verificará después del plan 05) y continúa con los demás pasos.
+4. Repite `trovify arranque verificar 00` hasta que no quede ningún ✗. Si solo queda ✗ algo que no puedes arreglar ahora, marca el paso con `trovify arranque hecho 00` y continúa con los demás pasos; vuelve a verificarlo cuando lo arregles.
 
 **Errores típicos**
 - Síntoma: `ffmpeg` se queda colgado y el verificador dice que no responde. Arreglo: tienes el ffmpeg de snap; instala el de apt con `sudo apt install -y ffmpeg`.
 - Síntoma: systemd sigue en ✗ tras editar `wsl.conf`. Arreglo: falta `wsl --shutdown` desde PowerShell de Windows y reabrir la terminal.
 - Síntoma: Obsidian instalado pero marcado ✗. Arreglo: instálalo para tu usuario de Windows (el instalador normal); Trovify lo busca en `AppData\Local\Programs\Obsidian`.
-- Síntoma: `playwright` en ✗ y no sabes qué hacer. Arreglo: es normal antes del plan 05; el paso queda pendiente solo por eso.
+- Síntoma: `playwright` en ✗. Arreglo: en una terminal de Ubuntu (WSL) aparte, `cd ~/trovefy/trovify && uv run playwright install chromium`, y vuelve a verificar.
 
 **Cómo se verifica**
 `trovify arranque verificar 00` revisa: Python 3.12, uv, Node 20+, git, ffmpeg (con límite de 10 s), poppler, libpango, el navegador de Playwright, systemd (`running` o `degraded`) y Obsidian en Windows. Guarda el detalle en `config/evidencia/` y el paso pasa a `verificado` solo si todos están ✓.

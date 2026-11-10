@@ -83,7 +83,7 @@ def _lanzar(p, servicio: str, visible: bool):
     except Exception as exc:
         raise NavegadorError(
             f"no se pudo iniciar Chromium ({type(exc).__name__}); comprueba que está instalado "
-            "(uv run playwright install chromium) y que tiene sus librerías de sistema"
+            "(en una terminal de Ubuntu aparte: cd ~/trovefy/trovify && uv run playwright install chromium) y que tiene sus librerías de sistema"
         ) from exc
 
 
