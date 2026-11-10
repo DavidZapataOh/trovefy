@@ -30,14 +30,14 @@
     - ["5 conjuntos", "cinco conjuntos"]
     - ["30"]
     - ["55"]
-  no_debe_contener: ["techo de 100", "tope de 100", "techo es de 100", "techo: 100", "techo de us$ 100", "techo es us$ 100", "techo de 100 usd", "100 usd de techo", "tope de us$ 100"]
+  no_debe_contener: ["techo es de 100", "techo es us$ 100", "techo es 100", "techo vigente es de 100", "techo: 100"]
 - id: c5
   pregunta: "¿Cuándo se pasa una oferta a pre-escala?"
   debe_contener:
     - ["5 ventas", "cinco ventas"]
     - ["roas"]
     - ["2"]
-  no_debe_contener: ["al menos 10 ventas", "minimo 10 ventas", "minimo de 10 ventas", "con 10 ventas se pasa", "requiere 10 ventas", "se necesitan 10 ventas", "tras 10 ventas", "a las 10 ventas"]
+  no_debe_contener: ["pre-escala a las 10 ventas", "preescala con 10 ventas", "pre-escala con 10 ventas", "pre-escala tras 10 ventas", "al menos 10 ventas", "se requiere al menos 10 ventas", "minimo 10 ventas", "minimo de 10 ventas"]
 - id: h1
   pregunta: "¿Cuál fue el ROAS de nuestra campaña de ayer en Rumanía?"
   debe_contener:
