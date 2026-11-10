@@ -23,6 +23,7 @@ from trovify.arranque.verificadores import (  # noqa: F401  (registran los verif
     caza,
     cerebro,
     checklist,
+    cuenta,
     entorno,
     meta_ids,
 )

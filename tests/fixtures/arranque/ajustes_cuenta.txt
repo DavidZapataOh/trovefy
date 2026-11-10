@@ -1,0 +1,13 @@
+Payment settings
+Account ID: <id de la cuenta>
+Business info
+Name: Cuenta de ejemplo
+Currency and time zone
+Currency: USD
+Time zone: Europe/Bucharest
+Account spending limit
+Account spending limit: $250.00
+Amount spent toward limit: $0.00
+Edit
+Payment method
+Visa ending in XXXX

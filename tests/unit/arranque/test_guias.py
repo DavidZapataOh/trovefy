@@ -7,7 +7,7 @@ SECCIONES = ["**Objetivo**", "**Antes de empezar**", "**Pasos**", "**Errores tí
 
 
 def test_guias_de_la_fase_0_nucleo():
-    for nombre in ["00-entorno.md", "01-cerebro.md", "02-caza-sin-cuentas.md", "03-perfil.md", "04-business.md", "05-pagina.md", "16-apimart.md", "_plantilla.md"]:
+    for nombre in ["00-entorno.md", "01-cerebro.md", "02-caza-sin-cuentas.md", "03-perfil.md", "04-business.md", "05-pagina.md", "06-cuenta-publicitaria.md", "16-apimart.md", "_plantilla.md"]:
         texto = (GUIAS / nombre).read_text()
         for s in SECCIONES:
             assert s in texto, (nombre, s)
@@ -79,3 +79,12 @@ def test_guias_03_04_05_dicen_lo_esencial():
         assert "trovify navegador abrir meta https://business.facebook.com/" in _t(n)
     assert "sin VPN" in _t("04-business.md") and "correo" in _t("04-business.md")
     assert "--dato url=" in _t("05-pagina.md") and "marca del primer producto" in _t("05-pagina.md")
+
+
+def test_guia_06_avisa_antes_de_crear_nada():
+    t = _t("06-cuenta-publicitaria.md")
+    aviso = t.index("**Antes de crear nada: la moneda (USD) y la zona horaria no se pueden cambiar después.**")
+    assert aviso < t.index("**Pasos**")
+    assert "/trovify:auditar" in t and "compras internacionales" in t
+    assert "cuenta.limite_gasto_inicial_usd" in t and "US$ 250" in t and "Fase 1" in t
+    assert "trovify arranque hecho 06 --dato act_id=" in t
