@@ -162,7 +162,7 @@ def _confirmar(vault: Path, id_: str, respuesta: str | None) -> int:
     if not si:
         print(f"\nNo se guarda nada. Avisa del desajuste del paso {id_} (qué campo no coincide): hay que ajustar el patrón en el repo.")
         return 1
-    entrada = registrar_confirmacion(vault, id_, archivo)
+    entrada = registrar_confirmacion(vault, id_, archivo, lector.huella_actual())
     anadir_log(vault, "arranque", f"confirmar {id_}: patrón confirmado por el usuario con su pantalla real", [RUTA_CONFIRMACIONES, rel])
     print(f"\nPatrón del paso {id_} confirmado ({entrada['fecha']}). Ahora: `trovify arranque verificar {id_}`.")
     return 0

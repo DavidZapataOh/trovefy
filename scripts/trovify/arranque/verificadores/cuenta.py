@@ -21,6 +21,7 @@ from trovify.arranque.verificadores.base import (
     Confirmacion,
     confirmacion_de,
     guardar_evidencia,
+    huella_de,
     registrar_lector,
     resultado_provisional,
 )
@@ -190,7 +191,7 @@ def verificar_cuenta(
     if cap is None:
         return no_medido(motivo or SIN_SESION)
     if not confirmacion.confirmada:
-        return resultado_provisional(vault, "06", cap, png)
+        return resultado_provisional(vault, "06", cap, png, motivo=confirmacion.aviso)
     ajustes = leer_ajustes_cuenta(cap.texto)
     if ajustes["moneda"] is None and ajustes["zona"] is None:
         return no_medido("no medido: la pantalla de ajustes no muestra moneda ni zona horaria")
@@ -214,7 +215,10 @@ def _aceptar_06(valores: dict[str, str | None]) -> str | None:
     return None
 
 
-registrar_lector("06", lambda textos, _v: leer_ajustes_cuenta(textos.get("pagina", "")), ("moneda", "zona"), _aceptar_06)
+registrar_lector(
+    "06", lambda textos, _v: leer_ajustes_cuenta(textos.get("pagina", "")), ("moneda", "zona"), _aceptar_06,
+    huella_de("06", _MONEDA, _ZONA, _LIMITE, _ROTULO_LIMITE),
+)
 
 
 @verificador("06")

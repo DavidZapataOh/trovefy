@@ -22,10 +22,10 @@ def capturar_pantallas(servicio: str, mapa: dict, nombres: list[str], capturar: 
     return salida, None
 
 
-def provisional_de(vault, id_: str, capturas: dict) -> ResultadoVerificacion:
+def provisional_de(vault, id_: str, capturas: dict, motivo: str | None = None) -> ResultadoVerificacion:
     """«No medido» con todas las pantallas capturadas guardadas como evidencia provisional (PNG + texto)."""
     pantallas = [PantallaProvisional(n, cap.url_final, png, cap.texto) for n, (cap, png) in capturas.items()]
-    return resultado_provisional(vault, id_, None, None, pantallas=pantallas)
+    return resultado_provisional(vault, id_, None, None, pantallas=pantallas, motivo=motivo)
 
 
 def campos_de(mapa: dict, capturas: dict) -> dict[str, dict[str, str | None]]:

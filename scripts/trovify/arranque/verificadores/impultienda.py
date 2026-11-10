@@ -12,7 +12,9 @@ from pathlib import Path
 from trovify.arranque.estado import ResultadoVerificacion
 from trovify.arranque.verificadores import verificador
 from trovify.arranque.verificadores.base import (
+    aviso_confirmacion,
     guardar_evidencia,
+    huella_mapa,
     lector_de_mapa,
     mapa_confirmado,
     registrar_lector,
@@ -72,7 +74,7 @@ def verificar_impultienda(
     if motivo:
         return no_medido(motivo)
     if mapa["capturado"] is None:
-        return provisional_de(vault, "09", capturas)
+        return provisional_de(vault, "09", capturas, aviso_confirmacion(vault, "09", mapa))
     try:
         campos = campos_de(mapa, capturas)
     except FirmaAusente as exc:
@@ -85,7 +87,7 @@ def verificar_impultienda(
     return ResultadoVerificacion(True, evidencia, r.motivo, [], r.datos, r.lineas)
 
 
-registrar_lector("09", lector_de_mapa(lambda: cargar(RUTA_MAPA)))
+registrar_lector("09", lector_de_mapa(lambda: cargar(RUTA_MAPA)), huella=lambda: huella_mapa(cargar(RUTA_MAPA)))
 
 
 @verificador("09")

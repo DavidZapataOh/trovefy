@@ -19,7 +19,9 @@ from pathlib import Path
 from trovify.arranque.estado import ResultadoVerificacion
 from trovify.arranque.verificadores import verificador
 from trovify.arranque.verificadores.base import (
+    aviso_confirmacion,
     guardar_evidencia,
+    huella_mapa,
     lector_de_mapa,
     mapa_confirmado,
     registrar_lector,
@@ -296,7 +298,7 @@ def verificar_whop(
     if motivo:
         return con_co(no_medido(motivo))
     if mapa["capturado"] is None:
-        prov = con_co(provisional_de(vault, "10", whop))
+        prov = con_co(provisional_de(vault, "10", whop, aviso_confirmacion(vault, "10", mapa)))
         prov.lineas.append(f"  medida guardada: {nota_pago}")
         return prov
     imp, motivo = capturar_pantallas("impultienda", mapa_imp, ["pasarelas"], cap_fn)
@@ -349,7 +351,7 @@ def verificar_hotmart(
     if motivo:
         return no_medido(motivo)
     if mapa["capturado"] is None:
-        return provisional_de(vault, "10b", capturas)
+        return provisional_de(vault, "10b", capturas, aviso_confirmacion(vault, "10b", mapa))
     try:
         campos = campos_de(mapa, capturas)
     except FirmaAusente as exc:
@@ -367,11 +369,15 @@ def verificar_hotmart(
     return ResultadoVerificacion(True, evidencia, r.motivo, [], datos, r.lineas)
 
 
-registrar_lector("10", lector_de_mapa(lambda: _mapa("templates/whop/mapa.yaml", None)))
+registrar_lector(
+    "10", lector_de_mapa(lambda: _mapa("templates/whop/mapa.yaml", None)),
+    huella=lambda: huella_mapa(_mapa("templates/whop/mapa.yaml", None)),
+)
 registrar_lector(
     "10b",
     lector_de_mapa(lambda: _mapa("templates/hotmart/mapa.yaml", None)),
     ("productos.firma", "productos.productos", "datos_financieros.firma", "datos_financieros.cuentas"),
+    huella=lambda: huella_mapa(_mapa("templates/hotmart/mapa.yaml", None)),
 )
 
 

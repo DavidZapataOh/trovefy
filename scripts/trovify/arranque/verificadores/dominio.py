@@ -20,6 +20,7 @@ from trovify.arranque.verificadores.base import (
     confirmacion_de,
     guardar_evidencia,
     guardar_provisional,
+    huella_de,
     lineas_provisionales,
     registrar_lector,
 )
@@ -145,7 +146,10 @@ def _aceptar_08(valores: dict[str, str | None]) -> str | None:
     return None if valores.get("estado") == "verificado" else "confirma cuando Meta muestre el dominio verificado"
 
 
-registrar_lector("08", _leer_08, ("dominio", "estado"), _aceptar_08)
+registrar_lector(
+    "08", _leer_08, ("dominio", "estado"), _aceptar_08,
+    huella_de("08", _VERIFICADO, _NO_VERIFICADO, r"(?<![\w.-]){dominio}(?![\w-])", "120 caracteres tras el dominio"),
+)
 
 
 def verificar_verificacion_meta(
@@ -171,8 +175,10 @@ def verificar_verificacion_meta(
         return no_medido(motivo)
     if not confirmacion.confirmada:
         rutas, avisos = guardar_provisional(vault, "08", [PantallaProvisional("pagina", cap.url_final, png, cap.texto)])
-        lineas = [f"? {MOTIVO_TXT_PENDIENTE} ({MOTIVO_SIN_CONFIRMAR})", *lineas_provisionales(rutas, avisos)]
-        return ResultadoVerificacion(None, [], MOTIVO_TXT_PENDIENTE, [], {}, lineas)
+        motivo = MOTIVO_TXT_PENDIENTE if confirmacion.aviso is None else f"{MOTIVO_TXT_PENDIENTE} ({confirmacion.aviso})"
+        detalle = confirmacion.aviso or MOTIVO_SIN_CONFIRMAR
+        lineas = [f"? {MOTIVO_TXT_PENDIENTE} ({detalle})", *lineas_provisionales(rutas, avisos)]
+        return ResultadoVerificacion(None, [], motivo, [], {}, lineas)
     if not _estado_verificado(cap.texto, dominio):
         return _resultado(False, "Meta no muestra el dominio como verificado", [
             "en Business Settings → Marcas → Dominios, abre el dominio y pulsa «Verificar»; si el TXT es reciente, espera y repite",

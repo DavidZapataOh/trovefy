@@ -89,6 +89,7 @@ class Confirmacion:
 
     fecha: str | None
     fuente: str
+    aviso: str | None = None  # p. ej. «patrón cambiado; vuelve a confirmar»
 
     @property
     def confirmada(self) -> bool:
@@ -261,7 +262,7 @@ def lineas_provisionales(rutas: list[str], avisos: list[str]) -> list[str]:
 
 def resultado_provisional(
     vault: Path, id: str, captura, png: bytes | None, *, pantallas: list[PantallaProvisional] | None = None,
-    texto: str | None = None, patrones_extracto=None, contexto: int = 2,
+    texto: str | None = None, patrones_extracto=None, contexto: int = 2, motivo: str | None = None,
 ) -> ResultadoVerificacion:
     """«No medido» para un patrón sin confirmar: guarda la evidencia provisional y nunca certifica.
 
@@ -271,8 +272,9 @@ def resultado_provisional(
         leido = captura.texto if texto is None else texto
         pantallas = [PantallaProvisional("pagina", captura.url_final, png, leido)]
     rutas, avisos = guardar_provisional(vault, id, pantallas, patrones_extracto, contexto)
-    lineas = [f"? {MOTIVO_SIN_CONFIRMAR}", *lineas_provisionales(rutas, avisos)]
-    return ResultadoVerificacion(None, [], MOTIVO_SIN_CONFIRMAR, [], {}, lineas)
+    motivo = motivo or MOTIVO_SIN_CONFIRMAR
+    lineas = [f"? {motivo}", *lineas_provisionales(rutas, avisos)]
+    return ResultadoVerificacion(None, [], motivo, [], {}, lineas)
 
 
 # --- Confirmación del patrón por el usuario (config/confirmaciones.yaml en el vault) ---------------
@@ -298,6 +300,10 @@ class Lector:
     leer: Callable[[dict[str, str], Path], dict[str, str | None]]
     requeridos: tuple[str, ...] | None  # None: todos los campos que devuelve `leer`
     aceptar: Callable[[dict[str, str | None]], str | None] | None = None  # motivo para no confirmar, o None
+    huella: str | Callable[[], str] = ""  # sha256 de los patrones (código) o del mapa actuales
+
+    def huella_actual(self) -> str:
+        return self.huella() if callable(self.huella) else self.huella
 
 
 LECTORES: dict[str, Lector] = {}
@@ -308,8 +314,28 @@ def registrar_lector(
     leer: Callable[[dict[str, str], Path], dict[str, str | None]],
     requeridos: tuple[str, ...] | None = None,
     aceptar: Callable[[dict[str, str | None]], str | None] | None = None,
+    huella: str | Callable[[], str] = "",
 ) -> None:
-    LECTORES[id_] = Lector(leer, requeridos, aceptar)
+    LECTORES[id_] = Lector(leer, requeridos, aceptar, huella)
+
+
+def huella_de(*partes) -> str:
+    """sha256 de los patrones de código de un paso (regex o textos): si cambian, cambia la huella."""
+    texto = "\n".join(p.pattern if isinstance(p, re.Pattern) else str(p) for p in partes)
+    return hashlib.sha256(texto.encode("utf-8")).hexdigest()
+
+
+def huella_mapa(mapa: dict) -> str:
+    """sha256 de las pantallas de un mapa (URL, firma y patrones), sin `capturado` ni `fuente`."""
+    return hashlib.sha256(json.dumps(mapa["pantallas"], sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def lector_para(paso: str, mapa: dict | None = None) -> Lector | None:
+    """El lector del paso; con `mapa`, el de ese mapa concreto (el que está usando el verificador)."""
+    base = LECTORES.get(paso)
+    if base is None or mapa is None:
+        return base
+    return Lector(lector_de_mapa(lambda: mapa), base.requeridos, base.aceptar, huella_mapa(mapa))
 
 
 def rechazo(lector: Lector, valores: dict[str, str | None]) -> str | None:
@@ -365,45 +391,74 @@ def _leer_confirmaciones(vault: Path) -> dict:
     return datos
 
 
-def fecha_confirmada(vault: Path, paso: str) -> str | None:
-    """Fecha de la confirmación del usuario si su sha256 coincide con un texto provisional existente."""
+def motivo_patron_cambiado(paso: str) -> str:
+    return f"no medido: patrón cambiado; vuelve a confirmar con `trovify arranque confirmar {paso}`"
+
+
+def estado_confirmacion(vault: Path, paso: str, mapa: dict | None = None) -> tuple[str | None, str | None]:
+    """(fecha, aviso) de la confirmación del usuario en el vault.
+
+    Vale solo si (1) su sha256 coincide con un texto provisional existente, (2) su huella es la de los
+    patrones o el mapa actuales y (3) el lector actual, sobre ese texto, sigue leyendo todo lo requerido
+    y lo acepta. Con (1) pero sin (2) o (3): (None, «patrón cambiado; vuelve a confirmar»).
+    """
     try:
         entrada = _leer_confirmaciones(vault).get(paso)
     except (ValueError, OSError):
-        return None
+        return None, None
     if not isinstance(entrada, dict):
-        return None
+        return None, None
     fecha, sha = entrada.get("fecha"), entrada.get("texto_sha256")
     fecha = fecha.isoformat() if isinstance(fecha, date) else fecha
     if not isinstance(fecha, str) or not _FECHA.fullmatch(fecha) or not isinstance(sha, str) or not _SHA.fullmatch(sha):
-        return None
+        return None, None
     try:
-        if any(_sha256(f) == sha for f in textos_provisionales(vault, paso)):
-            return fecha
+        archivo = next((f for f in textos_provisionales(vault, paso) if _sha256(f) == sha), None)
     except OSError:
-        return None
-    return None
+        return None, None
+    if archivo is None:
+        return None, None
+    lector = lector_para(paso, mapa)
+    if lector is None:
+        return None, None
+    cambiado = motivo_patron_cambiado(paso)
+    try:
+        if entrada.get("huella") != lector.huella_actual():
+            return None, cambiado
+        if rechazo(lector, lector.leer(leer_texto_provisional(archivo), vault)):
+            return None, cambiado
+    except (OSError, ValueError, KeyError):
+        return None, cambiado
+    return fecha, None
+
+
+def fecha_confirmada(vault: Path, paso: str, mapa: dict | None = None) -> str | None:
+    return estado_confirmacion(vault, paso, mapa)[0]
+
+
+def aviso_confirmacion(vault: Path, paso: str, mapa: dict | None = None) -> str | None:
+    return estado_confirmacion(vault, paso, mapa)[1]
 
 
 def confirmacion_de(vault: Path, paso: str, codigo: Confirmacion) -> Confirmacion:
     """La confirmación del código o, si no la hay, la del usuario en el vault (misma regla para todos)."""
     if codigo.confirmada:
         return codigo
-    fecha = fecha_confirmada(vault, paso)
+    fecha, aviso = estado_confirmacion(vault, paso)
     if fecha is None:
-        return codigo
+        return Confirmacion(codigo.fecha, codigo.fuente, aviso)
     return Confirmacion(fecha=fecha, fuente=f"confirmado por el usuario con su pantalla real ({RUTA_CONFIRMACIONES})")
 
 
 def mapa_confirmado(vault: Path, paso: str, mapa: dict) -> dict:
-    """El mapa con `capturado` puesto si el usuario confirmó el paso en el vault."""
+    """El mapa con `capturado` puesto si el usuario confirmó el paso en el vault con este mismo mapa."""
     if mapa.get("capturado") is not None:
         return mapa
-    fecha = fecha_confirmada(vault, paso)
+    fecha = fecha_confirmada(vault, paso, mapa)
     return mapa if fecha is None else {**mapa, "capturado": fecha}
 
 
-def registrar_confirmacion(vault: Path, paso: str, archivo: Path) -> dict:
+def registrar_confirmacion(vault: Path, paso: str, archivo: Path, huella: str) -> dict:
     """Escribe (atómico) la confirmación del paso en config/confirmaciones.yaml del vault."""
     from trovify.vault.escritura import escribir_atomico
 
@@ -412,6 +467,7 @@ def registrar_confirmacion(vault: Path, paso: str, archivo: Path) -> dict:
         "fecha": f"{datetime.now(ZONA_NEGOCIO):%Y-%m-%d}",
         "texto_sha256": _sha256(archivo),
         "archivo": Path(archivo).relative_to(vault).as_posix(),
+        "huella": huella,
     }
     datos[paso] = entrada
     escribir_atomico(Path(vault) / RUTA_CONFIRMACIONES, yaml.safe_dump(datos, allow_unicode=True, sort_keys=True))

@@ -20,6 +20,7 @@ from trovify.arranque.verificadores.base import (
     Confirmacion,
     confirmacion_de,
     guardar_evidencia,
+    huella_de,
     registrar_lector,
     resultado_provisional,
     sin_query,
@@ -107,7 +108,7 @@ def verificar_business(
     if cap is None:
         return no_medido(motivo)
     if not confirmacion.confirmada:
-        return resultado_provisional(vault, "04", cap, png, texto=texto_04(cap.url_final))
+        return resultado_provisional(vault, "04", cap, png, texto=texto_04(cap.url_final), motivo=confirmacion.aviso)
     bid = extraer_business_id(cap.url_final)
     if bid is None:
         m = "la página de ajustes de Business no muestra un portfolio con ID"
@@ -161,7 +162,8 @@ def verificar_pagina(
         return no_medido(motivo)
     if not confirmacion.confirmada:
         # el HTML con sesión lleva tokens (fb_dtsg…): solo se guardan las líneas (o trozos) que casan, sin contexto
-        return resultado_provisional(vault, "05", cap, png, texto=cap.html, patrones_extracto=PATRONES_PAGE_ID, contexto=0)
+        return resultado_provisional(vault, "05", cap, png, texto=cap.html, patrones_extracto=PATRONES_PAGE_ID, contexto=0,
+                                     motivo=confirmacion.aviso)
     pid = extraer_page_id(cap.html)
     esperado = _id_numerico_de_url(url)
     if pid is not None and esperado is not None and pid != esperado:
@@ -174,8 +176,14 @@ def verificar_pagina(
     return ResultadoVerificacion(True, ev, f"página de Facebook con ID {pid}", [], {"page_id": pid}, [f"✓ page_id {pid}"])
 
 
-registrar_lector("04", lambda textos, _v: {"business_id": extraer_business_id(textos.get("pagina", "").strip())}, ("business_id",))
-registrar_lector("05", lambda textos, _v: {"page_id": extraer_page_id(textos.get("pagina", ""))}, ("page_id",))
+registrar_lector(
+    "04", lambda textos, _v: {"business_id": extraer_business_id(textos.get("pagina", "").strip())}, ("business_id",),
+    huella=huella_de("04", "business_id=<dígitos> en la query de la URL final (parse_qs)"),
+)
+registrar_lector(
+    "05", lambda textos, _v: {"page_id": extraer_page_id(textos.get("pagina", ""))}, ("page_id",),
+    huella=huella_de("05", *PATRONES_PAGE_ID, "el ID más repetido"),
+)
 
 
 @verificador("04")

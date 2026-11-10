@@ -1,5 +1,6 @@
 """`trovify arranque confirmar`: el usuario confirma un patrón con su pantalla real (I-2)."""
 
+import dataclasses
 import pathlib
 import shutil
 
@@ -190,3 +191,56 @@ def test_confirmar_06_exige_el_limite(tmp_path, capsys):
     assert main(["arranque", "confirmar", "06", "--respuesta", "si", "--vault", str(v)]) == 2
     assert "pon primero el límite de gasto (paso 5 de la guía) y vuelve a capturar" in capsys.readouterr().err
     assert _confirmaciones(v) is None
+
+
+def test_mapa_cambiado_invalida_la_confirmacion(tmp_path):
+    import copy
+
+    mapa = cargar(RAIZ / "templates/impultienda/mapa.yaml")
+    textos = {n: (FIX / f"impultienda_{n}.html").read_text() for n in ("plan", "tiendas", "pasarelas")}
+    verificar_impultienda(tmp_path, capturar=_falso_impultienda(mapa, textos), mapa=mapa)
+    assert main(["arranque", "confirmar", "09", "--respuesta", "si", "--vault", str(tmp_path)]) == 0
+    assert verificar_impultienda(tmp_path, capturar=_falso_impultienda(mapa, textos), mapa=mapa).ok is True
+    otro = copy.deepcopy(mapa)
+    otro["pantallas"]["tiendas"]["firma"] = ["Mis tiendas"]
+    otro["pantallas"]["tiendas"]["campos"]["tiendas"]["patron"] = r"Mis tiendas\D*(\d+)"
+    nuevos = {**textos, "tiendas": "Mis tiendas 3 (ranking global)"}
+    r = verificar_impultienda(tmp_path, capturar=_falso_impultienda(otro, nuevos), mapa=otro)
+    assert r.ok is None and "patrón cambiado" in r.motivo and "confirmar 09" in r.motivo
+
+
+def test_patron_de_codigo_cambiado_invalida_la_confirmacion(tmp_path, monkeypatch):
+    from trovify.arranque.verificadores import base
+
+    v = _vault(tmp_path)
+    bien = (FIX / "ajustes_cuenta.txt").read_text()
+    verificar_cuenta(v, capturar=falso(bien))
+    assert main(["arranque", "confirmar", "06", "--respuesta", "si", "--vault", str(v)]) == 0
+    assert verificar_cuenta(v, capturar=falso(bien)).ok is True
+    monkeypatch.setitem(base.LECTORES, "06", dataclasses.replace(base.LECTORES["06"], huella="otro patrón"))
+    r = verificar_cuenta(v, capturar=falso(bien))
+    assert r.ok is None and "patrón cambiado" in r.motivo
+
+
+def test_lector_actual_que_ya_no_casa_invalida(tmp_path, monkeypatch):
+    from trovify.arranque.verificadores import base
+
+    v = _vault(tmp_path)
+    bien = (FIX / "ajustes_cuenta.txt").read_text()
+    verificar_cuenta(v, capturar=falso(bien))
+    main(["arranque", "confirmar", "06", "--respuesta", "si", "--vault", str(v)])
+    roto = dataclasses.replace(base.LECTORES["06"], leer=lambda t, _v: {"moneda": None, "zona": None, "limite_gasto": None})
+    monkeypatch.setitem(base.LECTORES, "06", roto)
+    assert fecha_confirmada(v, "06") is None
+
+
+def test_confirmacion_sin_huella_no_vale(tmp_path):
+    v = _vault(tmp_path)
+    verificar_cuenta(v, capturar=falso((FIX / "ajustes_cuenta.txt").read_text()))
+    main(["arranque", "confirmar", "06", "--respuesta", "si", "--vault", str(v)])
+    ruta = v / "config/confirmaciones.yaml"
+    datos = yaml.safe_load(ruta.read_text())
+    assert datos["06"]["huella"]
+    del datos["06"]["huella"]
+    ruta.write_text(yaml.safe_dump(datos))
+    assert fecha_confirmada(v, "06") is None
