@@ -9,11 +9,11 @@ Paso 10b: producto de prueba y cuenta bancaria colombiana para el retiro de HotP
 Mientras un mapa tenga `capturado: null` el resultado es «no medido»: nunca se certifica con un mapa supuesto.
 """
 
-import html
 import re
 import urllib.request
 from collections.abc import Callable
 from datetime import datetime
+from html.parser import HTMLParser
 from pathlib import Path
 
 from trovify.arranque.estado import ResultadoVerificacion
@@ -43,64 +43,157 @@ def _bajar(url: str) -> str:
         return r.read(5_000_000).decode("utf-8", errors="replace")
 
 
-def _paises(bloque: str) -> set[str]:
-    """Elementos de un bloque de texto: una línea o un elemento separado por coma; sin paréntesis, en minúsculas."""
-    salida = set()
-    for ln in re.split(r"[\n,;]", bloque):
-        ln = re.sub(r"\(.*?\)", "", ln).strip().casefold()
-        if ln:
-            salida.add(ln)
-    return salida
-
-
 _CONTROL_MIN = {c.casefold() for c in _CONTROL}
+_VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr", "path", "use", "circle", "rect"}
+_TITULO = re.compile(r"h[1-6]")
 
 
-def _bloque_lista(html_tras_encabezado: str) -> set[str]:
-    """Países de la lista que sigue al encabezado: termina en el primer encabezado h1-h6, en «Note that»
-    o en el primer texto largo que sigue a algún país (una pregunta o un párrafo); la frase de introducción previa se salta."""
-    cola = re.split(r"<h[1-6][\s>]", html_tras_encabezado, maxsplit=1)[0]
-    plano = html.unescape(re.sub(r"<[^>]+>", "\n", cola))
-    salida: set[str] = set()
-    for trozo in re.split(r"[\n,;]", plano):
-        trozo = trozo.strip()
-        if trozo.startswith("Note that"):
-            break
-        if len(trozo) > 40:
-            if salida:  # fin de la lista; los párrafos de introducción antes del primer país se saltan
-                break
+class _Nodo:
+    __slots__ = ("hijos", "tag")
+
+    def __init__(self, tag: str):
+        self.tag = tag
+        self.hijos: list = []
+
+    def texto(self) -> str:
+        partes, pila = [], [self]
+        while pila:
+            x = pila.pop()
+            if isinstance(x, str):
+                partes.append(x)
+            else:
+                pila.extend(reversed(x.hijos))
+        return re.sub(r"\s+", " ", "".join(partes)).strip()
+
+    def elementos(self) -> list["_Nodo"]:
+        return [h for h in self.hijos if isinstance(h, _Nodo)]
+
+
+class _Arbol(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.raiz = _Nodo("#raiz")
+        self.pila = [self.raiz]
+
+    def handle_starttag(self, tag, attrs):
+        n = _Nodo(tag)
+        self.pila[-1].hijos.append(n)
+        if tag not in _VOID:
+            self.pila.append(n)
+
+    def handle_startendtag(self, tag, attrs):
+        self.pila[-1].hijos.append(_Nodo(tag))
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.pila) - 1, 0, -1):
+            if self.pila[i].tag == tag:
+                del self.pila[i:]
+                return
+
+    def handle_data(self, data):
+        if self.pila[-1].tag not in ("script", "style"):
+            self.pila[-1].hijos.append(data)
+
+
+def _en_orden(raiz: _Nodo) -> list[tuple[_Nodo, int]]:
+    """Recorrido en orden del documento: (nodo, índice donde termina su subárbol)."""
+    salida: list[list] = []
+
+    def visitar(n: _Nodo):
+        pila = [(n, iter(n.elementos()), len(salida))]
+        salida.append([n, 0])
+        while pila:
+            _, it, i = pila[-1]
+            hijo = next(it, None)
+            if hijo is None:
+                salida[i][1] = len(salida)
+                pila.pop()
+            else:
+                pila.append((hijo, iter(hijo.elementos()), len(salida)))
+                salida.append([hijo, 0])
+
+    visitar(raiz)
+    return [(n, f) for n, f in salida]
+
+
+def _nombre(texto: str) -> str:
+    """Nombre del país de un elemento de lista: lo anterior a « — », « – », « - », «:» o «(»."""
+    return re.split(r" [—–-] |:|\(", texto.casefold(), maxsplit=1)[0].strip()
+
+
+def _elementos_de_lista(n: _Nodo) -> list[str] | None:
+    """Elementos de un contenedor de lista, o None si no lo es (ul/ol: li; table: primera celda; div: hijos hoja)."""
+    if n.tag in ("ul", "ol"):
+        return [_nombre(li.texto()) for li in n.elementos() if li.tag == "li"]
+    if n.tag == "table":
+        filas, pila = [], [n]
+        while pila:
+            x = pila.pop()
+            if x.tag == "tr":
+                celdas = [c for c in x.elementos() if c.tag in ("td", "th")]
+                if celdas:
+                    filas.append(_nombre(celdas[0].texto()))
+            else:
+                pila.extend(reversed(x.elementos()))
+        return filas
+    if n.tag == "div":
+        hijos = n.elementos()
+        if len(hijos) >= 4 and all(not any(d.tag in ("div", "ul", "ol", "table") or _TITULO.fullmatch(d.tag) for d in _descendientes(h)) for h in hijos):
+            return [_nombre(h.texto()) for h in hijos]
+    return None
+
+
+def _descendientes(n: _Nodo):
+    pila = list(n.elementos())
+    while pila:
+        x = pila.pop()
+        yield x
+        pila.extend(x.elementos())
+
+
+def _listas_bajo(orden, patron: re.Pattern[str]) -> list[list[str]]:
+    """Para cada encabezado cuyo texto casa con `patron`: la primera lista que le sigue, antes del siguiente
+    encabezado del mismo nivel o superior."""
+    salida = []
+    for i, (n, fin) in enumerate(orden):
+        if not _TITULO.fullmatch(n.tag) or not patron.search(n.texto()):
             continue
-        if trozo:
-            salida.add(re.sub(r"\(.*?\)", "", trozo).strip().casefold())
+        for m, _ in orden[fin:]:
+            if _TITULO.fullmatch(m.tag) and int(m.tag[1]) <= int(n.tag[1]):
+                break
+            items = _elementos_de_lista(m)
+            if items is not None:
+                salida.append(items)
+                break
     return salida
+
+
+_SOPORTADOS = re.compile(r"(?i)(?<![a-z])(?<!not )supported countries")
+_EXCLUIDOS = re.compile(r"(?i)(unsupported|not supported|restricted|sanctioned|excluded) countries")
 
 
 def medir_pago_a_co(fetch: Callable[[str], str] | None = None) -> bool | None:
     """¿Lista la documentación pública de Whop a Colombia entre los países de pago?
 
-    True solo si hay un bloque «Supported countries» reconocido (>= 4 países de control) que incluye a
-    Colombia y Colombia no aparece en ningún bloque de excluidos/restringidos; False solo si ese bloque
-    se reconoce y Colombia no está; None en cualquier otro caso (página ilegible, cambiada o ambigua).
+    Se lee la estructura HTML: el encabezado «Supported countries» y la primera lista que le sigue (ul/ol, tabla o
+    una cuadrícula de elementos hoja, que es lo que usa la página real); lo que quede fuera de esa lista se ignora.
+    True si la lista se reconoce (>= 4 países de control) y tiene a Colombia y ningún encabezado de excluidos/
+    restringidos la lista; False si se reconoce y no la tiene; None si no hay encabezado, lista o no se reconoce.
     """
     try:
         pagina = (fetch or _bajar)(URL_DOCS_WHOP)
+        arbol = _Arbol()
+        arbol.feed(pagina)
+        arbol.close()
     except Exception:  # noqa: BLE001  red, TLS o formato: no se concluye nada
         return None
-    texto = html.unescape(re.sub(r"<[^>]+>", "\n", pagina))
-    mejor: set[str] = set()
-    for m in re.finditer(r"(?i)(?<![a-z])supported countries", pagina):
-        previo = pagina[max(0, m.start() - 12) : m.start()].casefold()
-        if re.search(r"(un|not\s+)$", previo):
-            continue
-        paises = _bloque_lista(pagina[m.end() :])
-        if len(paises & _CONTROL_MIN) > len(mejor & _CONTROL_MIN):
-            mejor = paises
-    if len(mejor & _CONTROL_MIN) < 4:
+    orden = _en_orden(arbol.raiz)
+    reconocidas = [items for items in _listas_bajo(orden, _SOPORTADOS) if len(set(items) & _CONTROL_MIN) >= 4]
+    if not reconocidas:
         return None
-    for m in re.finditer(r"(?i)(unsupported|not supported|restricted|sanctioned|excluded) countries", texto):
-        if "colombia" in _paises(texto[m.end() : m.end() + 3000]):
-            return None
-    return "colombia" in mejor
+    if any("colombia" in items for items in _listas_bajo(orden, _EXCLUIDOS)):
+        return None
+    return any("colombia" in items for items in reconocidas)
 
 
 def evaluar_whop(pago_a_co: bool | None, kyc: str | None, conectado_en_impultienda: bool | None) -> ResultadoVerificacion:

@@ -52,6 +52,17 @@ def _docs(paises=PAISES):
     return f"<h2>Supported countries</h2><div>{paises}</div><p>Note that different payout options will be available</p>"
 
 
+def _ul(*paises):
+    return "<ul>" + "".join(f"<li>{p}</li>" for p in paises) + "</ul>"
+
+
+CONTROL = ["Chile", "Mexico", "Peru", "Brazil"]
+
+
+def _pagina(lista, antes="", despues=""):
+    return f"{antes}<h2>Supported countries</h2><p>Whop supports payouts to many countries:</p>{lista}{despues}"
+
+
 def test_pago_a_co_lee_la_lista_publica():
     pidio = []
 
@@ -70,42 +81,43 @@ def test_pago_a_co_exclusion_clara_solo_si_la_lista_se_reconoce():
     assert medir_pago_a_co(lambda u: _docs('<span data-as="p">Chile</span>')) is None
 
 
-def test_pago_a_co_true_exige_lista_reconocida():
-    # Colombia en un bloque que no es la lista de países (sin países de control): no medido
-    assert medir_pago_a_co(lambda u: "<h2>Supported countries</h2><p>Colombia</p><p>Note that x</p>") is None
-    assert medir_pago_a_co(lambda u: "<p>Colombia</p>") is None
+@pytest.mark.parametrize("posicion", ["primero", "medio", "ultimo"])
+def test_pago_a_co_item_largo_de_colombia_cuenta(posicion):
+    largo = "Colombia (COP) — payouts via local bank transfer within 3 business days"
+    items = {"primero": [largo, *CONTROL], "medio": [*CONTROL[:2], largo, *CONTROL[2:]], "ultimo": [*CONTROL, largo]}[posicion]
+    assert medir_pago_a_co(lambda u: _pagina(_ul(*items))) is True
+
+
+def test_pago_a_co_texto_fuera_de_la_lista_se_ignora():
+    lista = _ul(*CONTROL, "Cuba")
+    assert medir_pago_a_co(lambda u: _pagina(lista, despues="<footer><a>Colombia</a></footer>")) is False
+    assert medir_pago_a_co(lambda u: _pagina(lista, despues="<p>Colombia</p>")) is False
+    assert medir_pago_a_co(lambda u: _pagina(lista, despues="<h3>FAQ</h3><ul><li>Colombia</li></ul>")) is False
+    # Colombia solo en la frase de introducción
+    intro = "<h2>Supported countries</h2><p>Colombia is great</p>" + lista
+    assert medir_pago_a_co(lambda u: intro) is False
+    assert medir_pago_a_co(lambda u: "<h2>Supported countries</h2><p>Colombia</p>") is None
+    assert medir_pago_a_co(lambda u: "<p>Colombia</p>" + lista) is None  # sin encabezado
+
+
+def test_pago_a_co_tabla_y_encabezado_siguiente():
+    tabla = "<table>" + "".join(f"<tr><td>{p}</td><td>USD</td></tr>" for p in [*CONTROL, "Colombia"]) + "</table>"
+    assert medir_pago_a_co(lambda u: _pagina(tabla)) is True
+    # la lista que sigue a OTRO encabezado no es la de soportados
+    otra = f"<h2>Supported countries</h2><p>nada</p><h2>Otra cosa</h2>{_ul(*CONTROL, 'Colombia')}"
+    assert medir_pago_a_co(lambda u: otra) is None
 
 
 def test_pago_a_co_bloque_de_restringidos_o_no_soportados():
-    restringidos = '<h2>Restricted countries</h2><span>Colombia</span><span>Cuba</span>'
+    restringidos = "<h2>Restricted countries</h2>" + _ul("Colombia", "Cuba")
     assert medir_pago_a_co(lambda u: _docs() + restringidos) is None
     # un encabezado «Unsupported countries» no cuenta como lista de soportados
-    solo_no_soportados = _docs().replace("Supported countries", "Unsupported countries")
-    assert medir_pago_a_co(lambda u: solo_no_soportados) is None
+    assert medir_pago_a_co(lambda u: _docs().replace("Supported countries", "Unsupported countries")) is None
 
 
-def test_pago_a_co_tolera_mayusculas_parentesis_y_comas():
-    assert medir_pago_a_co(lambda u: _docs("<p>Chile, Mexico, Peru, Brazil, COLOMBIA (COP), Cuba</p>")) is True
-    sin = "<p>Chile, Mexico, Peru, Brazil, Cuba</p>"
-    assert medir_pago_a_co(lambda u: _docs(sin)) is False
-
-
-def test_pago_a_co_la_lista_termina_en_el_primer_encabezado():
-    sin_co = PAISES.replace('<span data-as="p">Colombia</span>', "")
-    pie = '<footer><h3>Países</h3><span>Colombia</span></footer>'
-    assert medir_pago_a_co(lambda u: _docs(sin_co) + pie) is False
-
-
-def test_pago_a_co_la_lista_termina_en_el_primer_texto_que_no_es_pais():
-    sin_co = PAISES.replace('<span data-as="p">Colombia</span>', "")
-    faq = '<p>Can I receive payments from customers in other countries?</p><span>Colombia</span>'
-    pagina = f"<h2>Supported countries</h2><div>{sin_co}</div>{faq}<p>Note that different payout options</p>"
-    assert medir_pago_a_co(lambda u: pagina) is False
-
-
-def test_pago_a_co_salta_la_frase_de_introduccion():
-    pagina = f"<h2>Supported countries</h2><p>Whop supports payouts to over 200 different countries:</p><div>{PAISES}</div><p>Note that x</p>"
-    assert medir_pago_a_co(lambda u: pagina) is True
+def test_pago_a_co_tolera_mayusculas_y_parentesis():
+    assert medir_pago_a_co(lambda u: _pagina(_ul(*CONTROL, "COLOMBIA (COP)"))) is True
+    assert medir_pago_a_co(lambda u: _pagina(_ul(*CONTROL, "Cuba"))) is False
 
 
 def test_pago_a_co_error_de_red_es_none():
