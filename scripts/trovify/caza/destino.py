@@ -176,7 +176,8 @@ def clave_oferta(url_final: str, checkout: str | None) -> str:
     subdominio de la tienda; el resto: ``<plataforma>:<host>/<primer segmento no genérico>``. Sin checkout:
     ``host/seg1/seg2`` en dominios compartidos (netlify.app...) o el dominio registrable.
 
-    Limitación: Whop ``whop.com/<empresa>/…`` (clave por empresa, junta planes) y
+    hotm.art/<corto> usa el código corto (no es el de pay.hotmart.com; el resolver lo
+    sustituye si la cadena llega a pay.hotmart.com). Limitación: Whop ``whop.com/<empresa>/…`` (clave por empresa, junta planes) y
     ``whop.com/checkout/plan_…`` (clave por plan) nunca coinciden entre sí.
     """
     if checkout:
@@ -215,11 +216,15 @@ def oferta_id(clave: str) -> str:
 
 # --- precio ---------------------------------------------------------------------------------
 
+# ``$`` suelto es ambiguo (USD, MXN, ARS, COP, CLP...): no se asigna moneda. USD solo con señal explícita.
 _MONEDAS = {
-    "us$": "USD", "r$": "BRL", "$": "USD", "€": "EUR", "eur": "EUR", "lei": "RON", "ron": "RON",
-    "kč": "CZK", "czk": "CZK", "zł": "PLN", "pln": "PLN",
+    "us$": "USD", "usd": "USD", "dólares": "USD", "dolares": "USD", "dólar": "USD", "dolar": "USD", "dollars": "USD",
+    "dollar": "USD", "r$": "BRL", "brl": "BRL", "€": "EUR", "eur": "EUR", "lei": "RON", "ron": "RON",
+    "kč": "CZK", "czk": "CZK", "zł": "PLN", "pln": "PLN", "mxn": "MXN", "ars": "ARS", "cop": "COP",
+    "clp": "CLP", "pen": "PEN", "uyu": "UYU", "$": None,
 }
-_CUR = r"(?:US\$|R\$|\$|€|(?<![A-Za-z])(?:EUR|RON|lei|CZK|PLN)(?![A-Za-z])|Kč|zł)"
+_CODIGOS = "USD|BRL|EUR|RON|CZK|PLN|MXN|ARS|COP|CLP|PEN|UYU|lei|d[óo]lar(?:es)?|dollars?"
+_CUR = rf"(?:US\$|R\$|\$|€|(?<![A-Za-z])(?:{_CODIGOS})(?![A-Za-z])|Kč|zł)"
 _NUM = r"\d[\d.,]*\d|\d"
 _PRECIO = re.compile(rf"(?:(?P<c1>{_CUR})\s*(?P<n1>{_NUM})|(?P<n2>{_NUM})\s*(?P<c2>{_CUR}))", re.IGNORECASE)
 _P = rf"(?:{_CUR}\s*(?:{_NUM})|(?:{_NUM})\s*{_CUR})"
@@ -248,9 +253,19 @@ def _numero(s: str) -> float | None:
         return None
 
 
-def extraer_precio(texto: str) -> tuple[float, str] | None:
-    """Precio al contado y moneda: ignora parcelas («12x de») y devuelve el menor (el ancla es el mayor)."""
-    limpio = _NO_PRECIO.sub(" ", _PARCELA.sub(" ", texto or ""))
+_CODIGO_ANTES = re.compile(rf"(?<![A-Za-z])({_CODIGOS})\s*\$", re.IGNORECASE)
+_CODIGO_DESPUES = re.compile(rf"\$\s*({_NUM})\s*({_CODIGOS})(?![A-Za-z])", re.IGNORECASE)
+
+
+def extraer_precio(texto: str) -> tuple[float, str | None] | None:
+    """Precio al contado y moneda: ignora parcelas («12x de», «3 cuotas de»), envíos y descuentos, y
+    devuelve el menor (el ancla es el mayor).
+
+    La moneda es ``None`` cuando solo hay un ``$`` suelto (ambiguo: USD, MXN, ARS, COP...): el importe
+    se conserva y quien llama anota «no medido: símbolo $ ambiguo». USD solo con ``US$``, ``USD`` o
+    «dólares»; un código cercano (``MXN $499``, ``$499 ARS``) manda sobre el ``$``."""
+    texto = _CODIGO_DESPUES.sub(r"\1 \2", _CODIGO_ANTES.sub(r"\1 ", texto or ""))
+    limpio = _NO_PRECIO.sub(" ", _PARCELA.sub(" ", texto))
     precios = []
     for m in _PRECIO.finditer(limpio):
         cur = m.group("c1") or m.group("c2")
@@ -321,6 +336,15 @@ _JS_REPRODUCTOR = """() => {
 }"""
 
 
+def _filtrar_ruta(ruta) -> None:
+    """Aborta lo de Meta y todo lo que no sea una URL pública (o ``data:``/``blob:``/``about:``)."""
+    u = ruta.request.url
+    if es_red_social(u) or not (url_valida(u) or u.startswith(("data:", "blob:", "about:"))):
+        ruta.abort()
+    else:
+        ruta.continue_()
+
+
 class NavegadorLandingEfimero:
     """Chromium móvil efímero (sin sesión) para landings de terceros; nunca carga recursos de Meta."""
 
@@ -343,13 +367,8 @@ class NavegadorLandingEfimero:
                     if r.resource_type == "document":
                         documentos.append(r.url)
 
-                def filtrar(ruta):
-                    u = ruta.request.url
-                    prohibido = es_red_social(u) or not (url_valida(u) or u.startswith(("data:", "blob:", "about:")))
-                    ruta.abort() if prohibido else ruta.continue_()
-
                 pagina.on("request", al_pedir)
-                pagina.route("**/*", filtrar)
+                pagina.route("**/*", _filtrar_ruta)
                 try:
                     resp = pagina.goto(url, wait_until="domcontentloaded", timeout=45_000)
                     pagina.wait_for_timeout(int(espera_s * 1000))
@@ -461,6 +480,12 @@ def resolver_destino(
     )
     if chk:
         destino.gateway, destino.checkout = chk
+        if chk[0] == "hotmart":
+            # un enlace corto hotm.art/<corto> no lleva el código de producto: si la cadena llega a
+            # pay.hotmart.com se usa ese; si no, queda el código corto (la oferta puede partirse)
+            pay = next((u for u in [*p.cadena, p.url_final] if _host(u) == "pay.hotmart.com"), None)
+            if pay:
+                destino.checkout = pay
     destino.tracker = detectar_tracker([*p.cadena, *p.peticiones, *urls_en_html(p.html)])
     destino.vsl = p.reproductor
     destino.cloaker, destino.motivo = _cloaker(p.url_final, p, pedir_como_robot, real)
@@ -473,4 +498,6 @@ def resolver_destino(
             precio = None
     if precio:
         destino.precio, destino.moneda = precio
+        if destino.moneda is None:
+            destino.motivo = "; ".join(m for m in (destino.motivo, "no medido: símbolo $ ambiguo") if m)
     return destino

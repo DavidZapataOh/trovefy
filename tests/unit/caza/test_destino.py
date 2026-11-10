@@ -250,7 +250,72 @@ def test_cloaker_spa_es_no_medido():
 
 
 def test_precio_cuotas_sin_x_y_envio():
-    assert extraer_precio("3 cuotas de $ 33 o $ 99") == (99.0, "USD")
+    assert extraer_precio("3 cuotas de $ 33 o $ 99") == (99.0, None)
     assert extraer_precio("3 parcelas de R$ 33,00 ou R$ 97,00") == (97.0, "BRL")
     assert extraer_precio("Envío 2,50 € Total 29 €") == (29.0, "EUR")
-    assert extraer_precio("Shipping $5 Price $40") == (40.0, "USD")
+    assert extraer_precio("Shipping $5 Price $40") == (40.0, None)
+
+
+def test_moneda_solo_usd_con_senal_explicita():
+    assert extraer_precio("Precio $ 17.000") == (17000.0, None)
+    assert extraer_precio("MXN $499") == (499.0, "MXN")
+    assert extraer_precio("$499 ARS") == (499.0, "ARS")
+    assert extraer_precio("US$ 17") == (17.0, "USD")
+    assert extraer_precio("17 USD") == (17.0, "USD")
+    assert extraer_precio("17 dólares") == (17.0, "USD")
+    assert extraer_precio("COP $ 59.900") == (59900.0, "COP")
+    assert extraer_precio("CLP 9.990") == (9990.0, "CLP")
+    assert extraer_precio("S/ 50 PEN") == (50.0, "PEN")
+    assert extraer_precio("UYU 450") == (450.0, "UYU")
+
+
+def test_resolver_dolar_ambiguo_deja_moneda_none_y_motivo():
+    p = pagina(texto="Kit completo " * 20 + "Hoy $ 17.000", html='<a href="https://pay.hotmart.com/X1234567Y">c</a>')
+    d = resolver_destino("https://tienda.example.com/", Falso(p), robot_igual)
+    assert d.precio == 17000.0 and d.moneda is None and "símbolo $ ambiguo" in d.motivo
+    assert veredicto_landing(d) == "modelable"
+
+
+def test_hotm_art_usa_codigo_de_pay_si_la_cadena_llega():
+    p = pagina(cadena=["https://hotm.art/AbCd", "https://pay.hotmart.com/X1234567Y?off=1"],
+               url_final="https://pay.hotmart.com/X1234567Y")
+    d = resolver_destino("https://tienda.example.com/", Falso(p), robot_igual)
+    assert clave_oferta(d.url_final, d.checkout) == "hotmart:X1234567Y"
+    p = pagina(cadena=["https://hotm.art/AbCd"])
+    d = resolver_destino("https://tienda.example.com/", Falso(p), robot_igual)
+    assert clave_oferta(d.url_final, d.checkout) == "hotmart:AbCd"  # sin llegar a pay.: código corto
+
+
+def test_instagram_l_se_desenvuelve():
+    u = "https://l.instagram.com/?u=https%3A%2F%2Ftienda.example.com%2Fx&e=AT0"
+    assert deshacer_redireccion_fb(u) == "https://tienda.example.com/x"
+
+
+def test_filtro_de_rutas_del_navegador():
+    from trovify.caza.destino import _filtrar_ruta
+
+    class Ruta:
+        def __init__(self, url):
+            self.request = type("R", (), {"url": url})()
+            self.accion = None
+
+        def abort(self):
+            self.accion = "abort"
+
+        def continue_(self):
+            self.accion = "continue"
+
+    esperado = {
+        "https://tienda.example.com/a.js": "continue",
+        "data:image/png;base64,AAAA": "continue",
+        "https://connect.facebook.net/x.js": "abort",
+        "https://www.facebook.com/tr": "abort",
+        "https://l.instagram.com/?u=x": "abort",
+        "http://127.0.0.1:9/": "abort",
+        "http://192.168.0.2/": "abort",
+        "file:///etc/passwd": "abort",
+    }
+    for url, accion in esperado.items():
+        r = Ruta(url)
+        _filtrar_ruta(r)
+        assert r.accion == accion, url
