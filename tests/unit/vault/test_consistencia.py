@@ -41,3 +41,21 @@ def test_paginas_de_wiki_con_frontmatter_y_enlazadas(tmp_path):
         meta, _ = leer(p)
         assert "tipo" in meta and "fecha" in meta and ("fuente" in meta or "fuentes" in meta), p
         assert f"[[{p.relative_to(v).with_suffix('').as_posix()}]]" in indice, p
+
+
+def test_valores_de_las_reglas_coinciden_con_el_yaml():
+    from pathlib import Path
+
+    import yaml
+
+    raiz = Path(__file__).resolve().parents[3] / "templates" / "cerebro"
+    umbrales = yaml.safe_load((raiz / "config/umbrales.yaml").read_text(encoding="utf-8"))
+    pares = 0
+    for pagina in sorted((raiz / "wiki/reglas").glob("R-*.md")):
+        for clave, valor in re.findall(r"`([a-z0-9_.]+)` \(([0-9][0-9.,]*)\)", pagina.read_text(encoding="utf-8")):
+            assert clave in umbrales, f"{pagina.name}: clave {clave} no existe"
+            assert float(valor.replace(",", ".")) == float(umbrales[clave]["valor"]), (
+                f"{pagina.name}: {clave} ({valor}) != {umbrales[clave]['valor']}"
+            )
+            pares += 1
+    assert pares >= 10

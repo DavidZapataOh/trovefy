@@ -16,7 +16,7 @@ Con un gasto de al menos `corte.anuncio.gasto_usd` (3) US$ en un anuncio **y** (
 
 ## Por qué
 
-Con US$ 3 ya hay datos para saber si un anuncio lleva a pagos iniciados, y esperar más solo quema capital. Gana sobre los 2 US$ de T3 por tener más señal. El CTR solo engaña: un clic barato que no llega al pago no vale nada.
+El corte de US$ 3 gana sobre los 2–3 US$ de las demás fuentes y sobre el CPC > 0,6 combinado con CPM flojo, y gana L2 + S1 (diseño §4.1, fila «Corte de anuncio»). «Nunca solo por el CTR» es parte de la regla del diseño §4.1; el motivo no consta en los vídeos.
 
 ## Cómo se aplica
 

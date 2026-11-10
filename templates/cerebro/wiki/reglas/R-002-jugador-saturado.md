@@ -16,7 +16,7 @@ A partir de `caza.saturado.activos_jugador` (150) anuncios activos de un mismo j
 
 ## Por qué
 
-Un jugador con muchísimos anuncios activos copa la atención y los precios de puja del nicho. Entrar contra él cuesta más y deja menos margen. El aviso no prohíbe la oferta; obliga a decidirlo con los ojos abiertos.
+Más de 150–200 anuncios activos de un mismo jugador lo hacen «saturado»: sirve como fuente, no como rival de frente (diseño §4.3). Criterio del diseño (sin fuente en los vídeos): el aviso no prohíbe la oferta; obliga a decidirlo con los ojos abiertos.
 
 ## Cómo se aplica
 

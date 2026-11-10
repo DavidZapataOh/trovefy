@@ -16,7 +16,7 @@ El test es ABO: `test.conjuntos` (5) conjuntos × 1 anuncio × `test.presupuesto
 
 ## Por qué
 
-Los vídeos dan ABO 5×6, CBO 1-1-10×30, ABO 4–5×5 y ABO 5.5. Con US$ 500 gana ABO 4–5×5 de Candy y Franco: es lo que el capital permite. El `spend_cap` de 30 son los 25 del corte (R-006) más margen por el sobregasto de Meta. La CBO 1-1-10 no se usa en el mes 1.
+Los vídeos dan ABO 5×6, CBO 1-1-10×30, ABO 4–5×5 y ABO 5.5; con US$ 500 gana ABO 4–5×5 de Candy y Franco, por capital (diseño §4.1, fila «Estructura del test»). La CBO 1-1-10 no se usa en el mes 1 por el capital [D-08]. El `spend_cap` de 30 son los 25 del corte sin ventas más un margen para el sobregasto de Meta (diseño §4.14).
 
 ## Cómo se aplica
 

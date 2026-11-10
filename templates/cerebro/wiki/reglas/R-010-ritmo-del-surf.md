@@ -16,7 +16,7 @@ El surf sube el presupuesto un `surf.paso_pct` (0,3) por paso (fracción), un pa
 
 ## Por qué
 
-T3 sube +30 %/h o ×2 y S sube +50 %/2 h. Un paso de 30 % cada 2 h limita el sobregasto de Meta y respeta el reinicio del aprendizaje. Pausar de noche rompe el aprendizaje; devolver a la base a las 23:00 limita el gasto sin pausar.
+T3 sube +30 %/h o ×2 y S sube +50 %/2 h; el diseño fija +30 % por paso, un paso cada 2 h como máximo, con tope de +50 % (diseño §4.1, fila «Ritmo del surf», gana HTML + fluxo). Un cambio de presupuesto de más del 20 % reinicia el aprendizaje de Meta (notas de investigación, auditoría de repos, field guide de YSY-99), por eso cada propuesta indica si reinicia el aprendizaje (diseño §3.4, regla 4). Sin pausar de noche y con vuelta a la base a las 23:00 locales (diseño §4.1, fila «Noche»); el motivo no consta en los vídeos.
 
 ## Cómo se aplica
 
