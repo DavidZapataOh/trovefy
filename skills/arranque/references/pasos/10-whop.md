@@ -4,7 +4,7 @@
 Poder cobrar en dólares en Impultienda con Whop y retirar el dinero a tu banco en Colombia.
 
 **Antes de empezar**
-- Paso 09 verificado.
+- Paso 09 hecho (`verificado`, o `hecho` con «patrón sin confirmar»).
 - **Antes de hacer el KYC, comprueba que Whop paga a Colombia.** La verificación de identidad se hace una vez y con tus documentos reales: no la empieces si el pago a tu país no está confirmado. `trovify arranque verificar 10` lo comprueba por ti en la página pública de Whop (https://docs.whop.com/manage-your-business/manage-payouts/set-up-payouts).
 - Si la documentación de Whop no lista a Colombia, el verificador te lo dice y recomienda el paso 10b (Hotmart). Es una lectura de documentación: confírmalo conmigo y, si estás de acuerdo, marca el paso 10 como **bloqueado** (`trovify arranque bloqueado 10 --motivo "Whop no paga a Colombia"`); entonces el siguiente paso es el 10b.
 - Tu cédula y la cuenta bancaria colombiana a tu nombre.
@@ -32,4 +32,5 @@ Poder cobrar en dólares en Impultienda con Whop y retirar el dinero a tu banco 
 **Cómo se verifica**
 Al verificar se abre una ventana del navegador de Trovify unos segundos; no la toques.
 `trovify arranque verificar 10` primero lee (sin navegador) la lista pública de países de pago de Whop. Si Colombia no está en una lista que se reconoce, recomienda el 10b (no bloquea nada por su cuenta). Si está, lee en el panel de Whop el estado del KYC y en la pantalla de pasarelas de Impultienda que Whop esté conectado. Es ✓ solo con las tres cosas: Colombia en la lista, KYC aprobado y Whop conectado.
-Mientras los mapas no estén confirmados con tus pantallas reales, el resultado es «no medido» y la captura queda en `config/evidencia/provisional/`.
+Mientras los mapas no estén confirmados con tus pantallas reales, el resultado es «no medido» y la captura y el texto leído quedan en `config/evidencia/provisional/`.
+Para confirmarlo, tras tu primera captura real: `trovify arranque confirmar 10` muestra lo que Trovify leyó de tu pantalla; si coincide con lo que ves y lo dices, Claude ejecuta `trovify arranque confirmar 10 --respuesta si` y vuelve a verificar. Si no coincide, hay que ajustar el patrón en el repo (no es tarea tuya).

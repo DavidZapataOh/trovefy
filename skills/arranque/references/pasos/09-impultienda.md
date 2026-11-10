@@ -4,7 +4,7 @@
 Tener tu cuenta de Impultienda en el plan **Free** con una tienda en el idioma del primer mercado, para vender con su checkout, bump y upsell.
 
 **Antes de empezar**
-- Pasos 07 y 08 verificados (dominio listo).
+- Paso 07 verificado y paso 08 hecho (`verificado`, o `hecho` con «patrón sin confirmar» / «falta confirmar el estado en Business Settings») (dominio listo).
 - El plan **Free** es gratis y sin tarjeta: 1 tienda, 1 bono y 1 upsell, comisión de Impultienda del 5 % (https://impultienda.ar/, leída el 2026-11-10). Con eso basta para empezar.
 - La prueba de 45 días de Starter, Pro o Max (pide tarjeta; no cobra hasta que termina) **solo se usa si hace falta una segunda tienda** u otro límite que el Free no cubra. No la actives por costumbre.
 - Qué idioma tendrá la tienda: el del primer mercado que elegiste con `/trovify:auditar`.
@@ -27,4 +27,5 @@ Tener tu cuenta de Impultienda en el plan **Free** con una tienda en el idioma d
 **Cómo se verifica**
 Al verificar se abre una ventana del navegador de Trovify unos segundos; no la toques.
 `trovify arranque verificar 09` lee solo (sin hacer clics) las pantallas de plan, tiendas y pasarelas con el perfil de Impultienda, según el mapa `templates/impultienda/mapa.yaml`. Es ✓ si el plan está activo y hay al menos una tienda, y guarda el plan, el número de tiendas y las pasarelas conectadas (el paso 10 las usa).
-Mientras el mapa no esté confirmado con tu pantalla real (`capturado: null`), el resultado es «no medido» y la captura queda en `config/evidencia/provisional/`.
+Mientras el mapa no esté confirmado con tu pantalla real (`capturado: null`), el resultado es «no medido» y las capturas y el texto de las tres pantallas quedan en `config/evidencia/provisional/`.
+Para confirmarlo, tras tu primera captura real: `trovify arranque confirmar 09` muestra lo que Trovify leyó de tu pantalla; si coincide con lo que ves y lo dices, Claude ejecuta `trovify arranque confirmar 09 --respuesta si` y vuelve a verificar. Si no coincide, hay que ajustar el patrón en el repo (no es tarea tuya).

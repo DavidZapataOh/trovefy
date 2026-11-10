@@ -4,7 +4,7 @@
 Crear tu cuenta publicitaria de Meta con la moneda y la zona horaria correctas y un límite de gasto, para que nada se gaste sin que tú lo decidas.
 
 **Antes de empezar**
-- Pasos 04 y 05 verificados.
+- Pasos 04 y 05 hechos (`verificado`, o `hecho` con «patrón sin confirmar»).
 - **Antes de crear nada: la moneda (USD) y la zona horaria no se pueden cambiar después.** La zona horaria tiene que ser la del primer mercado que elijas con `/trovify:auditar`; si todavía no lo has elegido, para aquí y hazlo primero. Si te equivocas, Meta cierra la cuenta y hay que crear otra.
 - Una tarjeta colombiana con compras internacionales activadas (llama a tu banco si no estás seguro).
 - Elige **pago automático con tarjeta**, no fondos prepagados ni saldo manual: Meta no permite límite de gasto de la cuenta en una cuenta prepagada (https://www.facebook.com/business/help/141820733085330).
@@ -29,5 +29,6 @@ Crear tu cuenta publicitaria de Meta con la moneda y la zona horaria correctas y
 **Cómo se verifica**
 Al verificar se abre una ventana del navegador de Trovify unos segundos; no la toques.
 `trovify arranque verificar 06` abre los Ajustes de pago de la cuenta con el perfil de Meta, lee la moneda, la zona horaria y el límite de gasto, y los compara con el mercado elegido y con el máximo del umbral. Guarda la captura en `config/evidencia/06-…` y el número de la cuenta como `act_id`.
-Mientras el patrón no esté confirmado con tu pantalla real, el resultado es «no medido: patrón sin confirmar con tu pantalla real» y la captura queda en `config/evidencia/provisional/`; el paso no se verifica todavía.
+Mientras el patrón no esté confirmado con tu pantalla real, el resultado es «no medido: patrón sin confirmar con tu pantalla real» y la captura y el texto leído quedan en `config/evidencia/provisional/`; el paso no se verifica todavía.
+Para confirmarlo, tras tu primera captura real: `trovify arranque confirmar 06` muestra lo que Trovify leyó de tu pantalla; si coincide con lo que ves y lo dices, Claude ejecuta `trovify arranque confirmar 06 --respuesta si` y vuelve a verificar. Si no coincide, hay que ajustar el patrón en el repo (no es tarea tuya).
 La verificación completa por API (`currency`, `timezone_name`, `spend_cap`, `account_status`, `min_daily_budget`) llega en la Fase 1.

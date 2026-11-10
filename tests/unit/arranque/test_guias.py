@@ -116,3 +116,30 @@ def test_guias_10_y_10b():
     assert "checkout, el order bump y el upsell son de Hotmart" in t10b and "Cloudflare Pages" in t10b
     assert "US$ 50" in t10b and "HotPay Internacional" in t10b and "Lemon Squeezy" in t10b
     assert "Lemon Squeezy" not in _t("09-impultienda.md") + t10
+
+
+def test_prerrequisitos_aceptan_patron_sin_confirmar():
+    for n in ["05-pagina.md", "06-cuenta-publicitaria.md", "08-verificar-dominio.md", "09-impultienda.md", "10-whop.md"]:
+        antes = _t(n).split("**Antes de empezar**")[1].split("**Pasos**")[0]
+        assert "patrón sin confirmar" in antes and "verificado" in antes, n
+
+
+def test_guias_con_patron_explican_confirmar():
+    for n in ["04-business.md", "05-pagina.md", "06-cuenta-publicitaria.md", "08-verificar-dominio.md",
+              "09-impultienda.md", "10-whop.md", "10b-hotmart.md"]:
+        paso = n.split("-")[0]
+        assert f"trovify arranque confirmar {paso}" in _t(n), n
+
+
+def test_skill_procedimiento_de_confirmacion_y_sin_plan_05_obsoleto():
+    t = (RAIZ / "SKILL.md").read_text()
+    assert "llega con el plan 05" not in t and "después del plan 05" not in t
+    assert "trovify arranque confirmar <paso> --respuesta si" in t
+    assert "patrón sin confirmar" in t and "nunca responde por el usuario" in t
+    assert "config/evidencia/provisional/" in t
+
+
+def test_entorno_arreglo_de_playwright_con_cd():
+    t = (RAIZ.parents[1] / "scripts/trovify/arranque/verificadores/entorno.py").read_text()
+    assert "plan 05" not in t
+    assert "cd ~/trovefy/trovify && uv run playwright install chromium" in t

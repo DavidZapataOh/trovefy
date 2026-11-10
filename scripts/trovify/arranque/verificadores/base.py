@@ -83,7 +83,8 @@ class Confirmacion:
 
     Mientras `fecha` sea None el patrón sale de la documentación o del encargo, no de la pantalla
     real del usuario: el verificador no certifica (ni suspende) nada con él; devuelve «no medido».
-    Se confirma en un commit posterior a la primera captura real, poniendo la fecha.
+    Se confirma en un commit posterior a la primera captura real, poniendo la fecha, o con la confirmación
+    del usuario en el vault (`trovify arranque confirmar`, ver `confirmacion_de`).
     """
 
     fecha: str | None

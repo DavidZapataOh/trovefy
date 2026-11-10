@@ -1,7 +1,8 @@
 # Mapa de pantallas de Impultienda (paso 09). Solo lectura: Trovify no hace clics aquí.
 # capturado: null = construido desde la página pública, NO confirmado con tu pantalla real.
 # Mientras sea null, el verificador del paso 09 devuelve «no medido» y guarda la captura como provisional.
-# Al hacer el paso, captura tus pantallas, ajusta firmas y patrones y pon aquí la fecha (AAAA-MM-DD) en un commit.
+# Se confirma de dos maneras equivalentes: el usuario, con `trovify arranque confirmar 09` sobre el texto provisional de
+# su pantalla real (queda en config/confirmaciones.yaml del vault), o un commit que ajusta firmas y patrones y pone aquí la fecha.
 capturado: null
 fuente: >-
   https://impultienda.ar/ (página pública, leída el 2026-11-10): planes Free/Starter/Pro/Max/Unlimited,

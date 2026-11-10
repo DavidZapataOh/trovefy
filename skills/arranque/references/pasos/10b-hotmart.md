@@ -4,7 +4,7 @@
 Cobrar con Hotmart y retirar a tu banco colombiano con HotPay Internacional, si Whop no te sirve (paso 10 bloqueado).
 
 **Antes de empezar**
-- Solo si el paso 10 está bloqueado o Whop no te funciona; si no, sáltalo.
+- Solo si el paso 10 está bloqueado (si Whop no te funciona, márcalo antes: `trovify arranque bloqueado 10 --motivo "<por qué>"`); si no, sáltalo.
 - **Con Hotmart cambia cómo se vende:** el checkout, el order bump y el upsell son de Hotmart, no de Impultienda. La landing (la página de venta) va aparte, en Cloudflare Pages, y su botón lleva al checkout de Hotmart. Piensa en esto antes de montar el embudo.
 - **Retiro mínimo: US$ 50** (o € 50) para cuentas internacionales, con una tarifa variable según el monto (https://help.hotmart.com/es/article/Como-sacar-a-minha-comiss%C3%A3o-/216440207, leída el 2026-11-10). Las cuentas Wise no se aceptan.
 - Hotmart solo muestra el formulario de **cuenta bancaria después de tu primera venta**, y el banco debe estar en Colombia y a tu nombre (https://help.hotmart.com/es/article/23867226765709/). Por eso este paso puede quedar «hecho» pero no verificado hasta esa primera venta.
@@ -28,4 +28,5 @@ Cobrar con Hotmart y retirar a tu banco colombiano con HotPay Internacional, si 
 **Cómo se verifica**
 Al verificar se abre una ventana del navegador de Trovify unos segundos; no la toques.
 `trovify arranque verificar 10b` lee solo (sin clics) tus productos y tus datos financieros con el perfil de Hotmart, según `templates/hotmart/mapa.yaml`. Sin cuenta bancaria todavía el resultado es «pendiente de primera venta» (no medido, no fallo). Es ✓ si hay al menos un producto y una cuenta bancaria colombiana aprobada para el retiro de HotPay Internacional.
-Mientras el mapa no esté confirmado con tu pantalla real, el resultado es «no medido» y la captura queda en `config/evidencia/provisional/`.
+Mientras el mapa no esté confirmado con tu pantalla real, el resultado es «no medido» y las capturas y el texto de las dos pantallas quedan en `config/evidencia/provisional/`.
+Para confirmarlo, tras tu primera captura real: `trovify arranque confirmar 10b` muestra lo que Trovify leyó de tu pantalla; si coincide con lo que ves y lo dices, Claude ejecuta `trovify arranque confirmar 10b --respuesta si` y vuelve a verificar. Si no coincide, hay que ajustar el patrón en el repo (no es tarea tuya).

@@ -4,7 +4,7 @@
 Que Meta confirme que el dominio es tuyo, requisito para usarlo en anuncios y eventos.
 
 **Antes de empezar**
-- Pasos 04 y 07 verificados.
+- Paso 07 verificado y paso 04 hecho (`verificado`, o `hecho` con «patrón sin confirmar»).
 - Sin VPN.
 
 **Pasos**
@@ -26,4 +26,5 @@ Que Meta confirme que el dominio es tuyo, requisito para usarlo en anuncios y ev
 
 **Cómo se verifica**
 `trovify arranque verificar 08` primero busca por DNS sobre HTTPS un TXT que empiece por `facebook-domain-verification=`; si falta, falla sin abrir el navegador. Si está, abre una ventana del navegador de Trovify unos segundos (no la toques) en `business.facebook.com/settings/owned-domains` y busca tu dominio con estado verificado; guarda captura y datos en `config/evidencia/`.
-Mientras ese patrón no esté confirmado con tu pantalla real, el resultado es «no medido» aunque el TXT esté, porque el TXT solo no es la verificación de Meta; la captura queda en `config/evidencia/provisional/`.
+Mientras ese patrón no esté confirmado con tu pantalla real, el resultado es «no medido» aunque el TXT esté, porque el TXT solo no es la verificación de Meta; la captura y el texto leído quedan en `config/evidencia/provisional/`.
+Para confirmarlo, tras tu primera captura real: `trovify arranque confirmar 08` muestra lo que Trovify leyó de tu pantalla; si coincide con lo que ves y lo dices, Claude ejecuta `trovify arranque confirmar 08 --respuesta si` y vuelve a verificar. Si no coincide, hay que ajustar el patrón en el repo (no es tarea tuya).

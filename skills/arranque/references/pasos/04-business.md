@@ -25,4 +25,5 @@ Crear tu portfolio comercial de Meta, el contenedor de tus páginas y cuentas pu
 **Cómo se verifica**
 Al verificar se abre una ventana del navegador de Trovify unos segundos; no la toques.
 `trovify arranque verificar 04` abre `https://business.facebook.com/settings/` con el perfil de Meta, lee el `business_id=` de la URL final y guarda una captura (`config/evidencia/04-captura-<fecha>.png`) y el ID. Si la sesión ha caducado dice «no medido» en vez de fallar.
-Mientras el patrón no esté confirmado con tu pantalla real, el resultado es «no medido: patrón sin confirmar con tu pantalla real» y la captura queda en `config/evidencia/provisional/`; el paso no se verifica todavía.
+Mientras el patrón no esté confirmado con tu pantalla real, el resultado es «no medido: patrón sin confirmar con tu pantalla real» y la captura y el texto leído quedan en `config/evidencia/provisional/`; el paso no se verifica todavía.
+Para confirmarlo, tras tu primera captura real: `trovify arranque confirmar 04` muestra lo que Trovify leyó de tu pantalla; si coincide con lo que ves y lo dices, Claude ejecuta `trovify arranque confirmar 04 --respuesta si` y vuelve a verificar. Si no coincide, hay que ajustar el patrón en el repo (no es tarea tuya).
