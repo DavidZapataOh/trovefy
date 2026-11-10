@@ -175,6 +175,7 @@ class ClienteBibliotecaPublica:
         self.cache = cache
         self._bloqueada = False
         self._errores_seguidos = 0
+        self._parada: str | None = None  # motivo de la parada por errores; una vez parada, no se navega más
 
     def buscar(
         self,
@@ -186,8 +187,8 @@ class ClienteBibliotecaPublica:
     ) -> ResultadoBusqueda:
         if self._bloqueada:
             raise SesionBloqueada("Meta bloqueó la sesión: se detiene la caza; no se fuerza ni se reintenta.")
-        if self._errores_seguidos >= _MAX_ERRORES_SEGUIDOS:
-            raise ParadaPorErrores(_MOTIVO_ERRORES)
+        if self._parada is not None:
+            raise ParadaPorErrores(self._parada)
         url = url_biblioteca(pais, q, page_id, estado)
         if self.cache is not None:
             en_cache = self.cache.leer(url, max_anuncios)
@@ -197,7 +198,11 @@ class ClienteBibliotecaPublica:
                 return en_cache
         self.presupuesto.antes_de_buscar()
         desplazar = min(_MAX_DESPLAZAMIENTOS, max(0, math.ceil(max_anuncios / _POR_PAGINA) - 1))
-        pagina = self._abrir_con_reintentos(url, desplazar)
+        try:
+            pagina = self._abrir_con_reintentos(url, desplazar)
+        except ParadaPorErrores as exc:
+            self._parada = str(exc)  # parada persistente: la siguiente búsqueda no vuelve a tocar Meta
+            raise
         self.presupuesto.exito()  # la página cargó: se acaba la racha de errores de red
         try:
             r = self._interpretar(url, pais, pagina, max_anuncios)
@@ -216,7 +221,8 @@ class ClienteBibliotecaPublica:
             else:
                 self._errores_seguidos += 1
                 if self._errores_seguidos >= _MAX_ERRORES_SEGUIDOS:
-                    raise ParadaPorErrores(_MOTIVO_ERRORES)
+                    self._parada = f"{_MOTIVO_ERRORES} (última: {r.motivo})" if r.motivo else _MOTIVO_ERRORES
+                    raise ParadaPorErrores(self._parada)
         return r
 
     def _abrir_con_reintentos(self, url: str, desplazar: int) -> PaginaCapturada:

@@ -289,3 +289,30 @@ def test_cota_inferior_menor_que_el_tope():
     r = cliente([_pagina_con_total(None, ">1.000 resultados")]).buscar("RO", q="x")
     assert r.total_aprox == 1000 and "más de 1.000 (cota inferior)" in r.motivo
     assert "tope" not in r.motivo
+
+
+def test_parada_por_errores_de_red_es_persistente():
+    esperas = []
+    ok = de_fixture("pagina_therapy_toolkit.json")
+    c = cliente([ErrorDeRed("a"), ErrorDeRed("b"), ErrorDeRed("c"), ok, ok], esperas=esperas)
+    with pytest.raises(ParadaPorErrores):
+        c.buscar("RO", q="x")
+    navegaciones, usadas, n_esperas = len(c.navegador.llamadas), c.presupuesto.usadas, len(esperas)
+    for q in ("y", "z"):
+        with pytest.raises(ParadaPorErrores):
+            c.buscar("RO", q=q)
+    assert len(c.navegador.llamadas) == navegaciones == 3
+    assert c.presupuesto.usadas == usadas and len(esperas) == n_esperas
+
+
+def test_tercer_error_conserva_su_motivo():
+    def roto():
+        return PaginaCapturada("https://www.facebook.com/ads/library/?q=x", "<html></html>", "", [])
+
+    c = cliente([roto(), roto(), roto()])
+    c.buscar("RO", q="a")
+    c.buscar("RO", q="b")
+    with pytest.raises(ParadaPorErrores, match="última: formato de la Biblioteca no reconocido"):
+        c.buscar("RO", q="c")
+    with pytest.raises(ParadaPorErrores, match="última: formato de la Biblioteca no reconocido"):
+        c.buscar("RO", q="d")
