@@ -110,9 +110,9 @@ def test_cache_acierto_no_navega_ni_gasta(tmp_path):
     cache = Cache(tmp_path)
     esperas = []
     c = cliente([de_fixture("pagina_therapy_toolkit.json")], cache, esperas)
-    r1 = c.buscar("ALL", page_id="102506312071455")
+    r1 = c.buscar("ALL", page_id="102506312071455", max_anuncios=5)
     n_esperas, usadas = len(esperas), c.presupuesto.usadas
-    r2 = c.buscar("ALL", page_id="102506312071455")
+    r2 = c.buscar("ALL", page_id="102506312071455", max_anuncios=5)
     assert len(c.navegador.llamadas) == 1
     assert c.presupuesto.usadas == usadas and len(esperas) == n_esperas
     assert r2.estado == "ok" and r2.anuncios == r1.anuncios and r2.total_aprox == r1.total_aprox
@@ -159,8 +159,8 @@ def test_cache_corrupta_es_fallo(tmp_path):
 def test_cache_ida_y_vuelta_y_sin_medios(tmp_path):
     r = cliente([de_fixture("pagina_therapy_toolkit.json")]).buscar("ALL", page_id="102506312071455")
     cache = Cache(tmp_path)
-    cache.guardar(r.url, r)
-    assert cache.leer(r.url).anuncios == r.anuncios
+    cache.guardar(r.url, r, 5)
+    assert cache.leer(r.url, 5).anuncios == r.anuncios
     contenido = "".join(f.read_text() for f in tmp_path.iterdir())
     assert "fbcdn" not in contenido and "scontent" not in contenido
 
@@ -211,3 +211,81 @@ def test_max_anuncios_recorta_y_decide_desplazamiento():
     r = c.buscar("ALL", page_id="102506312071455", max_anuncios=5)
     assert len(r.anuncios) == 5
     assert c.navegador.llamadas[0][1] == 0
+
+
+def test_cache_distingue_max_anuncios(tmp_path):
+    cache = Cache(tmp_path)
+    c = cliente([de_fixture("pagina_therapy_toolkit.json"), de_fixture("pagina_therapy_toolkit.json")], cache)
+    r5 = c.buscar("ALL", page_id="102506312071455", max_anuncios=5)
+    r60 = c.buscar("ALL", page_id="102506312071455", max_anuncios=60)
+    assert len(r5.anuncios) == 5 and len(r60.anuncios) > 5
+    assert len(c.navegador.llamadas) == 2
+
+
+def test_cache_no_sirve_resultado_incompleto(tmp_path):
+    url = "https://www.facebook.com/ads/library/?q=x"
+    base = cliente([de_fixture("pagina_therapy_toolkit.json")]).buscar("ALL", page_id="102506312071455")
+    parcial = ResultadoBusqueda("ok", url, 500, base.anuncios[:3], None, datetime.now(UTC))
+    exhaustivo = ResultadoBusqueda("ok", url, 3, base.anuncios[:3], None, datetime.now(UTC))
+    cache = Cache(tmp_path)
+    cache.guardar(url, parcial, 60)
+    assert cache.leer(url, 60) is None
+    cache.guardar(url, exhaustivo, 60)
+    assert cache.leer(url, 60) is not None
+
+
+def test_error_cargado_reinicia_errores_de_red():
+    roto = PaginaCapturada("https://www.facebook.com/ads/library/?q=x", "<html></html>", "", [])
+    ok = de_fixture("pagina_therapy_toolkit.json")
+    c = cliente([ErrorDeRed("a"), ErrorDeRed("b"), roto, ErrorDeRed("c"), ok])
+    assert c.buscar("RO", q="a").estado == "error"
+    assert c.buscar("ALL", page_id="1").estado == "ok"
+
+
+@pytest.mark.parametrize("codigo", [429, 403])
+def test_http_limitado_es_bloqueo(codigo):
+    p = PaginaCapturada("https://www.facebook.com/ads/library/?q=x", "<html></html>", "", [], codigo)
+    c = cliente([p])
+    r = c.buscar("RO", q="x")
+    assert r.estado == "bloqueado" and f"HTTP {codigo}" in r.motivo
+    assert c.presupuesto.bloqueos == 1
+    with pytest.raises(SesionBloqueada):
+        c.buscar("RO", q="y")
+
+
+def test_http_5xx_es_error_de_red():
+    esperas = []
+    p500 = PaginaCapturada("https://www.facebook.com/ads/library/?q=x", "", "", [], 503)
+    c = cliente([p500, de_fixture("pagina_therapy_toolkit.json")], esperas=esperas)
+    assert c.buscar("ALL", page_id="1").estado == "ok"
+    assert esperas[0] == 30
+
+
+def test_tres_errores_seguidos_paran():
+    def roto():
+        return PaginaCapturada("https://www.facebook.com/ads/library/?q=x", "<html></html>", "", [])
+
+    c = cliente([roto(), roto(), roto(), roto()])
+    assert c.buscar("RO", q="a").estado == "error"
+    assert c.buscar("RO", q="b").estado == "error"
+    with pytest.raises(ParadaPorErrores, match="3 búsquedas seguidas con error"):
+        c.buscar("RO", q="c")
+    assert len(c.navegador.llamadas) == 3
+
+
+def test_ok_reinicia_errores_seguidos():
+    def roto():
+        return PaginaCapturada("https://www.facebook.com/ads/library/?q=x", "<html></html>", "", [])
+
+    c = cliente([roto(), roto(), de_fixture("vacio.json"), roto(), roto()])
+    assert c.buscar("RO", q="a").estado == "error"
+    assert c.buscar("RO", q="b").estado == "error"
+    assert c.buscar("RO", q="c").estado == "vacio"
+    assert c.buscar("RO", q="d").estado == "error"
+    assert c.buscar("RO", q="e").estado == "error"
+
+
+def test_cota_inferior_menor_que_el_tope():
+    r = cliente([_pagina_con_total(None, ">1.000 resultados")]).buscar("RO", q="x")
+    assert r.total_aprox == 1000 and "más de 1.000 (cota inferior)" in r.motivo
+    assert "tope" not in r.motivo

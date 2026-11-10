@@ -49,14 +49,20 @@ class Cache:
     def por_defecto(cls) -> Cache:
         return cls(vault_root() / "data" / "cache" / "biblioteca")
 
-    def _ruta(self, url: str) -> Path:
-        return self.dir / (hashlib.sha256(url.encode("utf-8")).hexdigest() + ".json")
+    def _ruta(self, url: str, max_anuncios: int) -> Path:
+        # La clave incluye cuántos anuncios se pidieron: una petición corta no envenena una larga.
+        clave = f"{url}|{max_anuncios}"
+        return self.dir / (hashlib.sha256(clave.encode("utf-8")).hexdigest() + ".json")
 
-    def leer(self, url: str) -> ResultadoBusqueda | None:
-        """El resultado guardado si existe, es de la misma URL y no ha caducado; si no, ``None``."""
+    def leer(self, url: str, max_anuncios: int = 60) -> ResultadoBusqueda | None:
+        """El resultado guardado si existe, es de la misma URL y petición, no ha caducado y está completo."""
         try:
-            d = json.loads(self._ruta(url).read_text(encoding="utf-8"))
+            d = json.loads(self._ruta(url, max_anuncios).read_text(encoding="utf-8"))
             if d["url"] != url or d["estado"] not in _GUARDABLES:
+                return None
+            n, total = len(d["anuncios"]), d["total_aprox"]
+            # Con menos anuncios de los pedidos, solo vale si era exhaustivo (no hay más páginas).
+            if d["estado"] == "ok" and n < max_anuncios and not (total is not None and total <= n):
                 return None
             capturado = datetime.fromisoformat(d["capturado_en"])
             if self._ahora() - capturado > self.ttl:
@@ -68,11 +74,11 @@ class Cache:
         except (OSError, ValueError, KeyError, TypeError):
             return None  # ausente o ilegible: es un fallo de caché, no un error
 
-    def guardar(self, url: str, r: ResultadoBusqueda) -> None:
+    def guardar(self, url: str, r: ResultadoBusqueda, max_anuncios: int = 60) -> None:
         if r.estado not in _GUARDABLES:
             return
         d = {
             "url": url, "estado": r.estado, "total_aprox": r.total_aprox, "motivo": r.motivo,
             "capturado_en": r.capturado_en.isoformat(), "anuncios": [_anuncio_a_dict(a) for a in r.anuncios],
         }
-        escribir_atomico(self._ruta(url), json.dumps(d, ensure_ascii=False, indent=1) + "\n")
+        escribir_atomico(self._ruta(url, max_anuncios), json.dumps(d, ensure_ascii=False, indent=1) + "\n")
