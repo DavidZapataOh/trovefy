@@ -23,6 +23,10 @@ def leer(ruta: Path) -> tuple[dict, str]:
     return meta, resto[fin + 1 + len(_LIMITE):]
 
 
-def escribir(ruta: Path, meta: dict, cuerpo: str) -> None:
+def renderizar(meta: dict, cuerpo: str) -> str:
     yaml_txt = yaml.safe_dump(meta, sort_keys=False, allow_unicode=True)
-    escribir_atomico(ruta, f"---\n{yaml_txt}---\n{cuerpo}")
+    return f"---\n{yaml_txt}---\n{cuerpo}"
+
+
+def escribir(ruta: Path, meta: dict, cuerpo: str) -> None:
+    escribir_atomico(ruta, renderizar(meta, cuerpo))

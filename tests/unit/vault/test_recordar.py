@@ -127,3 +127,67 @@ def test_cli_regla_errores(tmp_path, monkeypatch, capsys):
     f = tmp_path / "falta.json"; f.write_text("{}")
     assert cli.main(["cerebro", "regla", "--json", str(f)]) == 2
     assert capsys.readouterr().err
+
+
+def _snapshot(v):
+    return {str(p.relative_to(v)): p.read_bytes() for p in v.rglob("*") if p.is_file()}
+
+
+def test_claude_sin_marcador_no_cambia_nada(tmp_path):
+    v = _vault(tmp_path)
+    (v / "CLAUDE.md").write_text((v / "CLAUDE.md").read_text().replace("<!-- REGLAS:FIN -->", ""))
+    antes = _snapshot(v)
+    with pytest.raises(ValueError):
+        nueva_regla(v, "Corte a 20", "r", "p", "c", "U",
+                    umbrales={"corte.oferta.sin_ventas_usd": 20}, reemplaza=["R-006"])
+    assert _snapshot(v) == antes
+
+
+def test_index_ausente_no_cambia_nada(tmp_path):
+    v = _vault(tmp_path)
+    (v / "index.md").unlink()
+    antes = _snapshot(v)
+    with pytest.raises(ValueError):
+        nueva_regla(v, "Corte a 20", "r", "p", "c", "U",
+                    umbrales={"corte.oferta.sin_ventas_usd": 20}, reemplaza=["R-006"])
+    assert _snapshot(v) == antes
+
+
+def test_cli_vault_incompleto_sale_2(tmp_path, monkeypatch, capsys):
+    v = _vault(tmp_path)
+    (v / "index.md").unlink()
+    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    assert cli.main(["cerebro", "regla", "--json", _json(tmp_path)]) == 2
+    assert "index.md" in capsys.readouterr().err
+
+
+def test_slug_vacio_y_fecha_invalida(tmp_path, monkeypatch, capsys):
+    v = _vault(tmp_path)
+    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    assert cli.main(["cerebro", "regla", "--json", _json(tmp_path, titulo="¡¡")]) == 2
+    assert cli.main(["cerebro", "regla", "--json", _json(tmp_path, fecha="10/11/2026")]) == 2
+    assert not list((v / "wiki/reglas").glob("R-013*"))
+
+
+def test_simular_no_escribe_y_muestra_heredados(tmp_path, monkeypatch, capsys):
+    v = _vault(tmp_path)
+    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    j = _json(tmp_path, umbrales={"corte.oferta.sin_ventas_usd": 20}, reemplaza=["R-006"])
+    antes = _snapshot(v)
+    assert cli.main(["cerebro", "regla", "--simular", "--json", j]) == 0
+    out = capsys.readouterr().out
+    assert _snapshot(v) == antes
+    assert "R-013 pasa a ser dueña de corte.oferta.factor_cpa_be (valor sin cambios)" in out
+    assert "corte.oferta.sin_ventas_usd: 25 -> 20" in out
+    assert "config/umbrales.yaml" in out and "R-013-no-cazar-en-diciembre" in out
+
+
+def test_real_imprime_mismo_resumen(tmp_path, monkeypatch, capsys):
+    v = _vault(tmp_path)
+    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    j = _json(tmp_path, umbrales={"corte.oferta.sin_ventas_usd": 20}, reemplaza=["R-006"])
+    assert cli.main(["cerebro", "regla", "--json", j]) == 0
+    out = capsys.readouterr().out
+    assert "R-013 pasa a ser dueña de corte.oferta.factor_cpa_be (valor sin cambios)" in out
+    assert out.strip().endswith("R-013-no-cazar-en-diciembre.md")
+    assert consistencia(v) == []

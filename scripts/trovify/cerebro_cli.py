@@ -5,10 +5,12 @@ import json
 import sys
 from pathlib import Path
 
+import yaml
+
 from trovify.cli import registrar
 from trovify.vault.andamio import crear_vault
 from trovify.vault.permisos import escribir_settings
-from trovify.vault.reglas import ConflictoDeReglas, nueva_regla
+from trovify.vault.reglas import ConflictoDeReglas, aplicar_plan, planear_regla
 from trovify.vault.rutas import vault_root
 
 
@@ -21,6 +23,8 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     reg = sub.add_parser("regla", help="crea una regla fechada R-nnn desde un JSON")
     reg.add_argument("--json", required=True, metavar="ARCHIVO",
                      help="JSON con titulo, regla, porque, como, fuente (+ umbrales, reemplaza, fecha); «-» lee de stdin")
+    reg.add_argument("--simular", action="store_true",
+                     help="valida y muestra qué cambiaría, sin escribir nada")
     reg.add_argument("--vault", help="ruta del vault (por defecto, TROVIFY_VAULT o ~/trovify-cerebro)")
 
 
@@ -48,13 +52,24 @@ def _regla(args: argparse.Namespace, destino: Path) -> int:
     if sobran:
         return _error(f"campos desconocidos en el JSON: {', '.join(sobran)}")
     try:
-        ruta = nueva_regla(destino, **campos)
+        plan = planear_regla(destino, **campos)
+        if not args.simular:
+            aplicar_plan(plan)
     except ConflictoDeReglas as exc:
         print("Conflicto con reglas vigentes: " + " ".join(exc.ids))
         return 3
     except (ValueError, TypeError, AttributeError) as exc:
         return _error(str(exc))
-    print(ruta)
+    except yaml.YAMLError as exc:
+        return _error(f"un archivo del vault no es YAML válido ({exc})")
+    except OSError as exc:
+        return _error(f"no se pudo leer o escribir en el vault: {exc.strerror or exc}")
+    if args.simular:
+        print("Simulación: no se escribió nada.")
+    for linea in plan.resumen():
+        print(linea)
+    if not args.simular:
+        print(plan.ruta)
     return 0
 
 

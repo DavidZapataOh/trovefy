@@ -2,6 +2,7 @@
 
 import re
 import unicodedata
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -9,11 +10,12 @@ import yaml
 
 from trovify.config.umbrales import cargar
 from trovify.vault.escritura import ZONA_NEGOCIO, anadir_log, escribir_atomico
-from trovify.vault.frontmatter import escribir, leer
+from trovify.vault.frontmatter import leer, renderizar
 
 _INICIO = "<!-- REGLAS:INICIO -->"
 _FIN = "<!-- REGLAS:FIN -->"
 _ID = re.compile(r"R-(\d{3})")
+_FECHA = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 class ConflictoDeReglas(Exception):
@@ -82,7 +84,22 @@ def _marcar_reemplazada(texto: str, viejo: str, nuevo_enlace: str) -> str:
     return "\n".join(lineas)
 
 
-def nueva_regla(
+@dataclass
+class PlanRegla:
+    """Todo lo que `nueva_regla` escribiría, ya calculado en memoria."""
+
+    id: str
+    ruta: Path
+    vault: Path
+    titulo: str
+    escrituras: list[tuple[Path, str]] = field(default_factory=list)  # en orden de escritura
+    lineas: list[str] = field(default_factory=list)
+
+    def resumen(self) -> list[str]:
+        return list(self.lineas)
+
+
+def planear_regla(
     vault: Path,
     titulo: str,
     regla: str,
@@ -92,18 +109,30 @@ def nueva_regla(
     umbrales: dict[str, float] | None = None,
     reemplaza: list[str] | None = None,
     fecha: str | None = None,
-) -> Path:
-    """Crea la regla R-nnn siguiente, la indexa y actualiza umbrales.yaml.
-
-    Las reglas reemplazadas pasan a `estado: reemplazada`; los umbrales que citaban y que
-    la regla nueva no redefine pasan a ser suyos (solo cambia `regla`, no el valor).
-    """
+) -> PlanRegla:
+    """Valida todo y calcula los contenidos; no escribe nada."""
     vault = Path(vault)
     umbrales = dict(umbrales or {})
     reemplaza = list(reemplaza or [])
     fecha = fecha or datetime.now(ZONA_NEGOCIO).strftime("%Y-%m-%d")
+    if not _FECHA.fullmatch(fecha):
+        raise ValueError(f"La fecha «{fecha}» no tiene el formato AAAA-MM-DD")
+    slug = _slug(titulo)
+    if not slug:
+        raise ValueError(f"El título «{titulo}» no genera un nombre de archivo válido")
+
     ruta_u = vault / "config" / "umbrales.yaml"
-    existentes = cargar(ruta_u)
+    claude = vault / "CLAUDE.md"
+    indice = vault / "index.md"
+    for archivo in (ruta_u, claude, indice):
+        if not archivo.is_file():
+            raise ValueError(f"Falta {archivo.relative_to(vault)} en el vault")
+    texto_claude = claude.read_text(encoding="utf-8")
+    if _INICIO not in texto_claude or _FIN not in texto_claude:
+        raise ValueError("CLAUDE.md no tiene los marcadores de reglas (REGLAS:INICIO / REGLAS:FIN)")
+    texto_indice = indice.read_text(encoding="utf-8")
+
+    existentes = cargar(ruta_u)  # valida cada entrada
     desconocidas = [c for c in umbrales if c not in existentes]
     if desconocidas:
         raise ValueError(f"Umbral(es) que no existen en umbrales.yaml: {', '.join(desconocidas)}")
@@ -119,62 +148,103 @@ def nueva_regla(
 
     numeros = [int(m.group(1)) for rid in paginas if (m := _ID.fullmatch(rid))]
     rid = f"R-{max(numeros, default=0) + 1:03d}"
-    nombre = f"{rid}-{_slug(titulo)}"
+    nombre = f"{rid}-{slug}"
+    ruta = vault / "wiki" / "reglas" / f"{nombre}.md"
+    if ruta.exists():
+        raise ValueError(f"Ya existe {ruta.relative_to(vault)}")
     heredados = [c for r in reemplaza for c in (paginas[r][1].get("umbrales") or [])
                  if c not in umbrales]
+    heredados = list(dict.fromkeys(heredados))
     claves = list(dict.fromkeys([*umbrales, *heredados]))
 
-    # Todo validado: a partir de aquí se escribe.
-    datos = yaml.safe_load(ruta_u.read_text(encoding="utf-8")) or {}
-    for clave, valor in umbrales.items():
-        datos[clave].update({"valor": valor, "fuente": fuente, "fecha": fecha, "regla": rid})
-    for clave in heredados:
-        datos[clave]["regla"] = rid
-    if claves:
-        cabecera = []
-        for linea in ruta_u.read_text(encoding="utf-8").splitlines():
-            if not linea.startswith("#"):
-                break
-            cabecera.append(linea)
-        cuerpo_u = yaml.safe_dump(datos, sort_keys=False, allow_unicode=True)
-        escribir_atomico(ruta_u, "".join(f"{c}\n" for c in cabecera) + cuerpo_u)
+    plan = PlanRegla(id=rid, ruta=ruta, vault=vault, titulo=titulo)
+    rel = lambda p: str(p.relative_to(vault))
 
+    # 1. página nueva
     meta = {"tipo": "regla", "id": rid, "titulo": titulo, "fecha": fecha, "fuente": fuente,
             "umbrales": claves, "estado": "vigente"}
     if reemplaza:
         meta["reemplaza"] = reemplaza
     cuerpo = (f"\n# {rid} · {titulo}\n\n## Regla\n\n{regla}\n\n## Por qué\n\n{porque}\n\n"
               f"## Cómo se aplica\n\n{como}\n\n## Fuente\n\n{fuente}\n")
-    ruta = vault / "wiki" / "reglas" / f"{nombre}.md"
-    escribir(ruta, meta, cuerpo)
+    plan.escrituras.append((ruta, renderizar(meta, cuerpo)))
 
+    # 2. páginas reemplazadas
     for viejo in reemplaza:
         pagina, m = paginas[viejo]
         _, texto = leer(pagina)
         m = {**m, "estado": "reemplazada", "reemplazada_por": rid}
-        escribir(pagina, m, texto)
+        plan.escrituras.append((pagina, renderizar(m, texto)))
 
-    claude = vault / "CLAUDE.md"
-    texto = claude.read_text(encoding="utf-8")
-    if _FIN not in texto:
-        raise ValueError("CLAUDE.md no tiene el marcador de reglas")
-    texto = texto.replace(_FIN, f"- [[{nombre}]] {titulo}\n{_FIN}", 1)
+    # 3. CLAUDE.md
+    texto = texto_claude.replace(_FIN, f"- [[{nombre}]] {titulo}\n{_FIN}", 1)
     for viejo in reemplaza:
         texto = _marcar_reemplazada(texto, viejo, nombre)
-    escribir_atomico(claude, texto)
+    plan.escrituras.append((claude, texto))
 
-    indice = vault / "index.md"
-    lineas = indice.read_text(encoding="utf-8").split("\n")
+    # 4. index.md
+    lineas = texto_indice.split("\n")
     nueva = f"- [[wiki/reglas/{nombre}]] — {titulo}"
-    ultimo = max((i for i, l in enumerate(lineas) if l.startswith("- [[wiki/reglas/")), default=None)
+    ultimo = max((i for i, ln in enumerate(lineas) if ln.startswith("- [[wiki/reglas/")), default=None)
     if ultimo is None:
-        lineas += [nueva]
+        lineas.append(nueva)
     else:
         lineas.insert(ultimo + 1, nueva)
     texto = "\n".join(lineas)
     for viejo in reemplaza:
         texto = _marcar_reemplazada(texto, viejo, f"wiki/reglas/{nombre}")
-    escribir_atomico(indice, texto)
+    plan.escrituras.append((indice, texto))
 
-    anadir_log(vault, "recordar", f"regla {rid} «{titulo}»", [f"wiki/reglas/{nombre}.md"])
-    return ruta
+    # 5. umbrales.yaml (al final)
+    if claves:
+        crudo = ruta_u.read_text(encoding="utf-8")
+        datos = yaml.safe_load(crudo) or {}
+        for clave, valor in umbrales.items():
+            datos[clave].update({"valor": valor, "fuente": fuente, "fecha": fecha, "regla": rid})
+        for clave in heredados:
+            datos[clave]["regla"] = rid
+        cabecera = []
+        for linea in crudo.splitlines():
+            if not linea.startswith("#"):
+                break
+            cabecera.append(linea)
+        cuerpo_u = yaml.safe_dump(datos, sort_keys=False, allow_unicode=True)
+        plan.escrituras.append((ruta_u, "".join(f"{c}\n" for c in cabecera) + cuerpo_u))
+
+    plan.lineas.append(f"Regla nueva: {rid} -> {rel(ruta)}")
+    plan.lineas.append("Archivos que cambian: " + ", ".join(rel(p) for p, _ in plan.escrituras))
+    for clave, valor in umbrales.items():
+        plan.lineas.append(f"Umbral {clave}: {existentes[clave].valor} -> {valor}")
+    for clave in heredados:
+        plan.lineas.append(f"{rid} pasa a ser dueña de {clave} (valor sin cambios)")
+    return plan
+
+
+def aplicar_plan(plan: PlanRegla) -> Path:
+    """Escribe el plan (cada archivo de forma atómica) y registra una línea en log.md."""
+    for ruta, contenido in plan.escrituras:
+        escribir_atomico(ruta, contenido)
+    anadir_log(plan.vault, "recordar", f"regla {plan.id} «{plan.titulo}»",
+               [str(p.relative_to(plan.vault)) for p, _ in plan.escrituras])
+    return plan.ruta
+
+
+def nueva_regla(
+    vault: Path,
+    titulo: str,
+    regla: str,
+    porque: str,
+    como: str,
+    fuente: str,
+    umbrales: dict[str, float] | None = None,
+    reemplaza: list[str] | None = None,
+    fecha: str | None = None,
+) -> Path:
+    """Crea la regla R-nnn siguiente, la indexa y actualiza umbrales.yaml.
+
+    Valida y calcula todo antes de escribir. Las reglas reemplazadas pasan a
+    `estado: reemplazada`; los umbrales que citaban y que la regla nueva no redefine pasan
+    a ser suyos (solo cambia `regla` en umbrales.yaml, no el valor).
+    """
+    return aplicar_plan(planear_regla(vault, titulo, regla, porque, como, fuente,
+                                      umbrales, reemplaza, fecha))
