@@ -63,15 +63,14 @@ def _crecimiento(
 ) -> Medida:
     if n_hoy is None:
         return _nm("muestra parcial (lectura parcial sin total exacto de Meta)")
-    candidatas = [
-        s for s in historial
-        if _VENTANA_FOTO[0] <= (hoy - s.dia).days <= _VENTANA_FOTO[1]
-        and (s.total is not None or s.activos is not None)
-    ]
-    if not candidatas:
+    en_ventana = [s for s in historial if _VENTANA_FOTO[0] <= (hoy - s.dia).days <= _VENTANA_FOTO[1]]
+    if not en_ventana:
         return _nm("primera caza" if not historial else "sin foto de hace 6–8 días")
-    foto = min(candidatas, key=lambda s: (abs((hoy - s.dia).days - 7), s.dia))
-    n_foto = foto.total if foto.total is not None else foto.activos
+    con_total = [s for s in en_ventana if s.total is not None]
+    if not con_total:
+        return _nm("la foto de hace 7 días no tiene total exacto")
+    foto = min(con_total, key=lambda s: (abs((hoy - s.dia).days - 7), s.dia))
+    n_foto = foto.total
     if n_foto == 0:
         return _nm("la foto de hace una semana tenía 0 anuncios activos")
     return Medida((n_hoy - n_foto) / n_foto)
@@ -103,8 +102,7 @@ def calcular_senales(
       lectura es completa.
     - Contrato de las fotos (Tarea 8): ``Snapshot.total`` se escribe solo desde una cuenta exacta
       (``total_meta`` o los cargados de una lectura completa), si no NULL; ``Snapshot.activos`` es
-      NULL en lecturas parciales. El crecimiento compara contra ``foto.total`` (o ``foto.activos``
-      si ``total`` es NULL).
+      NULL en lecturas parciales. El crecimiento compara contra ``foto.total`` (una foto sin ``total`` da «no medido»).
     - ``inactivos``: la Tarea 8 pasa None si esa búsqueda fue parcial (la vida mediana saldría
       sesgada hacia anuncios longevos).
     - ``pais="ALL"`` no evalúa ``moneda_distinta`` (no hay una moneda de país única).
@@ -136,8 +134,11 @@ def calcular_senales(
         sup = _nm("sin anuncios cargados")
     elif incompleto:
         # Los primeros por impresiones sesgan hacia anuncios viejos: no es una cifra, solo cota.
-        cota = f"{len(c7) / len(en_pais):.2f}".replace(".", ",")
-        sup = _nm(f"muestra parcial (≥ {cota} sobre los cargados)")
+        if total_meta:  # c7 cargados / total exacto de Meta es una cota inferior real
+            cota = f"{len(c7) / total_meta:.2f}".replace(".", ",")
+            sup = _nm(f"muestra parcial (≥ {cota})")
+        else:
+            sup = _nm("muestra parcial")
     else:
         sup = Medida(len(c7) / len(en_pais))
 

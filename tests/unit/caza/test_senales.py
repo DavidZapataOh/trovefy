@@ -144,9 +144,14 @@ def test_moneda_distinta():
     assert "moneda_distinta" not in calc(o).banderas
 
 
-def test_supervivencia_en_lectura_parcial_es_no_medido_con_cota_en_el_motivo():
-    s = calc(oferta_con([20, 20, 3, 3]), completo=False)
-    assert s.supervivencia.valor is None and "≥ 0,50" in s.supervivencia.motivo
+def test_supervivencia_parcial_con_total_meta_es_cota_c7_sobre_total():
+    s = calc(oferta_con([20, 20, 3, 3]), completo=False, total_meta=10)
+    assert s.supervivencia.valor is None and "≥ 0,20" in s.supervivencia.motivo
+
+
+def test_supervivencia_parcial_sin_total_meta_no_da_numero():
+    s = calc(oferta_con([20, 20, 3, 3]), completo=False, total_aprox=100)
+    assert s.supervivencia.valor is None and s.supervivencia.motivo == "no medido: muestra parcial"
 
 
 def snap_total(o, dias, total, activos=None):
@@ -183,3 +188,9 @@ def test_duplicacion_con_collation_parcial_es_suelo():
 def test_nuevos_sin_corrida_completa_previa():
     s = calc(oferta_con([9]), vistos=(None, None, None), completo=True)
     assert "sin corrida completa previa" in s.nuevos.motivo
+
+
+def test_crecimiento_foto_sin_total_exacto_no_medido_aunque_tenga_activos():
+    o = oferta_con([20] * 13)
+    m = calc(o, historial=[snap_total(o, 7, None, activos=10)], completo=True).crecimiento_7d
+    assert m.valor is None and "no tiene total exacto" in m.motivo
