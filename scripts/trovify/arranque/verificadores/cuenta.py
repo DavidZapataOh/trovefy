@@ -125,17 +125,17 @@ def evaluar_cuenta(ajustes: dict, zona_esperada: str | None, limite_max: float) 
         marca = "?" if ok is None else "✗"
         return ResultadoVerificacion(ok, [], motivo, [arreglo], {}, [f"{marca} {motivo}"])
 
+    if ajustes.get("moneda") != "USD":  # primero: una moneda equivocada es irreversible, haya mercado o no
+        return resultado(
+            False,
+            f"la moneda de la cuenta es {ajustes.get('moneda') or 'desconocida'}, no USD",
+            "la moneda no se puede cambiar: crea otra cuenta publicitaria con USD",
+        )
     if not zona_esperada:
         return resultado(
             None,
             "no medido: elige primero el mercado con /auditar (la zona horaria no se puede cambiar después)",
             "ejecuta /trovify:auditar y elige el mercado antes de crear o revisar la cuenta",
-        )
-    if ajustes.get("moneda") != "USD":
-        return resultado(
-            False,
-            f"la moneda de la cuenta es {ajustes.get('moneda') or 'desconocida'}, no USD",
-            "la moneda no se puede cambiar: crea otra cuenta publicitaria con USD",
         )
     if ajustes.get("zona") != zona_esperada:
         return resultado(

@@ -187,3 +187,9 @@ def test_limite_ilegible_es_no_medido_y_cero_es_invalido():
 def test_sin_limite_menciona_prepago():
     r = evaluar_cuenta({**BIEN, "limite_gasto": None}, "Europe/Bucharest", 250)
     assert r.ok is False and "pago automático con tarjeta" in " ".join(r.arreglos)
+
+
+def test_moneda_se_mira_antes_que_el_mercado():
+    r = evaluar_cuenta({**BIEN, "moneda": "COP"}, None, 250)
+    assert r.ok is False and "COP" in r.motivo
+    assert evaluar_cuenta(BIEN, None, 250).ok is None
