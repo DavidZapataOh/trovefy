@@ -1,0 +1,25 @@
+[project]
+name = "trovify"
+version = "0.1.0"
+description = "Trovify: plugin de Claude Code y paquete Python para un negocio de productos digitales."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12,<3.13"
+dependencies = ["pyyaml==6.0.3"]
+
+[project.scripts]
+trovify = "trovify.cli:main"
+
+[dependency-groups]
+dev = ["pytest==9.2.0", "ruff==0.17.4"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["scripts/trovify"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["scripts"]
