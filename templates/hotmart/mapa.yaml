@@ -1,0 +1,22 @@
+# Mapa de pantallas de Hotmart (paso 10b). Solo lectura.
+# capturado: null = construido desde el Centro de Ayuda público, NO confirmado con tu cuenta real.
+capturado: null
+fuente: >-
+  https://help.hotmart.com/es/article/23867226765709/ y
+  https://help.hotmart.com/es/article/Como-sacar-a-minha-comiss%C3%A3o-/216440207 (leídas el 2026-11-10):
+  Mi cuenta > Datos financieros > Nueva cuenta (el formulario aparece tras la primera venta), retiro
+  «HotPay Internacional» desde Saldo. Las rutas de app.hotmart.com y los rótulos del listado de productos
+  son una suposición.
+pantallas:
+  productos:
+    url: https://app.hotmart.com/products
+    firma: ["Productos"]
+    campos:
+      productos: {patron: '(\d+)\s+productos?'}
+  datos_financieros:
+    url: https://app.hotmart.com/account/financial
+    firma: ["Datos financieros"]
+    campos:
+      cuentas: {patron: 'Cuentas registradas:\s*(\d+)'}
+      pais: {patron: 'País de la cuenta:\s*([^<\n]+)'}
+      estado_cuenta: {patron: 'Estado de la cuenta:\s*([^<\n]+)'}

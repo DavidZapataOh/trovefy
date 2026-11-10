@@ -1,0 +1,14 @@
+# Mapa de pantallas de Whop (paso 10). Solo lectura.
+# capturado: null = construido desde la documentación pública, NO confirmado con tu panel real.
+capturado: null
+fuente: >-
+  https://docs.whop.com/manage-your-business/manage-payouts/set-up-payouts y
+  https://docs.whop.com/manage-your-business/manage-payouts/payout-methods (leídas el 2026-11-10):
+  Dashboard > Balances, «Payout methods», «Withdraw». El rótulo del estado de verificación (KYC)
+  no está documentado: el patrón es una suposición.
+pantallas:
+  balances:
+    url: https://whop.com/dashboard/balance/
+    firma: ["Balances", "Payout methods"]
+    campos:
+      kyc: {patron: '(?:Identity verification|Verificación de identidad):\s*([^<\n]+)'}

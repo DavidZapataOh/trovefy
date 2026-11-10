@@ -28,4 +28,5 @@ from trovify.arranque.verificadores import (  # noqa: F401  (registran los verif
     entorno,
     impultienda,
     meta_ids,
+    pagos,
 )

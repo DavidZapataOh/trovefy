@@ -102,3 +102,17 @@ def test_guia_09_free_y_prueba_solo_si_hace_falta():
         assert s in t, s
     assert "trovify arranque verificar 09" in t
     assert "Free" in t and "1 tienda" in t and "45 días" in t and "segunda tienda" in t
+
+
+def test_guias_10_y_10b():
+    t10, t10b = _t("10-whop.md"), _t("10b-hotmart.md")
+    for t, n in ((t10, "10"), (t10b, "10b")):
+        for s in SECCIONES:
+            assert s in t, (n, s)
+        assert f"trovify arranque verificar {n}" in t
+    aviso = t10.index("Antes de hacer el KYC, comprueba que Whop paga a Colombia")
+    assert aviso < t10.index("**Pasos**") and "bloqueado" in t10 and "10b" in t10
+    assert t10.index("trovify arranque verificar 10") < t10.index("Set up Whop Payments")
+    assert "checkout, el order bump y el upsell son de Hotmart" in t10b and "Cloudflare Pages" in t10b
+    assert "US$ 50" in t10b and "HotPay Internacional" in t10b and "Lemon Squeezy" in t10b
+    assert "Lemon Squeezy" not in _t("09-impultienda.md") + t10
