@@ -68,7 +68,7 @@ def agrupar(anuncios: list[AnuncioBiblioteca], destinos: dict[str, Destino]) -> 
         if o is None:
             o = grupos[clave] = Oferta(oferta_id(clave), clave, [], [], None)
             candidatos[clave] = []
-        if clave != f"pagina:{a.page_id}" and d is not None:
+        if d is not None:  # también el no medido: la clave es la página, pero el motivo se conserva
             candidatos[clave].append((a.inicio, d))
         o.anuncios.append(a)
         if a.page_id not in o.page_ids:

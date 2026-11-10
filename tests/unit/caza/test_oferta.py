@@ -40,7 +40,9 @@ def test_destino_no_medido_cae_a_la_pagina():
         {URL_TIENDA: d},
     )
     assert [o.clave for o in ofertas] == ["pagina:100", "pagina:200"]
-    assert len(ofertas[0].anuncios) == 2 and ofertas[0].destino is None
+    assert len(ofertas[0].anuncios) == 2
+    # se conserva el destino no medido para que el filtro dé su motivo
+    assert ofertas[0].destino.estado == "no_medido" and ofertas[1].destino.estado == "no_medido"
 
 
 def _d(url, **kw):
