@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from html import unescape
 from typing import ClassVar, Literal, Protocol
 
-from trovify.caza.biblioteca import detectar_bloqueo, url_biblioteca
+from trovify.caza.biblioteca import aviso_de_bloqueo, detectar_bloqueo, url_biblioteca
 from trovify.caza.cache import Cache
 from trovify.caza.captura import escuchar_respuestas
 from trovify.caza.modelo import ResultadoBusqueda
@@ -246,6 +246,8 @@ class ClienteBibliotecaPublica:
         bloqueo = detectar_bloqueo(p.url_final, p.html)
         if bloqueo:
             return resultado("bloqueado", motivo=f"Meta mostró {bloqueo}; se detiene la sesión")
+        if aviso_de_bloqueo(p.texto):
+            return resultado("bloqueado", motivo="Meta mostró un aviso de bloqueo temporal; se detiene la sesión")
         try:
             parseo = parsear_detalle(p.cuerpos, pais, p.html)
         except FormatoDesconocido as exc:

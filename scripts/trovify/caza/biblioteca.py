@@ -1,6 +1,7 @@
 """URLs reproducibles de la Biblioteca de anuncios y detección de bloqueos."""
 
 import re
+from html import unescape
 from typing import Literal
 from urllib.parse import urlencode, urlsplit
 
@@ -51,3 +52,20 @@ def detectar_bloqueo(url_final: str, html: str) -> Literal["captcha", "login", "
     if ruta == "/checkpoint" or ruta.startswith("/checkpoint/"):
         return "checkpoint"
     return None
+
+
+# Avisos de bloqueo que Meta puede servir con HTTP 200 en la propia /ads/library/. Son datos: se
+# amplían aquí si aparecen otros. Se buscan solo en el texto de los encabezados (role="heading"),
+# nunca en el HTML entero, para que el texto de un anuncio o de un script no los dispare.
+MARCADORES_BLOQUEO = (
+    "bloqueado temporalmente",
+    "temporarily blocked",
+    "you're temporarily blocked",
+    "has usado esta función demasiado rápido",
+)
+
+
+def aviso_de_bloqueo(texto_encabezados: str) -> bool:
+    """¿Muestran los encabezados un aviso de bloqueo (aunque la página llegara con HTTP 200)?"""
+    t = unescape(texto_encabezados or "").replace("\u2019", "'").casefold()
+    return any(m.casefold() in t for m in MARCADORES_BLOQUEO)

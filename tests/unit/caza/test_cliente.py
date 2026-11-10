@@ -372,3 +372,14 @@ def test_marcador_sin_resultados_en_js_con_formato_desconocido_es_error():
             '<script type="application/json">{"data": {"otra_cosa": 1}}</script></html>')
     p = PaginaCapturada("https://www.facebook.com/ads/library/?q=x", html, "", [])
     assert cliente([p]).buscar("RO", q="x").estado == "error"
+
+
+def test_aviso_de_bloqueo_con_http_200_detiene_la_sesion():
+    p = de_fixture("pagina_therapy_toolkit.json")
+    p.texto = "Bloqueado temporalmente\nHas usado esta función demasiado rápido"
+    p.estado_http = 200
+    c = cliente([p])
+    r = c.buscar("ALL", page_id="1")
+    assert r.estado == "bloqueado" and "bloqueo temporal" in r.motivo and r.anuncios == []
+    with pytest.raises(SesionBloqueada):
+        c.buscar("ALL", page_id="2")

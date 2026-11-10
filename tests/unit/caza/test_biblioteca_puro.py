@@ -1,4 +1,5 @@
-from trovify.caza.biblioteca import detectar_bloqueo, url_biblioteca
+import pytest
+from trovify.caza.biblioteca import aviso_de_bloqueo, detectar_bloqueo, url_biblioteca
 
 
 def test_url_por_pagina():
@@ -54,3 +55,18 @@ def test_captcha_false_no_es_bloqueo():
                             '"xfb_ad_library_is_captcha_required":true') == "captcha"
     assert detectar_bloqueo("https://www.facebook.com/ads/library/",
                             normal + '"xfb_ad_library_is_captcha_required":true') == "captcha"
+
+
+@pytest.mark.parametrize("texto", [
+    "Estás bloqueado temporalmente",
+    "You’re Temporarily Blocked",
+    "You&#039;re temporarily blocked\nIt looks like you were misusing this feature",
+    "Has usado esta función demasiado rápido",
+])
+def test_aviso_de_bloqueo_en_encabezados(texto):
+    assert aviso_de_bloqueo(texto)
+
+
+def test_sin_aviso_de_bloqueo():
+    assert not aviso_de_bloqueo("~230 resultados")
+    assert not aviso_de_bloqueo("")
