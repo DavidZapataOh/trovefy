@@ -74,3 +74,54 @@ def test_cli_ingerir(tmp_path, capsys):
     out = capsys.readouterr().out
     assert f"nuevo: {f}" in out and f"ya estaba: {f}" in out
     assert (v / "log.md").read_text().count("ingerir") == 2
+
+
+def test_no_sobrescribe_existente_ni_enlace_roto(tmp_path):
+    v = tmp_path / "v"
+    carpeta = v / "raw/2026-11-10"
+    carpeta.mkdir(parents=True)
+    (carpeta / "nota.md").write_text("previo")
+    (carpeta / "nota-2.md").symlink_to(tmp_path / "no-existe")
+    f = tmp_path / "nota.md"
+    f.write_text("nuevo")
+    r, c = ingerir(v, f, date(2026, 11, 10))
+    assert c and r.name == "nota-3.md"
+    assert (carpeta / "nota.md").read_text() == "previo"
+    assert not list(carpeta.glob(".*.tmp"))
+
+
+def test_carrera_entre_escaneo_y_escritura(tmp_path, monkeypatch):
+    from trovify.cerebro import ingesta
+    v = tmp_path / "v"
+    f = tmp_path / "nota.md"
+    f.write_text("x")
+    real = ingesta._buscar_por_sha
+
+    def con_carrera(raw, sha):
+        res = real(raw, sha)
+        d = raw / "2026-11-10"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "nota.md").write_text("otro proceso")
+        return res
+
+    monkeypatch.setattr(ingesta, "_buscar_por_sha", con_carrera)
+    r, c = ingerir(v, f, date(2026, 11, 10))
+    assert c and r.name == "nota-2.md"
+    assert (v / "raw/2026-11-10/nota.md").read_text() == "otro proceso"
+
+
+def test_html_sin_cierres_no_pierde_contenido():
+    h = ("<html><head><title>T</title><body><aside>Menu<h1>Titulo</h1><main><p>Cuerpo</p>"
+         "<table><tr><td>a<td>b</tr><tr><td>c<td>d</table>"
+         "<table><tr><td><ul><li>uno<li>dos</ul><td>z</table>"
+         "<table><tr><td>ext<table><tr><td>int</td></tr></table></td><td>fin</td></tr></table>")
+    t = html_a_texto(h)
+    assert "Cuerpo" in t and "Menu" not in t and "T\n" not in t
+    assert "a | b" in t and "c | d" in t
+    assert "- uno - dos | z" in t
+    assert "ext int | fin" in t
+
+
+def test_head_sin_cierre_conserva_cuerpo():
+    t = html_a_texto("<html><head><meta charset=x><title>Tit</title><body><p>Hola</p>")
+    assert "Hola" in t and "Tit" not in t

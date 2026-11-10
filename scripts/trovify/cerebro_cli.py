@@ -163,8 +163,9 @@ def _ingerir(args: argparse.Namespace, destino: Path) -> int:
             archivos.append(en_raw.relative_to(destino).as_posix())
         else:
             repetidos += 1
-    if nuevos or repetidos:
-        anadir_log(destino, "ingerir", f"{nuevos} nuevo(s), {repetidos} ya estaba(n)", archivos or ["—"])
+    if nuevos or repetidos or faltan:
+        pasos = f"{nuevos} nuevo(s), {repetidos} ya estaba(n), {faltan} fallo(s)"
+        anadir_log(destino, "ingerir", pasos, archivos or ["—"])
     return 2 if faltan else 0
 
 
