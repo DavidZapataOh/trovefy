@@ -90,6 +90,24 @@ def test_pago_a_co_tolera_mayusculas_parentesis_y_comas():
     assert medir_pago_a_co(lambda u: _docs(sin)) is False
 
 
+def test_pago_a_co_la_lista_termina_en_el_primer_encabezado():
+    sin_co = PAISES.replace('<span data-as="p">Colombia</span>', "")
+    pie = '<footer><h3>Países</h3><span>Colombia</span></footer>'
+    assert medir_pago_a_co(lambda u: _docs(sin_co) + pie) is False
+
+
+def test_pago_a_co_la_lista_termina_en_el_primer_texto_que_no_es_pais():
+    sin_co = PAISES.replace('<span data-as="p">Colombia</span>', "")
+    faq = '<p>Can I receive payments from customers in other countries?</p><span>Colombia</span>'
+    pagina = f"<h2>Supported countries</h2><div>{sin_co}</div>{faq}<p>Note that different payout options</p>"
+    assert medir_pago_a_co(lambda u: pagina) is False
+
+
+def test_pago_a_co_salta_la_frase_de_introduccion():
+    pagina = f"<h2>Supported countries</h2><p>Whop supports payouts to over 200 different countries:</p><div>{PAISES}</div><p>Note that x</p>"
+    assert medir_pago_a_co(lambda u: pagina) is True
+
+
 def test_pago_a_co_error_de_red_es_none():
     def roto(url):
         raise OSError("sin red")

@@ -1,8 +1,8 @@
 """Pasos 10 (Whop) y 10b (Hotmart, respaldo): dónde y cómo se cobra.
 
 Paso 10: antes de pedirte el KYC se mide en la documentación pública de Whop si paga a Colombia
-(`medir_pago_a_co`, sin navegador). Si la lista de países excluye claramente a Colombia, el paso 10 queda
-`bloqueado` y el siguiente es el 10b. Después se lee el panel de Whop (perfil «whop») y la pantalla de
+(`medir_pago_a_co`, sin navegador). Si la lista de países excluye claramente a Colombia, devuelve ok=False y recomienda el 10b; el paso 10 solo
+queda `bloqueado` cuando el usuario lo confirma y lo marca. Después se lee el panel de Whop (perfil «whop») y la pantalla de
 pasarelas de Impultienda (perfil «impultienda»), con los mapas de `templates/`.
 Paso 10b: producto de prueba y cuenta bancaria colombiana para el retiro de HotPay Internacional
 (perfil «hotmart»). Segundo respaldo (Lemon Squeezy): solo en la guía.
@@ -56,6 +56,25 @@ def _paises(bloque: str) -> set[str]:
 _CONTROL_MIN = {c.casefold() for c in _CONTROL}
 
 
+def _bloque_lista(html_tras_encabezado: str) -> set[str]:
+    """Países de la lista que sigue al encabezado: termina en el primer encabezado h1-h6, en «Note that»
+    o en el primer texto largo que sigue a algún país (una pregunta o un párrafo); la frase de introducción previa se salta."""
+    cola = re.split(r"<h[1-6][\s>]", html_tras_encabezado, maxsplit=1)[0]
+    plano = html.unescape(re.sub(r"<[^>]+>", "\n", cola))
+    salida: set[str] = set()
+    for trozo in re.split(r"[\n,;]", plano):
+        trozo = trozo.strip()
+        if trozo.startswith("Note that"):
+            break
+        if len(trozo) > 40:
+            if salida:  # fin de la lista; los párrafos de introducción antes del primer país se saltan
+                break
+            continue
+        if trozo:
+            salida.add(re.sub(r"\(.*?\)", "", trozo).strip().casefold())
+    return salida
+
+
 def medir_pago_a_co(fetch: Callable[[str], str] | None = None) -> bool | None:
     """¿Lista la documentación pública de Whop a Colombia entre los países de pago?
 
@@ -69,11 +88,11 @@ def medir_pago_a_co(fetch: Callable[[str], str] | None = None) -> bool | None:
         return None
     texto = html.unescape(re.sub(r"<[^>]+>", "\n", pagina))
     mejor: set[str] = set()
-    for m in re.finditer(r"(?i)(?<![a-z])supported countries", texto):
-        previo = texto[max(0, m.start() - 12) : m.start()].casefold()
+    for m in re.finditer(r"(?i)(?<![a-z])supported countries", pagina):
+        previo = pagina[max(0, m.start() - 12) : m.start()].casefold()
         if re.search(r"(un|not\s+)$", previo):
             continue
-        paises = _paises(texto[m.end() : m.end() + 20000].split("Note that", 1)[0])
+        paises = _bloque_lista(pagina[m.end() :])
         if len(paises & _CONTROL_MIN) > len(mejor & _CONTROL_MIN):
             mejor = paises
     if len(mejor & _CONTROL_MIN) < 4:
