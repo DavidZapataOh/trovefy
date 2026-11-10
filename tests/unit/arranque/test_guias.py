@@ -7,7 +7,7 @@ SECCIONES = ["**Objetivo**", "**Antes de empezar**", "**Pasos**", "**Errores tí
 
 
 def test_guias_de_la_fase_0_nucleo():
-    for nombre in ["00-entorno.md", "01-cerebro.md", "02-caza-sin-cuentas.md", "03-perfil.md", "04-business.md", "05-pagina.md", "06-cuenta-publicitaria.md", "16-apimart.md", "_plantilla.md"]:
+    for nombre in ["00-entorno.md", "01-cerebro.md", "02-caza-sin-cuentas.md", "03-perfil.md", "04-business.md", "05-pagina.md", "06-cuenta-publicitaria.md", "07-dominio.md", "08-verificar-dominio.md", "16-apimart.md", "_plantilla.md"]:
         texto = (GUIAS / nombre).read_text()
         for s in SECCIONES:
             assert s in texto, (nombre, s)

@@ -21,6 +21,7 @@ from trovify.arranque.verificadores import REGISTRO
 from trovify.arranque.verificadores.checklist import CHECKLISTS, verificar_checklist
 from trovify.cerebro.ingesta import _buscar_secreto
 from trovify.cli import registrar
+from trovify.dns import normalizar as normalizar_dominio
 from trovify.vault.escritura import anadir_log
 from trovify.vault.rutas import vault_root
 
@@ -88,7 +89,15 @@ def _parsear_datos(items: list[str]) -> dict[str, str]:
             raise ValueError(f"--dato {clave}: el valor no puede estar vacío ni tener saltos de línea")
         if _buscar_secreto(valor):
             raise ValueError(f"--dato {clave}: el valor parece un secreto; los secretos no se guardan en el vault")
-        datos[clave] = _url_limpia(valor) if clave == "url" else valor
+        if clave == "url":
+            datos[clave] = _url_limpia(valor)
+        elif clave == "dominio":
+            try:
+                datos[clave] = normalizar_dominio(valor)
+            except ValueError as exc:
+                raise ValueError(f"--dato dominio: {exc}") from None
+        else:
+            datos[clave] = valor
     return datos
 
 

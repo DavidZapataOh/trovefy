@@ -1,0 +1,155 @@
+"""Pasos 07 y 08: el dominio propio en Cloudflare y su verificación en Meta.
+
+07 y la parte TXT del 08 son públicas y se miden por DNS sobre HTTPS. El estado «verificado» de
+business.facebook.com/settings/owned-domains es una pantalla privada: mientras `CONFIRMACION_08`
+no tenga fecha, el 08 no certifica aunque el TXT esté (el TXT solo no es la verificación de Meta).
+"""
+
+import re
+from collections.abc import Callable
+from datetime import datetime
+from pathlib import Path
+
+from trovify.arranque.estado import ResultadoVerificacion, cargar
+from trovify.arranque.verificadores import verificador
+from trovify.arranque.verificadores.base import (
+    MOTIVO_SIN_CONFIRMAR,
+    Confirmacion,
+    guardar_evidencia,
+    guardar_provisional,
+)
+from trovify.arranque.verificadores.meta_ids import (
+    capturar_por_defecto,
+    leer_pagina,
+    no_medido,
+)
+from trovify.dns import SinRed, normalizar
+from trovify.dns import consultar as consultar_doh
+from trovify.vault.escritura import ZONA_NEGOCIO
+from trovify.vault.rutas import vault_root
+
+URL_DOMINIOS = "https://business.facebook.com/settings/owned-domains"
+SUFIJO_NS = ".ns.cloudflare.com"
+PREFIJO_TXT = "facebook-domain-verification="
+SIN_RED = "no medido: sin red"
+CONFIRMACION_08 = Confirmacion(
+    fecha=None,
+    fuente="encargo del plan 05: estado «verificado» en business.facebook.com/settings/owned-domains; falta la captura real",
+)
+MOTIVO_TXT_PENDIENTE = "TXT de Meta encontrado; falta confirmar el estado en Business Settings"
+
+_VERIFICADO = re.compile(r"\b(verificado|verified)\b", re.IGNORECASE)
+_NO_VERIFICADO = re.compile(r"\b(no verificado|not verified|unverified|sin verificar)\b", re.IGNORECASE)
+
+
+def _resultado(ok: bool | None, motivo: str, arreglos: list[str] | None = None, **kw) -> ResultadoVerificacion:
+    marca = {True: "✓", False: "✗", None: "?"}[ok]
+    return ResultadoVerificacion(ok, kw.get("evidencia", []), motivo, arreglos or [], kw.get("datos", {}), [f"{marca} {motivo}"])
+
+
+def evaluar_ns(ns: list[str]) -> ResultadoVerificacion:
+    limpios = [n.strip().lower().rstrip(".") for n in ns]
+    if any(n.endswith(SUFIJO_NS) for n in limpios):
+        return _resultado(True, "el dominio usa los servidores de nombres de Cloudflare")
+    motivo = "el dominio no usa los servidores de nombres de Cloudflare" if ns else "el dominio no responde con servidores de nombres"
+    return _resultado(False, motivo, [
+        "en Cloudflare, añade el dominio y copia los dos servidores de nombres que te da (terminan en .ns.cloudflare.com)",
+        "en tu registrador, cámbialos por esos dos; si acabas de hacerlo, puede tardar horas en propagarse: repite la verificación más tarde",
+    ])
+
+
+def evaluar_txt(txt: list[str]) -> ResultadoVerificacion:
+    if any(t.strip().strip('"').startswith(PREFIJO_TXT) for t in txt):
+        return _resultado(True, "TXT de Meta encontrado")
+    return _resultado(False, "no hay un TXT de Meta en el dominio", [
+        "en Meta (Business Settings → Marcas → Dominios) copia el valor `facebook-domain-verification=…`",
+        "en Cloudflare → DNS → Añadir registro: tipo TXT, nombre `@`, contenido ese valor; la propagación puede tardar: repite más tarde",
+    ])
+
+
+def _dominio_guardado(vault: Path) -> str | None:
+    p = next((p for p in cargar(vault) if p.id == "07"), None)
+    valor = p.datos.get("dominio") if p else None
+    try:
+        return normalizar(valor) if valor else None
+    except ValueError:
+        return None
+
+
+def _sin_dominio() -> ResultadoVerificacion:
+    return _resultado(None, "no medido: falta el dominio", [
+        "guárdalo con `trovify arranque hecho 07 --dato dominio=<tu-dominio>`",
+    ])
+
+
+def _sin_red() -> ResultadoVerificacion:
+    return _resultado(None, SIN_RED, ["comprueba tu conexión y repite la verificación"])
+
+
+def verificar_dominio(vault: Path | None = None, consultar: Callable = consultar_doh) -> ResultadoVerificacion:
+    vault = vault_root() if vault is None else Path(vault)
+    dominio = _dominio_guardado(vault)
+    if dominio is None:
+        return _sin_dominio()
+    try:
+        ns = consultar(dominio, "NS")
+    except SinRed:
+        return _sin_red()
+    r = evaluar_ns(ns)
+    ev = guardar_evidencia(vault, "07", "ns", {"dominio": dominio, "ns": ns, "fecha": f"{datetime.now(ZONA_NEGOCIO):%Y-%m-%d}"})
+    r.evidencia = [ev]
+    r.datos = {"dominio": dominio}
+    return r
+
+
+def _estado_verificado(texto: str, dominio: str) -> bool:
+    """El dominio aparece y, justo después, el estado es «verificado» (no «no verificado»)."""
+    bajo = texto.lower()
+    i = bajo.find(dominio)
+    if i < 0:
+        return False
+    tramo = texto[i + len(dominio): i + len(dominio) + 120]
+    return bool(_VERIFICADO.search(tramo)) and not _NO_VERIFICADO.search(tramo)
+
+
+def verificar_verificacion_meta(
+    vault: Path | None = None,
+    capturar: Callable | None = None,
+    consultar: Callable = consultar_doh,
+    confirmacion: Confirmacion = CONFIRMACION_08,
+) -> ResultadoVerificacion:
+    vault = vault_root() if vault is None else Path(vault)
+    dominio = _dominio_guardado(vault)
+    if dominio is None:
+        return _sin_dominio()
+    try:
+        txt = consultar(dominio, "TXT")
+    except SinRed:
+        return _sin_red()
+    t = evaluar_txt(txt)
+    if not t.ok:
+        return t
+    cap, png, motivo = leer_pagina(URL_DOMINIOS, capturar or capturar_por_defecto)
+    if cap is None:
+        return no_medido(motivo)
+    if not confirmacion.confirmada:
+        rutas = guardar_provisional(vault, "08", cap.url_final, png)
+        lineas = [f"? {MOTIVO_TXT_PENDIENTE} ({MOTIVO_SIN_CONFIRMAR})"] + [f"  captura provisional: {r}" for r in rutas]
+        return ResultadoVerificacion(None, [], MOTIVO_TXT_PENDIENTE, [], {}, lineas)
+    if not _estado_verificado(cap.texto, dominio):
+        return _resultado(False, "Meta no muestra el dominio como verificado", [
+            "en Business Settings → Marcas → Dominios, abre el dominio y pulsa «Verificar»; si el TXT es reciente, espera y repite",
+        ])
+    ev = [guardar_evidencia(vault, "08", "captura", png)] if png else []
+    ev.append(guardar_evidencia(vault, "08", "dominio", {"dominio": dominio, "txt": True, "url": URL_DOMINIOS}))
+    return _resultado(True, f"{dominio} verificado en Meta", evidencia=ev, datos={"dominio": dominio})
+
+
+@verificador("07")
+def _v07(vault: Path | None = None) -> ResultadoVerificacion:
+    return verificar_dominio(vault)
+
+
+@verificador("08")
+def _v08(vault: Path | None = None) -> ResultadoVerificacion:
+    return verificar_verificacion_meta(vault)
