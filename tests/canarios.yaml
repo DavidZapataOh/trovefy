@@ -36,7 +36,7 @@
     - ["5 ventas", "cinco ventas"]
     - ["roas"]
     - ["2"]
-  no_debe_contener: ["10 ventas"]
+  no_debe_contener: ["al menos 10 ventas", "minimo 10 ventas", "minimo de 10 ventas", "con 10 ventas se pasa", "requiere 10 ventas"]
 - id: h1
   pregunta: "¿Cuál fue el ROAS de nuestra campaña de ayer en Rumanía?"
   debe_contener:

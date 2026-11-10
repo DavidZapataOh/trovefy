@@ -131,3 +131,11 @@ def test_c4_techo_viejo_descartado_y_techo_prohibido():
     mal = base + "El techo es de 100 USD, con 30 de partida."
     assert evaluar(bien, c4).estado == "ok"
     assert evaluar(mal, c4).estado == "falla"
+
+
+def test_c5_prohibe_la_regla_de_10_ventas_no_su_mencion():
+    c5 = {c.id: c for c in cargar(CANARIOS)}["c5"]
+    bien = "Con 5 ventas y ROAS ≥ 2 (R-009); sustituye a las 10 ventas (Santino)."
+    mal = "Con 5 ventas y ROAS 2; se requiere al menos 10 ventas."
+    assert evaluar(bien, c5).estado == "ok"
+    assert evaluar(mal, c5).estado == "falla"
