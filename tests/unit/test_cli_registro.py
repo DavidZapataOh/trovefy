@@ -40,3 +40,15 @@ def test_descubre_modulos_cli(registro_aislado, tmp_path, monkeypatch):
     monkeypatch.delitem(sys.modules, "trovify.zz_prueba_cli", raising=False)
     importlib.invalidate_caches()
     assert cli.main(["zz-prueba"]) == 9
+
+
+def test_modulo_roto_no_impide_el_resto(registro_aislado, tmp_path, monkeypatch, capsys):
+    import trovify
+
+    (tmp_path / "zz_roto_cli.py").write_text("import modulo_que_no_existe_zz\n", encoding="utf-8")
+    monkeypatch.setattr(trovify, "__path__", [*trovify.__path__, str(tmp_path)])
+    monkeypatch.delitem(sys.modules, "trovify.zz_roto_cli", raising=False)
+    importlib.invalidate_caches()
+    assert cli.main(["version"]) == 0
+    err = capsys.readouterr().err
+    assert "aviso: no se pudo cargar trovify.zz_roto_cli: ModuleNotFoundError" in err

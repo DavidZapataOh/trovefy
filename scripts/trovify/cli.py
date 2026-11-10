@@ -36,7 +36,10 @@ def _descubrir_subcomandos() -> None:
     """Importa cada módulo `trovify.*_cli`; al importarse llaman a `registrar`."""
     for info in pkgutil.iter_modules(trovify.__path__):
         if info.name.endswith("_cli"):
-            importlib.import_module(f"trovify.{info.name}")
+            try:
+                importlib.import_module(f"trovify.{info.name}")
+            except Exception as exc:  # noqa: BLE001 - un módulo roto no debe tumbar la CLI
+                print(f"aviso: no se pudo cargar trovify.{info.name}: {type(exc).__name__}", file=sys.stderr)
 
 
 def _construir_parser() -> argparse.ArgumentParser:

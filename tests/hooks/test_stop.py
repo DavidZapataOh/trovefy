@@ -76,3 +76,41 @@ def test_stop_bash_cwd_en_subdirectorio_del_vault(correr_hook, vault_tmp):
         assert decision == "deny" and "STOP activo" in motivo, (cwd, cmd)
     for cwd, cmd in [(str(vault_tmp / "propuestas"), "ls"), (str(vault_tmp / "wiki"), "echo x > n.md")]:
         assert correr_hook("stop", ev("Bash", cwd=cwd, command=cmd), vault_tmp)[0] == "allow", (cwd, cmd)
+
+
+def test_stop_escrituras_no_destructivas_por_cwd_o_ruta_relativa(correr_hook, vault_tmp):
+    activar(vault_tmp)
+    (vault_tmp / "propuestas").mkdir()
+    p, w = str(vault_tmp / "propuestas"), str(vault_tmp / "wiki")
+    casos = [
+        (p, "echo x >> P.md"),
+        (w, "echo x >> ../propuestas/P.md"),
+        (w, "echo x | tee -a ../propuestas/P.md"),
+        (w, "echo x | tee ../propuestas/P.md"),
+        (p, """python3 -c 'open("P.md","w")'"""),
+        (w, "cd ../propuestas && python3 -c 'pass'"),
+        (str(vault_tmp), "cd propuestas && cat P.md > otro.md"),
+        (p, "find . -delete"),
+        (p, "find . -exec rm {} ;"),
+        (p, "echo x > P.md"),
+        (p, "cat P.md; sed -i s/a/b/ P.md"),
+    ]
+    for cwd, cmd in casos:
+        decision, motivo = correr_hook("stop", ev("Bash", cwd=cwd, command=cmd), vault_tmp)
+        assert decision == "deny" and "STOP activo" in motivo, (cwd, cmd)
+
+
+def test_stop_lecturas_en_propuestas_siguen_permitidas(correr_hook, vault_tmp):
+    activar(vault_tmp)
+    (vault_tmp / "propuestas").mkdir()
+    p, w = str(vault_tmp / "propuestas"), str(vault_tmp / "wiki")
+    for cwd, cmd in [(p, "ls -la"), (p, "cat P.md | grep x | wc -l"), (p, "head -n 3 P.md"),
+                     (p, "find . -name '*.md'"), (p, "pwd && stat P.md"), (p, "echo hola"),
+                     (p, "ls 2>/dev/null"), (w, "cat ../propuestas/P.md"), (w, "echo x >> n.md")]:
+        assert correr_hook("stop", ev("Bash", cwd=cwd, command=cmd), vault_tmp)[0] == "allow", (cwd, cmd)
+
+
+def test_sin_stop_escrituras_en_propuestas_se_permiten(correr_hook, vault_tmp):
+    (vault_tmp / "propuestas").mkdir()
+    e = ev("Bash", cwd=str(vault_tmp / "propuestas"), command="echo x >> P.md")
+    assert correr_hook("stop", e, vault_tmp)[0] == "allow"

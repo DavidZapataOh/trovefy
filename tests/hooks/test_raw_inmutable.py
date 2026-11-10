@@ -202,3 +202,17 @@ def test_bash_cwd_en_subdirectorio_sin_falsos_positivos(correr_hook, vault_tmp):
     assert _bash(correr_hook, vault_tmp, "ls ../raw", w) == "allow"
     assert _bash(correr_hook, vault_tmp, "cat 2026-11-10/x.md", str(vault_tmp / "raw")) == "allow"
     assert _bash(correr_hook, vault_tmp, "rm x", "/tmp") == "allow"
+
+
+def test_bash_cadena_de_cd_con_cwd_dentro_del_vault(correr_hook, vault_tmp):
+    w, v = str(vault_tmp / "wiki"), str(vault_tmp)
+    for cmd in ("cd $TROVIFY_VAULT && rm -rf raw/x", f"cd {v} && rm -rf raw/x",
+                "cd .. && rm -rf raw/x", 'cd "$TROVIFY_VAULT" ; rm raw/x',
+                f"cd /tmp || cd {v} && rm log.md"):
+        assert _bash(correr_hook, vault_tmp, cmd, w) == "deny", cmd
+
+
+def test_bash_cadena_de_cd_sin_falsos_positivos(correr_hook, vault_tmp):
+    w = str(vault_tmp / "wiki")
+    assert _bash(correr_hook, vault_tmp, "cd /tmp && rm -rf raw/x", w) == "allow"
+    assert _bash(correr_hook, vault_tmp, "cd /tmp && ls raw", w) == "allow"

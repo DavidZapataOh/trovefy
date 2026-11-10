@@ -173,27 +173,37 @@ def _dentro(ruta: pathlib.Path, protegida: pathlib.Path) -> bool:
     return ruta == protegida or protegida in ruta.parents
 
 
-def _directorio_efectivo(
+def _destino_cd(destino: str, bases: set[str], vault_res: pathlib.Path) -> str | None:
+    """Traduce ``~``, ``$HOME`` y las grafías del vault a una ruta; None si no se sabe."""
+    for base in sorted(bases, key=len, reverse=True):
+        if destino == base or destino.startswith(base + "/"):
+            return str(vault_res) + destino[len(base):]
+    home = (os.environ.get("HOME") or os.path.expanduser("~")).rstrip("/")
+    for prefijo in ("${HOME}", "$HOME", "~"):
+        if destino == prefijo or destino.startswith(prefijo + "/"):
+            return home + destino[len(prefijo):] if home else None
+    if destino.startswith("$") or destino == "-":
+        return None
+    return destino
+
+
+def directorios_efectivos(
     comando: str, bases: set[str], vault_res: pathlib.Path, cwd: str | None
-) -> pathlib.Path | None:
-    """Directorio del vault desde el que corre el comando (cwd o un ``cd``), si lo hay."""
-    inicial = resolver(cwd, None) if cwd else None
-    if inicial is not None and _dentro(inicial, vault_res):
-        return inicial
-    ordenadas = sorted(bases, key=len, reverse=True)
+) -> list[pathlib.Path]:
+    """Directorios del vault por los que pasa el comando: el cwd y cada ``cd``/``pushd``.
+
+    Se recorre la cadena de ``cd`` en orden, cada destino resuelto contra el
+    anterior; un destino que no se sabe resolver se ignora.
+    """
+    actual = resolver(cwd, None) if cwd else None
+    recorrido = [actual] if actual is not None else []
     for m in _CD.finditer(comando):
-        destino = m.group(1)
-        for base in ordenadas:
-            if destino == base or destino.startswith(base + "/"):
-                destino = str(vault_res) + destino[len(base):]
-                break
-        else:
-            if destino.startswith(("~", "$")):
-                continue
-        candidato = resolver(destino, str(inicial) if inicial else None)
-        if _dentro(candidato, vault_res):
-            return candidato
-    return None
+        destino = _destino_cd(m.group(1), bases, vault_res)
+        if destino is None:
+            continue
+        actual = resolver(destino, str(actual) if actual else None)
+        recorrido.append(actual)
+    return [d for d in recorrido if _dentro(d, vault_res)]
 
 
 def bash_toca_protegidas(
@@ -214,16 +224,14 @@ def bash_toca_protegidas(
     for base in bases:
         if any(f"{base}/{nombre}" in comando for nombre in protegidas):
             return True
-    efectivo = _directorio_efectivo(comando, bases, vault_res, cwd)
-    if efectivo is None:
-        return False
     rutas = [vault_res / nombre for nombre in protegidas]
-    if any(_dentro(efectivo, r) for r in rutas):
-        return True
-    for ficha in _SEPARADORES.split(comando):
-        if not ficha or ficha.startswith(("-", "~", "$")):
-            continue
-        destino = resolver(ficha, str(efectivo))
-        if any(_dentro(destino, r) for r in rutas):
+    for efectivo in directorios_efectivos(comando, bases, vault_res, cwd):
+        if any(_dentro(efectivo, r) for r in rutas):
             return True
+        for ficha in _SEPARADORES.split(comando):
+            if not ficha or ficha.startswith(("-", "~", "$")):
+                continue
+            destino = resolver(ficha, str(efectivo))
+            if any(_dentro(destino, r) for r in rutas):
+                return True
     return False
