@@ -5,7 +5,7 @@ Alcance (el plugin corre en todos los proyectos del usuario): las escrituras
 en el vault, en el repo de Trovify (``CLAUDE_PLUGIN_ROOT``) o en
 ``~/.config/trovify/``; allí los ``*.env`` están exentos. Bash se revisa en
 cualquier cwd, pero solo con los patrones de token de Meta y de bot de
-Telegram. El motivo nombra el patrón, jamás el valor. Solo biblioteca estándar;
+Telegram (la clave de Firecrawl se revisa solo en las escrituras). El motivo nombra el patrón, jamás el valor. Solo biblioteca estándar;
 falla cerrado.
 """
 from __future__ import annotations
@@ -21,6 +21,7 @@ PATRONES: tuple[tuple[str, re.Pattern[str]], ...] = (
     # Con o sin prefijo «bot»: no se exige \b antes de los dígitos.
     ("token de bot de Telegram", re.compile(r"(?<!\d)\d{6,12}:[A-Za-z0-9_-]{30,}\b")),
     ("clave sk-", re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}")),
+    ("clave de Firecrawl", re.compile(r"(?<![A-Za-z0-9_-])fc-[A-Za-z0-9]{20,}")),
     ("access_token=", re.compile(r"access_token=")),
 )
 

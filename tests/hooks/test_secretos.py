@@ -130,6 +130,33 @@ def _cargar_secretos():
 def test_patrones_token_se_eligen_por_nombre():
     mod = _cargar_secretos()
     nombres = {nombre for nombre, _ in mod.PATRONES_TOKEN}
-    assert nombres == {"token de Meta", "token de bot de Telegram", "clave sk-"}
+    assert nombres == {"token de Meta", "token de bot de Telegram", "clave sk-", "clave de Firecrawl"}
     assert "access_token=" not in nombres
     assert {n for n, _ in mod.PATRONES_BASH} == {"token de Meta", "token de bot de Telegram"}
+
+
+def _clave_firecrawl():
+    return "fc" + "-" + "a1B2" * 6  # construida: nunca un literal de clave
+
+
+def test_clave_de_firecrawl_en_write_se_deniega(correr_hook, vault_tmp):
+    e = {"tool_name": "Write", "tool_input": {"file_path": str(vault_tmp / "wiki/x.md"), "content": f"k {_clave_firecrawl()}"}}
+    assert correr_hook("secretos", e, vault_tmp)[0] == "deny"
+
+
+def test_clave_de_firecrawl_no_se_confunde_con_palabras(correr_hook, vault_tmp):
+    for texto in ("calc-" + "a" * 30, "fc-corto", "fc-" + "a" * 10 + "-" + "b" * 20):
+        e = {"tool_name": "Write", "tool_input": {"file_path": str(vault_tmp / "wiki/x.md"), "content": texto}}
+        assert correr_hook("secretos", e, vault_tmp)[0] == "allow", texto
+
+
+def test_bash_no_revisa_claves_de_firecrawl(correr_hook, vault_tmp):
+    e = {"tool_name": "Bash", "tool_input": {"command": f"echo {_clave_firecrawl()}"}}
+    assert correr_hook("secretos", e, vault_tmp)[0] == "allow"
+
+
+def test_clave_de_firecrawl_en_env_permitido(correr_hook, vault_tmp, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    e = {"tool_name": "Write", "tool_input": {"file_path": str(tmp_path / ".config/trovify/claude.env"),
+                                              "content": f"FIRECRAWL_API_KEY={_clave_firecrawl()}"}}
+    assert correr_hook("secretos", e, vault_tmp)[0] == "allow"

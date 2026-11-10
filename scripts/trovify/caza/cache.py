@@ -49,20 +49,26 @@ class Cache:
     def por_defecto(cls) -> Cache:
         return cls(vault_root() / "data" / "cache" / "biblioteca")
 
-    def _ruta(self, url: str, max_anuncios: int) -> Path:
+    def _ruta(self, url: str, max_anuncios: int, primera: bool = False) -> Path:
         # La clave incluye cuántos anuncios se pidieron: una petición corta no envenena una larga.
-        clave = f"{url}|{max_anuncios}"
+        # La entrada «primera» (lectura no completa) no depende de ese número: la primera página
+        # es la misma sea cual sea el tope pedido.
+        clave = f"{url}|primera" if primera else f"{url}|{max_anuncios}"
         return self.dir / (hashlib.sha256(clave.encode("utf-8")).hexdigest() + ".json")
 
-    def leer(self, url: str, max_anuncios: int = 60) -> ResultadoBusqueda | None:
-        """El resultado guardado si existe, es de la misma URL y petición, no ha caducado y está completo."""
+    def leer(self, url: str, max_anuncios: int = 60, primera: bool = False) -> ResultadoBusqueda | None:
+        """El resultado guardado si existe, es de la misma URL y petición, no ha caducado y está completo.
+
+        Con ``primera=True`` (petición no completa) vale la primera página guardada aunque traiga
+        menos anuncios que ``max_anuncios``.
+        """
         try:
-            d = json.loads(self._ruta(url, max_anuncios).read_text(encoding="utf-8"))
+            d = json.loads(self._ruta(url, max_anuncios, primera).read_text(encoding="utf-8"))
             if d["url"] != url or d["estado"] not in _GUARDABLES:
                 return None
             completo = d.get("completo") is True
             # Con menos anuncios de los pedidos, solo vale si era completo (Meta no tenía más).
-            if d["estado"] == "ok" and len(d["anuncios"]) < max_anuncios and not completo:
+            if not primera and d["estado"] == "ok" and len(d["anuncios"]) < max_anuncios and not completo:
                 return None
             capturado = datetime.fromisoformat(d["capturado_en"])
             if self._ahora() - capturado > self.ttl:
@@ -72,16 +78,17 @@ class Cache:
                 [_anuncio_de_dict(a) for a in d["anuncios"]], d["motivo"], capturado, completo,
                 "firecrawl" if d.get("via") == "firecrawl" else "playwright",
                 d["creditos"] if isinstance(d.get("creditos"), int) else None,
+                d["proxy"] if isinstance(d.get("proxy"), str) else None,
             )
         except (OSError, ValueError, KeyError, TypeError):
             return None  # ausente o ilegible: es un fallo de caché, no un error
 
-    def guardar(self, url: str, r: ResultadoBusqueda, max_anuncios: int = 60) -> None:
+    def guardar(self, url: str, r: ResultadoBusqueda, max_anuncios: int = 60, primera: bool = False) -> None:
         if r.estado not in _GUARDABLES:
             return
         d = {
             "url": url, "estado": r.estado, "total_aprox": r.total_aprox, "motivo": r.motivo,
-            "capturado_en": r.capturado_en.isoformat(), "completo": r.completo, "via": r.via, "creditos": r.creditos,
+            "capturado_en": r.capturado_en.isoformat(), "completo": r.completo, "via": r.via, "creditos": r.creditos, "proxy": r.proxy,
             "anuncios": [_anuncio_a_dict(a) for a in r.anuncios],
         }
-        escribir_atomico(self._ruta(url, max_anuncios), json.dumps(d, ensure_ascii=False, indent=1) + "\n")
+        escribir_atomico(self._ruta(url, max_anuncios, primera), json.dumps(d, ensure_ascii=False, indent=1) + "\n")

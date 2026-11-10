@@ -9,7 +9,7 @@ from trovify.caza.presupuesto import Presupuesto
 
 @pytest.mark.vivo
 def test_therapy_toolkit_sigue_anunciando():
-    r = ClienteBibliotecaPublica(Presupuesto(3, 2, 5)).buscar("ALL", page_id="102506312071455", estado="all")
+    r = ClienteBibliotecaPublica(Presupuesto(3, 2, 5)).buscar("ALL", page_id="102506312071455", estado="all", completa=True)
     resumen = (f"estado={r.estado} anuncios={len(r.anuncios)} total={r.total_aprox} "
                f"completo={r.completo} motivo={r.motivo!r}")
     warnings.warn(resumen, stacklevel=1)  # visible en el resumen de pytest

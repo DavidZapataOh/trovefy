@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import re
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from html import unescape
 from typing import ClassVar, Literal, Protocol
@@ -355,21 +355,32 @@ class ClienteBibliotecaPublica:
             raise ParadaPorErrores(self._parada)
         url = url_biblioteca(pais, q, page_id, estado)
         if self.cache is not None:
-            en_cache = self.cache.leer(url, max_anuncios)
-            if en_cache is not None:
+            en_cache = (not completa and self.cache.leer(url, max_anuncios, primera=True)) or self.cache.leer(
+                url, max_anuncios
+            )
+            if en_cache:
                 # Sin navegar, sin presupuesto, sin pausa; tampoco cuenta en presupuesto.vacios
                 # (ese contador es de búsquedas navegadas).
+                if len(en_cache.anuncios) > max_anuncios:
+                    en_cache = replace(en_cache, anuncios=en_cache.anuncios[:max_anuncios], completo=False)
                 return en_cache
         self.presupuesto.antes_de_buscar()
         via: Literal["firecrawl", "playwright"] = "playwright"
         aviso: str | None = None
+        rechazo: str | None = None
+        pagina: PaginaCapturada | None = None
         try:
             if not completa and self.firecrawl is not None and not self._firecrawl_caido:
-                from trovify.caza.firecrawl import FirecrawlNoDisponible
+                from trovify.caza.firecrawl import (
+                    FirecrawlNoDisponible,
+                    FirecrawlRechazo,
+                )
 
                 try:
                     pagina = self._abrir_con_reintentos(url, max_anuncios, self.firecrawl)
                     via = "firecrawl"
+                except FirecrawlRechazo as exc:
+                    via, rechazo = "firecrawl", str(exc)  # solo esta búsqueda; sin reintento ni cambio de vía
                 except FirecrawlNoDisponible as exc:
                     self._firecrawl_caido = True  # el resto de la sesión, Playwright; el aviso sale una vez
                     aviso = f"{exc}; se usa Playwright"
@@ -379,13 +390,18 @@ class ClienteBibliotecaPublica:
         except ParadaPorErrores as exc:
             self._parada = str(exc)  # parada persistente: la siguiente búsqueda no vuelve a tocar Meta
             raise
-        self.presupuesto.exito()  # la página cargó: se acaba la racha de errores de red
         try:
-            r = self._interpretar(url, pais, pagina, max_anuncios)
+            if pagina is None:
+                r = ResultadoBusqueda("error", url, None, [], rechazo, datetime.now(UTC))
+            else:
+                self.presupuesto.exito()  # la página cargó: se acaba la racha de errores de red
+                r = self._interpretar(url, pais, pagina, max_anuncios)
         finally:
             self.presupuesto.pausa()
         r.via = via
-        r.creditos = getattr(self.firecrawl, "creditos", None) if via == "firecrawl" else None
+        if via == "firecrawl":
+            r.creditos = getattr(self.firecrawl, "creditos", None)
+            r.proxy = getattr(self.firecrawl, "proxy", None)
         if r.estado == "bloqueado":
             self.presupuesto.bloqueos += 1
             self._bloqueada = True
@@ -395,7 +411,10 @@ class ClienteBibliotecaPublica:
             if r.estado in ("ok", "vacio"):
                 self._errores_seguidos = 0
                 if self.cache is not None:
-                    self.cache.guardar(url, r, max_anuncios)  # sin el aviso de la sesión
+                    # sin el aviso de la sesión; la primera página sirve a cualquier lectura no completa
+                    self.cache.guardar(url, r, max_anuncios)
+                    if len(r.anuncios) < max_anuncios:  # sin recortar: vale para cualquier tope
+                        self.cache.guardar(url, r, max_anuncios, primera=True)
             else:
                 self._errores_seguidos += 1
                 if self._errores_seguidos >= _MAX_ERRORES_SEGUIDOS:

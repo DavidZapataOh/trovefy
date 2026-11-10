@@ -7,6 +7,7 @@ ni aparece en un mensaje de error.
 
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -26,6 +27,11 @@ Http = Callable[[str, dict, dict], "tuple[int, str]"]
 
 class FirecrawlNoDisponible(RuntimeError):
     """La clave no vale o no hay créditos: el resto de la sesión usa Playwright."""
+
+
+class FirecrawlRechazo(RuntimeError):
+    """Firecrawl rechazó esta petición (4xx inesperado, ``success: false``): esa búsqueda acaba en
+    ``error``; no se reintenta ni se cambia de vía."""
 
 
 def clave_firecrawl(ruta: Path = RUTA_CLAUDE_ENV) -> str | None:
@@ -53,7 +59,7 @@ def _http_real(url: str, cuerpo: dict, cabeceras: dict) -> tuple[int, str]:
             return r.status, r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read().decode("utf-8", "replace")
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+    except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException) as exc:
         raise ErrorDeRed(f"no se pudo llamar a Firecrawl ({type(exc).__name__})") from None
 
 
@@ -108,33 +114,42 @@ class NavegadorFirecrawl:
         self._api_key = api_key
         self._http = http or _http_real
         self.creditos: int | None = None
+        self.proxy: str | None = None
 
     def __repr__(self) -> str:
         return "NavegadorFirecrawl()"
 
     def abrir(self, url: str, max_anuncios: int) -> PaginaCapturada:
         self.creditos = None
+        self.proxy = None
+        if not self._api_key.isascii() or not self._api_key.isprintable() or any(c.isspace() for c in self._api_key):
+            raise FirecrawlNoDisponible("la clave de Firecrawl tiene caracteres raros; vuelve a pegarla")
         cuerpo = {"url": url, "formats": ["rawHtml"], "proxy": "auto", "maxAge": 0,
                   "waitFor": 3000, "onlyMainContent": False}
         cabeceras = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
         try:
             codigo, texto = self._http(URL_API, cuerpo, cabeceras)
-        except (OSError, TimeoutError) as exc:
+        except (OSError, TimeoutError, http.client.HTTPException) as exc:
             raise ErrorDeRed(f"no se pudo llamar a Firecrawl ({type(exc).__name__})") from None
         if codigo in (401, 403):
             raise FirecrawlNoDisponible("la clave de Firecrawl no vale")
         if codigo == 402:
             raise FirecrawlNoDisponible("sin créditos de Firecrawl")
-        if codigo == 429 or codigo >= 500:
+        if codigo in (408, 429) or codigo >= 500:
             raise ErrorDeRed(f"Firecrawl respondió HTTP {codigo}")
         if not 200 <= codigo < 300:
-            raise FirecrawlNoDisponible(f"Firecrawl rechazó la petición (HTTP {codigo})")
+            raise FirecrawlRechazo(f"Firecrawl rechazó la petición (HTTP {codigo})")
         try:
             datos = json.loads(texto)
         except (ValueError, TypeError):
             raise ErrorDeRed("Firecrawl devolvió una respuesta ilegible") from None
-        if not isinstance(datos, dict) or datos.get("success") is False:
-            raise ErrorDeRed("Firecrawl devolvió un error")
+        if not isinstance(datos, dict):
+            raise ErrorDeRed("Firecrawl devolvió una respuesta ilegible")
+        if datos.get("success") is False:
+            detalle = " ".join(str(datos.get("error") or "").split()).replace(self._api_key, "[clave]")[:120]
+            raise FirecrawlRechazo(
+                f"Firecrawl rechazó la petición (success:false{': ' + detalle if detalle else ''})"
+            )
         cuerpo_datos = datos.get("data") if isinstance(datos.get("data"), dict) else datos
         meta = cuerpo_datos.get("metadata")
         meta = meta if isinstance(meta, dict) else {}
@@ -144,6 +159,8 @@ class NavegadorFirecrawl:
         estado = meta.get("statusCode")
         creditos = meta.get("creditsUsed")
         self.creditos = creditos if isinstance(creditos, int) and not isinstance(creditos, bool) else None
+        proxy = meta.get("proxyUsed")
+        self.proxy = proxy if isinstance(proxy, str) else None
         return PaginaCapturada(
             str(meta.get("url") or url), html, _texto_de_encabezados(html), [],
             estado if isinstance(estado, int) else None,

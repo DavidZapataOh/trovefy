@@ -62,3 +62,4 @@ class ResultadoBusqueda:
     completo: bool = False
     via: Literal["firecrawl", "playwright"] = "playwright"
     creditos: int | None = None  # metadata.creditsUsed de Firecrawl; None con Playwright
+    proxy: str | None = None  # metadata.proxyUsed de Firecrawl; None con Playwright

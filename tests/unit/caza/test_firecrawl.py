@@ -12,6 +12,7 @@ from trovify.caza.cliente import (
 )
 from trovify.caza.firecrawl import (
     FirecrawlNoDisponible,
+    FirecrawlRechazo,
     NavegadorFirecrawl,
     clave_firecrawl,
 )
@@ -83,7 +84,7 @@ def test_respuesta_sin_envolver_y_success_false():
     p = n.abrir(URL, 60)
     assert p.html == "<html></html>" and p.estado_http == 200 and p.cuerpos == []
     n = NavegadorFirecrawl(CLAVE, HttpFalso((200, {"success": False, "error": "algo"})))
-    with pytest.raises(ErrorDeRed):
+    with pytest.raises(FirecrawlRechazo):
         n.abrir(URL, 60)
 
 
@@ -201,3 +202,78 @@ def test_clave_firecrawl_lee_del_env(tmp_path):
     ruta.write_text(f"FIRECRAWL_API_KEY={CLAVE}\n")
     ruta.chmod(0o644)
     assert clave_firecrawl(ruta) is None  # permisos inseguros: no se usa
+
+
+# --- ronda de arreglos 1 -----------------------------------------------------------------
+
+
+@pytest.mark.parametrize("codigo", [408, 429, 500, 502])
+def test_408_429_5xx_se_reintentan(codigo):
+    with pytest.raises(ErrorDeRed):
+        NavegadorFirecrawl(CLAVE, HttpFalso((codigo, {}))).abrir(URL, 60)
+
+
+def test_http_exception_es_error_de_red():
+    import http.client
+
+    with pytest.raises(ErrorDeRed) as e:
+        NavegadorFirecrawl(CLAVE, HttpFalso(http.client.IncompleteRead(b""))).abrir(URL, 60)
+    assert CLAVE not in str(e.value)
+
+
+@pytest.mark.parametrize("codigo", [400, 404, 422, 302])
+def test_otro_no_2xx_es_error_de_esa_busqueda_sin_cambiar_de_via(codigo):
+    http = HttpFalso((codigo, {"error": "x"}), (200, respuesta_api(fixture()["html_final"])))
+    c, pw = cliente(http, [pagina_pw()])
+    r1 = c.buscar("ALL", page_id="1")
+    assert r1.estado == "error" and r1.via == "firecrawl"
+    assert r1.motivo == f"Firecrawl rechazó la petición (HTTP {codigo})"
+    assert len(http.peticiones) == 1 and pw.llamadas == []  # sin reintento ni cambio de vía
+    r2 = c.buscar("ALL", page_id="2")  # la sesión sigue en Firecrawl
+    assert r2.estado == "ok" and r2.via == "firecrawl" and pw.llamadas == []
+
+
+def test_success_false_es_error_con_texto_corto_sin_clave():
+    http = HttpFalso((200, {"success": False, "error": f"fallo {CLAVE} " + "z" * 500}))
+    c, _ = cliente(http)
+    r = c.buscar("ALL", page_id="1")
+    assert r.estado == "error" and r.motivo.startswith("Firecrawl rechazó la petición (success:false: fallo")
+    assert CLAVE not in r.motivo and len(r.motivo) < 250
+
+
+def test_tres_rechazos_seguidos_paran_la_sesion():
+    from trovify.caza.presupuesto import ParadaPorErrores
+
+    c, _ = cliente(HttpFalso((400, {}), (400, {}), (400, {})))
+    c.buscar("ALL", page_id="1")
+    c.buscar("ALL", page_id="2")
+    with pytest.raises(ParadaPorErrores):
+        c.buscar("ALL", page_id="3")
+
+
+@pytest.mark.parametrize("clave", ["clave con espacio", "cláve☃", "con\nsalto"])
+def test_clave_con_caracteres_raros_no_disponible(clave):
+    http = HttpFalso()
+    with pytest.raises(FirecrawlNoDisponible, match="caracteres raros; vuelve a pegarla") as e:
+        NavegadorFirecrawl(clave, http).abrir(URL, 60)
+    assert http.peticiones == [] and clave not in str(e.value)
+
+
+def test_proxy_usado_queda_en_el_resultado(tmp_path):
+    cache = Cache(tmp_path / "cache")
+    c, _ = cliente(HttpFalso((200, respuesta_api(fixture()["html_final"]))), cache=cache)
+    assert c.buscar("ALL", page_id="1").proxy == "basic"
+    assert c.buscar("ALL", page_id="1").proxy == "basic"  # desde caché
+
+
+def test_primera_pagina_en_cache_sirve_aunque_traiga_menos_de_max_anuncios(tmp_path):
+    cache = Cache(tmp_path / "cache")
+    http = HttpFalso((200, respuesta_api(fixture()["html_final"])))
+    c, pw = cliente(http, [pagina_pw()], cache=cache)
+    r1 = c.buscar("ALL", page_id="1")  # max_anuncios=60 por defecto, 30 anuncios, no completo
+    assert r1.completo is False and len(r1.anuncios) == 30
+    r2 = c.buscar("ALL", page_id="1")
+    assert len(http.peticiones) == 1 and r2.via == "firecrawl" and r2.creditos == 5
+    # una lectura completa no se conforma con la primera página
+    r3 = c.buscar("ALL", page_id="1", completa=True)
+    assert r3.via == "playwright" and len(pw.llamadas) == 1

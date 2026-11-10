@@ -25,3 +25,7 @@ def test_cli_hecho_sin_hooks_no_lanza_traceback(monkeypatch, tmp_path, capsys):
     assert main(["arranque", "hecho", "05", "--dato", "nombre=Mi tienda", "--vault", str(v)]) == 2
     err = capsys.readouterr().err
     assert "secretos" in err and "Traceback" not in err and "escribir en el vault" not in err
+
+
+def test_ve_la_clave_de_firecrawl():
+    assert secretos.buscar_secreto("hola " + "fc" + "-" + "a1B2" * 6) == "clave de Firecrawl"
