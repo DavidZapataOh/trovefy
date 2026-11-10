@@ -25,9 +25,9 @@ Dejar tu computador (Windows con WSL) con todas las herramientas que Trovify nec
    1. Mira el archivo actual: `cat /etc/wsl.conf` (si dice que no existe, no pasa nada).
    2. Ábrelo: `sudo nano /etc/wsl.conf`
    3. Si ya hay una sección `[boot]`, añade la línea `systemd=true` debajo de ella. Si no la hay, añade al FINAL del archivo estas dos líneas: `[boot]` y debajo `systemd=true`. No borres ni reemplaces nada de lo que ya estaba. Guarda con Ctrl+O, Enter y sal con Ctrl+X.
-   4. Abre **PowerShell de Windows** (no la terminal de Linux) y escribe `wsl --shutdown`.
-   5. Vuelve a abrir Ubuntu.
-4. Repite `trovify arranque verificar 00` hasta que no quede ningún ✗. Hasta el plan 05 puede quedar ✗ solo Playwright: entonces el paso 00 sigue pendiente solo por eso y puedes continuar con los demás pasos.
+   4. Abre **PowerShell de Windows** (no la terminal de Linux) y escribe `wsl --shutdown`. Ojo: esto también cierra Claude Code.
+   5. Vuelve a abrir Ubuntu, entra con `cd ~/trovify-cerebro` y ejecuta `claude` otra vez.
+4. Repite `trovify arranque verificar 00` hasta que no quede ningún ✗. Hasta el plan 05 puede quedar ✗ solo Playwright: entonces marca el paso con `trovify arranque hecho 00` (el verificador lo verificará después del plan 05) y continúa con los demás pasos.
 
 **Errores típicos**
 - Síntoma: `ffmpeg` se queda colgado y el verificador dice que no responde. Arreglo: tienes el ffmpeg de snap; instala el de apt con `sudo apt install -y ffmpeg`.

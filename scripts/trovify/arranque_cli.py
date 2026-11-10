@@ -7,6 +7,7 @@ from pathlib import Path
 from trovify.arranque.estado import (
     ArranqueCorrupto,
     PasoDesconocido,
+    ResultadoVerificacion,
     aplicar_verificacion,
     cargar,
     marcar_bloqueado,
@@ -54,7 +55,11 @@ def _verificar(vault: Path, id_: str) -> int:
     funcion = REGISTRO.get(id_)
     if funcion is None:
         return _error(f"el paso {id_} ({cargar_.nombre}) no tiene verificador todavía")
-    r = funcion(vault)
+    try:
+        r = funcion(vault)
+    except Exception as exc:  # noqa: BLE001  nunca el texto de la excepción: podría llevar un secreto
+        motivo = f"no medido: error del verificador ({type(exc).__name__})"
+        r = ResultadoVerificacion(None, [], motivo, [], {}, [f"? {motivo}"])
     antes = cargar_.estado
     p = aplicar_verificacion(vault, id_, r)
     for linea in r.lineas:
@@ -62,7 +67,7 @@ def _verificar(vault: Path, id_: str) -> int:
     texto, codigo = _RESULTADO[r.ok]
     print(f"\nPaso {p.id} ({p.nombre}): {texto} — {r.motivo}. Estado: {p.estado}.")
     if r.arreglos:
-        print("Para arreglarlo (los comandos con `!` los ejecutas tú):")
+        print("Para arreglarlo (los comandos de sistema van en una terminal de Ubuntu (WSL) aparte):")
         for a in r.arreglos:
             print(f"  - {a}")
     if p.estado == antes:  # si cambió de estado, aplicar_verificacion ya escribió la línea del log
@@ -97,17 +102,19 @@ def _ejecutar(args: argparse.Namespace) -> int:
         if s is not None:
             print(f"Siguiente: {s.id} · {s.nombre} ({s.estado})")
             return 0
-        bloqueados = [p for p in pasos if p.fase == 0 and p.estado == "bloqueado"]
-        if not bloqueados:
+        pendientes = [p for p in pasos if p.fase == 0 and p.estado in ("bloqueado", "hecho")]
+        if not pendientes:
             print("Fase 0 completa: todos los pasos están verificados.")
         else:
-            print("No hay un paso siguiente: lo que falta de la fase 0 está bloqueado.")
-            for p in bloqueados:
-                print(f"  {p.id} · {p.nombre}: {p.nota or 'sin motivo'}")
+            print("No hay un paso siguiente: lo que falta de la fase 0 está bloqueado o esperando verificación.")
+            for p in pendientes:
+                print(f"  {p.id} · {p.nombre} ({p.estado}): {p.nota or 'sin motivo'}")
         return 0
-    print(f"{'ID':<4} {'Paso':<40} {'Estado':<11} Fecha")
+    print(f"{'ID':<4} {'Paso':<40} {'Estado':<11} {'Fecha':<10} Nota")
     for p in pasos:
-        print(f"{p.id:<4} {p.nombre:<40} {p.estado:<11} {p.fecha or '—'}")
+        nota = (p.nota or "").replace("\n", " ")
+        nota = nota if len(nota) <= 80 else nota[:79] + "…"
+        print(f"{p.id:<4} {p.nombre:<40} {p.estado:<11} {p.fecha or '—':<10} {nota}".rstrip())
     frac = porcentaje_fase(pasos, 0)
     print(f"\nFase 0: {round(frac * 12)}/12 verificados ({frac * 100:.0f} %)")
     return 0

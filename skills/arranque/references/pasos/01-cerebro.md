@@ -9,11 +9,15 @@ Tener el cerebro (la carpeta de Obsidian con el método y las reglas) construido
 - Abre la terminal dentro del vault.
 
 **Pasos**
-1. Comprueba el orden del vault: `trovify cerebro lint`. Si señala algo, corrígelo con Claude y repite hasta que no haya problemas.
-2. Comprueba que existen páginas del método en `wiki/metodo/`. Si no las hay, destílalas con `/trovify:destilar`.
-3. Pasa los canarios, que son preguntas de control cuya respuesta Claude debe sacar solo del cerebro: `trovify cerebro canarios` (dentro del vault).
-4. Si algún canario falla, corrige la página del cerebro que corresponde o su cita y repite el paso 3.
-5. Los canarios valen 30 días: pasado ese tiempo hay que repetirlos.
+1. Abre la terminal de Ubuntu (WSL) y escribe `whoami`: lo que responde es tu `<tu-usuario>`. WSL tiene que estar en marcha (la terminal de Ubuntu abierta).
+2. Abre Obsidian en Windows y elige **Abrir carpeta como bóveda**.
+3. Escribe esta ruta cambiando `<tu-usuario>` por tu usuario: `\\wsl.localhost\Ubuntu\home\<tu-usuario>\trovify-cerebro`
+4. Confirma que ves las carpetas del cerebro (`wiki`, `raw`, `config`…) y sigue con las comprobaciones.
+5. Comprueba el orden del vault: `trovify cerebro lint`. Si señala algo, corrígelo con Claude y repite hasta que no haya problemas.
+6. Comprueba que existen páginas del método en `wiki/metodo/`. Si no las hay, destílalas con `/trovify:destilar`.
+7. Pasa los canarios, que son preguntas de control cuya respuesta Claude debe sacar solo del cerebro: `trovify cerebro canarios` (dentro del vault).
+8. Si algún canario falla, corrige la página del cerebro que corresponde o su cita y repite el paso 7.
+9. Los canarios valen 30 días: pasado ese tiempo hay que repetirlos.
 
 **Errores típicos**
 - Síntoma: «el vault tiene N problemas de lint». Arreglo: `trovify cerebro lint` y corrige lo que señala.

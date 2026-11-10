@@ -79,6 +79,8 @@ def _paso_desde(e: object, ruta: Path) -> Paso:
     evidencia, datos = e.get("evidencia") or [], e.get("datos") or {}
     if not isinstance(evidencia, list) or not isinstance(datos, dict):
         raise ArranqueCorrupto(f"{ruta}: evidencia o datos mal formados en el paso {e['id']}")
+    if estado == "verificado" and not evidencia:  # una edición a mano no certifica
+        estado = "hecho"
     return Paso(
         id=str(e["id"]),
         nombre=str(e.get("nombre", "")),
@@ -182,7 +184,10 @@ def aplicar_verificacion(vault: Path, id_: str, r: ResultadoVerificacion) -> Pas
             p.estado = "hecho"
             p.evidencia = []  # la evidencia anterior ya no vale
         p.fecha = _hoy()
-        p.nota = r.motivo
+        if p.estado == "bloqueado":
+            _anotar(p, r.motivo)  # conserva el motivo del bloqueo
+        else:
+            p.nota = r.motivo
     else:
         _anotar(p, r.motivo)
     return _cambiar(vault, pasos, p, antes, r.motivo)
@@ -204,7 +209,10 @@ def porcentaje_fase(pasos: list[Paso], fase: int = 0) -> float:
 
 
 def siguiente(pasos: list[Paso]) -> Paso | None:
-    """Primer paso pendiente de la fase 0 (el cobro cuenta como uno: 10, o 10b si 10 está bloqueado)."""
+    """Primer paso por hacer de la fase 0 (el cobro cuenta como uno: 10, o 10b si 10 está bloqueado).
+
+    Salta los verificados, los bloqueados y los «hecho» (el usuario ya hizo su parte; espera verificación).
+    """
     fase0 = sorted((p for p in pasos if p.fase == 0), key=lambda p: _orden(p.id))
     cobro_ok = _cobro_verificado(pasos)
     for p in fase0:
@@ -213,6 +221,6 @@ def siguiente(pasos: list[Paso]) -> Paso | None:
                 continue
         elif p.estado == "verificado":
             continue
-        if p.estado != "bloqueado":
+        if p.estado not in ("bloqueado", "hecho"):
             return p
     return None

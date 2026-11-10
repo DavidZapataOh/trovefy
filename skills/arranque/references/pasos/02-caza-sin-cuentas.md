@@ -5,7 +5,7 @@ Encontrar tu primera oferta ganadora mirando la Biblioteca de anuncios de Meta, 
 
 **Antes de empezar**
 - Pasos 00 y 01 verificados.
-- La caza llega con el plan 07 (`/trovify:cazar --modo nicho`). Hasta entonces este paso no puede completarse; puedes avanzar con los pasos 03 a 08 mientras tanto.
+- La caza llega con el plan 07 (`/trovify:cazar --modo nicho`). Hasta entonces este paso no puede completarse: márcalo con `trovify arranque bloqueado 02 --motivo "espera /trovify:cazar (plan 07)"` para que el asistente siga con el paso 03 y los demás (03 a 08 pueden ir en paralelo con la caza).
 
 **Pasos**
 1. Cuando el plan 07 esté instalado, escribe `/trovify:cazar --modo nicho` y dile a Claude el nicho que te interesa.

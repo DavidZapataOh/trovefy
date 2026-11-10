@@ -12,6 +12,7 @@ Responde siempre en español, con frases cortas y sin jerga. El usuario no es t�
 Reglas de fondo:
 
 - **Claude nunca escribe contraseñas ni lee códigos 2FA.** Inicios de sesión, KYC, pagos y 2FA los hace el usuario. Las claves de API las pega el usuario en su archivo; Claude no las ve.
+- Nunca leas ni muestres `~/.config/trovify/*.env`; la clave solo la escribe el usuario.
 - **Un paso solo está `verificado` si el verificador lo comprueba.** La palabra del usuario no basta.
 - **Los comandos de sistema o interactivos (sudo, apt, nano, editar /etc/wsl.conf, crear claude.env y pegar la clave) los ejecuta el usuario en una terminal de Ubuntu (WSL) aparte, sin `!`**: dentro de Claude Code el `!` no tiene terminal y no sirven ni la contraseña de sudo ni nano. Claude no los lanza. Los comandos `trovify …` no interactivos los ejecuta Claude por ti.
 - **Cuando el usuario deba decidir algo, ofrece opciones con una recomendada** («te recomiendo A porque…») y espera su respuesta. No decidas por él.
@@ -24,6 +25,10 @@ Pasos:
 3. **Si el paso usa el navegador**, ábrelo con `trovify navegador abrir <servicio> <url>`. Esa orden llega con el plan 05: hasta entonces no existe y los pasos con navegador (03 en adelante) no pueden guiarse. Abre Playwright **visible**, con un perfil dedicado (`~/.config/trovify/pw-<servicio>/`), el mismo que luego usa el verificador. El usuario escribe las contraseñas, hace el KYC y teclea el 2FA; Claude espera.
 4. **Acompaña al usuario paso a paso** por la guía. Cuando diga que terminó, ejecuta `trovify arranque hecho NN` y enseguida `trovify arranque verificar NN`. Si falla, muéstrale los arreglos tal como los imprime el verificador, explicados con sus palabras, y repite la verificación cuando los haya hecho.
 5. **Si Meta restringe algo** (cuenta, página, anuncios, dominio): detente. Explica con calma que existe una apelación oficial en el Centro de ayuda de Meta para negocios, que la presenta el usuario, y ejecuta `trovify arranque bloqueado NN --motivo "<qué restringió Meta>"`. No propongas pasos que dependan de eso ni rodeos para saltar la restricción.
+   Para que `siguiente` no se quede esperando en un paso que aún no se puede cerrar:
+   - Paso 02 sin poder verificarse todavía (la caza llega con el plan 07): `trovify arranque bloqueado 02 --motivo "espera /trovify:cazar (plan 07)"`.
+   - Paso 00 que solo falla por Playwright (llega con el plan 05): déjalo en `hecho`; el verificador lo verificará después del plan 05.
+   - `siguiente` salta los pasos `hecho` (el usuario ya hizo su parte y espera verificación) y los `bloqueado`.
 6. **Recuérdale que los pasos 03 a 08 pueden ir en paralelo con la caza** (paso 02): muchos de ellos esperan revisiones de Meta, y mientras tanto se puede seguir cazando ofertas.
 7. **Si el usuario quiere saltarse un paso**, dile el riesgo concreto, ofrécele las opciones (hacerlo ahora, hacerlo después, saltarlo) con una recomendada, y si insiste regístralo, nunca en silencio:
    `trovify arranque bloqueado NN --motivo "saltado por el usuario: <riesgo>"`.

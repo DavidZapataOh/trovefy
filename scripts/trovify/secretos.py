@@ -32,7 +32,7 @@ def leer_env(ruta: Path) -> dict[str, str]:
     """
     ruta = Path(ruta)
     try:
-        fd = os.open(ruta, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(ruta, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)  # NONBLOCK: una FIFO no debe colgar
     except OSError as exc:
         if exc.errno == errno.ELOOP:
             raise EnvNoSeguro("es un enlace simbólico") from None

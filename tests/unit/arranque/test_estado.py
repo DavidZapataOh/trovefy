@@ -104,7 +104,7 @@ def test_cli(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "Fase 0: 0/12 verificados (0 %)" in out and "bloqueado" in out
     assert main(["arranque", "siguiente", "--vault", v]) == 0
-    assert "Siguiente: 00" in capsys.readouterr().out
+    assert "Siguiente: 02" in capsys.readouterr().out  # 00 hecho y 01 bloqueado se saltan
     assert main(["arranque", "hecho", "99", "--vault", v]) == 2
     assert "99" in capsys.readouterr().err
 
@@ -151,3 +151,82 @@ def test_nota_sin_motivo_no_deja_separador(tmp_path):
     marcar_bloqueado(tmp_path, "03", "falta el DNI")
     p = aplicar_verificacion(tmp_path, "03", ResultadoVerificacion(None, [], "", []))
     assert p.nota == "falta el DNI"
+
+
+def test_fallo_conserva_el_motivo_de_un_bloqueo(tmp_path):
+    marcar_bloqueado(tmp_path, "03", "falta el DNI")
+    p = aplicar_verificacion(tmp_path, "03", ResultadoVerificacion(False, [], "clave rechazada", []))
+    assert p.estado == "bloqueado" and p.nota == "falta el DNI · clave rechazada"
+    p = aplicar_verificacion(tmp_path, "04", ResultadoVerificacion(False, [], "falla", []))
+    assert p.nota == "falla"
+
+
+def test_siguiente_salta_hecho_y_bloqueado(tmp_path):
+    marcar_hecho(tmp_path, "00")
+    assert siguiente(cargar(tmp_path)).id == "01"
+    aplicar_verificacion(tmp_path, "01", _ok())
+    marcar_bloqueado(tmp_path, "02", "espera /trovify:cazar (plan 07)")
+    assert siguiente(cargar(tmp_path)).id == "03"
+
+
+def test_siguiente_cli_con_hechos_no_dice_completa(tmp_path, capsys):
+    for i in [f"{n:02d}" for n in range(10)] + ["16"]:
+        aplicar_verificacion(tmp_path, i, _ok())
+    marcar_hecho(tmp_path, "05", "esperando revisión")
+    marcar_bloqueado(tmp_path, "10", "x")
+    marcar_bloqueado(tmp_path, "10b", "y")
+    aplicar_verificacion(tmp_path, "05", ResultadoVerificacion(False, [], "falla", []))
+    capsys.readouterr()
+    assert main(["arranque", "siguiente", "--vault", str(tmp_path)]) == 0
+    out = capsys.readouterr().out
+    assert "completa" not in out and "05" in out
+
+
+def test_verificado_a_mano_sin_evidencia_cuenta_como_hecho(tmp_path):
+    cargar(tmp_path)
+    ruta = tmp_path / "config" / "arranque.yaml"
+    d = yaml.safe_load(ruta.read_text())
+    for e in d["pasos"]:
+        if e["id"] in ("00", "01"):
+            e["estado"] = "verificado"
+            e["evidencia"] = ["config/evidencia/x.json"] if e["id"] == "01" else []
+    ruta.write_text(yaml.safe_dump(d, allow_unicode=True))
+    por = {p.id: p for p in cargar(tmp_path)}
+    assert por["00"].estado == "hecho" and por["01"].estado == "verificado"
+    assert porcentaje_fase(list(por.values())) == pytest.approx(1 / 12)
+
+
+def test_estado_cli_muestra_la_nota_truncada(tmp_path, capsys):
+    marcar_bloqueado(tmp_path, "02", "espera /trovify:cazar (plan 07)")
+    marcar_hecho(tmp_path, "03", "n" * 200)
+    capsys.readouterr()
+    assert main(["arranque", "estado", "--vault", str(tmp_path)]) == 0
+    out = capsys.readouterr().out
+    assert "espera /trovify:cazar (plan 07)" in out
+    assert "n" * 200 not in out and "n" * 70 in out
+
+
+def _con_verificador(monkeypatch, funcion):
+    from trovify.arranque.verificadores import REGISTRO
+    monkeypatch.setitem(REGISTRO, "03", funcion)
+
+
+def test_cli_encabezado_de_arreglos_coincide_con_la_convencion(tmp_path, capsys, monkeypatch):
+    _con_verificador(monkeypatch, lambda v: ResultadoVerificacion(False, [], "mal", ["haz esto"]))
+    assert main(["arranque", "verificar", "03", "--vault", str(tmp_path)]) == 1
+    out = capsys.readouterr().out
+    assert "Para arreglarlo (los comandos de sistema van en una terminal de Ubuntu (WSL) aparte):" in out
+    assert "con `!`" not in out
+
+
+def test_cli_excepcion_del_verificador_es_no_medido(tmp_path, capsys, monkeypatch):
+    def explota(v):
+        raise ValueError("secreto-sk-123")
+
+    _con_verificador(monkeypatch, explota)
+    assert main(["arranque", "verificar", "03", "--vault", str(tmp_path)]) == 3
+    cap = capsys.readouterr()
+    assert "no medido: error del verificador (ValueError)" in cap.out
+    assert "secreto-sk-123" not in cap.out + cap.err and "Traceback" not in cap.err
+    log = (tmp_path / "log.md").read_text()
+    assert log.count("verificar 03") == 1 and "secreto-sk-123" not in log

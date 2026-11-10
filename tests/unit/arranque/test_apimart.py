@@ -10,7 +10,7 @@ from trovify.arranque.verificadores.apimart import consultar_saldo, verificar_ap
 from trovify.secretos import PermisosInseguros, leer_env
 
 CLAVE = "sk-" + "x" * 30
-EXACTO = "en una terminal de Ubuntu (WSL) aparte: `mkdir -p ~/.config/trovify` y luego `install -m 600 /dev/null ~/.config/trovify/claude.env`"
+EXACTO = "en una terminal de Ubuntu (WSL) aparte: `mkdir -p ~/.config/trovify && touch ~/.config/trovify/claude.env && chmod 600 ~/.config/trovify/claude.env`"
 
 
 def env(tmp_path, modo=0o600, extra=""):
@@ -196,3 +196,52 @@ def test_redireccion_no_reenvia_la_clave(tmp_path):
         destino.shutdown()
     assert r.ok is None and r.motivo == "no medido: respuesta inesperada"
     assert vistos == []
+
+
+def test_arreglo_no_trunca_un_claude_env_existente():
+    import inspect
+
+    from trovify.arranque.verificadores import apimart
+    assert "install -m" not in inspect.getsource(apimart)
+
+
+def test_saldo_agotado_sigue_ok_con_aviso(tmp_path, respuesta_json):
+    for saldo in (0, -1.5):
+        r = verificar_apimart(tmp_path, env(tmp_path), abrir=respuesta_json(200, {**SALDO, "remain_balance": saldo}))
+        assert r.ok is True and r.evidencia
+        assert "saldo agotado: recarga US$ 5–10" in r.motivo
+        assert CLAVE not in todo(r, tmp_path)
+    r = verificar_apimart(tmp_path, env(tmp_path), abrir=respuesta_json(200, SALDO))
+    assert "agotado" not in r.motivo
+
+
+def test_clave_con_caracteres_raros(tmp_path):
+    rara = "sk-ñ" + "x" * 20 + "€"
+    f = tmp_path / "r.env"
+    f.write_text(f"APIMART_API_KEY={rara}\n")
+    os.chmod(f, 0o600)
+    r = verificar_apimart(tmp_path, f, abrir=lambda *a, **k: 1 / 0)
+    assert r.ok is False and r.motivo == "la clave tiene caracteres raros; vuelve a pegarla"
+    assert rara not in todo(r, tmp_path)
+    r = verificar_apimart(tmp_path, f, abrir=lambda *a, **k: (_ for _ in ()).throw(UnicodeEncodeError("latin-1", rara, 0, 1, "x")))
+    assert r.ok is False and rara not in todo(r, tmp_path)
+
+
+def test_leer_env_fifo_no_se_cuelga(tmp_path):
+    import threading
+
+    from trovify.secretos import EnvNoSeguro
+    fifo = tmp_path / "f.env"
+    os.mkfifo(fifo, 0o600)
+    out = []
+
+    def intenta():
+        try:
+            leer_env(fifo)
+        except EnvNoSeguro as exc:
+            out.append(exc)
+
+    t = threading.Thread(target=intenta, daemon=True)
+    t.start()
+    t.join(3)
+    assert not t.is_alive() and out

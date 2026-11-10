@@ -43,6 +43,10 @@ class BaseInvalida(Exception):
     pass
 
 
+class ClaveRara(Exception):
+    pass
+
+
 class _SinRedireccion(urllib.request.HTTPRedirectHandler):
     """No sigue redirecciones: urllib copiaría Authorization al destino."""
 
@@ -71,6 +75,8 @@ def _num(v):
 def consultar_saldo(base: str, clave: str, abrir=None) -> dict:
     """Devuelve {"saldo", "moneda"}; lanza ClaveRechazada, SinRed o RespuestaInesperada."""
     _validar_base(base)
+    if not (clave.isascii() and clave.isprintable()):
+        raise ClaveRara
     abrir = abrir or _abrir_sin_redireccion
     req = urllib.request.Request(base.rstrip("/") + "/v1/balance", headers={"Authorization": f"Bearer {clave}"})
     try:
@@ -80,6 +86,8 @@ def consultar_saldo(base: str, clave: str, abrir=None) -> dict:
         if exc.code in (401, 403):
             raise ClaveRechazada from None
         raise RespuestaInesperada from None
+    except UnicodeError:
+        raise ClaveRara from None
     except (urllib.error.URLError, TimeoutError, OSError):
         raise SinRed from None
     try:
@@ -106,7 +114,7 @@ def verificar_apimart(vault: Path, ruta_env: Path = RUTA_CLAUDE_ENV, abrir=None)
         env = leer_env(ruta_env)
     except FileNotFoundError:
         return _no(f"no existe {ruta_env}", [
-            "en una terminal de Ubuntu (WSL) aparte: `mkdir -p ~/.config/trovify` y luego `install -m 600 /dev/null ~/.config/trovify/claude.env`",
+            "en una terminal de Ubuntu (WSL) aparte: `mkdir -p ~/.config/trovify && touch ~/.config/trovify/claude.env && chmod 600 ~/.config/trovify/claude.env`",
             "en esa terminal, abre ~/.config/trovify/claude.env con un editor (por ejemplo `nano ~/.config/trovify/claude.env`) y pega tu clave como APIMART_API_KEY=... (Claude no la ve)",
         ])
     except EnvNoSeguro as exc:
@@ -123,6 +131,8 @@ def verificar_apimart(vault: Path, ruta_env: Path = RUTA_CLAUDE_ENV, abrir=None)
         saldo = consultar_saldo(base, clave, abrir)
     except BaseInvalida:
         return _no("APIMART_BASE_URL debe ser https", ["corrige APIMART_BASE_URL en claude.env (https://..., o bórrala para usar la oficial)"])
+    except ClaveRara:
+        return _no("la clave tiene caracteres raros; vuelve a pegarla", ["en una terminal de Ubuntu (WSL) aparte, abre ~/.config/trovify/claude.env y pega la clave de nuevo, sin espacios ni caracteres especiales"])
     except ClaveRechazada:
         return _no("clave rechazada por APIMart", ["revisa o regenera la clave en el panel de APIMart y pégala de nuevo en claude.env"])
     except SinRed:
@@ -136,6 +146,8 @@ def verificar_apimart(vault: Path, ruta_env: Path = RUTA_CLAUDE_ENV, abrir=None)
     unidad = f" {saldo['moneda']}" if saldo["moneda"] else ""
     cred = f", {saldo['creditos']} créditos" if saldo["creditos"] is not None else ""
     motivo = f"APIMart responde: saldo {saldo['saldo']}{unidad}{cred}"
+    if isinstance(saldo["saldo"], (int, float)) and saldo["saldo"] <= 0:
+        motivo += "; saldo agotado: recarga US$ 5–10"
     datos = {"saldo": str(saldo["saldo"])}
     if saldo["moneda"]:
         datos["moneda"] = saldo["moneda"]
