@@ -1,0 +1,83 @@
+def ev(tool, cwd="/", **inp):
+    return {"tool_name": tool, "tool_input": inp, "cwd": cwd}
+
+
+def test_raw_nuevo_se_permite_y_existente_se_deniega(correr_hook, vault_tmp):
+    nuevo = vault_tmp / "raw/2026-11-10/caza-europa.md"
+    assert correr_hook("raw_inmutable", ev("Write", file_path=str(nuevo), content="x"), vault_tmp)[0] == "allow"
+    nuevo.parent.mkdir(parents=True); nuevo.write_text("x")
+    assert correr_hook("raw_inmutable", ev("Write", file_path=str(nuevo), content="y"), vault_tmp)[0] == "deny"
+    assert correr_hook("raw_inmutable", ev("Edit", file_path=str(nuevo), old_string="x", new_string="y"), vault_tmp)[0] == "deny"
+    assert correr_hook("raw_inmutable", ev("MultiEdit", file_path=str(nuevo), edits=[{"old_string": "x", "new_string": "y"}]), vault_tmp)[0] == "deny"
+
+
+def test_log_solo_se_amplia(correr_hook, vault_tmp):
+    log = vault_tmp / "log.md"; log.write_text("- a\n")
+    assert correr_hook("raw_inmutable", ev("Write", file_path=str(log), content="- a\n- b\n"), vault_tmp)[0] == "allow"
+    assert correr_hook("raw_inmutable", ev("Write", file_path=str(log), content="- b\n"), vault_tmp)[0] == "deny"
+    assert correr_hook("raw_inmutable", ev("Edit", file_path=str(log), old_string="- a\n", new_string="- a\n- b\n"), vault_tmp)[0] == "allow"
+    assert correr_hook("raw_inmutable", ev("Edit", file_path=str(log), old_string="- a\n", new_string="- z\n"), vault_tmp)[0] == "deny"
+    ok = {"old_string": "a", "new_string": "ab"}
+    mal = {"old_string": "a", "new_string": "b"}
+    assert correr_hook("raw_inmutable", ev("MultiEdit", file_path=str(log), edits=[ok, ok]), vault_tmp)[0] == "allow"
+    assert correr_hook("raw_inmutable", ev("MultiEdit", file_path=str(log), edits=[ok, mal]), vault_tmp)[0] == "deny"
+
+
+def test_log_nuevo_se_permite(correr_hook, vault_tmp):
+    log = vault_tmp / "log.md"; log.unlink()
+    assert correr_hook("raw_inmutable", ev("Write", file_path=str(log), content="x"), vault_tmp)[0] == "allow"
+
+
+def test_raw_por_ruta_indirecta(correr_hook, vault_tmp):
+    f = vault_tmp / "raw/2026-11-10/x.md"; f.parent.mkdir(parents=True); f.write_text("x")
+    indirecta = str(vault_tmp / "wiki/../raw/2026-11-10/x.md")
+    assert correr_hook("raw_inmutable", ev("Write", file_path=indirecta, content="y"), vault_tmp)[0] == "deny"
+    enlace = vault_tmp / "wiki/enlace.md"; enlace.symlink_to(f)
+    assert correr_hook("raw_inmutable", ev("Write", file_path=str(enlace), content="y"), vault_tmp)[0] == "deny"
+    rel = {"tool_name": "Write", "tool_input": {"file_path": "raw/2026-11-10/x.md", "content": "y"}, "cwd": str(vault_tmp)}
+    assert correr_hook("raw_inmutable", rel, vault_tmp)[0] == "deny"
+
+
+def test_vault_symlink_y_prefijo_de_cadena(correr_hook, vault_tmp, tmp_path):
+    f = vault_tmp / "raw/x.md"; f.write_text("x")
+    enlace = tmp_path / "v2"; enlace.symlink_to(vault_tmp)
+    assert correr_hook("raw_inmutable", ev("Write", file_path=str(enlace / "raw/x.md"), content="y"), enlace)[0] == "deny"
+    parecido = vault_tmp / "raw-otro/x.md"; parecido.parent.mkdir(); parecido.write_text("x")
+    assert correr_hook("raw_inmutable", ev("Write", file_path=str(parecido), content="y"), vault_tmp)[0] == "allow"
+
+
+def test_notebook_en_raw(correr_hook, vault_tmp):
+    nb = vault_tmp / "raw/a.ipynb"; nb.write_text("{}")
+    assert correr_hook("raw_inmutable", ev("NotebookEdit", notebook_path=str(nb), new_source="x"), vault_tmp)[0] == "deny"
+    nuevo = vault_tmp / "raw/b.ipynb"
+    assert correr_hook("raw_inmutable", ev("NotebookEdit", notebook_path=str(nuevo), new_source="x"), vault_tmp)[0] == "allow"
+
+
+def test_bash_que_borra_raw(correr_hook, vault_tmp):
+    cmd = f"rm -rf {vault_tmp}/raw/2026-11-10"
+    assert correr_hook("raw_inmutable", ev("Bash", command=cmd), vault_tmp)[0] == "deny"
+
+
+def test_bash_operadores(correr_hook, vault_tmp):
+    v = str(vault_tmp)
+    denegar = [
+        f"mv {v}/raw/a /tmp/a", f"sed -i s/a/b/ {v}/raw/a", f"truncate -s0 {v}/log.md",
+        f"echo x > {v}/log.md", f"echo x | tee {v}/raw/a", f"cp /tmp/a {v}/raw/a",
+        f"chmod 777 {v}/raw/a", f"ln -sf /tmp/a {v}/raw/a", "rm -rf $TROVIFY_VAULT/raw/x",
+        f"rm {v}/log.md",
+    ]
+    for c in denegar:
+        assert correr_hook("raw_inmutable", ev("Bash", command=c), vault_tmp)[0] == "deny", c
+    permitir = [
+        f"cat {v}/raw/a", f"echo x >> {v}/log.md", f"echo x | tee -a {v}/log.md",
+        f"ls {v}/raw 2>&1", "rm -rf /tmp/otra", f"rm {v}/wiki/a.md",
+    ]
+    for c in permitir:
+        assert correr_hook("raw_inmutable", ev("Bash", command=c), vault_tmp)[0] == "allow", c
+
+
+def test_bash_relativo_con_cwd_en_vault(correr_hook, vault_tmp):
+    e = ev("Bash", cwd=str(vault_tmp), command="rm -rf raw/2026-11-10")
+    assert correr_hook("raw_inmutable", e, vault_tmp)[0] == "deny"
+    e = ev("Bash", cwd="/tmp", command="rm -rf raw/2026-11-10")
+    assert correr_hook("raw_inmutable", e, vault_tmp)[0] == "allow"
