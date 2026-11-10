@@ -15,12 +15,14 @@ import json
 import pathlib
 import re
 import sys
+import time
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
 COLA_LOG = 64 * 1024
 MAX_ENTRADAS_SESIONES = 2000
+ENFRIAMIENTO = 3600
 MENSAJE = (
     "Hoy se trabajó en el cerebro y aún no hay traspaso de sesión. "
     "Si vas a parar, ejecuta /trovify:cerrar para no perder el contexto."
@@ -59,14 +61,48 @@ def recordatorio(vault: pathlib.Path) -> str | None:
     return None
 
 
+def _en_vault(entrada: dict, vault: pathlib.Path) -> bool:
+    cwd = entrada.get("cwd")
+    if not isinstance(cwd, str) or not cwd:
+        return False
+    try:
+        pathlib.Path(cwd).expanduser().resolve().relative_to(vault.resolve())
+    except (ValueError, OSError):
+        return False
+    return True
+
+
+def _enfriado(vault: pathlib.Path) -> bool:
+    """True si ya se avisó hace menos de una hora (mtime del marcador)."""
+    try:
+        return time.time() - (vault / ".trovify" / "cierre-aviso").stat().st_mtime < ENFRIAMIENTO
+    except OSError:
+        return False
+
+
+def _marcar(vault: pathlib.Path) -> None:
+    try:
+        marca = vault / ".trovify" / "cierre-aviso"
+        marca.parent.mkdir(parents=True, exist_ok=True)
+        marca.touch()
+    except OSError:
+        pass
+
+
 def main() -> None:
     try:
-        from _comun import vault_root
+        from _comun import leer_entrada, vault_root
 
-        mensaje = recordatorio(vault_root())
+        vault = vault_root()
+        if not _en_vault(leer_entrada(), vault) or _enfriado(vault):
+            sys.exit(0)
+        mensaje = recordatorio(vault)
         if mensaje:
+            _marcar(vault)
             sys.stdout.write(json.dumps({"systemMessage": mensaje}))
             sys.stdout.flush()
+    except SystemExit:
+        raise
     except BaseException:  # noqa: BLE001, S110 - informativo: jamás rompe la sesión
         pass
     sys.exit(0)

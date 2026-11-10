@@ -51,3 +51,18 @@ def test_productos_exigen_frontmatter_y_sesiones_raw_se_ignoran(tmp_path):
     ps = lint(v)
     assert [(p.tipo, p.ruta) for p in ps if p.tipo == "frontmatter"] == [("frontmatter", "productos/p-0001/PRODUCTO.md")]
     assert not any(p.tipo == "huerfana" for p in ps)
+
+
+def test_nombre_ambiguo_y_pipe_escapado(tmp_path):
+    v = tmp_path / "v"
+    crear_vault(v)
+    _pagina(v / "wiki/mercados/dup.md", "x")
+    _pagina(v / "wiki/nichos/dup.md", "x")
+    _pagina(v / "wiki/mercados/t.md", "| [[wiki/mercados/dup\\|alias]] | [[dup]] |")
+    (v / "index.md").write_text(
+        (v / "index.md").read_text() + "\n- [[wiki/mercados/dup]] [[wiki/nichos/dup]] [[wiki/mercados/t]]\n"
+    )
+    ps = lint(v)
+    assert len(ps) == 1
+    assert ps[0].tipo == "enlace_roto" and ps[0].detalle.startswith("[[dup]] ambiguo:")
+    assert "wiki/mercados/dup.md" in ps[0].detalle and "wiki/nichos/dup.md" in ps[0].detalle

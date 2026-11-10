@@ -1,15 +1,20 @@
 import json
+import os
 import pathlib
 import subprocess
 import sys
-from datetime import date
+import time
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 HOOK = pathlib.Path(__file__).resolve().parents[2] / "hooks/cierre_sesion.py"
-HOY = date.today().isoformat()
+HOY = datetime.now(ZoneInfo("America/Bogota")).date().isoformat()
 LINEA = f"- {HOY} 10:00 COT · cazar · x ·  · tokens: —\n"
 
 
-def correr(vault, entrada='{"hook_event_name": "Stop"}'):
+def correr(vault, entrada=None, cwd=None):
+    if entrada is None:
+        entrada = json.dumps({"hook_event_name": "Stop", "cwd": str(cwd or vault)})
     r = subprocess.run([sys.executable, str(HOOK)], check=False, input=entrada, capture_output=True, text=True,
                        env={"TROVIFY_VAULT": str(vault), "PATH": "/usr/bin:/bin"})
     return r.returncode, r.stdout + r.stderr
@@ -40,4 +45,29 @@ def test_silencioso_sin_trabajo_hoy_o_sin_vault(tmp_path):
 def test_solo_lee_la_cola_del_log(tmp_path):
     (tmp_path / "sesiones").mkdir()
     (tmp_path / "log.md").write_text("- 2020-01-01 relleno\n" * 20000 + LINEA)
+    assert "/trovify:cerrar" in correr(tmp_path)[1]
+
+
+def _listo(tmp_path):
+    (tmp_path / "sesiones").mkdir()
+    (tmp_path / "log.md").write_text(LINEA)
+
+
+def test_cwd_fuera_del_vault_calla(tmp_path):
+    v = tmp_path / "v"
+    v.mkdir()
+    _listo(v)
+    otro = tmp_path / "otro"
+    otro.mkdir()
+    assert correr(v, cwd=otro) == (0, "")
+    assert "/trovify:cerrar" in correr(v, cwd=v)[1]
+
+
+def test_una_vez_por_hora(tmp_path):
+    _listo(tmp_path)
+    assert "/trovify:cerrar" in correr(tmp_path)[1]
+    assert correr(tmp_path) == (0, "")
+    marca = tmp_path / ".trovify" / "cierre-aviso"
+    viejo = time.time() - 3700
+    os.utime(marca, (viejo, viejo))
     assert "/trovify:cerrar" in correr(tmp_path)[1]

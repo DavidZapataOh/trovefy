@@ -48,26 +48,34 @@ def _existe(ruta: Path, vault: Path) -> Path | None:
     return ruta if ruta.exists() else None
 
 
-def _por_nombre(vault: Path) -> dict[str, Path]:
+def _por_nombre(vault: Path) -> dict[str, list[Path]]:
     """Páginas por nombre sin carpeta: ``[[R-001-x]]`` al estilo Obsidian (CLAUDE.md lo usa)."""
-    return {p.stem: p for p in reversed(_paginas(vault))}
+    nombres: dict[str, list[Path]] = {}
+    for p in _paginas(vault):
+        nombres.setdefault(p.stem, []).append(p)
+    return nombres
 
 
 def _enlaces(
-    texto: str, pagina: Path, vault: Path, nombres: dict[str, Path]
-) -> list[tuple[str, Path | None]]:
+    texto: str, pagina: Path, vault: Path, nombres: dict[str, list[Path]]
+) -> list[tuple[str, Path | None, str | None]]:
     """(destino tal como se escribió, ruta resuelta o None si no existe)."""
     resultado = []
     for m in _WIKILINK.finditer(texto):
-        destino = re.split(r"[|#]", m.group(1), maxsplit=1)[0].strip()
+        destino = re.split(r"[|#]", m.group(1), maxsplit=1)[0].strip().rstrip("\\").strip()
         if not destino:
             continue
         base = destino.lstrip("/")
         objetivo = vault / (base if base.endswith(".md") else base + ".md")
         resuelto = _existe(objetivo, vault)
+        ambiguo = None
         if resuelto is None and "/" not in base:
-            resuelto = nombres.get(base.removesuffix(".md"))
-        resultado.append((f"[[{m.group(1)}]]", resuelto))
+            cand = nombres.get(base.removesuffix(".md"), [])
+            if len(cand) == 1:
+                resuelto = cand[0]
+            elif len(cand) > 1:
+                ambiguo = "ambiguo: " + ", ".join(c.relative_to(vault).as_posix() for c in cand)
+        resultado.append((f"[[{m.group(1)}]]", resuelto, ambiguo))
     for m in _MDLINK.finditer(texto):
         destino = m.group(1).strip("<>")
         if not destino or destino.startswith("#") or _ESQUEMA.match(destino):
@@ -76,7 +84,7 @@ def _enlaces(
         if not limpio:
             continue
         base = vault if limpio.startswith("/") else pagina.parent
-        resultado.append((destino, _existe(base / limpio.lstrip("/"), vault)))
+        resultado.append((destino, _existe(base / limpio.lstrip("/"), vault), None))
     return resultado
 
 
@@ -106,8 +114,10 @@ def lint(vault: Path) -> list[Problema]:
         except (OSError, UnicodeDecodeError) as exc:
             problemas.append(Problema("frontmatter", rel, f"no se pudo leer ({type(exc).__name__})"))
             continue
-        for escrito, resuelto in _enlaces(_sin_codigo(texto), pagina, vault, nombres):
-            if resuelto is None:
+        for escrito, resuelto, ambiguo in _enlaces(_sin_codigo(texto), pagina, vault, nombres):
+            if ambiguo:
+                problemas.append(Problema("enlace_roto", rel, f"{escrito} {ambiguo}"))
+            elif resuelto is None:
                 problemas.append(Problema("enlace_roto", rel, f"{escrito} no existe"))
             elif resuelto != pagina:
                 entrantes.add(resuelto)
