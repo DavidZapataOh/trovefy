@@ -26,8 +26,8 @@ import sys
 from datetime import UTC, datetime
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urlsplit
 
+from trovify.caza.captura import es_respuesta_de_datos, escuchar_respuestas  # noqa: F401 (reexporta)
 from trovify.secretos import buscar_secreto
 from trovify.vault.escritura import escribir_atomico
 
@@ -91,12 +91,6 @@ def redactar(texto: str) -> str:
     texto = _PARAM_URL.sub(lambda m: m.group(1) + REDACTADO, texto)
     texto = _INPUT.sub(lambda m: m.group(1) + REDACTADO + m.group(2), texto)
     return _URL.sub(lambda m: MEDIA if _es_media(m.group(0)) else m.group(0), texto)
-
-
-def es_respuesta_de_datos(url: str) -> bool:
-    partes = urlsplit(url)
-    host = partes.hostname or ""
-    return (host == "facebook.com" or host.endswith(".facebook.com")) and partes.path.startswith("/api/graphql")
 
 
 def contar_anuncios(texto: str) -> int:
@@ -221,29 +215,17 @@ def guardar(datos: dict, salida: Path) -> None:
 
 
 def _capturar(url: str, max_respuestas: int, desplazamientos: int = 4) -> dict:
-    from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import sync_playwright
 
     from trovify.caza.biblioteca import detectar_bloqueo
     from trovify.navegador import _un_navegador_a_la_vez
-
-    respuestas: list[dict] = []
-
-    def al_responder(r):
-        if len(respuestas) >= max_respuestas or not es_respuesta_de_datos(r.url):
-            return
-        try:
-            cuerpo = r.text()
-        except (PlaywrightError, UnicodeDecodeError):
-            return  # cuerpo no disponible (redirección, petición abortada)
-        respuestas.append({"url": r.url, "estado": r.status, "cuerpo": cuerpo})
 
     with _un_navegador_a_la_vez(), sync_playwright() as p:
         navegador = p.chromium.launch(headless=True, chromium_sandbox=True)
         try:
             ctx = navegador.new_context()  # efímero: sin user_data_dir ni storage_state
             pagina = ctx.new_page()
-            pagina.on("response", al_responder)
+            respuestas = escuchar_respuestas(pagina, max_respuestas)
             pagina.goto(url, wait_until="domcontentloaded", timeout=60_000)
             pagina.wait_for_timeout(6_000)
             html = pagina.content()
