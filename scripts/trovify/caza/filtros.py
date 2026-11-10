@@ -69,10 +69,16 @@ def filtrar(oferta: Oferta, ctx: ContextoFiltros) -> Descarte | None:
         return Descarte("destino_social", "el destino es una red social, WhatsApp o una app")
 
     # Con marcadores digitales (pdf, plantilla, curso online...) solo cuentan las señales fuertes.
-    fis = palabras.conceptos(todo, palabras.FISICO_FUERTE)
-    if not palabras.encontradas(todo, palabras.DIGITAL):
-        fis |= palabras.conceptos(todo, palabras.FISICO_DEBIL)
-    tie = palabras.encontradas(todo, palabras.TIENDA)
+    # Compromiso aceptado: una oferta física que mencione «PDF» y tenga una sola señal fuerte pasa;
+    # la landing y el checkout (etapas siguientes) son la red de seguridad.
+    limpio = palabras.quitar_no_senales(todo)
+    digital = bool(palabras.encontradas(limpio, palabras.DIGITAL))
+    fis = palabras.conceptos(limpio, palabras.FISICO_FUERTE)
+    tie = palabras.encontradas(limpio, palabras.TIENDA)
+    if not digital:
+        fis |= palabras.conceptos(limpio, palabras.FISICO_DEBIL)
+        if palabras.encontradas(limpio, palabras.TIENDA_TALLA):
+            tie = tie | {"talla concreta"}
     if len(fis) >= _umbral(ctx, "caza.filtro.fisico_min_senales") or len(tie) >= _umbral(
         ctx, "caza.filtro.tienda_min_senales"
     ):

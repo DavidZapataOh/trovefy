@@ -179,3 +179,20 @@ def test_ya_visto_va_primero():
 
 def test_programa_suelto_no_es_marca_personal():
     assert filtrar(oferta("Mi programa y mentoría con plantilla"), CTX) is None
+
+
+@pytest.mark.parametrize("texto", [
+    "Patrón de costura PDF: talla S, talla M, talla L, talla XL incluidas",
+    "Cápsulas del tiempo imprimibles, envío inmediato",
+    "Stock photos pack con licencia, size 4000px",
+    "Plantillas editables en Canva, envío inmediato, stock ilimitado",
+    "Printables for kids, free shipping on orders of 3 downloads",
+    "Time capsules printables, tablets, size A4",
+])
+def test_digitales_con_plurales_y_frases_no_senal(texto):
+    assert filtrar(oferta(texto), CTX) is None
+
+
+def test_app_y_zoom_no_son_marcador_digital():
+    assert filtrar(oferta("Cápsulas 500 mg, envío, app, zoom"), CTX).codigo == "producto_fisico"
+    assert filtrar(oferta("Talla única, envío, app y zoom"), CTX).codigo == "producto_fisico"

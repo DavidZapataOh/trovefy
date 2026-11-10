@@ -40,11 +40,23 @@ FISICO_DEBIL: list[list[str]] = [
 ]
 # Marcadores de producto digital: con ellos, las señales débiles de FISICO no cuentan.
 DIGITAL: list[str] = [
-    "pdf", "digital", "descargable", "descarga", "download", "downloadable", "ebook", "e-book", "printable",
-    "imprimible", "plantilla", "plantillas", "template", "templates", "acceso inmediato", "instant access",
-    "curso online", "online course", "app", "zoom", "webinar", "audiolibro", "baixar", "descarregar",
-    "acces imediat", "descărcare", "scaricabile", "télécharger", "téléchargeable", "accesso immediato",
-    "accès immédiat", "acesso imediato", "curso online",
+    "pdf", "pdfs", "digital", "digitales", "digitais", "digitale", "numérique", "numériques", "numerique",
+    "descargable", "descargables", "descarga", "descargas", "download", "downloads", "downloadable",
+    "ebook", "ebooks", "e-book", "e-books", "printable", "printables", "imprimible", "imprimibles",
+    "imprimível", "imprimíveis", "imprimabil", "imprimabile", "stampabile", "stampabili", "imprimable",
+    "imprimables", "plantilla", "plantillas", "template", "templates", "modelo digital", "modelos digitais",
+    "șablon", "șabloane", "sablon", "sabloane", "modello", "modelli", "modèle numérique",
+    "acceso inmediato", "instant access", "acesso imediato", "acces imediat", "accesso immediato",
+    "accès immédiat", "curso online", "cursos online", "online course", "webinar", "audiolibro",
+    "baixar", "descarregar", "descărcare", "scaricabile", "scaricabili", "télécharger", "téléchargeable",
+    "téléchargeables",
+]
+# Frases que contienen una palabra de FISICO sin ser producto físico; se quitan antes de contar.
+NO_SENAL: list[str] = [
+    "cápsula del tiempo", "cápsulas del tiempo", "time capsule", "time capsules", "cápsula do tempo",
+    "cápsulas do tempo", "capsula timpului", "capsule del tempo", "capsula del tempo", "capsule temporelle",
+    "capsules temporelles", "stock photo", "stock photos", "foto de stock", "fotos de stock", "stock de fotos",
+    "fotos stock", "stock images", "imagens de stock", "poze stock", "foto stock", "photos de stock",
 ]
 FISICO: list[str] = [t for g in FISICO_FUERTE + FISICO_DEBIL for t in g]
 
@@ -56,9 +68,6 @@ TIENDA: list[str] = [
     "collezione", "collection printemps", "carrito de compras", "shopping cart", "coș de cumpărături",
     "pago contra reembolso", "cash on delivery", "plata la livrare", "pagamento alla consegna",
     "paiement à la livraison", "pagamento na entrega", "envío gratis en compras", "free shipping on orders",
-    "talla s", "talla m", "talla l", "talla xl", "size s", "size m", "size l", "size xl",
-    "taille s", "taille m", "taille l", "taglia s", "taglia m", "taglia l", "tamanho p", "tamanho m",
-    "tamanho g", "mărime s", "mărime m", "mărime l",
 ]
 
 # Solo bandera: los vídeos de la Biblioteca no descartan la academia (idea de un repo de referencia).
@@ -103,6 +112,11 @@ TEMPORADA: list[str] = [
     "noël", "rentrée des classes", "saint-valentin", "fête des mères", "fête des pères", "pâques",
 ]
 
+# Tallas concretas de ropa: cuentan como UN solo concepto de TIENDA y se ignoran con marcadores digitales.
+TIENDA_TALLA: list[str] = [
+    f"{p} {t}" for p in ("talla", "size", "taille", "taglia", "tamanho", "mărime") for t in ("s", "m", "l", "xl", "xxl")
+]
+
 
 def normalizar(texto: str) -> str:
     """Minúsculas, sin acentos ni diacríticos (ș→s, ñ→n) y con espacios colapsados."""
@@ -129,3 +143,11 @@ def contar(texto: str, lista: list[str]) -> int:
 def conceptos(texto: str, grupos: list[list[str]]) -> set[str]:
     """Grupos de ``grupos`` con al menos una variante en ``texto`` (se devuelve la primera variante)."""
     return {g[0] for g in grupos if encontradas(texto, g)}
+
+
+def quitar_no_senales(texto: str) -> str:
+    """Quita frases como «cápsula del tiempo» o «stock photos» que no indican producto físico."""
+    t = normalizar(texto)
+    for frase in NO_SENAL:
+        t = _patron(frase).sub(" ", t)
+    return t
