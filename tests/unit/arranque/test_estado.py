@@ -137,3 +137,17 @@ def test_siguiente_con_bloqueados_no_dice_completa(tmp_path, capsys):
     assert main(["arranque", "siguiente", "--vault", v]) == 0
     out = capsys.readouterr().out
     assert "completa" not in out and "sin pago a CO" in out and "sin KYC" in out
+
+
+def test_sin_evidencia_conserva_el_motivo_de_un_bloqueo(tmp_path):
+    marcar_bloqueado(tmp_path, "03", "falta el DNI")
+    p = aplicar_verificacion(tmp_path, "03", ResultadoVerificacion(None, [], "no medido: sin red", []))
+    assert p.estado == "bloqueado" and p.nota == "falta el DNI · no medido: sin red"
+    p = aplicar_verificacion(tmp_path, "03", ResultadoVerificacion(None, [], "no medido: sin red", []))
+    assert p.nota == "falta el DNI · no medido: sin red"  # no se repite
+
+
+def test_nota_sin_motivo_no_deja_separador(tmp_path):
+    marcar_bloqueado(tmp_path, "03", "falta el DNI")
+    p = aplicar_verificacion(tmp_path, "03", ResultadoVerificacion(None, [], "", []))
+    assert p.nota == "falta el DNI"

@@ -156,8 +156,12 @@ def marcar_bloqueado(vault: Path, id_: str, motivo: str) -> Paso:
 
 
 def _anotar(p: Paso, texto: str) -> None:
-    """Un paso verificado conserva la nota de su verificación: se añade, no se pisa."""
-    p.nota = f"{p.nota} · {texto}" if p.estado == "verificado" and p.nota else texto
+    """Un paso verificado o bloqueado conserva su nota: se añade una vez, no se pisa."""
+    if p.estado in ("verificado", "bloqueado") and p.nota:
+        if texto and texto not in p.nota:
+            p.nota = f"{p.nota} · {texto}"
+    elif texto:
+        p.nota = texto
 
 
 def aplicar_verificacion(vault: Path, id_: str, r: ResultadoVerificacion) -> Paso:
