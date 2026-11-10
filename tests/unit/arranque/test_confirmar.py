@@ -181,3 +181,12 @@ def test_confirmaciones_corruptas_no_se_pisan(tmp_path, capsys):
     assert main(["arranque", "confirmar", "06", "--respuesta", "si", "--vault", str(v)]) == 2
     assert ruta.read_text() == "[esto: no es: un mapa"
     assert fecha_confirmada(v, "06") is None
+
+
+def test_confirmar_06_exige_el_limite(tmp_path, capsys):
+    v = _vault(tmp_path)
+    sin = "Currency: USD\nTime zone: Europe/Bucharest\nAccount spending limit\nSet limit\n"
+    verificar_cuenta(v, capturar=falso(sin))
+    assert main(["arranque", "confirmar", "06", "--respuesta", "si", "--vault", str(v)]) == 2
+    assert "pon primero el límite de gasto (paso 5 de la guía) y vuelve a capturar" in capsys.readouterr().err
+    assert _confirmaciones(v) is None

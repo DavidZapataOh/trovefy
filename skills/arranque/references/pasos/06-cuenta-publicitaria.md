@@ -24,6 +24,7 @@ Crear tu cuenta publicitaria de Meta con la moneda y la zona horaria correctas y
 - Síntoma: «no medido: elige primero el mercado con /auditar». Arreglo: ejecuta `/trovify:auditar`, elige el mercado y vuelve a verificar.
 - Síntoma: la moneda no es USD o la zona no coincide. Arreglo: no se pueden cambiar; crea otra cuenta publicitaria con los valores correctos.
 - Síntoma: «la cuenta no tiene límite de gasto» o supera el máximo. Arreglo: ponlo en Ajustes de pago, hasta US$ 250. Si tu cuenta usa fondos prepagados, no admite límite: cambia a pago automático con tarjeta.
+- Síntoma: «pon primero el límite de gasto (paso 5 de la guía) y vuelve a capturar» al confirmar. Arreglo: pon el límite (paso 5), vuelve a verificar para capturar la pantalla y confirma después.
 - Síntoma: el pago se rechaza. Arreglo: pide a tu banco que active las compras internacionales.
 
 **Cómo se verifica**

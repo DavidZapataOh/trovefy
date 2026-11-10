@@ -22,6 +22,7 @@ from trovify.arranque.verificadores.base import (
     LECTORES,
     RUTA_CONFIRMACIONES,
     leer_texto_provisional,
+    rechazo,
     registrar_confirmacion,
     ultimo_texto_provisional,
 )
@@ -152,13 +153,9 @@ def _confirmar(vault: Path, id_: str, respuesta: str | None) -> int:
     print(f"Leído de tu pantalla real ({rel}):")
     for campo, valor in valores.items():
         print(f"  {campo}: {_mostrable(valor)}")
-    requeridos = lector.requeridos if lector.requeridos is not None else tuple(valores)
-    faltan = [c for c in requeridos if valores.get(c) is None]
-    if faltan:
-        return _error(
-            f"el patrón no casa con tu pantalla real (falta: {', '.join(faltan)}); "
-            "hay que ajustar el mapa (cambio en el repo). No se confirma nada."
-        )
+    motivo = rechazo(lector, valores)
+    if motivo:
+        return _error(motivo)
     if si is None:
         print(f"\n¿Coincide con lo que ves en tu pantalla? Solo con tu «sí»: `trovify arranque confirmar {id_} --respuesta si`.")
         return 0

@@ -297,15 +297,31 @@ class Lector:
 
     leer: Callable[[dict[str, str], Path], dict[str, str | None]]
     requeridos: tuple[str, ...] | None  # None: todos los campos que devuelve `leer`
+    aceptar: Callable[[dict[str, str | None]], str | None] | None = None  # motivo para no confirmar, o None
 
 
 LECTORES: dict[str, Lector] = {}
 
 
 def registrar_lector(
-    id_: str, leer: Callable[[dict[str, str], Path], dict[str, str | None]], requeridos: tuple[str, ...] | None = None
+    id_: str,
+    leer: Callable[[dict[str, str], Path], dict[str, str | None]],
+    requeridos: tuple[str, ...] | None = None,
+    aceptar: Callable[[dict[str, str | None]], str | None] | None = None,
 ) -> None:
-    LECTORES[id_] = Lector(leer, requeridos)
+    LECTORES[id_] = Lector(leer, requeridos, aceptar)
+
+
+def rechazo(lector: Lector, valores: dict[str, str | None]) -> str | None:
+    """Por qué no se puede confirmar lo leído (None: se puede)."""
+    requeridos = lector.requeridos if lector.requeridos is not None else tuple(valores)
+    faltan = [c for c in requeridos if valores.get(c) is None]
+    if faltan:
+        return (
+            f"el patrón no casa con tu pantalla real (falta: {', '.join(faltan)}); "
+            "hay que ajustar el mapa (cambio en el repo). No se confirma nada."
+        )
+    return lector.aceptar(valores) if lector.aceptar else None
 
 
 def lector_de_mapa(mapa: Callable[[], dict]) -> Callable[[dict[str, str], Path], dict]:

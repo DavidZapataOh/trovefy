@@ -46,6 +46,7 @@ CONFIRMACION_06 = Confirmacion(
 )
 
 ILEGIBLE = "ilegible"  # la línea del límite existe, pero el número es ambiguo
+SIN_LIMITE = "sin_limite"  # el rótulo del límite está, pero sin cantidad
 
 _MONEDA = re.compile(r"^\s*(?:Currency|Moneda)\s*:\s*([A-Z]{3})\s*$", re.MULTILINE)
 _ZONA = re.compile(
@@ -54,6 +55,7 @@ _ZONA = re.compile(
     re.MULTILINE,
 )
 _LIMITE = re.compile(r"^\s*(?:Account spending limit|Límite de gasto de la cuenta)\s*:\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
+_ROTULO_LIMITE = re.compile(r"Account spending limit|Límite de gasto de la cuenta", re.IGNORECASE)
 
 
 def _numero(texto: str) -> str | None:
@@ -98,7 +100,12 @@ def leer_ajustes_cuenta(texto: str) -> dict[str, str | None]:
         return m.group(1) if m else None
 
     bruto = uno(_LIMITE)
-    limite = None if bruto is None else (_numero(bruto) or ILEGIBLE)
+    if bruto is None:
+        limite = SIN_LIMITE if _ROTULO_LIMITE.search(texto) else None  # rótulo sin cantidad / ni rótulo
+    elif not re.search(r"\d", bruto):
+        limite = SIN_LIMITE
+    else:
+        limite = _numero(bruto) or ILEGIBLE
     return {"moneda": uno(_MONEDA), "zona": uno(_ZONA), "limite_gasto": limite}
 
 
@@ -143,6 +150,8 @@ def evaluar_cuenta(ajustes: dict, zona_esperada: str | None, limite_max: float) 
             f"la zona horaria es {ajustes.get('zona') or 'desconocida'}, no {zona_esperada}",
             "cámbiala en Ajustes de pago → Información de la empresa antes de crear campañas (cierra la cuenta y crea otra)",
         )
+    if ajustes.get("limite_gasto") is None:
+        return resultado(None, "no medido: no se ve el límite de gasto en la pantalla", "revisa el límite en Ajustes de pago (hasta US$ " f"{limite_max:g})")
     if ajustes.get("limite_gasto") == ILEGIBLE:
         return resultado(None, "no medido: no se entiende el número del límite de gasto", "revisa el límite en Ajustes de pago (hasta US$ " f"{limite_max:g})")
     try:
@@ -196,7 +205,16 @@ def verificar_cuenta(
     return ResultadoVerificacion(True, ev, r.motivo, [], {"act_id": act}, r.lineas)
 
 
-registrar_lector("06", lambda textos, _v: leer_ajustes_cuenta(textos.get("pagina", "")), ("moneda", "zona"))
+def _aceptar_06(valores: dict[str, str | None]) -> str | None:
+    limite = valores.get("limite_gasto")
+    if limite in (None, SIN_LIMITE):
+        return "pon primero el límite de gasto (paso 5 de la guía) y vuelve a capturar"
+    if limite == ILEGIBLE:
+        return "el número del límite de gasto no se entiende; hay que ajustar el patrón (cambio en el repo)"
+    return None
+
+
+registrar_lector("06", lambda textos, _v: leer_ajustes_cuenta(textos.get("pagina", "")), ("moneda", "zona"), _aceptar_06)
 
 
 @verificador("06")

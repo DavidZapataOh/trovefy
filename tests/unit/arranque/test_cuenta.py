@@ -35,7 +35,8 @@ def test_zona_distinta_falla():
 
 def test_moneda_y_limite():
     assert evaluar_cuenta({**BIEN, "moneda": "COP"}, "Europe/Bucharest", 250).ok is False
-    assert evaluar_cuenta({**BIEN, "limite_gasto": None}, "Europe/Bucharest", 250).ok is False
+    assert evaluar_cuenta({**BIEN, "limite_gasto": None}, "Europe/Bucharest", 250).ok is None  # no se ve el rótulo
+    assert evaluar_cuenta({**BIEN, "limite_gasto": "sin_limite"}, "Europe/Bucharest", 250).ok is False
     assert evaluar_cuenta({**BIEN, "limite_gasto": "250.01"}, "Europe/Bucharest", 250).ok is False
     assert evaluar_cuenta({**BIEN, "limite_gasto": "100"}, "Europe/Bucharest", 250).ok is True
     assert evaluar_cuenta(BIEN, "Europe/Bucharest", 250).ok is True
@@ -162,7 +163,7 @@ import pytest
     [
         ("250,00", "250.00"), ("1.000,00", "1000.00"), ("1,000.00", "1000.00"), ("250,00 US$", "250.00"),
         ("US$250.00", "250.00"), ("250 USD", "250"), ("$1,250.50", "1250.50"), ("1,000", "1000"), ("1.000.000", "1000000"),
-        ("1.000", ilegible := "ilegible"), ("12,345,6", ilegible), ("1.000,000", ilegible), ("abc", ilegible),
+        ("1.000", ilegible := "ilegible"), ("12,345,6", ilegible), ("1.000,000", ilegible), ("abc", "sin_limite"), ("—", "sin_limite"),
     ],
 )
 def test_numeros_en_formato_local(bruto, esperado):
@@ -185,7 +186,7 @@ def test_limite_ilegible_es_no_medido_y_cero_es_invalido():
 
 
 def test_sin_limite_menciona_prepago():
-    r = evaluar_cuenta({**BIEN, "limite_gasto": None}, "Europe/Bucharest", 250)
+    r = evaluar_cuenta({**BIEN, "limite_gasto": "sin_limite"}, "Europe/Bucharest", 250)
     assert r.ok is False and "pago automático con tarjeta" in " ".join(r.arreglos)
 
 
@@ -193,3 +194,11 @@ def test_moneda_se_mira_antes_que_el_mercado():
     r = evaluar_cuenta({**BIEN, "moneda": "COP"}, None, 250)
     assert r.ok is False and "COP" in r.motivo
     assert evaluar_cuenta(BIEN, None, 250).ok is None
+
+
+def test_rotulo_del_limite_sin_cantidad_es_sin_limite_y_sin_rotulo_es_none():
+    base = "Currency: USD\nTime zone: Europe/Bucharest\n"
+    assert leer_ajustes_cuenta(base + "Account spending limit\nSet limit\n")["limite_gasto"] == "sin_limite"
+    assert leer_ajustes_cuenta(base)["limite_gasto"] is None
+    r = evaluar_cuenta({**BIEN, "limite_gasto": None}, "Europe/Bucharest", 250)
+    assert r.ok is None and "límite" in r.motivo
