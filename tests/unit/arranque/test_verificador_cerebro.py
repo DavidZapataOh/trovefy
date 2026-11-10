@@ -27,7 +27,8 @@ def _pagina_metodo(vault, n=1):
 
 def _ultimo(vault, **cambios):
     datos = {
-        "fecha": _hoy().isoformat(), "todos_ok": True, "resultados": [],
+        "fecha": _hoy().isoformat(), "todos_ok": True,
+        "resultados": [{"id": c.id, "estado": "ok", "faltan": [], "respuesta": ""} for c in cargar()],
         "ids": [c.id for c in cargar()], "canarios_sha256": sha256_de(),
     }
     datos.update(cambios)
@@ -104,3 +105,43 @@ def test_pagina_invalida(tmp_path):
 def test_sin_vault(tmp_path):
     r = REGISTRO["01"](tmp_path / "nada")
     assert r.ok is False and "vault" in r.motivo
+
+
+def test_fecha_futura(tmp_path):
+    crear_vault(tmp_path)
+    _pagina_metodo(tmp_path)
+    _ultimo(tmp_path, fecha=(_hoy() + timedelta(days=1)).isoformat())
+    r = REGISTRO["01"](tmp_path)
+    assert r.ok is False and "futuro" in r.motivo
+
+
+def test_resultados_vacios(tmp_path):
+    crear_vault(tmp_path)
+    _pagina_metodo(tmp_path)
+    _ultimo(tmp_path, resultados=[])
+    assert REGISTRO["01"](tmp_path).ok is False
+
+
+def test_resultado_no_ok(tmp_path):
+    crear_vault(tmp_path)
+    _pagina_metodo(tmp_path)
+    res = [{"id": c.id, "estado": "ok"} for c in cargar()]
+    res[0]["estado"] = "falla"
+    _ultimo(tmp_path, resultados=res)
+    r = REGISTRO["01"](tmp_path)
+    assert r.ok is False and res[0]["id"] in r.motivo
+
+
+def test_canarios_yaml_roto(tmp_path, monkeypatch):
+    import yaml
+    from trovify.cerebro import canarios
+
+    def roto(*a, **k):
+        raise yaml.YAMLError("mal")
+
+    crear_vault(tmp_path)
+    _pagina_metodo(tmp_path)
+    _ultimo(tmp_path)
+    monkeypatch.setattr(canarios, "cargar", roto)
+    r = REGISTRO["01"](tmp_path)
+    assert r.ok is False and "canarios.yaml" in r.motivo

@@ -1,8 +1,10 @@
 """Paso 01: el cerebro está construido, es coherente y pasa sus canarios."""
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
+
+import yaml
 
 from trovify.arranque.estado import ResultadoVerificacion
 from trovify.arranque.verificadores import base, verificador
@@ -47,17 +49,30 @@ def verificar_cerebro(vault: Path | None = None) -> ResultadoVerificacion:
         fecha = datetime.strptime(str(datos["fecha"]), "%Y-%m-%d").date()
     except (OSError, ValueError, KeyError, TypeError):
         return _falla("data/canarios/ultimo.json está ilegible o incompleto", _CANARIOS)
-    if not isinstance(datos, dict) or datos.get("todos_ok") is not True:
+    if datos.get("todos_ok") is not True:
         return _falla("los canarios no pasaron todos", _CANARIOS + " y corrige las respuestas que fallan")
-    if fecha < datetime.now(ZONA_NEGOCIO).date() - timedelta(days=MAX_DIAS):
+    edad = (datetime.now(ZONA_NEGOCIO).date() - fecha).days
+    if edad < 0:
+        return _falla(f"la fecha de los canarios está en el futuro ({fecha})", _CANARIOS)
+    if edad > MAX_DIAS:
         return _falla(f"los canarios son de hace más de {MAX_DIAS} días ({fecha})", _CANARIOS)
     try:
         esperados = [c.id for c in canarios.cargar()]
         sha = canarios.sha256_de()
-    except (OSError, ValueError, TypeError) as exc:
+    except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
         return _falla(f"no se pudo leer el canarios.yaml canónico: {exc}", "revisa tests/canarios.yaml del repo")
     if datos.get("ids") != esperados:
         return _falla("los ids de los canarios del resultado no son los del canarios.yaml actual", _CANARIOS)
+    if not esperados:
+        return _falla("el canarios.yaml canónico no tiene canarios", "revisa tests/canarios.yaml del repo")
+    resultados = datos.get("resultados")
+    if not isinstance(resultados, list) or not all(isinstance(r, dict) for r in resultados):
+        return _falla("los resultados de los canarios están mal formados", _CANARIOS)
+    if [r.get("id") for r in resultados] != esperados:
+        return _falla("los resultados no cubren exactamente los canarios del canarios.yaml actual", _CANARIOS)
+    malos = [str(r.get("id")) for r in resultados if r.get("estado") != "ok"]
+    if malos:
+        return _falla("canarios que no están ok: " + ", ".join(malos), _CANARIOS + " y corrige las respuestas que fallan")
     if datos.get("canarios_sha256") != sha:
         return _falla("el sha del canarios.yaml cambió desde la última corrida", _CANARIOS)
     rel_ultimo = ultimo.relative_to(vault).as_posix()
