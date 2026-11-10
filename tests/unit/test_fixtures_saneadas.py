@@ -11,6 +11,8 @@ TELEFONO = re.compile(r"\+?\d[\d\s-]{8,}\d")
 def test_fixtures_saneadas():
     for f in FIX.rglob("*"):
         if f.is_file():
-            t = f.read_text(errors="ignore").replace(ID_PUBLICO, "")
+            t = f.read_text(errors="ignore")
+            if f.name == "pagina_publica.html":
+                t = t.replace(ID_PUBLICO, "")
             assert not CORREO.search(t), f
             assert not TELEFONO.search(t), f

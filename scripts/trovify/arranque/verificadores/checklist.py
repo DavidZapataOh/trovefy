@@ -30,7 +30,7 @@ def verificar_checklist(vault: Path, id: str, respuestas: dict[str, bool]) -> Re
     if desconocidas:
         raise ValueError(f"respuesta desconocida: {', '.join(desconocidas)} (válidas: {', '.join(items)})")
     if faltan:
-        motivo = "faltan respuestas: " + "; ".join(f"{items[k]} ({k})" for k in faltan)
+        motivo = "incompleto, faltan respuestas: " + "; ".join(f"{items[k]} ({k})" for k in faltan)
         return ResultadoVerificacion(False, [], motivo, [f"responde todas con `--respuesta {k}=si` o `=no`" for k in faltan],
                                      {}, [f"✗ {motivo}"])
     nos = [k for k in items if respuestas[k] is not True]

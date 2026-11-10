@@ -23,4 +23,6 @@ Crear tu portfolio comercial de Meta, el contenedor de tus páginas y cuentas pu
 - Síntoma: Meta te pide verificar identidad. Arreglo: hazlo tú con tus documentos reales; Claude no los ve.
 
 **Cómo se verifica**
+Al verificar se abre una ventana del navegador de Trovify unos segundos; no la toques.
 `trovify arranque verificar 04` abre `https://business.facebook.com/settings/` con el perfil de Meta, lee el `business_id=` de la URL final y guarda una captura (`config/evidencia/04-captura-<fecha>.png`) y el ID. Si la sesión ha caducado dice «no medido» en vez de fallar.
+Mientras el patrón no esté confirmado con tu pantalla real, el resultado es «no medido: patrón sin confirmar con tu pantalla real» y la captura queda en `config/evidencia/provisional/`; el paso no se verifica todavía.

@@ -16,12 +16,25 @@ from urllib.parse import parse_qs, urlparse
 
 from trovify.arranque.estado import ResultadoVerificacion, cargar
 from trovify.arranque.verificadores import verificador
-from trovify.arranque.verificadores.base import guardar_evidencia
+from trovify.arranque.verificadores.base import (
+    MOTIVO_SIN_CONFIRMAR,
+    Confirmacion,
+    guardar_evidencia,
+    guardar_provisional,
+    sin_query,
+)
 from trovify.vault.rutas import vault_root
 
 URL_BUSINESS = "https://business.facebook.com/settings/"
 COMANDO_ABRIR = "trovify navegador abrir meta https://business.facebook.com/"
 SIN_SESION = f"no medido: inicia sesión en el navegador de Trovify (`{COMANDO_ABRIR}`)"
+
+# Hasta que el usuario haga el paso y se capture su pantalla real, ninguno de los dos certifica.
+CONFIRMACION_04 = Confirmacion(fecha=None, fuente="encargo del plan 05: `business_id=` en la URL de business.facebook.com/settings/")
+CONFIRMACION_05_SESION = Confirmacion(
+    fecha=None,
+    fuente="patrones confirmados solo en HTML público sin sesión (2026-11-10); falta el HTML con la sesión «meta»",
+)
 
 PATRONES_PAGE_ID = (
     re.compile(r'"delegate_page":\{[^{}]*?"id":"(\d+)"'),
@@ -72,11 +85,21 @@ def _evidencia(vault: Path, id_: str, png: bytes | None, resumen: dict) -> list[
     return rel + [guardar_evidencia(vault, id_, "ids", resumen)]
 
 
-def verificar_business(vault: Path | None = None, capturar: Callable | None = None) -> ResultadoVerificacion:
+def _provisional(vault: Path, id_: str, cap, png: bytes | None) -> ResultadoVerificacion:
+    rutas = guardar_provisional(vault, id_, cap.url_final, png)
+    lineas = [f"? {MOTIVO_SIN_CONFIRMAR}"] + [f"  captura provisional: {r}" for r in rutas]
+    return ResultadoVerificacion(None, [], MOTIVO_SIN_CONFIRMAR, [], {}, lineas)
+
+
+def verificar_business(
+    vault: Path | None = None, capturar: Callable | None = None, confirmacion: Confirmacion = CONFIRMACION_04
+) -> ResultadoVerificacion:
     vault = vault_root() if vault is None else Path(vault)
     cap, png, motivo = _leer_pagina(URL_BUSINESS, capturar or _capturar_por_defecto)
     if cap is None:
         return _no_medido(motivo)
+    if not confirmacion.confirmada:
+        return _provisional(vault, "04", cap, png)
     bid = extraer_business_id(cap.url_final)
     if bid is None:
         m = "la página de ajustes de Business no muestra un portfolio con ID"
@@ -104,7 +127,20 @@ def _url_pagina(vault: Path) -> str | None:
     return url if ok else None
 
 
-def verificar_pagina(vault: Path | None = None, capturar: Callable | None = None) -> ResultadoVerificacion:
+def _id_numerico_de_url(url: str) -> str | None:
+    partes = urlparse(url)
+    primero = partes.path.strip("/").split("/")[0]
+    if primero.isdigit():
+        return primero
+    if primero == "profile.php":
+        ids = [v for v in parse_qs(partes.query).get("id", []) if v.isdigit()]
+        return ids[0] if ids else None
+    return None
+
+
+def verificar_pagina(
+    vault: Path | None = None, capturar: Callable | None = None, confirmacion: Confirmacion = CONFIRMACION_05_SESION
+) -> ResultadoVerificacion:
     vault = vault_root() if vault is None else Path(vault)
     url = _url_pagina(vault)
     if url is None:
@@ -114,11 +150,17 @@ def verificar_pagina(vault: Path | None = None, capturar: Callable | None = None
     cap, png, motivo = _leer_pagina(url, capturar or _capturar_por_defecto)
     if cap is None:
         return _no_medido(motivo)
+    if not confirmacion.confirmada:
+        return _provisional(vault, "05", cap, png)
     pid = extraer_page_id(cap.html)
+    esperado = _id_numerico_de_url(url)
+    if pid is not None and esperado is not None and pid != esperado:
+        m = "el ID de la página no coincide con el de la dirección guardada"
+        return ResultadoVerificacion(False, [], m, ["guarda la dirección de tu página con `trovify arranque hecho 05 --dato url=…`"], {}, [f"✗ {m}"])
     if pid is None:
         m = "la página no muestra un ID reconocible"
         return ResultadoVerificacion(False, [], m, ["comprueba que la URL es la de tu página y que está publicada"], {}, [f"✗ {m}"])
-    ev = _evidencia(vault, "05", png, {"url": url, "url_final": cap.url_final, "page_id": pid})
+    ev = _evidencia(vault, "05", png, {"url": url, "url_final": sin_query(cap.url_final), "page_id": pid})
     return ResultadoVerificacion(True, ev, f"página de Facebook con ID {pid}", [], {"page_id": pid}, [f"✓ page_id {pid}"])
 
 

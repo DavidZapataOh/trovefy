@@ -4,6 +4,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from trovify.arranque.estado import (
     ArranqueCorrupto,
@@ -57,6 +58,20 @@ def _error(msg: str) -> int:
 _CLAVE_DATO = re.compile(r"[a-z_]+")
 
 
+_PROHIBIDO_EN_URL = ("access_token=", "token=", "code=", "sig=", "fb_dtsg")
+
+
+def _url_limpia(valor: str) -> str:
+    """https y dominio de Facebook; sin parámetros ni fragmento (pueden llevar tokens)."""
+    if any(x in valor.lower() for x in _PROHIBIDO_EN_URL):
+        raise ValueError("--dato url: la dirección lleva un token o código; copia solo la dirección de la página")
+    partes = urlsplit(valor)
+    host = (partes.hostname or "").lower()
+    if partes.scheme != "https" or not (host in ("facebook.com", "fb.com") or host.endswith((".facebook.com", ".fb.com"))):
+        raise ValueError("--dato url: debe ser una dirección https de facebook.com o fb.com")
+    return urlunsplit((partes.scheme, partes.netloc, partes.path, "", ""))
+
+
 def _parsear_datos(items: list[str]) -> dict[str, str]:
     datos: dict[str, str] = {}
     for item in items:
@@ -67,7 +82,7 @@ def _parsear_datos(items: list[str]) -> dict[str, str]:
             raise ValueError(f"--dato {clave}: el valor no puede estar vacío ni tener saltos de línea")
         if _buscar_secreto(valor):
             raise ValueError(f"--dato {clave}: el valor parece un secreto; los secretos no se guardan en el vault")
-        datos[clave] = valor
+        datos[clave] = _url_limpia(valor) if clave == "url" else valor
     return datos
 
 

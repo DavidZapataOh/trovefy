@@ -6,8 +6,10 @@ import re
 import signal
 import subprocess
 import tempfile
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from trovify.vault.escritura import ZONA_NEGOCIO
 
@@ -64,3 +66,59 @@ def guardar_evidencia(vault: Path, id: str, nombre: str, datos: dict | bytes) ->
             os.unlink(tmp)
         raise
     return rel
+
+
+@dataclass(frozen=True)
+class Confirmacion:
+    """Estado de un patrón o mapa de una pantalla privada.
+
+    Mientras `fecha` sea None el patrón sale de la documentación o del encargo, no de la pantalla
+    real del usuario: el verificador no certifica (ni suspende) nada con él; devuelve «no medido».
+    Se confirma en un commit posterior a la primera captura real, poniendo la fecha.
+    """
+
+    fecha: str | None
+    fuente: str
+
+    @property
+    def confirmada(self) -> bool:
+        return self.fecha is not None
+
+
+MOTIVO_SIN_CONFIRMAR = "no medido: patrón sin confirmar con tu pantalla real"
+
+
+def sin_query(url: str) -> str:
+    """La URL sin parámetros ni fragmento (pueden llevar identificadores o tokens)."""
+    partes = urlsplit(url)
+    return urlunsplit((partes.scheme, partes.netloc, partes.path, "", ""))
+
+
+def guardar_provisional(vault: Path, id: str, url_final: str, png: bytes | None) -> list[str]:
+    """Guarda la captura (PNG) y la URL sin query en config/evidencia/provisional/; devuelve las rutas."""
+    if not _SEGURO.match(id):
+        raise ValueError("id de evidencia solo admite letras, números, - y _")
+    base = Path(vault) / "config" / "evidencia" / "provisional"
+    fecha = f"{datetime.now(ZONA_NEGOCIO):%Y-%m-%d}"
+    rutas: list[str] = []
+    for nombre, contenido in (
+        (f"{id}-captura-{fecha}.png", png),
+        (f"{id}-url-{fecha}.json", json.dumps({"url_final": sin_query(url_final)}, ensure_ascii=False).encode("utf-8")),
+    ):
+        if contenido is None:
+            continue
+        base.mkdir(parents=True, exist_ok=True)
+        destino = base / nombre
+        fd, tmp = tempfile.mkstemp(dir=base, prefix=".tmp-")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(contenido)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, destino)
+        except BaseException:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+            raise
+        rutas.append(destino.relative_to(vault).as_posix())
+    return rutas

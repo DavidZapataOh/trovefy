@@ -22,4 +22,6 @@ Crear la página «madre» de tu negocio, con la marca de tu primer producto, de
 - Síntoma: «la página no muestra un ID reconocible». Arreglo: comprueba que la dirección es la de tu página y que está publicada.
 
 **Cómo se verifica**
+Al verificar se abre una ventana del navegador de Trovify unos segundos; no la toques.
 `trovify arranque verificar 05` abre la dirección guardada (solo de facebook.com) con el perfil de Meta, extrae el ID de la página y guarda la captura y el ID en `config/evidencia/05-…`. El ID queda en los datos del paso como `page_id`.
+Mientras el patrón no esté confirmado con tu pantalla real, el resultado es «no medido: patrón sin confirmar con tu pantalla real» y la captura queda en `config/evidencia/provisional/`; el paso no se verifica todavía.
