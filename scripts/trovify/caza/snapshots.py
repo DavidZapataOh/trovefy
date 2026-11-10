@@ -96,6 +96,9 @@ def registrar_vistos(
     ``completo`` (obligatorio) es ``ResultadoBusqueda.completo``: con False el conjunto es solo una
     muestra (los primeros por impresiones) y compararlo inventaría arranques y paradas, así que no
     se registra nada y se devuelve (None, None) («no medido: muestra parcial»).
+
+    Como los días incompletos no se registran, la corrida anterior puede ser de varios días antes:
+    :func:`dia_anterior` da ese día, para decir la ventana («nuevos/parados desde el <día>»).
     """
     if not completo:
         return (None, None)
@@ -122,10 +125,7 @@ def registrar_vistos(
             "WHERE oferta_id = ? AND pais = ? GROUP BY library_id",
             (oferta_id, pais),
         )
-        previa = conn.execute(
-            "SELECT MAX(dia) FROM corridas WHERE oferta_id = ? AND pais = ? AND dia < ?",
-            (oferta_id, pais, d),
-        ).fetchone()[0]
+        previa = _previa(conn, oferta_id, pais, d)
         if previa is None:
             return (None, None)
         anteriores = {
@@ -136,3 +136,17 @@ def registrar_vistos(
             )
         }
     return (len(library_ids - anteriores), len(anteriores - library_ids))
+
+
+def _previa(conn: sqlite3.Connection, oferta_id: str, pais: str, d: str) -> str | None:
+    return conn.execute(
+        "SELECT MAX(dia) FROM corridas WHERE oferta_id = ? AND pais = ? AND dia < ?",
+        (oferta_id, pais, d),
+    ).fetchone()[0]
+
+
+def dia_anterior(conn: sqlite3.Connection, oferta_id: str, pais: str, dia: date) -> date | None:
+    """Día de la corrida completa anterior a ``dia`` (la que usa :func:`registrar_vistos` para
+    comparar); None si no hay. Sirve para indicar la ventana de nuevos/parados."""
+    previa = _previa(conn, oferta_id, pais, dia.isoformat())
+    return date.fromisoformat(previa) if previa else None

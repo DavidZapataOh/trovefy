@@ -1,7 +1,14 @@
 from datetime import date
 
 import pytest
-from trovify.caza.snapshots import Snapshot, abrir, guardar, historial, registrar_vistos
+from trovify.caza.snapshots import (
+    Snapshot,
+    abrir,
+    dia_anterior,
+    guardar,
+    historial,
+    registrar_vistos,
+)
 
 # fuente = la URL reproducible de ResultadoBusqueda.url
 FUENTE = "https://www.facebook.com/ads/library/?active_status=active&country=RO&q=x"
@@ -64,3 +71,15 @@ def test_completo_es_obligatorio(tmp_path):
     c = abrir(tmp_path / "s.sqlite")
     with pytest.raises(TypeError):
         registrar_vistos(c, "o", "RO", {"a"}, date(2026, 11, 10))
+
+
+def test_dia_anterior_es_la_ultima_corrida_completa(tmp_path):
+    c = abrir(tmp_path / "s.sqlite")
+    assert dia_anterior(c, "o", "RO", date(2026, 11, 10)) is None
+    registrar_vistos(c, "o", "RO", {"a"}, date(2026, 11, 10), completo=True)
+    registrar_vistos(c, "o", "RO", {"a", "b"}, date(2026, 11, 11), completo=False)  # no cuenta
+    registrar_vistos(c, "o", "RO", {"b"}, date(2026, 11, 12), completo=True)
+    # la comparación del día 12 fue contra el 10: la ventana de nuevos/parados es de 2 días
+    assert dia_anterior(c, "o", "RO", date(2026, 11, 12)) == date(2026, 11, 10)
+    assert dia_anterior(c, "o", "RO", date(2026, 11, 13)) == date(2026, 11, 12)
+    assert dia_anterior(c, "otra", "RO", date(2026, 11, 13)) is None
