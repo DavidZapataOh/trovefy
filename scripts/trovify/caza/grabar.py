@@ -37,8 +37,10 @@ MAX_BYTES = 1_000_000
 MIN_ANUNCIOS = 20
 
 # Nombres de campos de sesión / anti-CSRF; además, cualquier campo cuyo nombre contenga «token».
+# Por prudencia, también el id de sesión de la página y el cursor de paginación (opacos y ligados a la sesión).
 _NOMBRES = (
     r"lsd|fb_dtsg|jazoest|__spin_[rtb]|spin_[rtb]|__hsi|hsi|__dyn|__csr|__rev|_?_?js_datr|datr"
+    r"|session_?id|haste_session|end_cursor"
 )
 _CLAVE = rf"(?:{_NOMBRES}|[A-Za-z0-9_]*token[A-Za-z0-9_]*)"
 
@@ -104,8 +106,10 @@ def contar_anuncios(texto: str) -> int:
 
 # --- recorte del HTML ---------------------------------------------------------------------
 
+# Total («~230 resultados», «>50.000 resultados», «~1,700 results») o aviso de «sin resultados».
 _MARCADOR = re.compile(
-    r"(?i)\bresults?\b|\bresultados?\b|\bno ads\b|ningún anuncio|no hay anuncios|no se encontraron"
+    r"(?i)^\s*(?:~|>|aproximadamente\s+|about\s+)?\s*[\d.,]+\s+(?:results?|resultados?)\s*$"
+    r"|\bno ads\b|ningún anuncio|no hay anuncios|no se encontraron"
 )
 _SCRIPT_JSON = re.compile(r'<script\b[^>]*type="application/json"[^>]*>.*?</script>', re.DOTALL | re.IGNORECASE)
 _VACIOS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track", "wbr"}
@@ -170,11 +174,11 @@ def recortar(captura: dict, max_bytes: int = MAX_BYTES, min_anuncios: int = MIN_
     """Recorta la captura a ``max_bytes`` conservando al menos ``min_anuncios`` (o todos los que haya).
 
     Conserva solo respuestas con anuncios; si ninguna los trae, las de la búsqueda
-    (``search_results_connection``). Lanza ValueError si no cabe sin bajar del mínimo.
+    (``ad_library_main``). Lanza ValueError si no cabe sin bajar del mínimo.
     """
     resp = [r for r in captura["respuestas"] if "ad_archive_id" in r["cuerpo"]]
     if not resp:
-        resp = [r for r in captura["respuestas"] if "search_results_connection" in r["cuerpo"]]
+        resp = [r for r in captura["respuestas"] if "ad_library_main" in r["cuerpo"]]
     datos = {**captura, "html_final": recortar_html(captura["html_final"]), "respuestas": resp}
     total = contar_anuncios("".join(r["cuerpo"] for r in resp))
     objetivo = min(min_anuncios, total)

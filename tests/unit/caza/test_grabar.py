@@ -180,3 +180,23 @@ def test_componer_redacta_y_guardar_rechaza_secretos(tmp_path):
         guardar(c, otra)
     assert not otra.exists()
     assert "EAA" not in str(e.value)
+
+
+def test_marcadores_reales_y_texto_de_anuncios_fuera():
+    html = (
+        '<div role="heading">~230 resultados</div><div role="heading">&gt;50.000 resultados</div>'
+        "<div>Estos resultados incluyen anuncios</div><span>Resultados visibles en 3 semanas</span>"
+        "<div>No hay ningún anuncio que coincida con los criterios de búsqueda</div>"
+    )
+    r = recortar_html(html)
+    assert "~230 resultados" in r and "&gt;50.000 resultados" in r and "No hay ningún anuncio" in r
+    assert "Estos resultados" not in r and "visibles" not in r
+
+
+def test_redacta_sesion_y_cursor_de_paginacion():
+    v = _aleatorio()
+    datos = {"sessionID": v, "session_id": v, "haste_session": v, "end_cursor": v, "cursor": None,
+             "page_info": {"has_next_page": True}}
+    r = json.loads(redactar(json.dumps(datos)))
+    assert r == {"sessionID": R, "session_id": R, "haste_session": R, "end_cursor": R, "cursor": None,
+                 "page_info": {"has_next_page": True}}
