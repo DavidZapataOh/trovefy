@@ -41,8 +41,10 @@ def _nm(motivo: str) -> Medida:
     return Medida(None, f"no medido: {motivo}")
 
 
-def _en_idioma(texto: str, idioma: str) -> bool:
-    return detectar(texto, sorted({idioma.lower(), *_CONTRASTE})) == idioma.lower()
+def _idioma_de(texto: str, idioma: str) -> bool | None:
+    """True si está en ``idioma``, False si se detecta otro, None si no se puede detectar."""
+    d = detectar(texto, sorted({idioma.lower(), *_CONTRASTE}))
+    return None if d is None else d == idioma.lower()
 
 
 def _buscar(cliente, pais: str, **kw) -> ResultadoBusqueda | str:
@@ -58,19 +60,21 @@ def _incompleta(r: ResultadoBusqueda) -> bool:
     return r.estado == "ok" and not r.completo
 
 
-def _competencia(cliente, frases, pais, idioma, excluir_page_ids, u, hoy) -> tuple[Medida, list[str]]:
+def _competencia(cliente, frases, pais, idioma, excluir_page_ids, u, hoy) -> tuple[Medida, list[str], bool]:
     hoy = hoy or date.today()
     minimo = int(u["hueco.competidor_c7_min"].valor)
     intentos = int(u["hueco.intentos_para_cero"].valor)
     enlaces: list[str] = []
     vistos: dict[str, AnuncioBiblioteca] = {}
     fallos: list[str] = []
+    parada = False
     incompleto = False
     hechas = 0
     for frase in frases:
         r = _buscar(cliente, pais, q=frase)
         if isinstance(r, str):
             fallos.append(f"búsqueda bloqueada o detenida ({r})")
+            parada = True
             break  # no se insiste con una sesión bloqueada o parada
         enlaces.append(r.url)
         if r.estado in ("bloqueado", "error"):
@@ -82,21 +86,36 @@ def _competencia(cliente, frases, pais, idioma, excluir_page_ids, u, hoy) -> tup
             vistos.setdefault(a.library_id, a)
 
     por_pagina: dict[str, int] = {}
+    dudosos: dict[str, int] = {}  # anuncios elegibles cuyo idioma no se pudo detectar
     for a in vistos.values():
         if a.page_id in excluir_page_ids or not a.activo or (hoy - a.inicio).days < _DIAS_COMPETIDOR:
             continue
-        if _en_idioma(a.texto, idioma):
+        local = _idioma_de(a.texto, idioma)
+        if local:
             por_pagina[a.page_id] = por_pagina.get(a.page_id, 0) + 1
+        elif local is None:
+            dudosos[a.page_id] = dudosos.get(a.page_id, 0) + 1
     n = float(sum(1 for c in por_pagina.values() if c >= minimo))
-    degradada = bool(fallos) or incompleto or hechas < intentos
+    posibles = sum(
+        1 for p, d in dudosos.items() if por_pagina.get(p, 0) < minimo <= por_pagina.get(p, 0) + d
+    )
+    maximo = u["hueco.max_competencia_local"].valor
+    degradada = bool(fallos) or incompleto or hechas < intentos or posibles > 0
 
-    if n > 0:  # los competidores vistos existen aunque falte lectura: cota inferior
-        return Medida(n, suelo=degradada), enlaces
+    if n > maximo or (n > 0 and posibles == 0) or (n > 0 and degradada):
+        return Medida(n, suelo=degradada), enlaces, parada
+    if n + posibles > maximo:  # el idioma no detectable podría añadir competidores
+        total = sum(dudosos.values())
+        return _nm(f"idioma no detectable en {total} anuncios que podrían ser competencia local"), enlaces, parada
     if fallos:
-        return _nm("; ".join(fallos)), enlaces
+        return _nm("; ".join(fallos)), enlaces, parada
     if hechas < intentos:
-        return _nm(f"hacen falta {intentos} intentos con frases distintas para dar un 0 (hubo {hechas})"), enlaces
-    return Medida(0.0, suelo=incompleto), enlaces
+        return (
+            _nm(f"hacen falta {intentos} intentos con frases distintas para dar un 0 (hubo {hechas})"),
+            enlaces,
+            parada,
+        )
+    return Medida(n, suelo=incompleto), enlaces, parada
 
 
 def competencia_local(
@@ -114,9 +133,12 @@ def competencia_local(
 
 
 def _original(cliente, page_ids, pais, idioma, hoy, u) -> tuple[Original, list[str]]:
+    if not page_ids:
+        return "no_medido", []
     minimo = int(u["hueco.sin_traducir_min_dias"].valor)
     enlaces: list[str] = []
     en_otro_idioma: list[AnuncioBiblioteca] = []
+    sin_detectar: list[AnuncioBiblioteca] = []
     no_medido = False
     for pid in page_ids:
         r = _buscar(cliente, pais, page_id=pid)
@@ -132,14 +154,18 @@ def _original(cliente, page_ids, pais, idioma, hoy, u) -> tuple[Original, list[s
         for a in r.anuncios:
             if not a.activo:
                 continue
-            if _en_idioma(a.texto, idioma):
+            local = _idioma_de(a.texto, idioma)
+            if local:
                 return "traducido", enlaces  # un traducido leído es definitivo
-            en_otro_idioma.append(a)
+            (sin_detectar if local is None else en_otro_idioma).append(a)
     if no_medido:
         return "no_medido", enlaces
-    if not en_otro_idioma:
+    if not en_otro_idioma and not sin_detectar:
         return "ausente", enlaces
-    mas_viejo = max((hoy - a.inicio).days for a in en_otro_idioma)
+    viejos_dudosos = [a for a in sin_detectar if (hoy - a.inicio).days >= minimo]
+    if viejos_dudosos:  # idioma desconocido no es «sin traducir»
+        return "no_medido", enlaces
+    mas_viejo = max((hoy - a.inicio).days for a in en_otro_idioma) if en_otro_idioma else -1
     return ("sin_traducir" if mas_viejo >= minimo else "ausente_reciente"), enlaces
 
 
@@ -169,7 +195,7 @@ def motivo_hueco(comp: Medida, orig: str, u: dict[str, Umbral]) -> str | None:
     if comp.valor is None:
         return comp.motivo
     if orig == "no_medido":
-        return "no medido: no se pudo leer el original en este país"
+        return "no medido: no se pudo determinar si el original está traducido en este país"
     return _MOTIVO_SUELO
 
 
@@ -183,6 +209,9 @@ def hueco_pais(
     hoy: date,
     u: dict[str, Umbral],
 ) -> HuecoPais:
-    comp, e1 = _competencia(cliente, frases, pais, idioma, excluir_page_ids, u, hoy)
-    orig, e2 = _original(cliente, page_ids, pais, idioma, hoy, u)
+    comp, e1, parada = _competencia(cliente, frases, pais, idioma, excluir_page_ids, u, hoy)
+    if parada:  # sesión bloqueada o presupuesto agotado: no se sigue buscando
+        orig, e2 = "no_medido", []
+    else:
+        orig, e2 = _original(cliente, page_ids, pais, idioma, hoy, u)
     return HuecoPais(pais, comp, orig, hay_hueco(comp, orig, u), e1 + e2, motivo_hueco(comp, orig, u))

@@ -147,9 +147,48 @@ def test_original_ausente_y_no_medido(umbrales):
     assert original_presente(inc, ["9"], "RO", "ro", HOY, umbrales) == "no_medido"
 
 
-def test_texto_indetectable_no_cuenta_como_traducido(umbrales):
+def test_texto_indetectable_del_original_es_desconocido(umbrales):
     cl = ClienteFalso([con([ad("a", "9", 90, "PDF")])])
-    assert original_presente(cl, ["9"], "RO", "ro", HOY, umbrales) == "sin_traducir"
+    assert original_presente(cl, ["9"], "RO", "ro", HOY, umbrales) == "no_medido"
+    mezcla = ClienteFalso([con([ad("a", "9", 90, EN), ad("b", "9", 60, "PDF")])])
+    assert original_presente(mezcla, ["9"], "RO", "ro", HOY, umbrales) == "no_medido"
+    joven = ClienteFalso([con([ad("a", "9", 90, EN), ad("b", "9", 2, "PDF")])])
+    assert original_presente(joven, ["9"], "RO", "ro", HOY, umbrales) == "sin_traducir"
+
+
+def test_original_sin_paginas_no_busca(umbrales):
+    cl = ClienteFalso([])
+    assert original_presente(cl, [], "RO", "ro", HOY, umbrales) == "no_medido"
+    assert cl.llamadas == []
+
+
+def test_competidor_de_idioma_indetectable_no_da_hueco(umbrales):
+    dudosos = [ad(f"p{i}", "1", 10, "PDF") for i in range(3)]
+    m = competencia_local(ClienteFalso([con(dudosos), vacio()]), ["a b", "c d"], "RO", "ro", set(), umbrales, hoy=HOY)
+    assert m.valor is None and "no detectable" in m.motivo
+    assert hay_hueco(m, "sin_traducir", umbrales) is None
+    # con un competidor claro, la cuenta pasa a cota
+    ads = [ad(f"a{i}", "2", 10) for i in range(3)] + dudosos
+    m2 = competencia_local(ClienteFalso([con(ads), vacio()]), ["a b", "c d"], "RO", "ro", set(), umbrales, hoy=HOY)
+    assert m2.valor == 1 and m2.suelo
+    # dudosos insuficientes para llegar al mínimo: no cambian nada
+    pocos = [ad("q1", "3", 10, "PDF"), ad("q2", "3", 10, "PDF")]
+    m3 = competencia_local(ClienteFalso([con(pocos), vacio()]), ["a b", "c d"], "RO", "ro", set(), umbrales, hoy=HOY)
+    assert m3.valor == 0 and not m3.suelo
+
+
+def test_vacio_vacio_y_ok_bajo_el_minimo(umbrales):
+    ads = [ad("a", "1", 10), ad("b", "1", 10)]
+    m = competencia_local(ClienteFalso([vacio(), con(ads)]), ["a b", "c d"], "RO", "ro", set(), umbrales, hoy=HOY)
+    assert m.valor == 0 and not m.suelo
+
+
+def test_hueco_pais_no_busca_original_tras_parada(umbrales):
+    from trovify.caza.hueco import hueco_pais
+
+    cl = ClienteFalso([SesionBloqueada("x")])
+    h = hueco_pais(cl, ["a b", "c d"], ["9"], "RO", "ro", set(), HOY, umbrales)
+    assert len(cl.llamadas) == 1 and h.original == "no_medido" and h.hueco is None
 
 
 def test_hueco_pais_dataclass():
