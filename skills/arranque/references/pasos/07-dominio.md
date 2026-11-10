@@ -15,6 +15,7 @@ Tener un dominio propio gestionado por Cloudflare, que será la dirección públ
 4. Si lo compraste en otro registrador, añade el dominio en «Sitios web» y cambia en ese registrador los servidores de nombres por los dos que te da Cloudflare (terminan en `.ns.cloudflare.com`).
 5. Guarda el dominio en Trovify (comando de Trovify, no de sistema):
    `trovify arranque hecho 07 --dato dominio=<tu-dominio>`
+   Escribe el dominio principal (por ejemplo `midominio.com`), no un subdominio como `tienda.midominio.com`.
    Trovify lo guarda en minúsculas y sin `https://` ni `www.`.
 6. Verifica: `trovify arranque verificar 07`.
 

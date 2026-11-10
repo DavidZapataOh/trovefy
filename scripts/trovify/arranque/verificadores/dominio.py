@@ -2,7 +2,8 @@
 
 07 y la parte TXT del 08 son públicas y se miden por DNS sobre HTTPS. El estado «verificado» de
 business.facebook.com/settings/owned-domains es una pantalla privada: mientras `CONFIRMACION_08`
-no tenga fecha, el 08 no certifica aunque el TXT esté (el TXT solo no es la verificación de Meta).
+no tenga fecha, el 08 no certifica aunque el TXT esté (el TXT solo no es la verificación de Meta; un TXT de otro Business
+también queda provisional hasta confirmar esa pantalla).
 """
 
 import re

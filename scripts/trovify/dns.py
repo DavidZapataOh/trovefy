@@ -1,5 +1,6 @@
 """Consultas DNS públicas por DNS sobre HTTPS (Cloudflare), sin dependencias nuevas."""
 
+import http.client
 import json
 import re
 import urllib.error
@@ -11,6 +12,7 @@ from urllib.parse import quote, urlsplit
 URL_DOH = "https://cloudflare-dns.com/dns-query"
 TIMEOUT = 10
 MAX_BYTES = 65536
+_TIPOS = {"A": 1, "NS": 2, "TXT": 16}
 _ETIQUETA = re.compile(r"[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?")
 
 
@@ -29,7 +31,9 @@ def _abrir_sin_redireccion(req, timeout=None):
 
 def normalizar(dominio: str) -> str:
     """Minúsculas, sin esquema, `www.`, punto final ni ruta. Lanza ValueError si no es un dominio plausible."""
-    crudo = dominio.strip()
+    crudo = dominio.strip(" ")
+    if any(c.isspace() or not c.isprintable() for c in crudo):
+        raise ValueError("el dominio no puede llevar espacios ni caracteres de control")
     if "://" not in crudo:
         crudo = "//" + crudo
     try:
@@ -63,15 +67,28 @@ def consultar(
     try:
         with abrir(req, timeout=TIMEOUT) as resp:
             estado, cuerpo = resp.status, resp.read(MAX_BYTES)
-    except (urllib.error.URLError, TimeoutError, OSError):  # incluye HTTPError
+    except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException):  # incluye HTTPError
         raise SinRed from None
     if estado != 200:
         raise SinRed
     try:
         datos = json.loads(cuerpo)
-    except ValueError:
+    except (ValueError, RecursionError):
         raise SinRed from None
-    respuestas = datos.get("Answer") if isinstance(datos, dict) else None
+    if not isinstance(datos, dict):
+        raise SinRed
+    estado_dns = datos.get("Status")
+    if isinstance(estado_dns, bool) or estado_dns not in (0, 3):  # solo NOERROR y NXDOMAIN son una medida
+        raise SinRed
+    respuestas = datos.get("Answer")
     if not isinstance(respuestas, list):
         return []
-    return [r["data"] for r in respuestas if isinstance(r, dict) and isinstance(r.get("data"), str)]
+    return [
+        r["data"]
+        for r in respuestas
+        if isinstance(r, dict)
+        and isinstance(r.get("data"), str)
+        and r.get("type") == _TIPOS[tipo]
+        and isinstance(r.get("name"), str)
+        and r["name"].lower().rstrip(".") == nombre
+    ]
