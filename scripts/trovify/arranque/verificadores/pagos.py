@@ -280,37 +280,39 @@ def verificar_whop(
         m = f"no medido: no se pudo leer la lista pública de países de pago de Whop ({URL_DOCS_WHOP})"
         return no_medido(m)
     linea_co = f"✓ la documentación pública de Whop lista a Colombia ({URL_DOCS_WHOP})"
+
+    def con_co(r: ResultadoVerificacion) -> ResultadoVerificacion:
+        """Lo medido en la documentación se muestra también cuando el panel no se puede leer."""
+        r.lineas.insert(0, linea_co)
+        return r
+
     try:
         mapa = mapa_confirmado(vault, "10", _mapa("templates/whop/mapa.yaml", mapa))
         mapa_imp = mapa_confirmado(vault, "09", _mapa("templates/impultienda/mapa.yaml", mapa_impultienda))
     except MapaInvalido as exc:
-        return no_medido(f"no medido: {exc}")
+        return con_co(no_medido(f"no medido: {exc}"))
     cap_fn = capturar or capturar_por_defecto
     whop, motivo = capturar_pantallas("whop", mapa, ["balances"], cap_fn)
     if motivo:
-        return no_medido(motivo)
+        return con_co(no_medido(motivo))
     if mapa["capturado"] is None:
-        prov = provisional_de(vault, "10", whop)
-        prov.lineas.insert(0, linea_co)
+        prov = con_co(provisional_de(vault, "10", whop))
         prov.lineas.append(f"  medida guardada: {nota_pago}")
         return prov
     imp, motivo = capturar_pantallas("impultienda", mapa_imp, ["pasarelas"], cap_fn)
     if motivo:
-        return no_medido(motivo)
+        return con_co(no_medido(motivo))
     if mapa_imp["capturado"] is None:
-        prov = provisional_de(vault, "10", {"pasarelas_impultienda": imp["pasarelas"]})
-        prov.lineas.insert(0, linea_co)
-        return prov
+        return con_co(provisional_de(vault, "10", {**whop, "pasarelas_impultienda": imp["pasarelas"]}))
     try:
         kyc = _kyc(campos_de(mapa, whop)["balances"]["kyc"])
         conectadas = campos_de(mapa_imp, imp)["pasarelas"]["pasarelas"]
     except FirmaAusente as exc:
-        return desactualizado(exc.pantalla)
+        return con_co(desactualizado(exc.pantalla))
     conectado = None if conectadas is None else "whop" in normalizar_pasarelas(conectadas).split(",")
     r = evaluar_whop(True, kyc, conectado)
     if r.ok is not True:
-        r.lineas.insert(0, linea_co)
-        return r
+        return con_co(r)
     datos = {"pago_a_co": "si", "kyc": "aprobado", "conectado_en_impultienda": "si"}
     evidencia = [nota_pago]
     if whop["balances"][1]:

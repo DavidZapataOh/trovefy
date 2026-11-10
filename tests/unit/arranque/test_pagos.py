@@ -278,3 +278,16 @@ def test_10_docs_ilegibles_no_dejan_evidencia_en_la_raiz(tmp_path):
     assert r.ok is None
     assert not list((v / "config/evidencia").glob("10-pago-a-co-*.json"))
     assert list((v / "config/evidencia/provisional").glob("10-pago-a-co-*.json"))
+
+
+def test_10_sin_sesion_en_whop_muestra_igual_lo_de_colombia(tmp_path):
+    v = _vault_con_pasos(tmp_path)
+
+    def login(servicio, url, esperar_ms=3000, visible=True, captura_png=None):
+        return Captura("https://whop.com/login/?next=x", "", "", None)
+
+    r = verificar_whop(v, capturar=login, fetch=_docs_ok, mapa=WHOP_OK, mapa_impultienda=IMP_OK)
+    assert r.ok is None and "inicia sesión" in r.motivo
+    assert any("lista a Colombia" in ln for ln in r.lineas)
+    r = verificar_whop(v, capturar=falso(whop="rediseñada"), fetch=_docs_ok, mapa=WHOP_OK, mapa_impultienda=IMP_OK)
+    assert r.ok is None and any("lista a Colombia" in ln for ln in r.lineas)
