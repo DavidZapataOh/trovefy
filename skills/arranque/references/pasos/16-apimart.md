@@ -11,7 +11,7 @@ Dejar tu cuenta de APIMart conectada, con clave guardada de forma segura y saldo
 **Pasos**
 1. Crea tu cuenta en APIMart (gratis): entra a https://apimart.ai/ y regístrate. La contraseña la escribes tú.
 2. Recarga saldo desde la consola de APIMart (https://apimart.ai/overview, sección de saldo o recarga): **US$ 5 a 10 y no más**. Es suficiente para empezar y limita lo que puedes perder.
-3. Crea la clave de API en la consola, en https://apimart.ai/keys (botón de crear clave). Empieza con `sk-`. Cópiala; no la compartas con nadie.
+3. Crea la clave de API en la consola, en https://apimart.ai/keys (botón de crear clave). Suele parecerse a una cadena larga de letras y números (cópiala completa). Cópiala; no la compartas con nadie.
 4. Comprueba en https://apimart.ai/overview que el saldo aparece.
 5. Crea el archivo sin borrar uno que ya exista y protégelo (permisos 0600, solo tú puedes leerlo), todo en una línea: `mkdir -p ~/.config/trovify && touch ~/.config/trovify/claude.env && chmod 600 ~/.config/trovify/claude.env`
 6. Ábrelo con tu editor: `nano ~/.config/trovify/claude.env`
