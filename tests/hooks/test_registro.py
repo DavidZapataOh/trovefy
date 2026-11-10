@@ -29,3 +29,11 @@ def test_matchers_exactos():
             assert h["command"] == f'python3 "${{CLAUDE_PLUGIN_ROOT}}/hooks/{nombre}"'
             obtenido[nombre] = grupo["matcher"]
     assert obtenido == esperado
+
+
+def test_stop_registra_cierre_sesion():
+    reg = json.loads((RAIZ / "hooks/hooks.json").read_text())
+    cmds = [h for g in reg["hooks"]["Stop"] for h in g["hooks"]]
+    assert [h["command"] for h in cmds] == ['python3 "${CLAUDE_PLUGIN_ROOT}/hooks/cierre_sesion.py"']
+    assert cmds[0]["timeout"] == 5
+    assert (RAIZ / "hooks/cierre_sesion.py").exists()

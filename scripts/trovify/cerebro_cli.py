@@ -9,9 +9,11 @@ import yaml
 
 from trovify.cli import registrar
 from trovify.vault.andamio import crear_vault
+from trovify.vault.lint import lint
 from trovify.vault.permisos import escribir_settings
 from trovify.vault.reglas import ConflictoDeReglas, aplicar_plan, planear_regla
 from trovify.vault.rutas import vault_root
+from trovify.vault.sesiones import escribir_traspaso, ultimo_traspaso
 
 
 def _configurar(p: argparse.ArgumentParser) -> None:
@@ -26,6 +28,14 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     reg.add_argument("--simular", action="store_true",
                      help="valida y muestra qué cambiaría, sin escribir nada")
     reg.add_argument("--vault", help="ruta del vault (por defecto, TROVIFY_VAULT o ~/trovify-cerebro)")
+    tra = sub.add_parser("traspaso", help="escribe el traspaso de la sesión en sesiones/")
+    tra.add_argument("--json", required=True, metavar="ARCHIVO",
+                     help="JSON con hecho, pendiente, decisiones, archivos (listas de texto); «-» lee de stdin")
+    tra.add_argument("--vault", help="ruta del vault (por defecto, TROVIFY_VAULT o ~/trovify-cerebro)")
+    ret = sub.add_parser("retomar", help="imprime el último traspaso de sesión")
+    ret.add_argument("--vault", help="ruta del vault (por defecto, TROVIFY_VAULT o ~/trovify-cerebro)")
+    lin = sub.add_parser("lint", help="revisa enlaces rotos, páginas huérfanas y frontmatter")
+    lin.add_argument("--vault", help="ruta del vault (por defecto, TROVIFY_VAULT o ~/trovify-cerebro)")
 
 
 def _error(msg: str) -> int:
@@ -73,10 +83,70 @@ def _regla(args: argparse.Namespace, destino: Path) -> int:
     return 0
 
 
+_LISTAS = ("hecho", "pendiente", "decisiones", "archivos")
+
+
+def _traspaso(args: argparse.Namespace, destino: Path) -> int:
+    try:
+        crudo = sys.stdin.read() if args.json == "-" else Path(args.json).expanduser().read_text(encoding="utf-8")
+        campos = json.loads(crudo)
+    except OSError as exc:
+        return _error(f"no se pudo leer {args.json}: {exc.strerror or exc}")
+    except json.JSONDecodeError as exc:
+        return _error(f"el JSON no es válido ({exc})")
+    if not isinstance(campos, dict):
+        return _error("el JSON debe ser un objeto con hecho, pendiente, decisiones y archivos")
+    sobran = sorted(set(campos) - set(_LISTAS))
+    if sobran:
+        return _error(f"campos desconocidos en el JSON: {', '.join(sobran)}")
+    listas = {}
+    for c in _LISTAS:
+        v = campos.get(c, [])
+        if not isinstance(v, list) or not all(isinstance(i, str) for i in v):
+            return _error(f"«{c}» debe ser una lista de textos")
+        listas[c] = [i.strip() for i in v if i.strip()]
+    try:
+        ruta = escribir_traspaso(destino, listas["hecho"], listas["pendiente"],
+                                 listas["decisiones"], listas["archivos"])
+    except OSError as exc:
+        return _error(f"no se pudo escribir en el vault: {exc.strerror or exc}")
+    print(ruta)
+    return 0
+
+
+def _retomar(destino: Path) -> int:
+    ruta = ultimo_traspaso(destino)
+    if ruta is None:
+        print("No hay traspasos de sesión todavía.")
+        return 0
+    print(f"# {ruta.relative_to(destino)}\n")
+    print(ruta.read_text(encoding="utf-8"))
+    return 0
+
+
+def _lint(destino: Path) -> int:
+    if not destino.is_dir():
+        return _error(f"no existe el vault {destino}")
+    problemas = lint(destino)
+    for p in problemas:
+        print(f"{p.tipo}: {p.ruta}: {p.detalle}")
+    if problemas:
+        print(f"{len(problemas)} problema(s).")
+        return 1
+    print("Vault sin problemas.")
+    return 0
+
+
 def _ejecutar(args: argparse.Namespace) -> int:
     destino = Path(args.vault).expanduser() if args.vault else vault_root()
     if args.accion == "regla":
         return _regla(args, destino)
+    if args.accion == "traspaso":
+        return _traspaso(args, destino)
+    if args.accion == "retomar":
+        return _retomar(destino)
+    if args.accion == "lint":
+        return _lint(destino)
     if args.accion == "permisos":
         escribir_settings(destino, sobrescribir=True)
         print(f"Permisos regenerados en {destino / '.claude' / 'settings.json'}.")

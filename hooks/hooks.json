@@ -48,6 +48,17 @@
           }
         ]
       }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/cierre_sesion.py\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }
