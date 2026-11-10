@@ -7,6 +7,7 @@ para leer IDs. Nunca se escriben contraseñas ni se leen códigos 2FA desde aqu�
 from __future__ import annotations
 
 import fcntl
+import os
 import re
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -33,12 +34,19 @@ def _base() -> Path:
     return Path.home() / ".config" / "trovify"
 
 
+def _base_privada() -> Path:
+    base = _base()
+    base.parent.mkdir(parents=True, exist_ok=True)
+    base.mkdir(mode=0o700, exist_ok=True)
+    base.chmod(0o700)
+    return base
+
+
 def perfil(servicio: str) -> Path:
     """Directorio del perfil `~/.config/trovify/pw-<servicio>/`, creado con modo 0700."""
     if not _SERVICIO.fullmatch(servicio):
         raise ValueError("el servicio solo admite minúsculas, dígitos y guiones (a-z, 0-9, -)")
-    base = _base()
-    base.mkdir(parents=True, exist_ok=True)
+    base = _base_privada()
     ruta = base / f"pw-{servicio}"
     ruta.mkdir(mode=0o700, exist_ok=True)
     ruta.chmod(0o700)
@@ -53,9 +61,9 @@ def sesion_caducada(url_final: str) -> bool:
 
 @contextmanager
 def _un_navegador_a_la_vez():
-    base = _base()
-    base.mkdir(parents=True, exist_ok=True)
-    with open(base / "navegador.lock", "w") as f:
+    base = _base_privada()
+    fd = os.open(base / "navegador.lock", os.O_WRONLY | os.O_CREAT, 0o600)
+    with os.fdopen(fd, "w") as f:
         try:
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
@@ -68,10 +76,12 @@ def _un_navegador_a_la_vez():
 
 def _lanzar(p, servicio: str, visible: bool):
     try:
-        return p.chromium.launch_persistent_context(user_data_dir=str(perfil(servicio)), headless=not visible)
+        return p.chromium.launch_persistent_context(
+            user_data_dir=str(perfil(servicio)), headless=not visible, chromium_sandbox=True
+        )
     except Exception as exc:
         raise NavegadorError(
-            "no se pudo iniciar Chromium; comprueba que está instalado "
+            f"no se pudo iniciar Chromium ({type(exc).__name__}); comprueba que está instalado "
             "(uv run playwright install chromium) y que tiene sus librerías de sistema"
         ) from exc
 
@@ -100,6 +110,7 @@ def capturar(
                     captura_png = Path(captura_png)
                     captura_png.parent.mkdir(parents=True, exist_ok=True)
                     page.screenshot(path=str(captura_png))
+                    captura_png.chmod(0o600)
                     png = captura_png
                 return Captura(page.url, page.content(), page.inner_text("body"), png)
             except PlaywrightError as exc:
@@ -125,7 +136,7 @@ def abrir(servicio: str, url: str, cierre_auto_ms: int | None = None) -> None:
                 raise NavegadorError(f"no se pudo cargar la página ({type(exc).__name__}); revisa la URL y tu conexión") from exc
             try:
                 ctx.wait_for_event("close", timeout=cierre_auto_ms or 0)
-            except PlaywrightTimeout:
+            except (PlaywrightTimeout, KeyboardInterrupt):
                 pass
         finally:
             try:

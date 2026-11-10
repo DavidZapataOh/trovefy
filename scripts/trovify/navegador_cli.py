@@ -26,12 +26,13 @@ def _error(msg: str, codigo: int = 2) -> int:
 
 
 def _ejecutar(args: argparse.Namespace) -> int:
+    u = urlparse(args.url)
+    if u.scheme not in ("http", "https") or not u.netloc:
+        return _error("la URL debe empezar por http:// o https://")
     try:
         navegador.perfil(args.servicio)
     except ValueError as exc:
         return _error(str(exc))
-    if urlparse(args.url).scheme not in ("http", "https") or not urlparse(args.url).netloc:
-        return _error("la URL debe empezar por http:// o https://")
     try:
         if args.accion == "abrir":
             print(f"Abriendo {args.servicio}: inicia sesión tú mismo y cierra la ventana cuando termines.")

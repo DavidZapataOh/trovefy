@@ -34,20 +34,23 @@ def test_sesion_caducada_no_medido():
     assert not sesion_caducada("https://business.facebook.com/settings/?business_id=123")
 
 
-def test_cli_servicio_invalido(capsys):
+def test_cli_servicio_invalido(capsys, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
     from trovify.cli import main
 
     assert main(["navegador", "abrir", "../x", "http://127.0.0.1"]) == 2
     assert "Error" in capsys.readouterr().err
 
 
-def test_cli_url_invalida(capsys):
+def test_cli_url_invalida(capsys, tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
     from trovify.cli import main
 
     assert main(["navegador", "capturar", "meta", "no-es-url", "--png", "x.png"]) == 2
 
 
-def test_cli_capturar_error_de_navegador_sin_traza(monkeypatch, capsys):
+def test_cli_capturar_error_de_navegador_sin_traza(monkeypatch, capsys, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
     import trovify.navegador as nav
     from trovify.cli import main
 
@@ -58,3 +61,34 @@ def test_cli_capturar_error_de_navegador_sin_traza(monkeypatch, capsys):
     assert main(["navegador", "capturar", "meta", "http://127.0.0.1/", "--png", "x.png"]) == 1
     err = capsys.readouterr().err
     assert "no se pudo abrir la página" in err and "Traceback" not in err
+
+
+def test_lanzar_activa_sandbox(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    import trovify.navegador as nav
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    p = MagicMock()
+    nav._lanzar(p, "meta", True)
+    kw = p.chromium.launch_persistent_context.call_args.kwargs
+    assert kw["chromium_sandbox"] is True and kw["headless"] is False
+    assert kw["user_data_dir"] == str(tmp_path / ".config/trovify/pw-meta")
+
+
+def test_lanzar_error_en_espanol(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    import trovify.navegador as nav
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    p = MagicMock()
+    p.chromium.launch_persistent_context.side_effect = RuntimeError("boom")
+    with pytest.raises(NavegadorError, match="RuntimeError"):
+        nav._lanzar(p, "meta", True)
+
+
+def test_base_privada_modos(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    perfil("meta")
+    assert stat.S_IMODE((tmp_path / ".config/trovify").stat().st_mode) == 0o700

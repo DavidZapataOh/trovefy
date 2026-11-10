@@ -44,3 +44,10 @@ def test_error_de_navegacion_es_claro(tmp_path, monkeypatch):
 
     with pytest.raises(NavegadorError):
         capturar("prueba", "http://127.0.0.1:9/", esperar_ms=0, visible=False)
+
+
+def test_abrir_con_cierre_automatico(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    from trovify.navegador import abrir
+
+    abrir("prueba", "about:blank", cierre_auto_ms=1500)
