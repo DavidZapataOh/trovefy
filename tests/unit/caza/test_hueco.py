@@ -155,7 +155,7 @@ def test_texto_indetectable_del_original_es_desconocido(umbrales):
     joven = ClienteFalso([con([ad("a", "9", 90, EN), ad("b", "9", 2, "PDF")])])
     assert original_presente(joven, ["9"], "RO", "ro", HOY, umbrales) == "no_medido"
     reciente = ClienteFalso([con([ad("a", "9", 10, EN), ad("b", "9", 2, "PDF")])])
-    assert original_presente(reciente, ["9"], "RO", "ro", HOY, umbrales) == "ausente_reciente"
+    assert original_presente(reciente, ["9"], "RO", "ro", HOY, umbrales) == "no_medido"
 
 
 def test_original_sin_paginas_no_busca(umbrales):
