@@ -95,38 +95,172 @@ def sin_query(url: str) -> str:
     return urlunsplit((partes.scheme, partes.netloc, partes.path, "", ""))
 
 
-def guardar_provisional(vault: Path, id: str, url_final: str, png: bytes | None) -> list[str]:
-    """Guarda la captura (PNG) y la URL sin query en config/evidencia/provisional/; devuelve las rutas."""
+_MAX_LINEA = 300  # una línea más larga (HTML minificado) no se guarda entera: solo el trozo que casa
+_MAX_TROZO = 2000
+_SECCION = re.compile(r"^=== pantalla ([A-Za-z0-9_-]+) · (\S*) ===$", re.MULTILINE)
+
+
+@dataclass(frozen=True)
+class PantallaProvisional:
+    """Una pantalla capturada sin patrón confirmado: lo que se guarda en config/evidencia/provisional/."""
+
+    nombre: str
+    url_final: str
+    png: bytes | None
+    texto: str | None  # el texto sobre el que corren los patrones (None: no hay nada que guardar)
+
+
+def extracto(texto: str, patrones, contexto: int = 2) -> str:
+    """Solo las líneas que casan con algún patrón y las ±`contexto` de alrededor.
+
+    Si alguna de esas líneas es muy larga (HTML minificado con tokens de sesión) no se guarda: se
+    guarda solo el trozo que casa. Nunca devuelve el texto completo.
+    """
+    lineas = texto.splitlines()
+    inicios, pos = [], 0
+    for ln in texto.splitlines(keepends=True):
+        inicios.append(pos)
+        pos += len(ln)
+
+    def linea_de(offset: int) -> int:
+        lo, hi = 0, len(inicios) - 1
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if inicios[mid] <= offset:
+                lo = mid
+            else:
+                hi = mid - 1
+        return lo
+
+    guardar: set[int] = set()
+    trozos: list[str] = []
+    for patron in patrones:
+        for m in patron.finditer(texto):
+            a, b = linea_de(m.start()), linea_de(max(m.end() - 1, m.start()))
+            rango = range(max(0, a - contexto), min(len(lineas), b + contexto + 1))
+            if all(len(lineas[i]) <= _MAX_LINEA for i in range(a, b + 1)):
+                guardar.update(i for i in rango if len(lineas[i]) <= _MAX_LINEA)
+            elif len(m.group(0)) <= _MAX_TROZO:
+                trozos.append(m.group(0))
+    return "\n".join([lineas[i] for i in sorted(guardar)] + trozos)
+
+
+def escribir_privado(destino: Path, contenido: bytes) -> None:
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=destino.parent, prefix=".tmp-")  # mkstemp: modo 0600
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(contenido)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, destino)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
+
+
+def documento_de_texto(pantallas: list[PantallaProvisional]) -> str:
+    """Texto de varias pantallas en un archivo: cada una bajo `=== pantalla <nombre> · <url sin query> ===`."""
+    partes = []
+    for p in pantallas:
+        if p.texto is not None:
+            partes.append(f"=== pantalla {p.nombre} · {sin_query(p.url_final)} ===\n{p.texto.rstrip(chr(10))}\n")
+    return "".join(partes)
+
+
+def leer_texto_provisional(ruta: Path) -> dict[str, str]:
+    """{pantalla: texto} de un archivo de texto provisional."""
+    contenido = Path(ruta).read_text(encoding="utf-8")
+    marcas = list(_SECCION.finditer(contenido))
+    salida = {}
+    for n, m in enumerate(marcas):
+        fin = marcas[n + 1].start() if n + 1 < len(marcas) else len(contenido)
+        salida[m.group(1)] = contenido[m.end() + 1: fin]
+    return salida
+
+
+def carpeta_provisional(vault: Path) -> Path:
+    return Path(vault) / "config" / "evidencia" / "provisional"
+
+
+def textos_provisionales(vault: Path, id: str) -> list[Path]:
+    """Archivos de texto provisional del paso, del más antiguo al más reciente."""
     if not _SEGURO.match(id):
         raise ValueError("id de evidencia solo admite letras, números, - y _")
-    base = Path(vault) / "config" / "evidencia" / "provisional"
-    fecha = f"{datetime.now(ZONA_NEGOCIO):%Y-%m-%d}"
+    return sorted(f for f in carpeta_provisional(vault).glob(f"{id}-texto-*.txt") if f.is_file() and not f.is_symlink())
+
+
+def ultimo_texto_provisional(vault: Path, id: str) -> Path | None:
+    textos = textos_provisionales(vault, id)
+    return textos[-1] if textos else None
+
+
+def guardar_provisional(
+    vault: Path, id: str, pantallas: list[PantallaProvisional], patrones_extracto=None, contexto: int = 2
+) -> tuple[list[str], list[str]]:
+    """Guarda en config/evidencia/provisional/ las capturas (PNG), las URLs sin query y el texto leído.
+
+    Todo con modo 0600. Con `patrones_extracto` (p. ej. HTML con sesión) solo se guardan los trozos que
+    casan, nunca la página entera. Si el texto parece llevar un secreto, no se guarda: solo el PNG.
+    Devuelve (rutas relativas al vault, avisos para mostrar).
+    """
+    from trovify.secretos import RevisionSecretosNoDisponible, buscar_secreto
+
+    if not _SEGURO.match(id) or not all(_SEGURO.match(p.nombre) for p in pantallas):
+        raise ValueError("id y pantalla de evidencia solo admiten letras, números, - y _")
+    base = carpeta_provisional(vault)
+    ahora = datetime.now(ZONA_NEGOCIO)
+    fecha = f"{ahora:%Y-%m-%d}"
+    varias = len(pantallas) > 1
     rutas: list[str] = []
-    for nombre, contenido in (
-        (f"{id}-captura-{fecha}.png", png),
-        (f"{id}-url-{fecha}.json", json.dumps({"url_final": sin_query(url_final)}, ensure_ascii=False).encode("utf-8")),
-    ):
-        if contenido is None:
-            continue
-        base.mkdir(parents=True, exist_ok=True)
+    avisos: list[str] = []
+
+    def escribir(nombre: str, contenido: bytes) -> None:
         destino = base / nombre
-        fd, tmp = tempfile.mkstemp(dir=base, prefix=".tmp-")
-        try:
-            with os.fdopen(fd, "wb") as f:
-                f.write(contenido)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, destino)
-        except BaseException:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
-            raise
+        escribir_privado(destino, contenido)
         rutas.append(destino.relative_to(vault).as_posix())
-    return rutas
+
+    for p in pantallas:
+        if p.png is not None:
+            escribir(f"{id}-captura-{p.nombre}-{fecha}.png" if varias else f"{id}-captura-{fecha}.png", p.png)
+    urls = {p.nombre: sin_query(p.url_final) for p in pantallas}
+    url_json = {"url_final": urls} if varias else {"url_final": next(iter(urls.values()), "")}
+    escribir(f"{id}-url-{fecha}.json", json.dumps(url_json, ensure_ascii=False).encode("utf-8"))
+
+    if patrones_extracto is not None:
+        pantallas = [PantallaProvisional(p.nombre, p.url_final, p.png, None if p.texto is None else extracto(p.texto, patrones_extracto, contexto))
+                     for p in pantallas]
+    documento = documento_de_texto(pantallas)
+    if documento:
+        try:
+            patron = buscar_secreto(documento)
+        except RevisionSecretosNoDisponible as exc:
+            avisos.append(f"texto no guardado: {exc}")
+        else:
+            if patron:
+                avisos.append(f"texto no guardado: parece llevar un secreto ({patron}); solo se guardó la captura")
+            else:
+                escribir(f"{id}-texto-{ahora:%Y-%m-%d-%H%M%S%f}.txt", documento.encode("utf-8"))
+    return rutas, avisos
 
 
-def resultado_provisional(vault: Path, id: str, captura, png: bytes | None) -> ResultadoVerificacion:
-    """«No medido» para un patrón sin confirmar: guarda la captura provisional y nunca certifica."""
-    rutas = guardar_provisional(vault, id, captura.url_final, png)
-    lineas = [f"? {MOTIVO_SIN_CONFIRMAR}"] + [f"  captura provisional: {r}" for r in rutas]
+def lineas_provisionales(rutas: list[str], avisos: list[str]) -> list[str]:
+    return [f"  captura provisional: {r}" for r in rutas] + [f"  aviso: {a}" for a in avisos]
+
+
+def resultado_provisional(
+    vault: Path, id: str, captura, png: bytes | None, *, pantallas: list[PantallaProvisional] | None = None,
+    texto: str | None = None, patrones_extracto=None, contexto: int = 2,
+) -> ResultadoVerificacion:
+    """«No medido» para un patrón sin confirmar: guarda la evidencia provisional y nunca certifica.
+
+    `texto` es lo que leen los patrones (por defecto `captura.texto`); `pantallas`, si hay varias.
+    """
+    if pantallas is None:
+        leido = captura.texto if texto is None else texto
+        pantallas = [PantallaProvisional("pagina", captura.url_final, png, leido)]
+    rutas, avisos = guardar_provisional(vault, id, pantallas, patrones_extracto, contexto)
+    lineas = [f"? {MOTIVO_SIN_CONFIRMAR}", *lineas_provisionales(rutas, avisos)]
     return ResultadoVerificacion(None, [], MOTIVO_SIN_CONFIRMAR, [], {}, lineas)

@@ -18,13 +18,14 @@ from pathlib import Path
 
 from trovify.arranque.estado import ResultadoVerificacion
 from trovify.arranque.verificadores import verificador
-from trovify.arranque.verificadores.base import guardar_evidencia, resultado_provisional
+from trovify.arranque.verificadores.base import guardar_evidencia
 from trovify.arranque.verificadores.impultienda import normalizar_pasarelas
 from trovify.arranque.verificadores.meta_ids import capturar_por_defecto, no_medido
 from trovify.arranque.verificadores.pantallas import (
     campos_de,
     capturar_pantallas,
     desactualizado,
+    provisional_de,
 )
 from trovify.mapa import FirmaAusente, MapaInvalido, cargar
 from trovify.vault.escritura import ZONA_NEGOCIO
@@ -283,7 +284,7 @@ def verificar_whop(
     if motivo:
         return no_medido(motivo)
     if mapa["capturado"] is None:
-        prov = resultado_provisional(vault, "10", *whop["balances"])
+        prov = provisional_de(vault, "10", whop)
         prov.lineas.insert(0, linea_co)
         prov.lineas.append(f"  medida guardada: {nota_pago}")
         return prov
@@ -291,7 +292,7 @@ def verificar_whop(
     if motivo:
         return no_medido(motivo)
     if mapa_imp["capturado"] is None:
-        prov = resultado_provisional(vault, "10", *imp["pasarelas"])
+        prov = provisional_de(vault, "10", {"pasarelas_impultienda": imp["pasarelas"]})
         prov.lineas.insert(0, linea_co)
         return prov
     try:
@@ -340,7 +341,7 @@ def verificar_hotmart(
     if motivo:
         return no_medido(motivo)
     if mapa["capturado"] is None:
-        return resultado_provisional(vault, "10b", *capturas["productos"])
+        return provisional_de(vault, "10b", capturas)
     try:
         campos = campos_de(mapa, capturas)
     except FirmaAusente as exc:

@@ -16,8 +16,10 @@ from trovify.arranque.verificadores import verificador
 from trovify.arranque.verificadores.base import (
     MOTIVO_SIN_CONFIRMAR,
     Confirmacion,
+    PantallaProvisional,
     guardar_evidencia,
     guardar_provisional,
+    lineas_provisionales,
 )
 from trovify.arranque.verificadores.meta_ids import (
     capturar_por_defecto,
@@ -134,8 +136,8 @@ def verificar_verificacion_meta(
     if cap is None:
         return no_medido(motivo)
     if not confirmacion.confirmada:
-        rutas = guardar_provisional(vault, "08", cap.url_final, png)
-        lineas = [f"? {MOTIVO_TXT_PENDIENTE} ({MOTIVO_SIN_CONFIRMAR})"] + [f"  captura provisional: {r}" for r in rutas]
+        rutas, avisos = guardar_provisional(vault, "08", [PantallaProvisional("pagina", cap.url_final, png, cap.texto)])
+        lineas = [f"? {MOTIVO_TXT_PENDIENTE} ({MOTIVO_SIN_CONFIRMAR})", *lineas_provisionales(rutas, avisos)]
         return ResultadoVerificacion(None, [], MOTIVO_TXT_PENDIENTE, [], {}, lineas)
     if not _estado_verificado(cap.texto, dominio):
         return _resultado(False, "Meta no muestra el dominio como verificado", [

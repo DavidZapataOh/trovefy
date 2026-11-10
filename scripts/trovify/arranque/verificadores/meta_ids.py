@@ -53,6 +53,12 @@ def extraer_page_id(html: str) -> str | None:
     return cuenta.most_common(1)[0][0] if cuenta else None
 
 
+def texto_04(url_final: str) -> str:
+    """Lo que lee el patrón del 04: la URL sin query y, si está, solo `business_id=<dígitos>`."""
+    bid = extraer_business_id(url_final)
+    return sin_query(url_final) + (f"?business_id={bid}" if bid else "") + "\n"
+
+
 def capturar_por_defecto(servicio: str, url: str, **kw):
     from trovify.navegador import capturar
 
@@ -98,7 +104,7 @@ def verificar_business(
     if cap is None:
         return no_medido(motivo)
     if not confirmacion.confirmada:
-        return resultado_provisional(vault, "04", cap, png)
+        return resultado_provisional(vault, "04", cap, png, texto=texto_04(cap.url_final))
     bid = extraer_business_id(cap.url_final)
     if bid is None:
         m = "la página de ajustes de Business no muestra un portfolio con ID"
@@ -150,7 +156,8 @@ def verificar_pagina(
     if cap is None:
         return no_medido(motivo)
     if not confirmacion.confirmada:
-        return resultado_provisional(vault, "05", cap, png)
+        # el HTML con sesión lleva tokens (fb_dtsg…): solo se guardan las líneas (o trozos) que casan, sin contexto
+        return resultado_provisional(vault, "05", cap, png, texto=cap.html, patrones_extracto=PATRONES_PAGE_ID, contexto=0)
     pid = extraer_page_id(cap.html)
     esperado = _id_numerico_de_url(url)
     if pid is not None and esperado is not None and pid != esperado:

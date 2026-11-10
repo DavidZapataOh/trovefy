@@ -11,12 +11,13 @@ from pathlib import Path
 
 from trovify.arranque.estado import ResultadoVerificacion
 from trovify.arranque.verificadores import verificador
-from trovify.arranque.verificadores.base import guardar_evidencia, resultado_provisional
+from trovify.arranque.verificadores.base import guardar_evidencia
 from trovify.arranque.verificadores.meta_ids import capturar_por_defecto, no_medido
 from trovify.arranque.verificadores.pantallas import (
     campos_de,
     capturar_pantallas,
     desactualizado,
+    provisional_de,
 )
 from trovify.mapa import FirmaAusente, MapaInvalido, cargar
 from trovify.vault.rutas import vault_root
@@ -65,8 +66,7 @@ def verificar_impultienda(
     if motivo:
         return no_medido(motivo)
     if mapa["capturado"] is None:
-        cap, png = capturas[PANTALLAS[0]]
-        return resultado_provisional(vault, "09", cap, png)
+        return provisional_de(vault, "09", capturas)
     try:
         campos = campos_de(mapa, capturas)
     except FirmaAusente as exc:

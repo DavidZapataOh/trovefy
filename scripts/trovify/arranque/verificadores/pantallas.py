@@ -3,6 +3,10 @@
 from collections.abc import Callable
 
 from trovify.arranque.estado import ResultadoVerificacion
+from trovify.arranque.verificadores.base import (
+    PantallaProvisional,
+    resultado_provisional,
+)
 from trovify.arranque.verificadores.meta_ids import leer_pagina
 from trovify.mapa import FirmaAusente, leer_pantalla
 
@@ -16,6 +20,12 @@ def capturar_pantallas(servicio: str, mapa: dict, nombres: list[str], capturar: 
             return salida, motivo
         salida[nombre] = (cap, png)
     return salida, None
+
+
+def provisional_de(vault, id_: str, capturas: dict) -> ResultadoVerificacion:
+    """«No medido» con todas las pantallas capturadas guardadas como evidencia provisional (PNG + texto)."""
+    pantallas = [PantallaProvisional(n, cap.url_final, png, cap.texto) for n, (cap, png) in capturas.items()]
+    return resultado_provisional(vault, id_, None, None, pantallas=pantallas)
 
 
 def campos_de(mapa: dict, capturas: dict) -> dict[str, dict[str, str | None]]:

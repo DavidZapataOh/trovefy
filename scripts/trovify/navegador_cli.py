@@ -17,12 +17,33 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     c = sub.add_parser("capturar", help="abre la URL con el perfil y guarda una captura de pantalla")
     c.add_argument("servicio", metavar="SERVICIO")
     c.add_argument("url", metavar="URL")
-    c.add_argument("--png", required=True, metavar="RUTA", help="dónde guardar la captura")
+    c.add_argument("--png", required=True, metavar="RUTA",
+                   help="dónde guardar la captura; el texto de la página se guarda al lado (.txt) salvo si parece llevar un secreto")
 
 
 def _error(msg: str, codigo: int = 2) -> int:
     print(f"Error: {msg}", file=sys.stderr)
     return codigo
+
+
+def _guardar_texto(destino: Path, url_final: str, texto: str) -> str:
+    """Guarda el texto visible (nunca el HTML) con modo 0600; nada si parece llevar un secreto."""
+    from trovify.arranque.verificadores.base import (
+        PantallaProvisional,
+        documento_de_texto,
+        escribir_privado,
+    )
+    from trovify.secretos import RevisionSecretosNoDisponible, buscar_secreto
+
+    documento = documento_de_texto([PantallaProvisional("pagina", url_final, None, texto)])
+    try:
+        patron = buscar_secreto(documento)
+    except RevisionSecretosNoDisponible as exc:
+        return f"Texto no guardado: {exc}."
+    if patron:
+        return f"Texto no guardado: parece llevar un secreto ({patron}); solo se guardó la captura."
+    escribir_privado(destino, documento.encode("utf-8"))
+    return f"Texto guardado en {destino}."
 
 
 def _ejecutar(args: argparse.Namespace) -> int:
@@ -45,6 +66,7 @@ def _ejecutar(args: argparse.Namespace) -> int:
     except OSError as exc:
         return _error(f"no se pudo escribir: {exc.strerror or exc}", 1)
     print(f"Captura guardada en {c.png}.")
+    print(_guardar_texto(Path(args.png).with_suffix(".txt"), c.url_final, c.texto))
     if navegador.sesion_caducada(c.url_final):
         print("Aviso: parece que la sesión ha caducado (pantalla de inicio de sesión). Ejecuta «trovify navegador abrir».")
     return 0
