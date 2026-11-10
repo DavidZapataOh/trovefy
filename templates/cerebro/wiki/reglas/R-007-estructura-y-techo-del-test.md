@@ -20,7 +20,7 @@ Los vídeos dan ABO 5×6, CBO 1-1-10×30, ABO 4–5×5 y ABO 5.5; con US$ 500 ga
 
 ## Cómo se aplica
 
-`/montar` propone la campaña con esa estructura y el `spend_cap`; `/caja` reserva el sobre de tests y calcula los huecos de test (unos 9–10 con US$ 280). La prórroga se pide una sola vez y solo con ventas.
+`/montar` propone la campaña con esa estructura y el `spend_cap`; `/caja` reserva el sobre de tests y calcula los huecos de test (unos 9–10 con US$ 280). La prórroga se pide una sola vez y solo con ventas. El antiguo techo de US$ 100 y 1 semana del documento ABO (C1 18:10) queda sustituido por el de 30, con una única prórroga a 55 (§4.1, D-09).
 
 ## Fuente
 

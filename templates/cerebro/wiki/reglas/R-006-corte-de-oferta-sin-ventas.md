@@ -20,7 +20,7 @@ Había un conflicto entre tres reglas: la guarda de 72 h, el corte sin ventas ha
 
 ## Cómo se aplica
 
-`/leer` compara el gasto acumulado de la oferta con el corte y, si no hay ventas, propone apagarla al buzón. Es el segundo corte por gasto acumulado que admite el día en curso. Las 72 h (R-011) no protegen a una oferta sin ventas. Esta regla no se reabre sin una nueva decisión explícita del usuario.
+`/leer` compara el gasto acumulado de la oferta con el corte y, si no hay ventas, propone apagarla al buzón. Es el segundo corte por gasto acumulado que admite el día en curso. Las 72 h (R-011) solo protegen a ofertas con ventas. Esta regla no se reabre sin una nueva decisión explícita del usuario.
 
 ## Fuente
 

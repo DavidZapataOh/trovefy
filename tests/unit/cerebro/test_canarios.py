@@ -135,7 +135,60 @@ def test_c4_techo_viejo_descartado_y_techo_prohibido():
 
 def test_c5_prohibe_la_regla_de_10_ventas_no_su_mencion():
     c5 = {c.id: c for c in cargar(CANARIOS)}["c5"]
-    bien = "Con 5 ventas y ROAS ≥ 2 (R-009); sustituye a las 10 ventas (Santino)."
+    bien = "Con 5 ventas y ROAS ≥ 2 (R-009); sustituye a la exigencia de 10 ventas (Santino)."
     mal = "Con 5 ventas y ROAS 2; se requiere al menos 10 ventas."
     assert evaluar(bien, c5).estado == "ok"
     assert evaluar(mal, c5).estado == "falla"
+
+
+def _c(i):
+    return next(c for c in cargar(CANARIOS) if c.id == i)
+
+
+@pytest.mark.parametrize(
+    "mala",
+    [
+        "El techo de US$ 100 y una semana. Son 5 conjuntos; 30 y prórroga a 55.",
+        "El techo es US$ 100; 5 conjuntos, 30, 55.",
+        "5 conjuntos con techo de 100 USD; 30 y 55.",
+        "5 conjuntos, 100 USD de techo; 30 y 55.",
+        "5 conjuntos, tope de US$ 100; 30 y 55.",
+    ],
+)
+def test_c4_rechaza_techo_100(mala):
+    assert evaluar(mala, _c("c4")).estado == "falla"
+
+
+def test_c4_acepta_100_descartado():
+    ok = "5 conjuntos, techo US$ 30 con prórroga a 55. Los vídeos hablaban de 100 USD y una semana, pero eso fue descartado."
+    assert evaluar(ok, _c("c4")).estado == "ok"
+
+
+@pytest.mark.parametrize(
+    "mala",
+    [
+        "Se necesitan 10 ventas; con 5 ventas no, ROAS 2.",
+        "Tras 10 ventas y ROAS 2, a pre-escala (5 ventas no basta).",
+        "A las 10 ventas con ROAS 2; 5 ventas no.",
+    ],
+)
+def test_c5_rechaza_10_ventas(mala):
+    assert evaluar(mala, _c("c5")).estado == "falla"
+
+
+def test_c5_acepta_10_historico():
+    ok = "Con 5 ventas y ROAS neto acumulado de 2. Santino pedía 10 ventas, pero no se usa."
+    assert evaluar(ok, _c("c5")).estado == "ok"
+
+
+def test_c2_exige_multiplicador():
+    base = "Con 0 ventas, sin esperar ningún plazo, al llegar a min(25, {m} CPA_BE)."
+    assert evaluar(base.format(m="3 ×"), _c("c2")).estado == "falla"
+    for m in ["2 ×", "2×", "2x", "2 x"]:
+        assert evaluar(base.format(m=m), _c("c2")).estado == "ok", m
+    assert evaluar("25 USD o el doble del CPA_BE, sin esperar", _c("c2")).estado == "ok"
+
+
+def test_c2_acepta_72h_historico():
+    ok = "min(25, 2 × CPA_BE), sin esperar; las 72 h no protegen a ofertas sin ventas."
+    assert evaluar(ok, _c("c2")).estado == "ok"
