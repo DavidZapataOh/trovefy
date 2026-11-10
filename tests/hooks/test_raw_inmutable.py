@@ -17,9 +17,10 @@ def test_log_solo_se_amplia(correr_hook, vault_tmp):
     assert correr_hook("raw_inmutable", ev("Write", file_path=str(log), content="- b\n"), vault_tmp)[0] == "deny"
     assert correr_hook("raw_inmutable", ev("Edit", file_path=str(log), old_string="- a\n", new_string="- a\n- b\n"), vault_tmp)[0] == "allow"
     assert correr_hook("raw_inmutable", ev("Edit", file_path=str(log), old_string="- a\n", new_string="- z\n"), vault_tmp)[0] == "deny"
-    ok = {"old_string": "a", "new_string": "ab"}
-    mal = {"old_string": "a", "new_string": "b"}
-    assert correr_hook("raw_inmutable", ev("MultiEdit", file_path=str(log), edits=[ok, ok]), vault_tmp)[0] == "allow"
+    ok = {"old_string": "- a\n", "new_string": "- a\n- b\n"}
+    ok2 = {"old_string": "- b\n", "new_string": "- b\n- c\n"}
+    mal = {"old_string": "- a\n", "new_string": "b"}
+    assert correr_hook("raw_inmutable", ev("MultiEdit", file_path=str(log), edits=[ok, ok2]), vault_tmp)[0] == "allow"
     assert correr_hook("raw_inmutable", ev("MultiEdit", file_path=str(log), edits=[ok, mal]), vault_tmp)[0] == "deny"
 
 
@@ -81,3 +82,71 @@ def test_bash_relativo_con_cwd_en_vault(correr_hook, vault_tmp):
     assert correr_hook("raw_inmutable", e, vault_tmp)[0] == "deny"
     e = ev("Bash", cwd="/tmp", command="rm -rf raw/2026-11-10")
     assert correr_hook("raw_inmutable", e, vault_tmp)[0] == "allow"
+
+
+def _bash(correr_hook, vault, cmd, cwd="/"):
+    return correr_hook("raw_inmutable", ev("Bash", cwd=cwd, command=cmd), vault)[0]
+
+
+def test_bash_vault_con_tilde_y_home(correr_hook, vault_tmp, tmp_path, monkeypatch):
+    home = tmp_path / "casa"; (home / "trovify-cerebro/raw").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    v = home / "trovify-cerebro"
+    for c in ("rm -rf ~/trovify-cerebro/raw/x", "rm $HOME/trovify-cerebro/log.md",
+              "rm ${HOME}/trovify-cerebro/raw/x"):
+        assert _bash(correr_hook, v, c) == "deny", c
+    assert _bash(correr_hook, v, "cat ~/trovify-cerebro/raw/x") == "allow"
+
+
+def test_bash_env_del_vault_con_tilde(correr_hook, vault_tmp, tmp_path, monkeypatch):
+    home = tmp_path / "casa"; (home / "v").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    assert _bash(correr_hook, "~/v", "rm ~/v/raw/x") == "deny"
+    assert _bash(correr_hook, "$HOME/v", "rm $HOME/v/log.md") == "deny"
+
+
+def test_bash_sed_inplace_en_cualquier_posicion(correr_hook, vault_tmp):
+    v = str(vault_tmp)
+    for c in (f"sed 's/a/b/' -i {v}/raw/a", f"sed -E 's/a/b/' -i {v}/raw/a",
+              f"sed -n -i.bak p {v}/raw/a", f"sed --in-place s/a/b/ {v}/raw/a"):
+        assert _bash(correr_hook, vault_tmp, c) == "deny", c
+    assert _bash(correr_hook, vault_tmp, f"sed -n p {v}/raw/a") == "allow"
+
+
+def test_bash_redireccion_ampersand(correr_hook, vault_tmp):
+    v = str(vault_tmp)
+    for c in (f"echo x >&{v}/log.md", f"echo x &>{v}/log.md"):
+        assert _bash(correr_hook, vault_tmp, c) == "deny", c
+    for c in (f"echo x &>>{v}/log.md", f"ls {v}/raw 2>&1", f"ls {v}/raw >&-"):
+        assert _bash(correr_hook, vault_tmp, c) == "allow", c
+
+
+def test_bash_tee_sin_append_aunque_haya_otro_con_append(correr_hook, vault_tmp):
+    v = str(vault_tmp)
+    assert _bash(correr_hook, vault_tmp, f"echo x | tee -a /tmp/z | tee {v}/log.md") == "deny"
+    assert _bash(correr_hook, vault_tmp, f"echo x | tee --append {v}/log.md") == "allow"
+
+
+def test_bash_cd_al_vault_y_relativo(correr_hook, vault_tmp):
+    v = str(vault_tmp)
+    for c in (f'cd "$TROVIFY_VAULT" && rm -rf raw/x', f"cd {v}; rm -rf raw/x",
+              "cd ${TROVIFY_VAULT} && rm log.md"):
+        assert _bash(correr_hook, vault_tmp, c) == "deny", c
+    assert _bash(correr_hook, vault_tmp, "cd /tmp && rm -rf raw/x") == "allow"
+
+
+def test_edit_log_solo_al_final_y_no_vacio(correr_hook, vault_tmp):
+    log = vault_tmp / "log.md"; log.write_text("- a\n- b\n")
+    medio = ev("Edit", file_path=str(log), old_string="- a\n", new_string="- a\n- x\n")
+    assert correr_hook("raw_inmutable", medio, vault_tmp)[0] == "deny"
+    vacio = ev("Edit", file_path=str(log), old_string="", new_string="zzz")
+    assert correr_hook("raw_inmutable", vacio, vault_tmp)[0] == "deny"
+    final = ev("Edit", file_path=str(log), old_string="- b\n", new_string="- b\n- c\n")
+    assert correr_hook("raw_inmutable", final, vault_tmp)[0] == "allow"
+
+
+def test_multiedit_log_malformado(correr_hook, vault_tmp):
+    log = vault_tmp / "log.md"; log.write_text("- a\n")
+    for edits in ("no-lista", [], ["texto"], [{"old_string": "", "new_string": "x"}]):
+        e = ev("MultiEdit", file_path=str(log), edits=edits)
+        assert correr_hook("raw_inmutable", e, vault_tmp)[0] == "deny", edits
