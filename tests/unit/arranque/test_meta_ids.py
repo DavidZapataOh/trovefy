@@ -156,6 +156,15 @@ def test_05_url_profile_php_exige_el_mismo_id(tmp_path):
 
 @pytest.mark.parametrize("url", ["http://www.facebook.com/x", "https://evil.com/x", "https://facebook.com.evil.com/x",
                                  "https://www.facebook.com/x?access_token=1", "https://www.facebook.com/x?code=1",
-                                 "https://www.facebook.com/x?sig=1", "https://www.facebook.com/x#fb_dtsg=1", "https://www.facebook.com/x?token=1"])
+                                 "https://www.facebook.com/x?sig=1", "https://user:pw@www.facebook.com/x", "https://www.facebook.com@evil.com/x", "https://www.facebook.com/x#fb_dtsg=1", "https://www.facebook.com/x?token=1"])
 def test_cli_dato_url_rechazada(tmp_path, url):
     assert main(["arranque", "hecho", "05", "--vault", str(tmp_path), "--dato", f"url={url}"]) == 2
+
+
+def test_resultado_provisional_publico_en_base(tmp_path):
+    from trovify.arranque.verificadores.base import resultado_provisional
+
+    r = resultado_provisional(tmp_path, "99", Captura("https://www.facebook.com/x?token=1", "", "", None), PNG)
+    assert r.ok is None and r.motivo == "no medido: patrón sin confirmar con tu pantalla real" and not r.datos and not r.evidencia
+    assert any("provisional" in l for l in r.lineas[1:])
+    assert "token" not in "".join(f.read_text() for f in (tmp_path / "config/evidencia/provisional").glob("*.json"))

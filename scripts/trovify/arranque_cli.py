@@ -66,6 +66,8 @@ def _url_limpia(valor: str) -> str:
     if any(x in valor.lower() for x in _PROHIBIDO_EN_URL):
         raise ValueError("--dato url: la dirección lleva un token o código; copia solo la dirección de la página")
     partes = urlsplit(valor)
+    if "@" in partes.netloc:
+        raise ValueError("--dato url: la dirección no puede llevar usuario ni contraseña (`algo@`)")
     host = (partes.hostname or "").lower()
     if partes.scheme != "https" or not (host in ("facebook.com", "fb.com") or host.endswith((".facebook.com", ".fb.com"))):
         raise ValueError("--dato url: debe ser una dirección https de facebook.com o fb.com")

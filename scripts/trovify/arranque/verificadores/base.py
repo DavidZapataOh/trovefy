@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
+from trovify.arranque.estado import ResultadoVerificacion
 from trovify.vault.escritura import ZONA_NEGOCIO
 
 _SEGURO = re.compile(r"^[A-Za-z0-9_-]+$")
@@ -122,3 +123,10 @@ def guardar_provisional(vault: Path, id: str, url_final: str, png: bytes | None)
             raise
         rutas.append(destino.relative_to(vault).as_posix())
     return rutas
+
+
+def resultado_provisional(vault: Path, id: str, captura, png: bytes | None) -> ResultadoVerificacion:
+    """«No medido» para un patrón sin confirmar: guarda la captura provisional y nunca certifica."""
+    rutas = guardar_provisional(vault, id, captura.url_final, png)
+    lineas = [f"? {MOTIVO_SIN_CONFIRMAR}"] + [f"  captura provisional: {r}" for r in rutas]
+    return ResultadoVerificacion(None, [], MOTIVO_SIN_CONFIRMAR, [], {}, lineas)

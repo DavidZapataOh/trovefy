@@ -17,10 +17,9 @@ from urllib.parse import parse_qs, urlparse
 from trovify.arranque.estado import ResultadoVerificacion, cargar
 from trovify.arranque.verificadores import verificador
 from trovify.arranque.verificadores.base import (
-    MOTIVO_SIN_CONFIRMAR,
     Confirmacion,
     guardar_evidencia,
-    guardar_provisional,
+    resultado_provisional,
     sin_query,
 )
 from trovify.vault.rutas import vault_root
@@ -85,12 +84,6 @@ def _evidencia(vault: Path, id_: str, png: bytes | None, resumen: dict) -> list[
     return rel + [guardar_evidencia(vault, id_, "ids", resumen)]
 
 
-def _provisional(vault: Path, id_: str, cap, png: bytes | None) -> ResultadoVerificacion:
-    rutas = guardar_provisional(vault, id_, cap.url_final, png)
-    lineas = [f"? {MOTIVO_SIN_CONFIRMAR}"] + [f"  captura provisional: {r}" for r in rutas]
-    return ResultadoVerificacion(None, [], MOTIVO_SIN_CONFIRMAR, [], {}, lineas)
-
-
 def verificar_business(
     vault: Path | None = None, capturar: Callable | None = None, confirmacion: Confirmacion = CONFIRMACION_04
 ) -> ResultadoVerificacion:
@@ -99,7 +92,7 @@ def verificar_business(
     if cap is None:
         return _no_medido(motivo)
     if not confirmacion.confirmada:
-        return _provisional(vault, "04", cap, png)
+        return resultado_provisional(vault, "04", cap, png)
     bid = extraer_business_id(cap.url_final)
     if bid is None:
         m = "la página de ajustes de Business no muestra un portfolio con ID"
@@ -151,7 +144,7 @@ def verificar_pagina(
     if cap is None:
         return _no_medido(motivo)
     if not confirmacion.confirmada:
-        return _provisional(vault, "05", cap, png)
+        return resultado_provisional(vault, "05", cap, png)
     pid = extraer_page_id(cap.html)
     esperado = _id_numerico_de_url(url)
     if pid is not None and esperado is not None and pid != esperado:
