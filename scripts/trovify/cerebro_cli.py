@@ -7,6 +7,8 @@ from pathlib import Path
 
 import yaml
 
+from trovify.cerebro.canarios import cargar as cargar_canarios
+from trovify.cerebro.canarios import correr as correr_canarios
 from trovify.cerebro.destilado import pendientes, validar_todo
 from trovify.cerebro.ingesta import ingerir
 from trovify.cli import registrar
@@ -47,6 +49,10 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     grupo.add_argument("--pendientes", action="store_true", help="lista las fuentes de raw/ sin destilar")
     grupo.add_argument("--validar", action="store_true", help="valida las citas de todo wiki/metodo/")
     des.add_argument("--vault", help="ruta del vault (por defecto, TROVIFY_VAULT o ~/trovify-cerebro)")
+    can = sub.add_parser("canarios", help="hace las preguntas canario al cerebro (claude -p) y evalúa las respuestas")
+    can.add_argument("--solo", metavar="ID", help="corre solo el canario con ese id")
+    can.add_argument("--canarios", metavar="ARCHIVO", help="YAML de canarios (por defecto, tests/canarios.yaml del repo)")
+    can.add_argument("--vault", help="ruta del vault (por defecto, TROVIFY_VAULT o ~/trovify-cerebro)")
     lg = sub.add_parser("log", help="añade una línea a log.md")
     lg.add_argument("--skill", required=True, help="nombre de la skill (p. ej. destilar)")
     lg.add_argument("--que", required=True, help="qué se hizo, en una frase")
@@ -203,6 +209,27 @@ def _destilar(args: argparse.Namespace, destino: Path) -> int:
     return 0
 
 
+def _canarios(args: argparse.Namespace, destino: Path) -> int:
+    if not destino.is_dir():
+        return _error(f"no existe el vault {destino}")
+    try:
+        lista = cargar_canarios(Path(args.canarios).expanduser() if args.canarios else None)
+    except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
+        return _error(f"no se pudieron cargar los canarios: {exc}")
+    if args.solo:
+        lista = [c for c in lista if c.id == args.solo]
+        if not lista:
+            return _error(f"no hay ningún canario con id «{args.solo}»")
+    try:
+        resultados = correr_canarios(destino, lista)
+    except OSError as exc:
+        return _error(f"no se pudo escribir en el vault: {exc.strerror or exc}")
+    for r in resultados:
+        detalle = f"faltan: {', '.join(r.faltan)}" if r.faltan else ("" if r.estado == "ok" else r.respuesta[:120])
+        print(f"{r.id}\t{r.estado}\t{detalle}".rstrip())
+    return 0 if resultados and all(r.estado == "ok" for r in resultados) else 1
+
+
 def _log(args: argparse.Namespace, destino: Path) -> int:
     if not destino.is_dir():
         return _error(f"no existe el vault {destino}")
@@ -230,6 +257,8 @@ def _ejecutar(args: argparse.Namespace) -> int:
         return _lint(destino)
     if args.accion == "ingerir":
         return _ingerir(args, destino)
+    if args.accion == "canarios":
+        return _canarios(args, destino)
     if args.accion == "log":
         return _log(args, destino)
     if args.accion == "destilar":

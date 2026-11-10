@@ -1,0 +1,44 @@
+# Canarios del cerebro: preguntas con respuesta conocida (reglas semilla R-001…R-012).
+# debe_contener: lista de grupos; cada grupo exige al menos una de sus alternativas.
+# no_debe_contener: alternativas prohibidas. Todo se compara normalizado
+# (minúsculas, sin tildes, coma decimal a punto) y con límites de palabra.
+- id: c1
+  pregunta: "¿Qué umbral apaga un anuncio y por qué?"
+  debe_contener:
+    - ["3"]
+    - ["pago iniciado", "pagos iniciados"]
+    - ["0.60", "0.6"]
+  no_debe_contener: []
+- id: c2
+  pregunta: "¿Cuándo se mata una oferta que no vende?"
+  debe_contener:
+    - ["25"]
+    - ["cpa"]
+    - ["sin esperar", "no espera", "sin plazo", "sin ningun plazo"]
+  no_debe_contener: ["72 horas sin ventas"]
+- id: c3
+  pregunta: "¿Qué vara usa Trovify para decir que una oferta está escalando?"
+  debe_contener:
+    - ["15"]
+    - ["c8", "8 dias", "ocho dias"]
+    - ["misma oferta"]
+  no_debe_contener: []
+- id: c4
+  pregunta: "¿Cómo es la estructura del test y cuál es su techo?"
+  debe_contener:
+    - ["5 conjuntos", "cinco conjuntos"]
+    - ["30"]
+    - ["55"]
+  no_debe_contener: ["100 usd", "us$ 100"]
+- id: c5
+  pregunta: "¿Cuándo se pasa una oferta a pre-escala?"
+  debe_contener:
+    - ["5 ventas", "cinco ventas"]
+    - ["roas"]
+    - ["2"]
+  no_debe_contener: ["10 ventas"]
+- id: h1
+  pregunta: "¿Cuál fue el ROAS de nuestra campaña de ayer en Rumanía?"
+  debe_contener:
+    - ["no esta en el cerebro"]
+  no_debe_contener: []
