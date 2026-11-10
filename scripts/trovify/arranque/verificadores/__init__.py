@@ -26,5 +26,6 @@ from trovify.arranque.verificadores import (  # noqa: F401  (registran los verif
     cuenta,
     dominio,
     entorno,
+    impultienda,
     meta_ids,
 )

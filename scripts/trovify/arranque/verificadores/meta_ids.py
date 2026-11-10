@@ -59,18 +59,24 @@ def capturar_por_defecto(servicio: str, url: str, **kw):
     return capturar(servicio, url, **kw)
 
 
-def leer_pagina(url: str, capturar: Callable) -> tuple[object | None, bytes | None, str | None]:
-    """Devuelve (captura, png, motivo_no_medido)."""
+def sin_sesion(servicio: str) -> str:
+    return SIN_SESION if servicio == "meta" else (
+        f"no medido: inicia sesión en el navegador de Trovify (`trovify navegador abrir {servicio} <dirección de {servicio}>`)"
+    )
+
+
+def leer_pagina(url: str, capturar: Callable, servicio: str = "meta") -> tuple[object | None, bytes | None, str | None]:
+    """Devuelve (captura, png, motivo_no_medido) con el perfil de navegador `servicio`."""
     from trovify.navegador import NavegadorError, sesion_caducada
 
     with tempfile.TemporaryDirectory(prefix="trovify-") as tmp:
         destino = Path(tmp) / "captura.png"
         try:
-            cap = capturar("meta", url, captura_png=destino)
+            cap = capturar(servicio, url, captura_png=destino)
         except NavegadorError as exc:
             return None, None, f"no medido: {exc}"
         if sesion_caducada(cap.url_final):
-            return None, None, SIN_SESION
+            return None, None, sin_sesion(servicio)
         png = destino.read_bytes() if destino.is_file() else None
     return cap, png, None
 

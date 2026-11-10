@@ -95,7 +95,7 @@ def test_registro_tiene_el_00():
 def test_cli_verificar(tmp_path, capsys, monkeypatch):
     v = str(tmp_path)
     assert main(["arranque", "verificar", "99", "--vault", v]) == 2
-    assert main(["arranque", "verificar", "09", "--vault", v]) == 2  # sin verificador
+    assert main(["arranque", "verificar", "11", "--vault", v]) == 2  # sin verificador
     assert "no tiene verificador" in capsys.readouterr().err
 
     def fallo(vault):

@@ -94,3 +94,11 @@ def test_guia_06_pide_pago_automatico():
     t = _t("06-cuenta-publicitaria.md")
     assert t.count("pago automático") >= 3 and "141820733085330" in t
     assert t.index("pago automático") < t.index("**Pasos**")
+
+
+def test_guia_09_free_y_prueba_solo_si_hace_falta():
+    t = _t("09-impultienda.md")
+    for s in SECCIONES:
+        assert s in t, s
+    assert "trovify arranque verificar 09" in t
+    assert "Free" in t and "1 tienda" in t and "45 días" in t and "segunda tienda" in t

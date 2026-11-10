@@ -1,0 +1,27 @@
+# Mapa de pantallas de Impultienda (paso 09). Solo lectura: Trovify no hace clics aquí.
+# capturado: null = construido desde la página pública, NO confirmado con tu pantalla real.
+# Mientras sea null, el verificador del paso 09 devuelve «no medido» y guarda la captura como provisional.
+# Al hacer el paso, captura tus pantallas, ajusta firmas y patrones y pon aquí la fecha (AAAA-MM-DD) en un commit.
+capturado: null
+fuente: >-
+  https://impultienda.ar/ (página pública, leída el 2026-11-10): planes Free/Starter/Pro/Max/Unlimited,
+  «Tiendas activas» y «Ranking de tiendas» del panel de muestra, menú Inicio/Configuraciones, pasarelas
+  MercadoPago, Stripe, PayPal y Whop. Las rutas /dashboard/plan y /dashboard/configuraciones son una
+  suposición a partir del menú de la maqueta (solo /dashboard/inicio aparece en la página pública).
+pantallas:
+  plan:
+    url: https://app.impultienda.ar/dashboard/plan
+    firma: ["Plan actual"]
+    campos:
+      plan: {patron: 'Plan actual:\s*(\w+)'}
+      estado: {patron: 'Estado del plan:\s*(\w+)'}
+  tiendas:
+    url: https://app.impultienda.ar/dashboard/inicio
+    firma: ["Tiendas activas"]
+    campos:
+      tiendas: {patron: '(\d+)\s+Tiendas activas'}
+  pasarelas:
+    url: https://app.impultienda.ar/dashboard/configuraciones
+    firma: ["Pasarelas de pago"]
+    campos:
+      pasarelas: {patron: 'Pasarelas conectadas:\s*([^<\n]+)'}
