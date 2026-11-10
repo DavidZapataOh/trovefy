@@ -141,3 +141,13 @@ def test_dato_dominio_se_normaliza_y_valida(tmp_path):
 
     assert next(p for p in cargar(tmp_path) if p.id == "07").datos["dominio"] == "kits-docentes.com"
     assert main(["arranque", "hecho", "07", *v, "--dato", "dominio=192.168.0.1"]) != 0
+
+
+def test_dominio_se_busca_con_limites():
+    from trovify.arranque.verificadores.dominio import _estado_verificado
+
+    assert not _estado_verificado("mikits.com Verificado\nkits.com No verificado", "kits.com")
+    assert not _estado_verificado("mikits.com Verificado", "kits.com")
+    assert not _estado_verificado("shop.kits.com Verificado", "kits.com")
+    assert _estado_verificado("mikits.com No verificado\nkits.com Verificado", "kits.com")
+    assert _estado_verificado("Dominio: kits.com — Verificado", "kits.com")

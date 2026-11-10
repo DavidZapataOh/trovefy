@@ -108,7 +108,9 @@ def verificar_dominio(vault: Path | None = None, consultar: Callable = consultar
 
 
 def _posicion_dominio(texto: str, dominio: str) -> int:
-    return texto.lower().find(dominio)
+    """Posición del dominio como palabra entera: «kits.com» no casa dentro de «mikits.com» ni de «shop.kits.com»."""
+    m = re.search(rf"(?<![\w.-]){re.escape(dominio)}(?![\w-])", texto.lower())
+    return m.start() if m else -1
 
 
 def estado_del_dominio(texto: str, dominio: str) -> str | None:
