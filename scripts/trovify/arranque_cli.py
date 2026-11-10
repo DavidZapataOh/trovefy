@@ -4,7 +4,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from trovify.arranque.estado import (
     ArranqueCorrupto,
@@ -69,7 +69,11 @@ def _url_limpia(valor: str) -> str:
     host = (partes.hostname or "").lower()
     if partes.scheme != "https" or not (host in ("facebook.com", "fb.com") or host.endswith((".facebook.com", ".fb.com"))):
         raise ValueError("--dato url: debe ser una dirección https de facebook.com o fb.com")
-    return urlunsplit((partes.scheme, partes.netloc, partes.path, "", ""))
+    consulta = ""
+    if partes.path.rstrip("/") == "/profile.php":  # las páginas nuevas se identifican solo por ?id=<dígitos>
+        ids = [v for v in parse_qs(partes.query).get("id", []) if v.isdigit()]
+        consulta = f"id={ids[0]}" if ids else ""
+    return urlunsplit((partes.scheme, partes.netloc, partes.path, consulta, ""))
 
 
 def _parsear_datos(items: list[str]) -> dict[str, str]:

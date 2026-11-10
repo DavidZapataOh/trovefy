@@ -133,7 +133,25 @@ def test_cli_dato_url_se_limpia(tmp_path):
     from trovify.arranque.estado import cargar
 
     assert main(["arranque", "hecho", "05", "--vault", str(tmp_path), "--dato", "url=https://www.facebook.com/profile.php?id=5&ref=x#a"]) == 0
+    assert next(p for p in cargar(tmp_path) if p.id == "05").datos["url"] == "https://www.facebook.com/profile.php?id=5"
+
+
+def test_cli_dato_url_profile_php_solo_id_numerico(tmp_path):
+    from trovify.arranque.estado import cargar
+
+    assert main(["arranque", "hecho", "05", "--vault", str(tmp_path), "--dato", "url=https://www.facebook.com/profile.php?id=abc&x=1"]) == 0
     assert next(p for p in cargar(tmp_path) if p.id == "05").datos["url"] == "https://www.facebook.com/profile.php"
+    assert main(["arranque", "hecho", "05", "--vault", str(tmp_path), "--dato", "url=https://www.facebook.com/otra?id=5"]) == 0
+    assert next(p for p in cargar(tmp_path) if p.id == "05").datos["url"] == "https://www.facebook.com/otra"
+
+
+def test_05_url_profile_php_exige_el_mismo_id(tmp_path):
+    marcar_hecho(tmp_path, "05", datos={"url": "https://www.facebook.com/profile.php?id=999"})
+    r = verificar_pagina(tmp_path, capturar=falso("https://www.facebook.com/profile.php?id=999", FIX.read_text()), confirmacion=CONF)
+    assert r.ok is False and "no coincide" in r.motivo
+    marcar_hecho(tmp_path, "05", datos={"url": "https://www.facebook.com/profile.php?id=102506312071455"})
+    r = verificar_pagina(tmp_path, capturar=falso("https://www.facebook.com/profile.php?id=102506312071455", FIX.read_text()), confirmacion=CONF)
+    assert r.ok is True
 
 
 @pytest.mark.parametrize("url", ["http://www.facebook.com/x", "https://evil.com/x", "https://facebook.com.evil.com/x",
