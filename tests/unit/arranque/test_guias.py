@@ -7,7 +7,7 @@ SECCIONES = ["**Objetivo**", "**Antes de empezar**", "**Pasos**", "**Errores tí
 
 
 def test_guias_de_la_fase_0_nucleo():
-    for nombre in ["00-entorno.md", "01-cerebro.md", "02-caza-sin-cuentas.md", "16-apimart.md", "_plantilla.md"]:
+    for nombre in ["00-entorno.md", "01-cerebro.md", "02-caza-sin-cuentas.md", "03-perfil.md", "04-business.md", "05-pagina.md", "16-apimart.md", "_plantilla.md"]:
         texto = (GUIAS / nombre).read_text()
         for s in SECCIONES:
             assert s in texto, (nombre, s)
@@ -70,3 +70,12 @@ def test_skill_prohibe_leer_env_y_cubre_hecho_y_bloqueado():
     assert "hecho" in t and "Playwright" in t
     assert "espera /trovify:cazar" in _t("02-caza-sin-cuentas.md")
     assert "trovify arranque hecho 00" in _t("00-entorno.md")
+
+
+def test_guias_03_04_05_dicen_lo_esencial():
+    assert "trovify arranque checklist 03 --respuesta perfil_propio=si --respuesta dos_fa=si --respuesta sin_vpn=si" in _t("03-perfil.md")
+    assert "Autenticación en dos pasos" in _t("03-perfil.md")
+    for n in ["04-business.md", "05-pagina.md"]:
+        assert "trovify navegador abrir meta https://business.facebook.com/" in _t(n)
+    assert "sin VPN" in _t("04-business.md") and "correo" in _t("04-business.md")
+    assert "--dato url=" in _t("05-pagina.md") and "marca del primer producto" in _t("05-pagina.md")
