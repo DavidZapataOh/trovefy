@@ -155,3 +155,35 @@ def test_sin_resultados_manda_el_json():
         {"node": {"collated_results": [_anuncio(snapshot={"body": {"text": "No ads match your search criteria"}})]}}]}}}
     html = _html_con_json(con) + "<p>No ads match your search criteria</p>"
     assert not sin_resultados(html)
+
+
+def _cuerpo_pag(ids, hay_mas):
+    edges = [{"node": {"collated_results": [_anuncio(ad_archive_id=i)]}} for i in ids]
+    con = {"edges": edges, "page_info": {"has_next_page": hay_mas}}
+    return json.dumps({"data": {"ad_library_main": {"search_results_connection": con}}})
+
+
+def test_hay_mas_de_la_ultima_conexion():
+    _, html = cuerpos("pagina_therapy_toolkit.json")
+    assert parsear_detalle([], "ALL", html=html).hay_mas is True
+    _, html = cuerpos("vacio.json")
+    assert parsear_detalle([], "RO", html=html).hay_mas is False
+    c, html = cuerpos("palabra_impultienda.json")
+    assert parsear_detalle(c, "ALL", html=html).hay_mas is True
+    assert parsear_detalle([_cuerpo_pag(["1"], True), _cuerpo_pag(["2"], False)], "AR").hay_mas is False
+    assert parsear_detalle([_cuerpo(_anuncio())], "AR").hay_mas is None  # sin page_info: no se sabe
+
+
+def test_primera_pagina_del_html_va_delante():
+    c, html = cuerpos("palabra_impultienda.json")
+    solo_html = [a.library_id for a in parsear_detalle([], "ALL", html=html).anuncios]
+    todos = [a.library_id for a in parsear_detalle(c, "ALL", html=html).anuncios]
+    assert len(solo_html) == 30 and todos[:30] == solo_html and len(todos) == 70
+
+
+def test_sin_resultados_ignora_scripts_y_estilos():
+    js = "<script>var i18n = {vacio: 'No hay ningún anuncio que coincida'};</script>"
+    css = "<style>/* no ads found */</style>"
+    desconocido = '<script type="application/json">{"data": {"otra_cosa": 1}}</script>'
+    assert not sin_resultados("<html>" + js + css + desconocido + "</html>")
+    assert sin_resultados("<html>" + js + '<div role="heading">No hay ningún anuncio que coincida</div></html>')

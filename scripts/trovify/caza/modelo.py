@@ -37,6 +37,8 @@ class Parseo:
     anuncios: list[AnuncioBiblioteca]
     descartados: int
     total_json: int | None  # ``count`` de search_results_connection en el HTML; None si no viene
+    # ``page_info.has_next_page`` de la última página leída; None si ninguna lo trae.
+    hay_mas: bool | None = None
 
 
 @dataclass

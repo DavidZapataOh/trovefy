@@ -33,6 +33,7 @@ class FormatoDesconocido(Exception):
 _SCRIPT_JSON = re.compile(
     r'<script\b[^>]*type=["\']application/json["\'][^>]*>(.*?)</script>', re.DOTALL | re.IGNORECASE
 )
+_SCRIPT_O_ESTILO = re.compile(r"<(script|style)\b[^>]*>.*?</\1\s*>", re.DOTALL | re.IGNORECASE)
 
 
 def _conexiones(nodo: Any):
@@ -128,14 +129,18 @@ def _scripts(html: str | None) -> list[str]:
 def parsear_detalle(cuerpos: list[str], pais: str, html: str | None = None) -> Parseo:
     """Lee anuncios de las respuestas de datos y de los bloques JSON del HTML.
 
-    Los anuncios repetidos (mismo ``library_id``) se cuentan una vez y se conserva la primera
-    aparición (orden: respuestas, luego HTML). Un anuncio o ``edge`` malformado se descarta y se
+    Orden: primero la primera página (HTML), luego las respuestas del desplazamiento en el orden en
+    que llegaron; los anuncios repetidos (mismo ``library_id``) se cuentan una vez y se conserva la
+    primera aparición, así que recortar por el final quita los de las páginas más tardías.
+    ``hay_mas`` es el ``page_info.has_next_page`` de la última conexión que lo trae (``None`` si
+    ninguna lo trae). Un anuncio o ``edge`` malformado se descarta y se
     cuenta en ``descartados``. Lanza ``FormatoDesconocido`` si ningún documento trae
     ``search_results_connection``, o si hubo entradas pero ninguna se pudo leer. Una conexión
     reconocida con ``edges`` vacío es una búsqueda sin resultados.
     """
-    textos = list(cuerpos) + _scripts(html)
+    textos = _scripts(html) + list(cuerpos)
     vistos: dict[str, AnuncioBiblioteca] = {}
+    hay_mas: bool | None = None
     reconocido = False
     descartados = 0
     entradas = 0
@@ -146,6 +151,9 @@ def parsear_detalle(cuerpos: list[str], pais: str, html: str | None = None) -> P
             continue
         for con in _conexiones(doc):
             reconocido = True
+            info = con.get("page_info")
+            if isinstance(info, dict) and isinstance(info.get("has_next_page"), bool):
+                hay_mas = info["has_next_page"]
             for edge in con["edges"]:
                 nodo = edge.get("node") if isinstance(edge, dict) else None
                 resultados = nodo.get("collated_results") if isinstance(nodo, dict) else None
@@ -165,7 +173,7 @@ def parsear_detalle(cuerpos: list[str], pais: str, html: str | None = None) -> P
         raise FormatoDesconocido("ninguna respuesta trae search_results_connection")
     if entradas and not vistos:
         raise FormatoDesconocido("hay anuncios pero ninguno tiene el formato esperado")
-    return Parseo(list(vistos.values()), descartados, _total_json(html))
+    return Parseo(list(vistos.values()), descartados, _total_json(html), hay_mas)
 
 
 def parsear_respuestas(cuerpos: list[str], pais: str, html: str | None = None) -> list[AnuncioBiblioteca]:
@@ -215,7 +223,8 @@ def sin_resultados(texto: str) -> bool:
 
     Si el HTML trae el JSON de resultados, manda el JSON (``count`` 0 y ``edges`` vacío; con
     anuncios, nunca). El texto del aviso solo cuenta cuando no hay JSON de anuncios, para que el
-    texto de un anuncio no lo dispare.
+    texto de un anuncio no lo dispare, y solo fuera de ``<script>`` y ``<style>``: un texto de
+    traducción o de código incrustado no convierte un formato desconocido en «sin resultados».
     """
     conexiones = []
     for t in _scripts(texto):
@@ -227,5 +236,5 @@ def sin_resultados(texto: str) -> bool:
         return False
     if any(c.get("count") == 0 for c in conexiones):
         return True
-    visible = _SCRIPT_JSON.sub(" ", texto or "")
+    visible = _SCRIPT_O_ESTILO.sub(" ", texto or "")
     return bool(_SIN_RESULTADOS.search(_html.unescape(visible)))
