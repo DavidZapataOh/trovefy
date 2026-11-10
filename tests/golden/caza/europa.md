@@ -1,0 +1,99 @@
+# Caza del 2026-11-10 · europa
+
+Modo: nicho · perfil: tomi
+
+Búsquedas en la Biblioteca: 6 (Firecrawl 5, Playwright 1) · créditos de Firecrawl: 5
+
+Búsquedas con acceso bloqueado: 0 · búsquedas sin resultados: 1
+
+Cómo leer este informe: «≥ N» quiere decir «al menos N» (Meta tenía más anuncios de los que se leyeron). «no medido: …» quiere decir que esa cifra no se pudo medir y por qué; nunca se rellena con un número. Cada tabla lleva el enlace de la Biblioteca que da sus cifras.
+
+## Resumen
+
+- A: ninguna
+- B: 1 — o-ejemplo (RO)
+- Observar: ninguna
+- Descartadas: 1 — o-tienda-ejemplo (RO)
+- Sin evaluar: 2 candidatas por el tope de ofertas nuevas por ejecución (R14); salen en la próxima caza.
+
+## Ofertas A
+
+Ninguna.
+
+## Ofertas B
+
+### o-ejemplo · RO · nota 67,10
+
+Decisión: **B** — nota 67,1 < 70 para A; sin hueco comprobado
+
+Ficha: [[wiki/ofertas/o-ejemplo]]
+
+Cifras de RO (enlace reproducible): https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=RO&media_type=all&q=caiet+de+exercitii&search_type=keyword_unordered
+
+| Señal | Valor | Qué significa |
+|---|---|---|
+| C8 | 15 | anuncios activos con 8 días o más: la oferta se sostiene |
+| C7 | 16 | anuncios activos con 7 días o más |
+| Total | 32 | anuncios activos de la oferta en el país |
+| Supervivencia | 0,5 | parte de los anuncios que llega a 7 días (de 0 a 1) |
+| Semanas escalonadas | no medido: fechas de inicio sin leer en esta búsqueda | semanas distintas en que arrancaron anuncios que siguen vivos |
+| Edad máxima (días) | no medido: fechas de inicio sin leer en esta búsqueda | días que lleva el anuncio activo más antiguo |
+| Vida mediana (días) | no medido: sin búsqueda de inactivos | cuánto duraron los anuncios que ya pararon |
+| Crecimiento en 7 días | no medido: primera caza | cambio de anuncios activos frente a hace una semana |
+| Expansión | no medido: idiomas sin detectar | países, idiomas y páginas que llevan la oferta |
+| Duplicación | no medido: la Biblioteca no informa collation_count | copias extra del mismo anuncio que agrupa Meta |
+| Alcance UE | no medido: requiere /ads_archive (paso 15) | alcance declarado en la Unión Europea |
+| Nuevos | no medido: primera caza | anuncios que aparecieron desde la corrida completa anterior |
+| Parados | no medido: primera caza | anuncios que desaparecieron desde la corrida completa anterior |
+
+Nota 67,10 de 100, parte por parte:
+
+| Parte | Peso | Puntuación (0 a 1) | Aporte |
+|---|---|---|---|
+| C8 | 25 | 0,71 | 17,63 |
+| Supervivencia | 5 | 0,50 | 2,50 |
+
+Cálculo: 100 × 20,13 ÷ 30 (pesos medidos) = 67,10.
+
+Sin medir (no cuentan en la nota ni restan): Longevidad, Crecimiento en 7 días, Expansión, Duplicación, Alcance UE.
+
+Hueco por país:
+
+| País | Competencia local | Original | Hueco | Por qué |
+|---|---|---|---|---|
+| RO | no medido: hacen falta 2 intentos con frases distintas para dar un 0 (hubo 1) | no medido | no comprobado | falta medir la competencia local |
+
+Búsquedas del hueco en RO:
+- https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=RO&media_type=all&q=caiet+de+lucru&search_type=keyword_unordered
+
+## Observar
+
+Ninguna.
+
+## Descartadas
+
+- o-tienda-ejemplo (RO): producto físico — señales de producto físico o retail: envío gratis, talla concreta · cifras: https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=RO&media_type=all&q=caiet+de+exercitii&search_type=keyword_unordered · ficha: [[wiki/ofertas/o-tienda-ejemplo]]
+
+## Palabras clave
+
+| Palabra | País | Anuncios | Candidatas | Modelables | Enlace |
+|---|---|---|---|---|---|
+| caiet de exercitii | RO | 48 | 2 | 1 | https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=RO&media_type=all&q=caiet+de+exercitii&search_type=keyword_unordered |
+| fise de lucru copii | RO | 0 | 0 | 0 | https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=RO&media_type=all&q=fise+de+lucru+copii&search_type=keyword_unordered |
+
+## Tasas
+
+- Tasa de señal (ofertas con anuncios de 7 días o más, sobre las leídas): 2 de 2 = 1,00
+- Tasa de modelo (landings modelables, sobre las verificadas): 1 de 2 = 0,50
+
+## Tres señales (R16)
+
+Para modelar una oferta hacen falta tres señales: ya se vende, hay hueco por país y la oferta se puede mejorar.
+
+### o-ejemplo · RO
+
+1. Ya se vende: sí (C8 15, mínimo 15 del perfil tomi)
+2. Hay hueco por país: no comprobado (RO: no medido: hacen falta 2 intentos con frases distintas para dar un 0 (hubo 1))
+3. La oferta se puede mejorar: pendiente: la confirma /modelar
+
+La decisión de modelar es tuya: escríbela en veredicto.md
