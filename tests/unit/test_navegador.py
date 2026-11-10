@@ -92,3 +92,20 @@ def test_base_privada_modos(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     perfil("meta")
     assert stat.S_IMODE((tmp_path / ".config/trovify").stat().st_mode) == 0o700
+
+
+@pytest.mark.parametrize("url", [
+    "https://whop.com/sign-in/?next=x",
+    "https://app.impultienda.ar/auth/login",
+    "https://app.impultienda.ar/auth",
+    "https://app.hotmart.com/ingresar",
+    "https://tienda.example.com/iniciar-sesion",
+    "https://www.facebook.com/login.php",
+])
+def test_sesion_caducada_otras_rutas_de_login(url):
+    assert sesion_caducada(url)
+
+
+def test_sesion_caducada_no_confunde_rutas_parecidas():
+    assert not sesion_caducada("https://blog.example.com/authors/ana")
+    assert not sesion_caducada("https://app.impultienda.ar/dashboard/plan")

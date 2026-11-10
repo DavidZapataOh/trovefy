@@ -15,7 +15,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 _SERVICIO = re.compile(r"[a-z0-9-]+")
-_RUTAS_LOGIN = ("/login", "/checkpoint", "/signin")
+_RUTAS_LOGIN = ("/login", "/checkpoint", "/signin", "/sign-in", "/auth", "/ingresar", "/iniciar-sesion")
+# la ruta de login va seguida de /, ., -, _ o del final: «/auth/login» sí, «/authors» no
+_LOGIN = re.compile("(?:" + "|".join(re.escape(r) for r in _RUTAS_LOGIN) + r")(?=[/._-]|$)")
 
 
 class NavegadorError(Exception):
@@ -55,8 +57,7 @@ def perfil(servicio: str) -> Path:
 
 def sesion_caducada(url_final: str) -> bool:
     """True si la URL final es una pantalla de login o de comprobación de seguridad."""
-    ruta = urlparse(url_final).path.lower()
-    return any(r in ruta for r in _RUTAS_LOGIN)
+    return bool(_LOGIN.search(urlparse(url_final).path.lower()))
 
 
 @contextmanager
