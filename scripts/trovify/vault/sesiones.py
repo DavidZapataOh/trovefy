@@ -11,7 +11,7 @@ from pathlib import Path
 from trovify.vault.escritura import ZONA_NEGOCIO
 from trovify.vault.frontmatter import escribir
 
-_NOMBRE = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{4}\.md$")
+_NOMBRE = re.compile(r"^(\d{4}-\d{2}-\d{2}-\d{4})(?:-(\d+))?\.md$")
 
 
 def _seccion(titulo: str, items: list[str]) -> str:
@@ -29,7 +29,12 @@ def escribir_traspaso(
 ) -> Path:
     """Escribe ``sesiones/AAAA-MM-DD-HHMM.md`` (hora COT) y devuelve su ruta."""
     ahora = (ahora or datetime.now(ZONA_NEGOCIO)).astimezone(ZONA_NEGOCIO)
-    ruta = Path(vault) / "sesiones" / f"{ahora:%Y-%m-%d-%H%M}.md"
+    base = f"{ahora:%Y-%m-%d-%H%M}"
+    ruta = Path(vault) / "sesiones" / f"{base}.md"
+    n = 1
+    while ruta.exists():  # dos cierres en el mismo minuto: nunca se pisa el primero
+        n += 1
+        ruta = ruta.with_name(f"{base}-{n}.md")
     meta = {
         "tipo": "traspaso",
         "fecha": f"{ahora:%Y-%m-%d}",
@@ -52,5 +57,9 @@ def ultimo_traspaso(vault: Path) -> Path | None:
     carpeta = Path(vault) / "sesiones"
     if not carpeta.is_dir():
         return None
-    nombres = sorted(p.name for p in carpeta.iterdir() if _NOMBRE.match(p.name))
-    return carpeta / nombres[-1] if nombres else None
+    candidatos = []
+    for p in carpeta.iterdir():
+        m = _NOMBRE.match(p.name)
+        if m:
+            candidatos.append(((m.group(1), int(m.group(2) or 1)), p.name))
+    return carpeta / max(candidatos)[1] if candidatos else None

@@ -9,6 +9,7 @@ import yaml
 
 from trovify.cli import registrar
 from trovify.vault.andamio import crear_vault
+from trovify.vault.escritura import anadir_log
 from trovify.vault.lint import lint
 from trovify.vault.permisos import escribir_settings
 from trovify.vault.reglas import ConflictoDeReglas, aplicar_plan, planear_regla
@@ -108,6 +109,7 @@ def _traspaso(args: argparse.Namespace, destino: Path) -> int:
     try:
         ruta = escribir_traspaso(destino, listas["hecho"], listas["pendiente"],
                                  listas["decisiones"], listas["archivos"])
+        anadir_log(destino, "cerrar", "traspaso de sesión", [ruta.relative_to(destino).as_posix()])
     except OSError as exc:
         return _error(f"no se pudo escribir en el vault: {exc.strerror or exc}")
     print(ruta)

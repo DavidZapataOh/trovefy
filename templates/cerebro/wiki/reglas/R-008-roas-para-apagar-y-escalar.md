@@ -16,7 +16,7 @@ Hay dos umbrales distintos, ambos sobre ROAS **neto**: se propone apagar si el R
 
 ## Por qué
 
-T3 apaga por debajo de 2 y el CLAUDE.md del vídeo por debajo de 1,4. Dos umbrales dejan una franja de espera en la que ni se mata una oferta recuperable ni se escala una que aún no rinde.
+T3 apaga por debajo de 2 y el CLAUDE.md del vídeo por debajo de 1,4. Criterio del diseño (sin fuente en los vídeos): dos umbrales dejan una franja de espera en la que ni se mata una oferta recuperable ni se escala una que aún no rinde.
 
 ## Cómo se aplica
 

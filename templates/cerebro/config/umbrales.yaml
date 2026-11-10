@@ -321,6 +321,13 @@ corte.anuncio.cpc_max_usd:
   gana_sobre: "—"
   regla: R-005
 
+corte.anuncio.impresiones_min:
+  valor: 1000
+  fuente: "Diseño §4.13 (Anuncio: ESPERAR)"
+  fecha: "2026-11-09"
+  gana_sobre: "—"
+  regla: R-005
+
 corte.oferta.sin_ventas_usd:
   valor: 25
   fuente: "Usuario (PU-01, 2026-11-09): «matar el producto a los ~US$ 25 sin ventas»; C1 1:24:15"

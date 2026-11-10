@@ -3,12 +3,12 @@
 import re
 import unicodedata
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 import yaml
 
-from trovify.config.umbrales import cargar
+from trovify.config.umbrales import cargar, cargar_texto
 from trovify.vault.escritura import ZONA_NEGOCIO, anadir_log, escribir_atomico
 from trovify.vault.frontmatter import leer, renderizar
 
@@ -16,6 +16,7 @@ _INICIO = "<!-- REGLAS:INICIO -->"
 _FIN = "<!-- REGLAS:FIN -->"
 _ID = re.compile(r"R-(\d{3})")
 _FECHA = re.compile(r"\d{4}-\d{2}-\d{2}")
+_PAR = re.compile(r"`([a-z0-9_.]+)` \(([0-9][0-9.,]*)\)")  # `clave` (valor) en el texto de una regla
 
 
 class ConflictoDeReglas(Exception):
@@ -60,6 +61,56 @@ def consistencia(vault: Path) -> list[str]:
         if clave not in citados:
             problemas.append(f"umbral «{clave}» ({u.regla}): ninguna regla lo cita")
     return problemas
+
+
+def _numero(texto: str) -> float | None:
+    try:
+        return float(texto.replace(",", "."))
+    except ValueError:
+        return None
+
+
+def valores_citados(vault: Path) -> list[tuple[str, str, str, float | None]]:
+    """(página, clave, valor tal como se escribió, valor numérico) de cada `clave` (valor)
+    en las reglas vigentes."""
+    vault = Path(vault)
+    pares = []
+    for _rid, pagina, meta in _paginas(vault):
+        if not _vigente(meta):
+            continue
+        rel = pagina.relative_to(vault).as_posix()
+        for clave, texto in _PAR.findall(pagina.read_text(encoding="utf-8")):
+            pares.append((rel, clave, texto, _numero(texto)))
+    return pares
+
+
+def valores_desactualizados(vault: Path) -> list[tuple[str, str]]:
+    """(página, detalle) de cada valor citado que no coincide con config/umbrales.yaml."""
+    umbrales = cargar(Path(vault) / "config" / "umbrales.yaml")
+    problemas = []
+    for rel, clave, texto, num in valores_citados(vault):
+        if clave not in umbrales:
+            problemas.append((rel, f"cita `{clave}` ({texto}), que no existe en umbrales.yaml"))
+        elif num != float(umbrales[clave].valor):
+            problemas.append((rel, f"cita `{clave}` ({texto}) pero umbrales.yaml dice {umbrales[clave].valor:g}"))
+    return problemas
+
+
+def formatear_valor_citado(nuevo: float, viejo: str) -> str:
+    """El valor nuevo con el formato que usaba la página (coma decimal, decimales mínimos)."""
+    sep = "," if "," in viejo else ("." if "." in viejo else None)
+    dec_viejo = len(viejo.split(sep)[1]) if sep else 0
+    dec_nuevo = len(f"{nuevo:.6f}".rstrip("0").split(".")[1])
+    decimales = max(dec_viejo, dec_nuevo)
+    texto = f"{nuevo:.{decimales}f}"
+    return texto.replace(".", sep or ",") if decimales else texto
+
+
+def _reescribir_citas(texto: str, nuevos: dict[str, float]) -> str:
+    def cambia(m: re.Match) -> str:
+        clave, viejo = m.group(1), m.group(2)
+        return m.group(0) if clave not in nuevos else f"`{clave}` ({formatear_valor_citado(nuevos[clave], viejo)})"
+    return _PAR.sub(cambia, texto)
 
 
 def conflictos(vault: Path, claves: list[str]) -> list[str]:
@@ -117,6 +168,12 @@ def planear_regla(
     fecha = fecha or datetime.now(ZONA_NEGOCIO).strftime("%Y-%m-%d")
     if not _FECHA.fullmatch(fecha):
         raise ValueError(f"La fecha «{fecha}» no tiene el formato AAAA-MM-DD")
+    try:
+        date.fromisoformat(fecha)
+    except ValueError:
+        raise ValueError(f"La fecha «{fecha}» no existe en el calendario") from None
+    if re.search(r"[\r\n]", titulo):
+        raise ValueError("El título no puede tener saltos de línea")
     slug = _slug(titulo)
     if not slug:
         raise ValueError(f"El título «{titulo}» no genera un nombre de archivo válido")
@@ -176,6 +233,18 @@ def planear_regla(
         m = {**m, "estado": "reemplazada", "reemplazada_por": rid}
         plan.escrituras.append((pagina, renderizar(m, texto)))
 
+    # 2b. otras reglas vigentes que citan el valor de un umbral que cambia: se actualiza el número
+    nuevos = {c: v for c, v in umbrales.items() if v != existentes[c].valor}
+    actualizadas = []
+    for otro, (pagina, m) in paginas.items():
+        if otro in reemplaza or not _vigente(m):
+            continue
+        original = pagina.read_text(encoding="utf-8")
+        cambiado = _reescribir_citas(original, nuevos)
+        if cambiado != original:
+            plan.escrituras.append((pagina, cambiado))
+            actualizadas.append(otro)
+
     # 3. CLAUDE.md
     texto = texto_claude.replace(_FIN, f"- [[{nombre}]] {titulo}\n{_FIN}", 1)
     for viejo in reemplaza:
@@ -200,7 +269,11 @@ def planear_regla(
         crudo = ruta_u.read_text(encoding="utf-8")
         datos = yaml.safe_load(crudo) or {}
         for clave, valor in umbrales.items():
-            datos[clave].update({"valor": valor, "fuente": fuente, "fecha": fecha, "regla": rid})
+            previo = existentes[clave]
+            cambio = {"valor": valor, "fuente": fuente, "fecha": fecha, "regla": rid}
+            if valor != previo.valor:
+                cambio["gana_sobre"] = f"{previo.regla}: {previo.valor:g}"
+            datos[clave].update(cambio)
         for clave in heredados:
             datos[clave]["regla"] = rid
         cabecera = []
@@ -209,12 +282,16 @@ def planear_regla(
                 break
             cabecera.append(linea)
         cuerpo_u = yaml.safe_dump(datos, sort_keys=False, allow_unicode=True)
-        plan.escrituras.append((ruta_u, "".join(f"{c}\n" for c in cabecera) + cuerpo_u))
+        nuevo_yaml = "".join(f"{c}\n" for c in cabecera) + cuerpo_u
+        cargar_texto(nuevo_yaml)  # misma validación que el cargador: número finito, no bool
+        plan.escrituras.append((ruta_u, nuevo_yaml))
 
     plan.lineas.append(f"Regla nueva: {rid} -> {rel(ruta)}")
     plan.lineas.append("Archivos que cambian: " + ", ".join(rel(p) for p, _ in plan.escrituras))
     for clave, valor in umbrales.items():
         plan.lineas.append(f"Umbral {clave}: {existentes[clave].valor} -> {valor}")
+    if actualizadas:
+        plan.lineas.append("Se actualiza el valor citado en " + ", ".join(actualizadas))
     for clave in heredados:
         plan.lineas.append(f"{rid} pasa a ser dueña de {clave} (valor sin cambios)")
     return plan

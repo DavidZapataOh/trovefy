@@ -2,6 +2,7 @@
 
 import fcntl
 import os
+import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -38,9 +39,10 @@ def anadir_log(
     """Añade una línea a log.md (con flock) y la devuelve."""
     ahora = (ahora or datetime.now(ZONA_NEGOCIO)).astimezone(ZONA_NEGOCIO)
     tokens = "—" if tokens_aprox is None else f"~{tokens_aprox}"
+    una_linea = lambda s: re.sub(r"[\r\n]+", " ", str(s)) 
     linea = (
-        f"- {ahora:%Y-%m-%d %H:%M} COT · {skill} · {que} · "
-        f"{', '.join(archivos)} · {tokens} tokens"
+        f"- {ahora:%Y-%m-%d %H:%M} COT · {una_linea(skill)} · {una_linea(que)} · "
+        f"{', '.join(una_linea(a) for a in archivos)} · {tokens} tokens"
     )
     ruta = Path(vault) / "log.md"
     ruta.parent.mkdir(parents=True, exist_ok=True)

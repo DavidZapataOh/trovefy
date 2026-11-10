@@ -191,3 +191,102 @@ def test_real_imprime_mismo_resumen(tmp_path, monkeypatch, capsys):
     assert "R-013 pasa a ser dueña de corte.oferta.factor_cpa_be (valor sin cambios)" in out
     assert out.strip().endswith("R-013-no-cazar-en-diciembre.md")
     assert consistencia(v) == []
+
+
+# --- Fix wave final del plan 02 -------------------------------------------------
+
+@pytest.mark.parametrize("malo", ["NaN", "Infinity", '"veinte"', "true"])
+def test_valor_no_numerico_o_no_finito_sale_2_sin_escribir(tmp_path, monkeypatch, capsys, malo):
+    v = _vault(tmp_path)
+    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    f = tmp_path / "r.json"
+    f.write_text('{"titulo": "X", "regla": "r", "porque": "p", "como": "c", "fuente": "U", '
+                 '"umbrales": {"corte.oferta.sin_ventas_usd": ' + malo + '}, "reemplaza": ["R-006"]}')
+    antes = _snapshot(v)
+    assert cli.main(["cerebro", "regla", "--json", str(f)]) == 2
+    assert capsys.readouterr().err
+    assert _snapshot(v) == antes
+    from trovify.config.umbrales import valor
+    assert valor(v, "corte.oferta.sin_ventas_usd") == 25
+
+
+def test_reemplazo_actualiza_valor_citado_en_otras_reglas(tmp_path, monkeypatch, capsys):
+    from trovify.vault.lint import lint
+    v = _vault(tmp_path)
+    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    j = _json(tmp_path, titulo="Escalar a 2,5", umbrales={"roas.escalar": 2.5}, reemplaza=["R-008"])
+    assert cli.main(["cerebro", "regla", "--simular", "--json", j]) == 0
+    out = capsys.readouterr().out
+    assert "Se actualiza el valor citado en R-009, R-010" in out
+    assert "wiki/reglas/R-009-" in out
+    assert "`roas.escalar` (2,0)" in (v / "wiki/reglas/R-009-pre-escala.md").read_text()
+    assert cli.main(["cerebro", "regla", "--json", j]) == 0
+    capsys.readouterr()
+    for pagina in ("R-009-pre-escala.md", "R-010-escalera-de-escala.md"):
+        ruta = next((v / "wiki/reglas").glob(pagina[:5] + "*"))
+        t = ruta.read_text()
+        assert "`roas.escalar` (2,5)" in t and "`roas.escalar` (2,0)" not in t, ruta.name
+    assert consistencia(v) == []
+    assert lint(v) == []
+
+
+def test_formato_del_valor_citado(tmp_path):
+    from trovify.vault.reglas import formatear_valor_citado
+    assert formatear_valor_citado(2.5, "2,0") == "2,5"
+    assert formatear_valor_citado(3, "2,0") == "3,0"
+    assert formatear_valor_citado(7, "5") == "7"
+    assert formatear_valor_citado(0.65, "0,6") == "0,65"
+    assert formatear_valor_citado(2.5, "2") == "2,5"
+    assert formatear_valor_citado(0.7, "0.6") == "0.7"
+
+
+def test_titulo_con_salto_de_linea_sale_2(tmp_path, monkeypatch, capsys):
+    v = _vault(tmp_path)
+    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    antes = _snapshot(v)
+    for t in ("Uno\ndos", "Uno\rdos"):
+        assert cli.main(["cerebro", "regla", "--json", _json(tmp_path, titulo=t)]) == 2
+    assert _snapshot(v) == antes
+
+
+def test_gana_sobre_apunta_a_la_regla_y_valor_anteriores(tmp_path):
+    v = _vault(tmp_path)
+    nueva_regla(v, "Corte a 20", "r", "p", "c", "U",
+                umbrales={"corte.oferta.sin_ventas_usd": 20}, reemplaza=["R-006"])
+    u = yaml.safe_load((v / "config/umbrales.yaml").read_text())
+    assert u["corte.oferta.sin_ventas_usd"]["gana_sobre"] == "R-006: 25"
+    assert u["corte.oferta.factor_cpa_be"]["gana_sobre"] != "R-006: 25"
+
+
+def test_fecha_imposible_sale_2(tmp_path, monkeypatch):
+    v = _vault(tmp_path)
+    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    for f in ("2026-13-45", "2026-02-30"):
+        assert cli.main(["cerebro", "regla", "--json", _json(tmp_path, fecha=f)]) == 2
+    assert not list((v / "wiki/reglas").glob("R-013*"))
+
+
+def test_lint_marca_valor_desactualizado_y_consistencia(tmp_path):
+    from trovify.vault.lint import lint
+    v = _vault(tmp_path)
+    p = v / "wiki/reglas/R-009-pre-escala.md"
+    p.write_text(p.read_text().replace("`roas.escalar` (2,0)", "`roas.escalar` (3,0)", 1))
+    problemas = lint(v)
+    assert [x.tipo for x in problemas] == ["valor_desactualizado"]
+    assert "roas.escalar" in problemas[0].detalle and problemas[0].ruta.endswith("R-009-pre-escala.md")
+    (v / "wiki/reglas/R-005-corte-de-anuncio.md").unlink()
+    assert "consistencia" in {x.tipo for x in lint(v)}
+
+
+def test_lint_ignora_paginas_reemplazadas(tmp_path):
+    from trovify.vault.lint import lint
+    v = _vault(tmp_path)
+    nueva_regla(v, "Corte a 20", "r", "p", "c", "U",
+                umbrales={"corte.oferta.sin_ventas_usd": 20}, reemplaza=["R-006"])
+    assert lint(v) == []
+
+
+def test_recordar_documenta_contradicciones_sin_clave():
+    t = (Path(__file__).resolve().parents[3] / "skills/recordar/SKILL.md").read_text(encoding="utf-8")
+    for frase in ("Reglas aprendidas", "reglas duras", "PU-01", "cuál manda"):
+        assert frase in t

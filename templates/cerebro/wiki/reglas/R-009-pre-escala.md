@@ -16,11 +16,11 @@ La pre-escala se propone con al menos `preescala.min_ventas` (5) ventas y un ROA
 
 ## Por qué
 
-Santino exige 10 ventas, pero con US$ 55 de techo y un AOV de US$ 15–20 salen unos 5–7 pedidos: con 10 no se llegaría nunca. Con 5 ventas hay señal suficiente y el techo sigue protegiendo el capital.
+Santino exige 10 ventas, pero con US$ 55 de techo y un AOV de US$ 15–20 salen unos 5–7 pedidos: con 10 no se llegaría nunca. Criterio del diseño (sin fuente en los vídeos): con 5 ventas hay señal suficiente y el techo sigue protegiendo el capital.
 
 ## Cómo se aplica
 
-`/escalar` comprueba ventas y ROAS neto acumulado con días cerrados antes de proponer el paso a la escalera ABO → CBO → Cost Cap → Bid Cap. El order bump se añade con 10 ventas acumuladas, no antes.
+`/escalar` comprueba ventas y ROAS neto acumulado con días cerrados antes de proponer el paso a la escalera ABO → CBO → Cost Cap → Bid Cap. El order bump se añade con 10 ventas acumuladas, no antes (diseño §4.1, fila «Order bump en el test 1»; todavía no tiene clave en `umbrales.yaml`).
 
 ## Fuente
 

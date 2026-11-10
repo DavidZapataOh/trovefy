@@ -28,3 +28,11 @@ def test_log_concurrente_no_pierde_lineas(tmp_path):
     with Pool(8) as p:
         p.map(_escribe, [(tmp_path, i) for i in range(200)])
     assert len((tmp_path / "log.md").read_text().splitlines()) == 200
+
+
+def test_log_reemplaza_saltos_de_linea(tmp_path):
+    from trovify.vault.escritura import anadir_log
+    linea = anadir_log(tmp_path, "reg\nla", "uno\r\ndos\ntres", ["a\nb.md", "c.md"])
+    texto = (tmp_path / "log.md").read_text()
+    assert texto.count("\n") == 1 and "\r" not in texto
+    assert "uno dos tres" in linea and "a b.md" in linea

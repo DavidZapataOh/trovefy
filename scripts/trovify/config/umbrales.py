@@ -38,7 +38,12 @@ class Umbral:
 
 
 def cargar(ruta: Path) -> dict[str, Umbral]:
-    datos = yaml.safe_load(Path(ruta).read_text(encoding="utf-8")) or {}
+    return cargar_texto(Path(ruta).read_text(encoding="utf-8"))
+
+
+def cargar_texto(texto: str) -> dict[str, Umbral]:
+    """Valida el contenido de un umbrales.yaml con las mismas reglas que `cargar`."""
+    datos = yaml.safe_load(texto) or {}
     umbrales: dict[str, Umbral] = {}
     for clave, entrada in datos.items():
         if not isinstance(entrada, dict):

@@ -12,6 +12,7 @@ from typing import Literal
 import yaml
 
 from trovify.vault.frontmatter import leer
+from trovify.vault.reglas import consistencia, valores_desactualizados
 
 EXCLUIDOS = {".trovify", ".claude", "raw", "sesiones"}
 _WIKILINK = re.compile(r"\[\[([^\]\n]+)\]\]")
@@ -23,7 +24,7 @@ _ESQUEMA = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*:")
 
 @dataclass
 class Problema:
-    tipo: Literal["enlace_roto", "huerfana", "frontmatter"]
+    tipo: Literal["enlace_roto", "huerfana", "frontmatter", "valor_desactualizado", "consistencia"]
     ruta: str
     detalle: str
 
@@ -130,4 +131,18 @@ def lint(vault: Path) -> list[Problema]:
         rel = pagina.relative_to(vault).as_posix()
         if rel.startswith("wiki/") and pagina not in entrantes:
             problemas.append(Problema("huerfana", rel, "ninguna página la enlaza (ni index.md)"))
+    problemas.extend(_revisar_reglas(vault))
+    return problemas
+
+
+def _revisar_reglas(vault: Path) -> list[Problema]:
+    """Valores citados en las reglas y consistencia reglas <-> umbrales.yaml."""
+    ruta = "config/umbrales.yaml"
+    if not (vault / ruta).is_file():
+        return [Problema("consistencia", ruta, "falta config/umbrales.yaml")]
+    try:
+        problemas = [Problema("valor_desactualizado", rel, d) for rel, d in valores_desactualizados(vault)]
+        problemas += [Problema("consistencia", ruta, d) for d in consistencia(vault)]
+    except (ValueError, yaml.YAMLError, OSError, UnicodeDecodeError) as exc:
+        return [Problema("consistencia", ruta, f"no se pudo comprobar ({exc})")]
     return problemas

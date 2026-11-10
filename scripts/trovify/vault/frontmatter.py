@@ -1,26 +1,30 @@
 """Lectura y escritura de Markdown con frontmatter YAML."""
 
+import re
 from pathlib import Path
 
 import yaml
 
 from trovify.vault.escritura import escribir_atomico
 
-_LIMITE = "---\n"
+_APERTURA = re.compile(r"---\r?\n")
+_CIERRE = re.compile(r"\r?\n---\r?\n")
 
 
 def leer(ruta: Path) -> tuple[dict, str]:
     texto = Path(ruta).read_text(encoding="utf-8")
-    if not texto.startswith(_LIMITE):
+    abre = _APERTURA.match(texto)
+    if not abre:
         return {}, texto
-    resto = texto[len(_LIMITE):]
-    if resto.startswith(_LIMITE):
-        return {}, resto[len(_LIMITE):]
-    fin = resto.find("\n" + _LIMITE)
-    if fin == -1:
+    resto = texto[abre.end():]
+    vacio = _APERTURA.match(resto)
+    if vacio:
+        return {}, resto[vacio.end():]
+    cierre = _CIERRE.search(resto)
+    if cierre is None:
         return {}, texto
-    meta = yaml.safe_load(resto[: fin + 1]) or {}
-    return meta, resto[fin + 1 + len(_LIMITE):]
+    meta = yaml.safe_load(resto[: cierre.start()]) or {}
+    return meta, resto[cierre.end():]
 
 
 def renderizar(meta: dict, cuerpo: str) -> str:

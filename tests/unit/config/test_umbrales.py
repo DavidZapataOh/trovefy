@@ -13,7 +13,7 @@ def test_semilla_carga_y_respeta_pu01():
     assert u["test.spend_cap_usd"].valor == 30
     assert u["test.spend_cap_prorroga_usd"].valor == 55
     assert u["caza.perfil.tomi.c8_min"].valor == 15
-    assert len(u) == 60
+    assert len(u) == 61
 
 
 def test_umbral_incompleto_falla_con_nombre(tmp_path):

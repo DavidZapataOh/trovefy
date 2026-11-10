@@ -46,16 +46,24 @@ def test_paginas_de_wiki_con_frontmatter_y_enlazadas(tmp_path):
 def test_valores_de_las_reglas_coinciden_con_el_yaml():
     from pathlib import Path
 
-    import yaml
+    from trovify.vault.reglas import valores_citados, valores_desactualizados
 
     raiz = Path(__file__).resolve().parents[3] / "templates" / "cerebro"
-    umbrales = yaml.safe_load((raiz / "config/umbrales.yaml").read_text(encoding="utf-8"))
-    pares = 0
-    for pagina in sorted((raiz / "wiki/reglas").glob("R-*.md")):
-        for clave, valor in re.findall(r"`([a-z0-9_.]+)` \(([0-9][0-9.,]*)\)", pagina.read_text(encoding="utf-8")):
-            assert clave in umbrales, f"{pagina.name}: clave {clave} no existe"
-            assert float(valor.replace(",", ".")) == float(umbrales[clave]["valor"]), (
-                f"{pagina.name}: {clave} ({valor}) != {umbrales[clave]['valor']}"
-            )
-            pares += 1
-    assert pares >= 10
+    assert valores_desactualizados(raiz) == []
+    assert len(valores_citados(raiz)) >= 10
+
+
+def test_r005_aplica_a_todo_anuncio_y_cita_esperar():
+    from pathlib import Path
+    raiz = Path(__file__).resolve().parents[3] / "templates" / "cerebro"
+    t = (raiz / "wiki/reglas/R-005-corte-de-anuncio.md").read_text(encoding="utf-8")
+    assert "No aplica a ofertas con ventas" not in t
+    assert "§4.13" in t and "corte.anuncio.impresiones_min" in t
+    assert "corte.anuncio.impresiones_min" in (raiz / "config/umbrales.yaml").read_text(encoding="utf-8")
+
+
+def test_valores_desactualizados_comparte_implementacion(tmp_path):
+    from trovify.vault.reglas import valores_citados
+    crear_vault(tmp_path / "v")
+    pares = valores_citados(tmp_path / "v")
+    assert len(pares) >= 10 and all(len(x) == 4 for x in pares)

@@ -60,3 +60,34 @@ def test_cli_traspaso_retomar_lint(tmp_path, monkeypatch, capsys):
     assert correr("traspaso", "--json", "-", stdin='{"hecho": "no-lista"}') == 2
     (v / "wiki/mercados/zz.md").write_text("sin frontmatter [[nada]]\n")
     assert correr("lint") == 1
+
+
+def test_mismo_minuto_no_sobrescribe(tmp_path):
+    t = datetime(2026, 11, 10, 18, 5, tzinfo=BOGOTA)
+    r1 = escribir_traspaso(tmp_path, ["uno"], [], [], [], t)
+    r2 = escribir_traspaso(tmp_path, ["dos"], [], [], [], t)
+    r3 = escribir_traspaso(tmp_path, ["tres"], [], [], [], t)
+    assert [r.name for r in (r1, r2, r3)] == [
+        "2026-11-10-1805.md", "2026-11-10-1805-2.md", "2026-11-10-1805-3.md"]
+    assert "uno" in r1.read_text() and "dos" in r2.read_text()
+    assert ultimo_traspaso(tmp_path) == r3
+    t2 = datetime(2026, 11, 10, 18, 6, tzinfo=BOGOTA)
+    r4 = escribir_traspaso(tmp_path, ["cuatro"], [], [], [], t2)
+    assert ultimo_traspaso(tmp_path) == r4
+
+
+def test_cli_traspaso_escribe_log(tmp_path, monkeypatch):
+    import io
+    import json
+
+    from trovify import cli
+    from trovify.vault.andamio import crear_vault
+
+    v = tmp_path / "v"
+    crear_vault(v)
+    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hecho": ["x"]})))
+    antes = (v / "log.md").read_text().count("\n")
+    assert cli.main(["cerebro", "traspaso", "--json", "-"]) == 0
+    lineas = (v / "log.md").read_text().splitlines()
+    assert len(lineas) == antes + 1 and "· cerrar ·" in lineas[-1] and "sesiones/" in lineas[-1]
