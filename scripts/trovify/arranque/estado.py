@@ -50,6 +50,7 @@ class ResultadoVerificacion:
     motivo: str
     arreglos: list[str]
     datos: dict[str, str] = field(default_factory=dict)
+    lineas: list[str] = field(default_factory=list)  # para mostrar; no se guarda
 
 
 def _ruta(vault: Path) -> Path:
