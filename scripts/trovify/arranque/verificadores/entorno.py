@@ -39,10 +39,14 @@ def comprobar_entorno(
 ) -> list[Elemento]:
     home = Path.home() if home is None else Path(home)
     elementos = [
-        _herramienta(correr, "python", ["uv", "python", "find", "3.12"], "! uv python install 3.12"),
         _herramienta(
             correr, "uv", ["uv", "--version"],
-            "instala uv con una versión fijada (por ejemplo `! pipx install uv==<versión>`); no uses `curl | bash`",
+            "en una terminal de Ubuntu (WSL) aparte: `sudo apt install -y pipx` y luego `pipx install uv==0.11.26`; "
+            "no uses scripts descargados al vuelo",
+        ),
+        _herramienta(
+            correr, "python", ["uv", "python", "find", "3.12"],
+            "en una terminal de Ubuntu (WSL) aparte: `uv python install 3.12` (necesita uv)",
         ),
     ]
     codigo, salida = correr(["node", "--version"], timeout=10)
@@ -51,26 +55,30 @@ def comprobar_entorno(
         elementos.append(Elemento("node", True, salida, None))
     else:
         detalle = salida if codigo is None else f"versión {salida or 'desconocida'}: se necesita Node {_NODE_MINIMO} o superior"
-        elementos.append(Elemento("node", False, detalle, f"instala Node LTS ({_NODE_MINIMO} o superior) con una versión fijada y vuelve a verificar"))
+        elementos.append(Elemento(
+            "node", False, detalle,
+            f"descarga Node LTS ({_NODE_MINIMO} o superior) para Linux desde https://nodejs.org/en/download, "
+            "verifica la descarga y descomprímela como indica esa página; no uses scripts descargados al vuelo",
+        ))
     elementos += [
-        _herramienta(correr, "git", ["git", "--version"], "! sudo apt install -y git"),
+        _herramienta(correr, "git", ["git", "--version"], "en una terminal de Ubuntu (WSL) aparte: `sudo apt install -y git`"),
         # el ffmpeg de snap se cuelga en WSL: por eso el límite de 10 s y el arreglo con apt
-        _herramienta(correr, "ffmpeg", ["ffmpeg", "-version"], "! sudo apt install -y ffmpeg"),
-        _herramienta(correr, "poppler", ["pdfinfo", "-v"], "! sudo apt install -y poppler-utils"),
+        _herramienta(correr, "ffmpeg", ["ffmpeg", "-version"], "en una terminal de Ubuntu (WSL) aparte: `sudo apt install -y ffmpeg` (el de snap se cuelga en WSL)"),
+        _herramienta(correr, "poppler", ["pdfinfo", "-v"], "en una terminal de Ubuntu (WSL) aparte: `sudo apt install -y poppler-utils`"),
     ]
     codigo, salida = correr(["ldconfig", "-p"], timeout=10)
     if codigo == 0 and "libpango-1.0" in salida:
         elementos.append(Elemento("weasyprint", True, "libpango-1.0 presente", None))
     else:
         detalle = salida if codigo is None else "falta libpango-1.0"
-        elementos.append(Elemento("weasyprint", False, detalle, "! sudo apt install -y libpango-1.0-0 libpangoft2-1.0-0"))
+        elementos.append(Elemento("weasyprint", False, detalle, "en una terminal de Ubuntu (WSL) aparte: `sudo apt install -y libpango-1.0-0 libpangoft2-1.0-0`"))
     navegadores = sorted(glob.glob(str(home / ".cache" / "ms-playwright" / "chromium-*")))
     if navegadores:
         elementos.append(Elemento("playwright", True, Path(navegadores[0]).name, None))
     else:
         elementos.append(Elemento(
             "playwright", False, "no hay navegador de Playwright en ~/.cache/ms-playwright",
-            "Playwright para Python se instala en el plan 05; después: ! uv run playwright install chromium",
+            "Playwright para Python se instala en el plan 05; después, en una terminal de Ubuntu aparte: `uv run playwright install chromium`",
         ))
     codigo, salida = correr(["systemctl", "is-system-running"], timeout=10)
     estado = _primera_linea(salida)
@@ -80,8 +88,9 @@ def comprobar_entorno(
         detalle = salida if codigo is None else (estado or "sin respuesta")
         elementos.append(Elemento(
             "systemd", False, detalle,
-            "edita /etc/wsl.conf (! sudo nano /etc/wsl.conf) y añade `[boot]` y `systemd=true`; "
-            "luego ejecuta `wsl --shutdown` desde PowerShell de Windows y reabre la terminal",
+            "en una terminal de Ubuntu (WSL) aparte: mira `cat /etc/wsl.conf`; si ya tiene una sección [boot], añade "
+            "`systemd=true` debajo; si no, añade al final `[boot]` y `systemd=true` (por ejemplo con `sudo nano /etc/wsl.conf`), "
+            "sin borrar lo que ya hay; luego ejecuta `wsl --shutdown` desde PowerShell de Windows y reabre Ubuntu",
         ))
     candidatos = [Path(p) for p in sorted(glob.glob(_OBSIDIAN))] if obsidian is None else [Path(p) for p in obsidian]
     encontrado = next((p for p in candidatos if p.exists()), None)

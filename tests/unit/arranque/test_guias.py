@@ -1,4 +1,5 @@
 import pathlib
+import re
 
 RAIZ = pathlib.Path(__file__).resolve().parents[3] / "skills/arranque"
 GUIAS = RAIZ / "references/pasos"
@@ -18,8 +19,19 @@ def test_guias_sin_practicas_prohibidas():
         texto = f.read_text()
         assert "@latest" not in texto and "| bash" not in texto, f.name
         for linea in texto.splitlines():
-            if linea.lstrip().startswith(("!", "1. !")) or "`! " in linea:
-                assert "!!" not in linea and "&& !" not in linea, (f.name, linea)
+            for cmd in re.findall(r"`([^`]+)`", linea):
+                if cmd == "!":  # mención del propio símbolo
+                    continue
+                assert "!" not in cmd, (f.name, cmd)  # ni `!` inicial ni negación dentro de un comando
+            if "sudo" in linea or "nano" in linea:
+                assert not linea.lstrip(" 0123456789.-").startswith("!"), (f.name, linea)
+                assert "`!" not in linea.replace("`!`", ""), (f.name, linea)
+
+
+def test_verificadores_sin_exclamacion_en_arreglos():
+    raiz = RAIZ.parents[1] / "scripts/trovify/arranque/verificadores"
+    for nombre in ["entorno.py", "apimart.py", "cerebro.py"]:
+        assert "`!" not in (raiz / nombre).read_text() and '"! ' not in (raiz / nombre).read_text(), nombre
 
 
 def test_skill_tiene_frontmatter_y_permisos():

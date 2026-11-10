@@ -25,12 +25,12 @@ def _falla(motivo: str, arreglo: str, evidencia: list[str] | None = None) -> Res
 def verificar_cerebro(vault: Path | None = None) -> ResultadoVerificacion:
     vault = vault_root() if vault is None else Path(vault)
     if not vault.is_dir():
-        return _falla(f"no existe el vault en {vault}", "crea el vault con `trovify vault init` y vuelve a verificar")
+        return _falla(f"no existe el vault en {vault}", "crea el vault con `trovify cerebro init` y vuelve a verificar")
     problemas = lint(vault)
     if problemas:
         return _falla(
             f"el vault tiene {len(problemas)} problemas de lint (p. ej. {problemas[0].ruta}: {problemas[0].detalle})",
-            "corre `trovify vault lint` y corrige lo que señala",
+            "corre `trovify cerebro lint` y corrige lo que señala",
         )
     ultimo = vault / "data" / "canarios" / "ultimo.json"
     if not ultimo.is_file():

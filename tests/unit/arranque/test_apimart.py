@@ -10,7 +10,7 @@ from trovify.arranque.verificadores.apimart import consultar_saldo, verificar_ap
 from trovify.secretos import PermisosInseguros, leer_env
 
 CLAVE = "sk-" + "x" * 30
-EXACTO = "crea el archivo vacío: `! mkdir -p ~/.config/trovify && touch ~/.config/trovify/claude.env && chmod 600 ~/.config/trovify/claude.env`"
+EXACTO = "en una terminal de Ubuntu (WSL) aparte: `mkdir -p ~/.config/trovify` y luego `install -m 600 /dev/null ~/.config/trovify/claude.env`"
 
 
 def env(tmp_path, modo=0o600, extra=""):

@@ -30,7 +30,7 @@ def test_todo_bien(tmp_path):
     elementos = comprobar_entorno(falso(BIEN), home=tmp_path, obsidian=[obs])
     assert all(e.ok for e in elementos), [e for e in elementos if not e.ok]
     assert [e.nombre for e in elementos] == [
-        "python", "uv", "node", "git", "ffmpeg", "poppler", "weasyprint", "playwright", "systemd", "obsidian",
+        "uv", "python", "node", "git", "ffmpeg", "poppler", "weasyprint", "playwright", "systemd", "obsidian",
     ]
 
 
@@ -99,12 +99,12 @@ def test_cli_verificar(tmp_path, capsys, monkeypatch):
     assert "no tiene verificador" in capsys.readouterr().err
 
     def fallo(vault):
-        return ResultadoVerificacion(False, [], "falta ffmpeg", ["! sudo apt install -y ffmpeg"], {}, ["✗ ffmpeg — tiempo agotado"])
+        return ResultadoVerificacion(False, [], "falta ffmpeg", ["sudo apt install -y ffmpeg"], {}, ["✗ ffmpeg — tiempo agotado"])
 
     monkeypatch.setitem(REGISTRO, "00", fallo)
     assert main(["arranque", "verificar", "00", "--vault", v]) == 1
     out = capsys.readouterr().out
-    assert "✗ ffmpeg — tiempo agotado" in out and "! sudo apt install -y ffmpeg" in out
+    assert "✗ ffmpeg — tiempo agotado" in out and "sudo apt install -y ffmpeg" in out
     assert "falló" in (tmp_path / "log.md").read_text(encoding="utf-8")
 
     monkeypatch.setitem(REGISTRO, "00", lambda vault: ResultadoVerificacion(None, [], "no medido: sin red", []))
@@ -124,6 +124,6 @@ def test_verificador_00_guarda_evidencia(tmp_path, monkeypatch):
     r = REGISTRO["00"](tmp_path)
     assert r.ok is True and r.evidencia and (tmp_path / r.evidencia[0]).exists()
     assert r.lineas == ["✓ git — git 2"]
-    monkeypatch.setattr(entorno, "comprobar_entorno", lambda *a, **k: [entorno.Elemento("git", False, "no instalado", "! sudo apt install -y git")])
+    monkeypatch.setattr(entorno, "comprobar_entorno", lambda *a, **k: [entorno.Elemento("git", False, "no instalado", "sudo apt install -y git")])
     r = REGISTRO["00"](tmp_path)
-    assert r.ok is False and r.arreglos == ["git: ! sudo apt install -y git"]
+    assert r.ok is False and r.arreglos == ["git: sudo apt install -y git"]

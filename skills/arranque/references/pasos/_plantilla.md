@@ -8,8 +8,8 @@ Qué necesitas tener a mano (cuentas, documentos, tiempo, pasos anteriores verif
 
 **Pasos**
 1. Lo que hace el usuario, en una acción por número.
-2. Los comandos con `sudo` se escriben con un solo `!` al inicio de la línea, para que los ejecute el usuario:
-   `! sudo apt install -y <paquete>`
+2. Los comandos de sistema o interactivos (`sudo`, `apt`, `nano`, editar archivos de sistema) los escribe el usuario en una terminal de Ubuntu (WSL) **aparte**, sin `!` (dentro de Claude Code el `!` no tiene terminal y no funcionan ni la contraseña de sudo ni nano):
+   `sudo apt install -y <paquete>`
 3. Contraseñas, KYC y 2FA los hace el usuario; Claude no los escribe ni los lee.
 
 **Errores típicos**

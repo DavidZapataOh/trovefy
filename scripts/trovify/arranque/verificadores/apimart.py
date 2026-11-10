@@ -106,18 +106,18 @@ def verificar_apimart(vault: Path, ruta_env: Path = RUTA_CLAUDE_ENV, abrir=None)
         env = leer_env(ruta_env)
     except FileNotFoundError:
         return _no(f"no existe {ruta_env}", [
-            "crea el archivo vacío: `! mkdir -p ~/.config/trovify && touch ~/.config/trovify/claude.env && chmod 600 ~/.config/trovify/claude.env`",
-            "abre ~/.config/trovify/claude.env con tu editor y pega tu clave como APIMART_API_KEY=... (Claude no la ve)",
+            "en una terminal de Ubuntu (WSL) aparte: `mkdir -p ~/.config/trovify` y luego `install -m 600 /dev/null ~/.config/trovify/claude.env`",
+            "en esa terminal, abre ~/.config/trovify/claude.env con un editor (por ejemplo `nano ~/.config/trovify/claude.env`) y pega tu clave como APIMART_API_KEY=... (Claude no la ve)",
         ])
     except EnvNoSeguro as exc:
         return _no(f"{ruta_env} no es seguro: {exc}", ["usa un archivo regular tuyo, sin enlaces simbólicos, con permisos 600"])
     except (OSError, UnicodeDecodeError):  # PermissionError, IsADirectoryError, etc.; sin contenido ni clave
         return _no(f"no se pudo leer {ruta_env}", ["comprueba que es un archivo de texto UTF-8 legible por ti"])
     except PermisosInseguros as exc:
-        return _no(f"{ruta_env} tiene permisos {exc.modo:o}; deben ser 600", [f"`! chmod 600 {ruta_env}`"])
+        return _no(f"{ruta_env} tiene permisos {exc.modo:o}; deben ser 600", [f"en una terminal de Ubuntu (WSL) aparte: `chmod 600 {ruta_env}`"])
     clave = env.get("APIMART_API_KEY", "")
     if not clave:
-        return _no("falta APIMART_API_KEY en claude.env", ["abre ~/.config/trovify/claude.env con tu editor y añade APIMART_API_KEY=... (Claude no la ve)"])
+        return _no("falta APIMART_API_KEY en claude.env", ["en una terminal de Ubuntu (WSL) aparte, abre ~/.config/trovify/claude.env con tu editor y añade APIMART_API_KEY=... (Claude no la ve)"])
     base = env.get("APIMART_BASE_URL") or BASE_POR_DEFECTO
     try:
         saldo = consultar_saldo(base, clave, abrir)
