@@ -143,3 +143,32 @@ def test_nombres_largos_no_tapan_ultimas_secciones(tmp_path):
 def test_timeout_en_hooks_json():
     reg = json.loads((HOOK.parents[1] / "hooks/hooks.json").read_text())
     assert reg["hooks"]["SessionStart"][0]["hooks"][0]["timeout"] == 5
+
+
+def test_peor_caso_conserva_todas_las_secciones(tmp_path):
+    (tmp_path / ".trovify").mkdir()
+    (tmp_path / ".trovify/STOP").write_text("")
+    (tmp_path / "index.md").write_text("\n".join("i" * 200 for _ in range(40)))
+    (tmp_path / "propuestas").mkdir()
+    (tmp_path / "productos").mkdir()
+    for i in range(15):
+        n = f"{i:02d}-" + "z" * 249 + ".md"
+        (tmp_path / "propuestas" / n).write_text("---\nestado: pendiente\n---\n")
+        d = tmp_path / "productos" / (f"{i:02d}-" + "q" * 252)
+        d.mkdir()
+        (d / "PRODUCTO.md").write_text("---\nestado: ESCALA\n---\n")
+    (tmp_path / "sesiones").mkdir()
+    (tmp_path / "sesiones" / ("2026-09-09-" + "t" * 200 + ".md")).write_text("x")
+    ctx = ctx_de(correr(tmp_path))
+    assert len(ctx) <= 4000
+    for cab in ("Índice (cabecera)", "STOP activo", "Propuestas pendientes",
+                "Productos en marcha", "Último traspaso"):
+        assert cab in ctx
+    assert "2026-09-09" in ctx
+
+
+def test_frontmatter_linea_gigante_acotada(tmp_path):
+    d = tmp_path / "productos/p-1-x"
+    d.mkdir(parents=True)
+    (d / "PRODUCTO.md").write_text("---\nestado: TEST\n" + "a" * 5_000_000)
+    assert "p-1-x" in ctx_de(correr(tmp_path))

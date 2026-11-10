@@ -24,6 +24,10 @@ MAX_ITEM_CHARS = 120
 MAX_LINEAS_FM = 200
 MAX_ARCHIVOS = 200
 MAX_BYTES_INDICE = 8192
+MAX_ENTRADAS_SESIONES = 1000
+PRESUPUESTO_PRODUCTOS = 1300
+PRESUPUESTO_TRASPASO = 200
+PRESUPUESTO_PROPUESTAS = 800
 ESTADOS_VIVOS = {"TEST", "CANDIDATO", "PRE_ESCALA", "ESCALA"}
 
 
@@ -38,10 +42,11 @@ def _estados(ruta: pathlib.Path) -> list[str]:
         primera = f.readline(1024)
         if primera.strip() != "---":
             return []
-        for linea in itertools.islice(f, MAX_LINEAS_FM):
-            if linea.strip() == "---":
+        for _ in range(MAX_LINEAS_FM):
+            linea = f.readline(4096)
+            if not linea or linea.strip() == "---":
                 break
-            clave, sep, valor = linea[:1024].strip().partition(":")
+            clave, sep, valor = linea.strip().partition(":")
             if sep and clave == "estado":
                 valores.append(valor.strip().strip("\"'"))
     return valores
@@ -101,20 +106,42 @@ def _productos(vault: pathlib.Path) -> str | None:
 
 
 def _traspaso(vault: pathlib.Path) -> str | None:
-    archivos = sorted(p.name for p in (vault / "sesiones").glob("*.md"))
-    return f"## Último traspaso\nsesiones/{archivos[-1]}" if archivos else None
+    entradas = itertools.islice((vault / "sesiones").iterdir(), MAX_ENTRADAS_SESIONES)
+    archivos = sorted(p.name for p in entradas if p.name.endswith(".md"))
+    return f"## Último traspaso\nsesiones/{archivos[-1][:MAX_ITEM_CHARS]}" if archivos else None
+
+
+def _recortar(seccion: str | None, limite: int) -> str | None:
+    """Corta la sección en un salto de línea para que no pase de ``limite``."""
+    if not seccion or limite <= 0:
+        return None
+    if len(seccion) <= limite:
+        return seccion
+    corte = seccion[: limite - 1]
+    if "\n" in corte:
+        corte = corte[: corte.rindex("\n")]
+    return corte + "…"
 
 
 def armar_contexto(vault: pathlib.Path) -> str | None:
+    """Orden de salida: índice, STOP, propuestas, productos, traspaso.
+
+    STOP, productos y traspaso se construyen primero y reservan su espacio;
+    propuestas e índice se reparten lo que queda, así el total es <= MAX_TOTAL.
+    """
     if not vault.is_dir():
         return None
-    secciones = [
-        _seguro(f, vault) for f in (_indice, _stop, _propuestas, _productos, _traspaso)
-    ]
-    texto = "\n\n".join(s for s in secciones if s)
-    if len(texto) > MAX_TOTAL:
-        texto = texto[: MAX_TOTAL - 1] + "…"
-    return texto or None
+    stop = _recortar(_seguro(_stop, vault), 200)
+    prod = _recortar(_seguro(_productos, vault), PRESUPUESTO_PRODUCTOS)
+    tras = _recortar(_seguro(_traspaso, vault), PRESUPUESTO_TRASPASO)
+    reservado = [x for x in (stop, prod, tras) if x]
+    libre = MAX_TOTAL - sum(len(x) for x in reservado) - 2 * (len(reservado) + 2)
+    prop = _recortar(_seguro(_propuestas, vault), min(PRESUPUESTO_PROPUESTAS, libre // 3))
+    libre -= len(prop) if prop else 0
+    ind = _recortar(_seguro(_indice, vault), min(MAX_INDICE, libre))
+    partes = [ind, stop, prop, prod, tras]
+    texto = "\n\n".join(x for x in partes if x)
+    return texto[:MAX_TOTAL] or None
 
 
 def main() -> None:
