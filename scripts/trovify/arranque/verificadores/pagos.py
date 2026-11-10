@@ -13,9 +13,10 @@ import html
 import re
 import urllib.request
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 
-from trovify.arranque.estado import ResultadoVerificacion, marcar_bloqueado
+from trovify.arranque.estado import ResultadoVerificacion
 from trovify.arranque.verificadores import verificador
 from trovify.arranque.verificadores.base import guardar_evidencia, resultado_provisional
 from trovify.arranque.verificadores.impultienda import normalizar_pasarelas
@@ -26,9 +27,11 @@ from trovify.arranque.verificadores.pantallas import (
     desactualizado,
 )
 from trovify.mapa import FirmaAusente, MapaInvalido, cargar
+from trovify.vault.escritura import ZONA_NEGOCIO
 from trovify.vault.rutas import vault_root
 
 RAIZ = Path(__file__).resolve().parents[4]
+URL_HOTMART_BANCO = "https://help.hotmart.com/es/article/23867226765709/"
 URL_DOCS_WHOP = "https://docs.whop.com/manage-your-business/manage-payouts/set-up-payouts"
 # Países que la lista real incluye: si no están, la página cambió y no se concluye nada de ella.
 _CONTROL = {"Argentina", "Brazil", "Chile", "Mexico", "Peru", "Spain", "Germany", "Canada", "Australia", "France"}
@@ -40,11 +43,25 @@ def _bajar(url: str) -> str:
         return r.read(5_000_000).decode("utf-8", errors="replace")
 
 
+def _paises(bloque: str) -> set[str]:
+    """Elementos de un bloque de texto: una línea o un elemento separado por coma; sin paréntesis, en minúsculas."""
+    salida = set()
+    for ln in re.split(r"[\n,;]", bloque):
+        ln = re.sub(r"\(.*?\)", "", ln).strip().casefold()
+        if ln:
+            salida.add(ln)
+    return salida
+
+
+_CONTROL_MIN = {c.casefold() for c in _CONTROL}
+
+
 def medir_pago_a_co(fetch: Callable[[str], str] | None = None) -> bool | None:
     """¿Lista la documentación pública de Whop a Colombia entre los países de pago?
 
-    True si aparece; False solo si la lista se reconoce (varios países de control) y Colombia no está;
-    None si la página no se pudo leer o cambió.
+    True solo si hay un bloque «Supported countries» reconocido (>= 4 países de control) que incluye a
+    Colombia y Colombia no aparece en ningún bloque de excluidos/restringidos; False solo si ese bloque
+    se reconoce y Colombia no está; None en cualquier otro caso (página ilegible, cambiada o ambigua).
     """
     try:
         pagina = (fetch or _bajar)(URL_DOCS_WHOP)
@@ -52,15 +69,19 @@ def medir_pago_a_co(fetch: Callable[[str], str] | None = None) -> bool | None:
         return None
     texto = html.unescape(re.sub(r"<[^>]+>", "\n", pagina))
     mejor: set[str] = set()
-    for m in re.finditer("Supported countries", texto):
-        resto = texto[m.end() : m.end() + 20000]
-        resto = resto.split("Note that", 1)[0]
-        paises = {ln.strip() for ln in resto.splitlines() if ln.strip()}
-        if len(paises & _CONTROL) > len(mejor & _CONTROL) or (not mejor and paises):
+    for m in re.finditer(r"(?i)(?<![a-z])supported countries", texto):
+        previo = texto[max(0, m.start() - 12) : m.start()].casefold()
+        if re.search(r"(un|not\s+)$", previo):
+            continue
+        paises = _paises(texto[m.end() : m.end() + 20000].split("Note that", 1)[0])
+        if len(paises & _CONTROL_MIN) > len(mejor & _CONTROL_MIN):
             mejor = paises
-    if "Colombia" in mejor:
-        return True
-    return False if len(mejor & _CONTROL) >= 4 else None
+    if len(mejor & _CONTROL_MIN) < 4:
+        return None
+    for m in re.finditer(r"(?i)(unsupported|not supported|restricted|sanctioned|excluded) countries", texto):
+        if "colombia" in _paises(texto[m.end() : m.end() + 3000]):
+            return None
+    return "colombia" in mejor
 
 
 def evaluar_whop(pago_a_co: bool | None, kyc: str | None, conectado_en_impultienda: bool | None) -> ResultadoVerificacion:
@@ -126,10 +147,15 @@ def verificar_whop(
 ) -> ResultadoVerificacion:
     vault = vault_root() if vault is None else Path(vault)
     pago = medir_pago_a_co(fetch)
+    nota_pago = guardar_evidencia(
+        vault, "10", "pago-a-co",
+        {"pago_a_co": {True: "si", False: "no", None: "no medido"}[pago], "fuente": URL_DOCS_WHOP, "fecha": f"{datetime.now(ZONA_NEGOCIO):%Y-%m-%d}"},
+    )
     if pago is False:
+        # Solo documentación: no se bloquea el paso; lo marca el usuario (o la skill tras confirmarlo con él).
         r = evaluar_whop(False, None, None)
-        r.lineas.append(f"  fuente: {URL_DOCS_WHOP}")
-        marcar_bloqueado(vault, "10", "Whop no paga a Colombia: sigue con el paso 10b (Hotmart)")
+        r.arreglos.append('tras confirmarlo contigo: `trovify arranque bloqueado 10 --motivo "Whop no paga a Colombia"`')
+        r.lineas += [f"  fuente: {URL_DOCS_WHOP}", f"  medida guardada: {nota_pago}"]
         return r
     if pago is None:
         m = f"no medido: no se pudo leer la lista pública de países de pago de Whop ({URL_DOCS_WHOP})"
@@ -147,6 +173,7 @@ def verificar_whop(
     if mapa["capturado"] is None:
         prov = resultado_provisional(vault, "10", *whop["balances"])
         prov.lineas.insert(0, linea_co)
+        prov.lineas.append(f"  medida guardada: {nota_pago}")
         return prov
     imp, motivo = capturar_pantallas("impultienda", mapa_imp, ["pasarelas"], cap_fn)
     if motivo:
@@ -166,7 +193,9 @@ def verificar_whop(
         r.lineas.insert(0, linea_co)
         return r
     datos = {"pago_a_co": "si", "kyc": "aprobado", "conectado_en_impultienda": "si"}
-    evidencia = [guardar_evidencia(vault, "10", "captura-whop", whop["balances"][1])] if whop["balances"][1] else []
+    evidencia = [nota_pago]
+    if whop["balances"][1]:
+        evidencia.append(guardar_evidencia(vault, "10", "captura-whop", whop["balances"][1]))
     evidencia.append(guardar_evidencia(vault, "10", "datos", {"fuente_pago_a_co": URL_DOCS_WHOP, "mapa_capturado": mapa["capturado"], **datos}))
     return ResultadoVerificacion(True, evidencia, r.motivo, [], datos, [linea_co, *r.lineas])
 
@@ -205,6 +234,9 @@ def verificar_hotmart(
     except FirmaAusente as exc:
         return desactualizado(exc.pantalla)
     n = _entero(campos["productos"].get("productos"))
+    if n is not None and n >= 1 and _entero(campos["datos_financieros"].get("cuentas")) == 0:
+        m = f"pendiente de primera venta: Hotmart solo muestra el formulario bancario tras la primera venta ({URL_HOTMART_BANCO})"
+        return ResultadoVerificacion(None, [], m, ["haz tu primera venta y registra entonces tu cuenta bancaria colombiana"], {}, [f"? {m}"])
     r = evaluar_hotmart(None if n is None else n >= 1, _retiro(campos["datos_financieros"]))
     if r.ok is not True:
         return r

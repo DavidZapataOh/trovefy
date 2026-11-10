@@ -20,12 +20,12 @@ Cobrar con Hotmart y retirar a tu banco colombiano con HotPay Internacional, si 
    `trovify arranque hecho 10b`
 
 **Errores típicos**
-- Síntoma: «falta en Hotmart: cuenta de retiro». Arreglo: el formulario del banco aparece tras la primera venta; hazla (o espera) y vuelve a verificar.
+- Síntoma: «pendiente de primera venta». Arreglo: no es un fallo; el formulario del banco aparece tras la primera venta. Hazla (o espera) y vuelve a verificar.
 - Síntoma: la cuenta se devuelve («Devuelto»). Arreglo: corrige los datos bancarios; el nombre y el tipo de cuenta deben coincidir con los de Hotmart.
 - Síntoma: «no medido: patrón sin confirmar con tu pantalla real». Arreglo: es lo esperado hasta que se capture tu cuenta real por primera vez.
 - Síntoma: «no medido: mapa desactualizado (…)». Arreglo: Hotmart cambió esa pantalla; avisa para actualizar el mapa.
 
 **Cómo se verifica**
 Al verificar se abre una ventana del navegador de Trovify unos segundos; no la toques.
-`trovify arranque verificar 10b` lee solo (sin clics) tus productos y tus datos financieros con el perfil de Hotmart, según `templates/hotmart/mapa.yaml`. Es ✓ si hay al menos un producto y una cuenta bancaria colombiana aprobada para el retiro de HotPay Internacional.
+`trovify arranque verificar 10b` lee solo (sin clics) tus productos y tus datos financieros con el perfil de Hotmart, según `templates/hotmart/mapa.yaml`. Sin cuenta bancaria todavía el resultado es «pendiente de primera venta» (no medido, no fallo). Es ✓ si hay al menos un producto y una cuenta bancaria colombiana aprobada para el retiro de HotPay Internacional.
 Mientras el mapa no esté confirmado con tu pantalla real, el resultado es «no medido» y la captura queda en `config/evidencia/provisional/`.
