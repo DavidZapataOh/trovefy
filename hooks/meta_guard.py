@@ -6,7 +6,8 @@ vía «allow con ticket». Solo biblioteca estándar; falla cerrado.
 """
 from __future__ import annotations
 
-from urllib.parse import urlsplit
+import json
+from urllib.parse import unquote, urlsplit
 
 from _comun import ejecutar_guardia, herramienta
 
@@ -22,9 +23,19 @@ def _es_meta_mcp(nombre: str) -> tuple[bool, str]:
         return False, ""
     partes = nombre.split("__")
     corto = partes[-1]
-    servidor = "__".join(partes[1:-1]).lower()
-    meta = any(s in servidor for s in _SERVIDORES) or corto.lower().startswith("ads_")
-    return meta, corto.lower()
+    if len(partes) == 2:  # mcp__<servidor> sin herramienta: el servidor es el nombre
+        servidor = partes[1]
+    else:
+        servidor = "__".join(partes[1:-1])
+    meta = (
+        any(s in servidor for s in _SERVIDORES)
+        or any(p.startswith("ads_") for p in partes[1:])
+    )
+    return meta, corto
+
+
+def _menciona_graph(texto: str) -> bool:
+    return any(h in texto for h in _HOSTS_GRAPH)
 
 
 def _host(url: str) -> str:
@@ -35,20 +46,28 @@ def _host(url: str) -> str:
 
 
 def clasificar(tool_name: str, tool_input: dict) -> tuple[str, str]:
+    tool_name = tool_name.lower()
     meta, corto = _es_meta_mcp(tool_name)
     if meta:
         if corto.startswith(_PREFIJOS_LECTURA) or corto in _LECTURA_EXACTA:
             return "allow", ""
         return "deny", MOTIVO
-    if tool_name == "Bash":
-        cmd = str(tool_input.get("command", "")).lower()
-        if any(h in cmd for h in _HOSTS_GRAPH):
+    if tool_name.startswith("mcp__"):
+        # Navegador/scrape por MCP hacia Graph: Claude lee Meta solo por el MCP oficial.
+        try:
+            volcado = json.dumps(tool_input).lower()
+        except (TypeError, ValueError):
             return "deny", MOTIVO
-    elif tool_name == "WebFetch":
+        if _menciona_graph(volcado) or _menciona_graph(unquote(volcado)):
+            return "deny", MOTIVO
+    elif tool_name == "bash":
+        if _menciona_graph(str(tool_input.get("command", "")).lower()):
+            return "deny", MOTIVO
+    elif tool_name == "webfetch":
+        # Siempre deny hacia Graph, con o sin token: Graph acepta method=post en GET
+        # y el token puede ir codificado en porcentaje.
         url = str(tool_input.get("url", ""))
-        bajo = url.lower()
-        apunta = _host(url) in _HOSTS_GRAPH or any(h in bajo for h in _HOSTS_GRAPH)
-        if apunta and "access_token" in bajo:
+        if _host(url) in _HOSTS_GRAPH or _menciona_graph(unquote(url).lower()):
             return "deny", MOTIVO
     return "allow", ""
 
