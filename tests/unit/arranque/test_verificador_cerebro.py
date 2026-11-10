@@ -94,7 +94,7 @@ def test_cero_paginas_de_metodo(tmp_path):
 def test_pagina_invalida(tmp_path):
     crear_vault(tmp_path)
     _pagina_metodo(tmp_path)
-    escribir(tmp_path / "wiki/metodo/mala.md", {"tipo": "metodo"}, "## Sin cita\ntexto\n")
+    escribir(tmp_path / "wiki/metodo/mala.md", {"tipo": "metodo", "fecha": "2026-01-01", "fuentes": ["raw/fuente1.md"]}, "## Sin cita\ntexto\n")
     (tmp_path / "index.md").write_text((tmp_path / "index.md").read_text() + "\n[[mala]]\n")
     _ultimo(tmp_path)
     r = REGISTRO["01"](tmp_path)
