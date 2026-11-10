@@ -91,3 +91,37 @@ def test_cli_destilar(tmp_path, capsys):
     _pagina(v, "a/b.md", "## A\nsin cita\n")
     assert main(["cerebro", "destilar", "--validar", "--vault", str(v)]) == 1
     assert "a/b.md" in capsys.readouterr().out
+
+
+def test_cita_raw_anclada():
+    assert not CITA.search("https://x/raw/foo.md")
+    assert not CITA.search("myraw/a.md")
+    assert CITA.search("(raw/2026/a.md)") and CITA.search("`raw/a.md`") and CITA.search("ver raw/a.md.")
+
+
+def test_cita_raw_inexistente_se_reporta(tmp_path):
+    v, _ = _vault(tmp_path)
+    p = _pagina(v, "z.md", "## A\ndato (raw/2026-11-10/nada.md)\n")
+    assert any("nada.md" in x for x in validar_pagina(v, p))
+    ok = _pagina(v, "w.md", f"## A\ndato ({RAW})\n")
+    assert validar_pagina(v, ok) == []
+
+
+def test_validar_sin_metodo(tmp_path, capsys):
+    from trovify.cli import main
+    v, _ = _vault(tmp_path)
+    assert main(["cerebro", "destilar", "--validar", "--vault", str(v)]) == 0
+    assert "No hay páginas del método" in capsys.readouterr().out
+
+
+def test_cli_log(tmp_path, capsys):
+    from trovify.cli import main
+    v, _ = _vault(tmp_path)
+    assert main(["cerebro", "log", "--skill", "destilar", "--que", "a\nb", "--archivo", "x.md",
+                 "--archivo", "y.md", "--tokens", "1200", "--vault", str(v)]) == 0
+    linea = (v / "log.md").read_text().splitlines()[-1]
+    assert "destilar · a b · x.md, y.md · ~1200 tokens" in linea
+    assert main(["cerebro", "log", "--skill", "s", "--que", "q", "--vault", str(v)]) == 0
+    assert (v / "log.md").read_text().splitlines()[-1].endswith("· — · — tokens")
+    assert main(["cerebro", "log", "--skill", " ", "--que", "q", "--vault", str(v)]) == 2
+    assert main(["cerebro", "log", "--skill", "s", "--que", "q", "--tokens", "-1", "--vault", str(v)]) == 2

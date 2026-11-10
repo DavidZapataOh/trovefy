@@ -47,6 +47,12 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     grupo.add_argument("--pendientes", action="store_true", help="lista las fuentes de raw/ sin destilar")
     grupo.add_argument("--validar", action="store_true", help="valida las citas de todo wiki/metodo/")
     des.add_argument("--vault", help="ruta del vault (por defecto, TROVIFY_VAULT o ~/trovify-cerebro)")
+    lg = sub.add_parser("log", help="añade una línea a log.md")
+    lg.add_argument("--skill", required=True, help="nombre de la skill (p. ej. destilar)")
+    lg.add_argument("--que", required=True, help="qué se hizo, en una frase")
+    lg.add_argument("--archivo", action="append", default=[], help="archivo tocado (repetible)")
+    lg.add_argument("--tokens", type=int, help="tokens aproximados")
+    lg.add_argument("--vault", help="ruta del vault (por defecto, TROVIFY_VAULT o ~/trovify-cerebro)")
 
 
 def _error(msg: str) -> int:
@@ -185,12 +191,30 @@ def _destilar(args: argparse.Namespace, destino: Path) -> int:
         if not lista:
             print("No hay fuentes pendientes.")
         return 0
+    if not (destino / "wiki" / "metodo").is_dir() or not list((destino / "wiki" / "metodo").rglob("*.md")):
+        print("No hay páginas del método que validar.")
+        return 0
     problemas = validar_todo(destino)
     for p in problemas:
         print(p)
     if problemas:
         return 1
     print("Método sin problemas de citas.")
+    return 0
+
+
+def _log(args: argparse.Namespace, destino: Path) -> int:
+    if not destino.is_dir():
+        return _error(f"no existe el vault {destino}")
+    if not args.skill.strip() or not args.que.strip():
+        return _error("--skill y --que no pueden estar vacíos")
+    if args.tokens is not None and args.tokens < 0:
+        return _error("--tokens debe ser un entero no negativo")
+    try:
+        linea = anadir_log(destino, args.skill.strip(), args.que.strip(), args.archivo or ["—"], args.tokens)
+    except OSError as exc:
+        return _error(f"no se pudo escribir en log.md: {exc.strerror or exc}")
+    print(linea)
     return 0
 
 
@@ -206,6 +230,8 @@ def _ejecutar(args: argparse.Namespace) -> int:
         return _lint(destino)
     if args.accion == "ingerir":
         return _ingerir(args, destino)
+    if args.accion == "log":
+        return _log(args, destino)
     if args.accion == "destilar":
         return _destilar(args, destino)
     if args.accion == "permisos":

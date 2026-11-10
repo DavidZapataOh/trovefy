@@ -29,4 +29,4 @@ Pasos:
 3. **Añade las páginas a `index.md`** bajo una sección `## Método`, una línea por página: `- [[wiki/metodo/caza]] — descripción corta`. Usa Edit sobre `index.md`; no toques el resto del índice.
 4. **Valida hasta que pase.** Ejecuta `trovify cerebro destilar --validar` y `trovify cerebro lint`. Corrige lo que señalen (citas que faltan, fuentes inexistentes, enlaces rotos, páginas huérfanas) y repite hasta que ambos terminen con código 0.
 5. **Propón reglas, no las crees.** Si de las fuentes sale una regla nueva o un cambio de umbral, descríbela al usuario y propón pasarla por `/recordar`. No la escribas tú.
-6. **Deja constancia.** Añade una línea a `log.md` con la fecha, «destilar», las páginas tocadas y los tokens aproximados consumidos (una estimación, marcada como tal).
+6. **Deja constancia.** Registra una línea en `log.md` con `trovify cerebro log --skill destilar --que "<qué se destiló>" --archivo wiki/metodo/<página>.md --tokens <N>` (repite `--archivo` por página tocada; `<N>` es una estimación de los tokens consumidos).

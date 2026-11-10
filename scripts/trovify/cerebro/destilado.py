@@ -11,7 +11,7 @@ from trovify.vault.frontmatter import leer
 CITA = re.compile(
     r"(?<![A-Za-z0-9])(?:T[1-3]|[SCLV][1-2])\s\d{1,2}:\d{2}(?::\d{2})?(?!\d)"
     r"|§\d+(?:\.\d+)*"
-    r"|raw/\S+\.md"
+    r"|(?<![^\s(\[`])raw/\S+?\.md"
 )
 _SECCION = re.compile(r"^## (.*?)\s*$", re.MULTILINE)
 
@@ -78,6 +78,12 @@ def validar_pagina(vault: Path, ruta: Path) -> list[str]:
         destino = (raiz / f).resolve()
         if f.startswith("/") or not destino.is_relative_to(raiz) or not destino.is_file():
             problemas.append(f"{nombre}: la fuente «{f}» no existe en el vault")
+    for m in CITA.finditer(cuerpo):
+        c = m.group(0)
+        if c.startswith("raw/") and not (raiz / c).resolve().is_relative_to(raiz) or (
+            c.startswith("raw/") and not (raiz / c).is_file()
+        ):
+            problemas.append(f"{nombre}: la cita «{c}» no existe en el vault")
     marcas = list(_SECCION.finditer(cuerpo))
     for i, m in enumerate(marcas):
         fin = marcas[i + 1].start() if i + 1 < len(marcas) else len(cuerpo)
