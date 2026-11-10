@@ -1,5 +1,6 @@
 """Canarios del cerebro: preguntas con respuesta conocida que se hacen a `/consultar`."""
 
+import hashlib
 import json
 import re
 import subprocess
@@ -102,6 +103,8 @@ def correr(
     vault: Path,
     canarios: list[Canario],
     preguntar: Callable[[Path, str], str] = preguntar_a_claude,
+    actualizar_ultimo: bool = True,
+    canarios_sha256: str | None = None,
 ) -> list[Resultado]:
     vault = Path(vault)
     resultados = []
@@ -115,13 +118,32 @@ def correr(
     ahora = datetime.now(ZONA_NEGOCIO)
     todos_ok = bool(resultados) and all(r.estado == "ok" for r in resultados)
     cuerpo = json.dumps(
-        {"fecha": f"{ahora:%Y-%m-%d}", "todos_ok": todos_ok, "resultados": [asdict(r) for r in resultados]},
+        {"fecha": f"{ahora:%Y-%m-%d}", "todos_ok": todos_ok, "ids": [c.id for c in canarios],
+         "canarios_sha256": canarios_sha256 or _sha_por_defecto(),
+         "resultados": [asdict(r) for r in resultados]},
         ensure_ascii=False, indent=2,
     ) + "\n"
     carpeta = vault / "data" / "canarios"
-    escribir_atomico(carpeta / f"{ahora:%Y-%m-%d}.json", cuerpo)
-    escribir_atomico(carpeta / "ultimo.json", cuerpo)
+    base = f"{ahora:%Y-%m-%d-%H%M}"
+    nombre, n = f"{base}.json", 1
+    while (carpeta / nombre).exists():
+        n += 1
+        nombre = f"{base}-{n}.json"
+    escribir_atomico(carpeta / nombre, cuerpo)
+    escribir_atomico(carpeta / ("ultimo.json" if actualizar_ultimo else "parcial.json"), cuerpo)
     ok = sum(r.estado == "ok" for r in resultados)
     anadir_log(vault, "canarios", f"{ok}/{len(resultados)} canarios ok",
-               [f"data/canarios/{ahora:%Y-%m-%d}.json"])
+               [f"data/canarios/{nombre}"])
     return resultados
+
+
+def sha256_de(ruta: Path | None = None) -> str:
+    ruta = Path(ruta) if ruta else ruta_por_defecto()
+    return hashlib.sha256(ruta.read_bytes()).hexdigest()
+
+
+def _sha_por_defecto() -> str:
+    try:
+        return sha256_de()
+    except OSError:
+        return "—"

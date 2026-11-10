@@ -42,4 +42,9 @@
   pregunta: "¿Cuál fue el ROAS de nuestra campaña de ayer en Rumanía?"
   debe_contener:
     - ["no esta en el cerebro"]
-  no_debe_contener: []
+  no_debe_contener: ["el roas fue", "roas de ayer fue", "roas fue de", "roas de ayer es", "probablemente", "aproximadamente", "estimado", "seguramente"]
+- id: h2
+  pregunta: "¿Qué dice el método sobre Google Ads?"
+  debe_contener:
+    - ["no esta en el cerebro"]
+  no_debe_contener: ["google ads funciona", "en google ads se", "probablemente", "aproximadamente"]

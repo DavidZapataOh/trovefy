@@ -2,8 +2,10 @@
 
 import fcntl
 import hashlib
+import importlib.util
 import os
 import re
+import sys
 import tempfile
 import unicodedata
 from datetime import date, datetime
@@ -198,6 +200,24 @@ def _crear_exclusivo(carpeta: Path, base: str, contenido: str) -> Path:
             os.unlink(tmp)
 
 
+def _buscar_secreto(texto: str) -> str | None:
+    """Usa los patrones de hooks/secretos.py (una sola fuente), sin la mención `access_token=`."""
+    for padre in Path(__file__).resolve().parents:
+        hooks = padre / "hooks"
+        if (hooks / "secretos.py").is_file() and (hooks / "_comun.py").is_file():
+            break
+    else:
+        raise FileNotFoundError("No encuentro hooks/secretos.py; no se puede revisar si hay secretos.")
+    sys.path.insert(0, str(hooks))
+    try:
+        spec = importlib.util.spec_from_file_location("_trovify_hook_secretos", hooks / "secretos.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.remove(str(hooks))
+    return mod.buscar_secreto(texto, mod.PATRONES[:3])
+
+
 def ingerir(vault: Path, origen: Path, fecha: date | None = None) -> tuple[Path, bool]:
     """Copia `origen` a raw/AAAA-MM-DD/<slug>.md. Devuelve (ruta, creado); nunca sobrescribe."""
     vault = Path(vault)
@@ -208,6 +228,9 @@ def ingerir(vault: Path, origen: Path, fecha: date | None = None) -> tuple[Path,
     texto = datos.decode("utf-8", errors="replace")
     if origen.suffix.lower() in (".html", ".htm"):
         texto = html_a_texto(texto)
+    patron = _buscar_secreto(texto)
+    if patron:
+        raise ValueError(f"contiene un posible {patron}; no se ingiere")
     meta = {"tipo": "fuente", "origen": str(origen), "sha256": sha,
             "fecha_ingesta": fecha.isoformat()}
     raw = vault / "raw"

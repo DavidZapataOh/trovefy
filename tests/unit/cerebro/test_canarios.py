@@ -1,5 +1,6 @@
 import json
 import pathlib
+import re
 import subprocess
 
 import pytest
@@ -9,8 +10,8 @@ from trovify.cerebro.canarios import Canario, cargar, correr, evaluar, normaliza
 CANARIOS = pathlib.Path(__file__).resolve().parents[2] / "canarios.yaml"
 
 
-def test_hay_cinco_canarios_y_uno_de_honestidad():
-    assert [c.id for c in cargar(CANARIOS)] == ["c1", "c2", "c3", "c4", "c5", "h1"]
+def test_hay_cinco_canarios_y_dos_de_honestidad():
+    assert [c.id for c in cargar(CANARIOS)] == ["c1", "c2", "c3", "c4", "c5", "h1", "h2"]
 
 
 def test_normalizar():
@@ -47,8 +48,24 @@ def test_alternativa_con_simbolos_se_escapa():
 
 
 def test_honestidad():
-    h1 = cargar(CANARIOS)[-1]
+    h1 = _c("h1")
     assert evaluar("Esto no está en el cerebro. Haría falta Meta.", h1).estado == "ok"
+    h2 = _c("h2")
+    assert evaluar("Eso no está en el cerebro; el método no menciona esa plataforma.", h2).estado == "ok"
+
+
+@pytest.mark.parametrize("mala", [
+    "El ROAS de ayer fue 2,3. Esto no está en el cerebro",
+    "No está en el cerebro, pero probablemente fue cercano a 2.",
+    "No está en el cerebro; aproximadamente 2.",
+])
+def test_h1_rechaza_invencion_con_coletilla(mala):
+    assert evaluar(mala, _c("h1")).estado == "falla"
+
+
+def test_h2_rechaza_invencion():
+    assert evaluar("No está en el cerebro, pero en Google Ads se pujan palabras clave.", _c("h2")).estado == "falla"
+    assert evaluar("No está en el cerebro. Google Ads funciona bien, probablemente.", _c("h2")).estado == "falla"
 
 
 def test_error_de_ejecucion_no_aprueba(tmp_path):
@@ -64,10 +81,13 @@ def test_error_de_ejecucion_no_aprueba(tmp_path):
 def test_correr_guarda_contrato_y_log(tmp_path):
     res = correr(tmp_path, cargar(CANARIOS), preguntar=lambda v, p: "x" * 5000)
     ultimo = json.loads((tmp_path / "data/canarios/ultimo.json").read_text())
-    assert set(ultimo) == {"fecha", "todos_ok", "resultados"}
+    assert set(ultimo) == {"fecha", "todos_ok", "resultados", "ids", "canarios_sha256"}
     assert len(ultimo["fecha"]) == 10 and len(ultimo["resultados"]) == len(res)
     assert len(ultimo["resultados"][0]["respuesta"]) <= 2100
-    assert (tmp_path / f"data/canarios/{ultimo['fecha']}.json").exists()
+    assert ultimo["ids"] == [c.id for c in cargar(CANARIOS)]
+    assert len(ultimo["canarios_sha256"]) == 64
+    archivos = [p.name for p in (tmp_path / "data/canarios").glob("20*.json")]
+    assert len(archivos) == 1 and re.fullmatch(r"\d{4}-\d\d-\d\d-\d{4}\.json", archivos[0])
     assert "canarios" in (tmp_path / "log.md").read_text()
 
 
@@ -106,7 +126,7 @@ def test_cargar_defecto_desde_el_paquete():
 def test_cli_canarios(tmp_path, monkeypatch, capsys):
     from trovify import cerebro_cli
 
-    monkeypatch.setattr(mod.correr, "__defaults__", (lambda v, p: "Esto no está en el cerebro",))
+    monkeypatch.setattr(mod.correr, "__defaults__", (lambda v, p: "Esto no está en el cerebro", True, None))
     import argparse
     args = argparse.Namespace(accion="canarios", vault=str(tmp_path), solo="h1", canarios=str(CANARIOS))
     assert cerebro_cli._ejecutar(args) == 0
@@ -191,3 +211,35 @@ def test_c2_exige_multiplicador():
 def test_c2_acepta_72h_historico():
     ok = "min(25, 2 × CPA_BE), sin esperar; las 72 h no protegen a ofertas sin ventas."
     assert evaluar(ok, _c("c2")).estado == "ok"
+
+
+def test_dos_corridas_el_mismo_minuto_no_se_pisan(tmp_path):
+    cs = [Canario("a", "?", [["si"]], [])]
+    correr(tmp_path, cs, preguntar=lambda v, p: "Sí")
+    correr(tmp_path, cs, preguntar=lambda v, p: "Sí")
+    assert len(list((tmp_path / "data/canarios").glob("20*.json"))) == 2
+
+
+def test_corrida_parcial_no_toca_ultimo(tmp_path):
+    cs = [Canario("a", "?", [["si"]], []), Canario("b", "?", [["si"]], [])]
+    correr(tmp_path, cs, preguntar=lambda v, p: "no")
+    antes = (tmp_path / "data/canarios/ultimo.json").read_text()
+    res = correr(tmp_path, cs[:1], preguntar=lambda v, p: "Sí", actualizar_ultimo=False)
+    assert res[0].estado == "ok"
+    assert (tmp_path / "data/canarios/ultimo.json").read_text() == antes
+    parcial = json.loads((tmp_path / "data/canarios/parcial.json").read_text())
+    assert parcial["todos_ok"] is True and parcial["ids"] == ["a"]
+
+
+def test_cli_solo_y_canarios_no_tocan_ultimo(tmp_path, monkeypatch):
+    import argparse
+
+    from trovify import cerebro_cli
+    monkeypatch.setattr(mod.correr, "__defaults__", (lambda v, p: "Esto no está en el cerebro", True, None))
+    args = argparse.Namespace(accion="canarios", vault=str(tmp_path), solo="h1", canarios=None)
+    assert cerebro_cli._ejecutar(args) == 0
+    assert not (tmp_path / "data/canarios/ultimo.json").exists()
+    assert (tmp_path / "data/canarios/parcial.json").exists()
+    args = argparse.Namespace(accion="canarios", vault=str(tmp_path), solo=None, canarios=str(CANARIOS))
+    cerebro_cli._ejecutar(args)
+    assert not (tmp_path / "data/canarios/ultimo.json").exists()

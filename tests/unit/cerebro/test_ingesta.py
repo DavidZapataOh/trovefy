@@ -1,6 +1,7 @@
 import pathlib
 from datetime import date
 
+import pytest
 from trovify.cerebro.ingesta import html_a_texto, ingerir
 from trovify.vault import frontmatter
 
@@ -125,3 +126,37 @@ def test_html_sin_cierres_no_pierde_contenido():
 def test_head_sin_cierre_conserva_cuerpo():
     t = html_a_texto("<html><head><meta charset=x><title>Tit</title><body><p>Hola</p>")
     assert "Hola" in t and "Tit" not in t
+
+
+def _tokens():
+    return {
+        "token de Meta": "EA" + "A" + "x1" * 15,
+        "token de bot de Telegram": "123456789" + ":" + "Ab_" * 12,
+        "clave sk-": "sk" + "-" + "q" * 24,
+    }
+
+
+@pytest.mark.parametrize("patron", ["token de Meta", "token de bot de Telegram", "clave sk-"])
+def test_ingesta_rechaza_secretos(tmp_path, patron):
+    f = tmp_path / "s.md"
+    f.write_text("texto " + _tokens()[patron] + " fin")
+    v = tmp_path / "v"
+    with pytest.raises(ValueError, match=f"contiene un posible {patron}; no se ingiere"):
+        ingerir(v, f)
+    assert not list((v / "raw").rglob("*.md"))
+
+
+def test_ingesta_acepta_mencion_de_access_token(tmp_path):
+    f = tmp_path / "m.md"
+    f.write_text("la URL lleva access" + "_token" + "= pero sin valor")
+    assert ingerir(tmp_path / "v", f)[1] is True
+
+
+def test_cli_ingerir_secreto_sale_2(tmp_path, capsys):
+    from trovify.cli import main
+    f = tmp_path / "s.md"
+    f.write_text(_tokens()["clave sk-"])
+    v = tmp_path / "v"
+    assert main(["cerebro", "ingerir", "--vault", str(v), str(f)]) == 2
+    assert "no se ingiere" in capsys.readouterr().err
+    assert not list((v / "raw").rglob("*.md"))

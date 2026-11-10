@@ -9,6 +9,7 @@ import yaml
 
 from trovify.cerebro.canarios import cargar as cargar_canarios
 from trovify.cerebro.canarios import correr as correr_canarios
+from trovify.cerebro.canarios import sha256_de as sha_canarios
 from trovify.cerebro.destilado import pendientes, validar_todo
 from trovify.cerebro.ingesta import ingerir
 from trovify.cli import registrar
@@ -175,6 +176,10 @@ def _ingerir(args: argparse.Namespace, destino: Path) -> int:
             print(f"Error: no se pudo ingerir {crudo}: {exc.strerror or exc}", file=sys.stderr)
             faltan += 1
             continue
+        except ValueError as exc:
+            print(f"Error: {crudo}: {exc}", file=sys.stderr)
+            faltan += 1
+            continue
         print(f"{'nuevo' if creado else 'ya estaba'}: {crudo}")
         if creado:
             nuevos += 1
@@ -216,12 +221,14 @@ def _canarios(args: argparse.Namespace, destino: Path) -> int:
         lista = cargar_canarios(Path(args.canarios).expanduser() if args.canarios else None)
     except (OSError, ValueError, TypeError, yaml.YAMLError) as exc:
         return _error(f"no se pudieron cargar los canarios: {exc}")
+    parcial = bool(args.solo or args.canarios)
     if args.solo:
         lista = [c for c in lista if c.id == args.solo]
         if not lista:
             return _error(f"no hay ningún canario con id «{args.solo}»")
     try:
-        resultados = correr_canarios(destino, lista)
+        sha = sha_canarios(Path(args.canarios).expanduser() if args.canarios else None)
+        resultados = correr_canarios(destino, lista, actualizar_ultimo=not parcial, canarios_sha256=sha)
     except OSError as exc:
         return _error(f"no se pudo escribir en el vault: {exc.strerror or exc}")
     for r in resultados:
