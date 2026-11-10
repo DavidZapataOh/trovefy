@@ -1,0 +1,7 @@
+{
+  "name": "trovify",
+  "version": "0.1.0",
+  "description": "Trovify: sistema de trabajo con Claude Code para tiendas Shopify, con memoria en un vault de Obsidian.",
+  "author": { "name": "Trovify" },
+  "license": "MIT"
+}

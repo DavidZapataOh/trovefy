@@ -1,0 +1,12 @@
+{
+  "name": "trovify",
+  "owner": { "name": "Trovify" },
+  "description": "Marketplace local de Trovify.",
+  "plugins": [
+    {
+      "name": "trovify",
+      "source": "./",
+      "description": "Trovify: sistema de trabajo con Claude Code para tiendas Shopify."
+    }
+  ]
+}
