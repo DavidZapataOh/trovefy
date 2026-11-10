@@ -19,7 +19,9 @@ def vault_tmp(tmp_path):
 
 
 @pytest.fixture
-def correr_hook():
+def correr_hook_crudo():
+    """Ejecuta el hook y devuelve el CompletedProcess sin interpretar."""
+
     def _correr(nombre, entrada, vault):
         script = RAIZ / "hooks" / f"{nombre}.py"
         if not script.exists():
@@ -31,11 +33,19 @@ def correr_hook():
             "HOME": os.environ.get("HOME", ""),
             "PATH": os.environ.get("PATH", ""),
         }
-        proc = subprocess.run(
+        return subprocess.run(
             ["python3", str(script)],
             input=cuerpo, capture_output=True, text=True,
             env=entorno, cwd=RAIZ, timeout=30, check=False,
         )
+
+    return _correr
+
+
+@pytest.fixture
+def correr_hook(correr_hook_crudo):
+    def _correr(nombre, entrada, vault):
+        proc = correr_hook_crudo(nombre, entrada, vault)
         assert proc.returncode == 0, f"código {proc.returncode}: {proc.stderr}"
         if not proc.stdout.strip():
             return ("allow", "")

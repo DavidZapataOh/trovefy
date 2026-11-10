@@ -64,16 +64,52 @@ def resolver(ruta: str, cwd: str | None) -> pathlib.Path:
     return p.resolve(strict=False)
 
 
-def _emitir_deny(motivo: str) -> NoReturn:
-    salida = {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "deny",
-            "permissionDecisionReason": motivo,
-        }
-    }
-    sys.stdout.write(json.dumps(salida))
-    sys.stdout.flush()
+_DENY_FIJO = (
+    '{"hookSpecificOutput": {"hookEventName": "PreToolUse", '
+    '"permissionDecision": "deny", '
+    '"permissionDecisionReason": "fallo interno del hook al emitir la decisi\\u00f3n"}}'
+)
+
+
+def _salir_bloqueando(motivo: str) -> NoReturn:
+    """Último recurso: código 2 con stderr bloquea aunque stdout falle."""
+    try:
+        sys.stderr.write(f"trovify hook: {motivo}\n")
+        sys.stderr.flush()
+    except BaseException:  # noqa: BLE001, S110 - no hay nada más que hacer
+        pass
+    os._exit(2)
+
+
+def _diagnostico(texto: str) -> None:
+    try:
+        sys.stderr.write(f"trovify hook: {texto}\n")
+        sys.stderr.flush()
+    except BaseException:  # noqa: BLE001, S110
+        pass
+
+
+def _emitir(decision: str, motivo: str) -> NoReturn:
+    """Deny normal: JSON por stdout y código 0. Allow: código 0 sin salida."""
+    if decision == "allow":
+        sys.exit(0)
+    try:
+        try:
+            texto = json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": motivo,
+                    }
+                }
+            )
+        except BaseException:  # noqa: BLE001
+            texto = _DENY_FIJO
+        sys.stdout.write(texto)
+        sys.stdout.flush()
+    except BaseException:  # noqa: BLE001
+        _salir_bloqueando("no se pudo emitir la denegación: " + motivo)
     sys.exit(0)
 
 
@@ -81,12 +117,13 @@ def ejecutar_guardia(decidir: Callable[[dict], tuple[str, str]]) -> NoReturn:
     """Llama a ``decidir(entrada)`` y emite la decisión; ante cualquier duda, deny."""
     try:
         decision, motivo = decidir(leer_entrada())
-        if decision not in ("allow", "deny"):
+        if decision not in ("allow", "deny") or not isinstance(motivo, str):
             raise ValueError("decisión no válida")
     except EntradaIlegible as exc:
-        _emitir_deny(f"entrada ilegible: {exc}")
-    except Exception as exc:  # noqa: BLE001 - fail-closed: cualquier fallo deniega
-        _emitir_deny(f"fallo interno del hook: {type(exc).__name__}")
-    if decision == "deny":
-        _emitir_deny(motivo or "denegado por política de Trovify")
-    sys.exit(0)
+        decision, motivo = "deny", f"entrada ilegible: {exc}"
+    except BaseException as exc:  # noqa: BLE001 - fail-closed: cualquier fallo deniega
+        decision, motivo = "deny", f"fallo interno del hook: {type(exc).__name__}"
+        _diagnostico(motivo)
+    if decision == "deny" and not motivo:
+        motivo = "denegado por política de Trovify"
+    _emitir(decision, motivo)
