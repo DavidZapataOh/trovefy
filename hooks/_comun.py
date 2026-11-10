@@ -64,6 +64,23 @@ def resolver(ruta: str, cwd: str | None) -> pathlib.Path:
     return p.resolve(strict=False)
 
 
+def bases_vault(vault: pathlib.Path, vault_res: pathlib.Path) -> set[str]:
+    """Todas las grafías posibles de la ruta del vault dentro de un comando."""
+    bases = {str(vault), str(vault_res), "$TROVIFY_VAULT", "${TROVIFY_VAULT}"}
+    literal = os.environ.get("TROVIFY_VAULT")
+    if literal:
+        bases.add(literal)
+        bases.add(os.path.expandvars(literal))
+        bases.add(os.path.expanduser(os.path.expandvars(literal)))
+    home = os.environ.get("HOME") or os.path.expanduser("~")
+    home = home.rstrip("/")
+    for base in list(bases):
+        if home and base.startswith(home + "/"):
+            resto = base[len(home):]
+            bases.update({"~" + resto, "$HOME" + resto, "${HOME}" + resto})
+    return {b.rstrip("/") for b in bases if b.rstrip("/")}
+
+
 _DENY_FIJO = (
     '{"hookSpecificOutput": {"hookEventName": "PreToolUse", '
     '"permissionDecision": "deny", '

@@ -1,0 +1,63 @@
+def ev(tool, cwd="/", **inp):
+    return {"tool_name": tool, "tool_input": inp, "cwd": cwd}
+
+
+def activar(vault):
+    (vault / ".trovify/STOP").write_text("")
+
+
+def test_stop_bloquea_el_buzon(correr_hook, vault_tmp):
+    activar(vault_tmp)
+    e = {"tool_name": "Write", "tool_input": {"file_path": "/var/spool/trovify/entrada/P-1.json", "content": "{}"}}
+    decision, motivo = correr_hook("stop", e, vault_tmp)
+    assert decision == "deny" and "STOP activo: no se deposita nada" in motivo
+
+
+def test_sin_stop_no_bloquea(correr_hook, vault_tmp):
+    e = {"tool_name": "Write", "tool_input": {"file_path": str(vault_tmp / "propuestas/P-1.md"), "content": "x"}}
+    assert correr_hook("stop", e, vault_tmp)[0] == "allow"
+    e = ev("Write", file_path="/var/spool/trovify/entrada/P-1.json", content="{}")
+    assert correr_hook("stop", e, vault_tmp)[0] == "allow"
+
+
+def test_stop_bloquea_propuestas_en_todas_las_herramientas(correr_hook, vault_tmp):
+    activar(vault_tmp)
+    destino = str(vault_tmp / "propuestas/P-1.md")
+    assert correr_hook("stop", ev("Write", file_path=destino, content="x"), vault_tmp)[0] == "deny"
+    assert correr_hook("stop", ev("Edit", file_path=destino, old_string="a", new_string="b"), vault_tmp)[0] == "deny"
+    assert correr_hook("stop", ev("MultiEdit", file_path=destino, edits=[]), vault_tmp)[0] == "deny"
+    indirecta = str(vault_tmp / "wiki/../propuestas/P-1.md")
+    assert correr_hook("stop", ev("Write", file_path=indirecta, content="x"), vault_tmp)[0] == "deny"
+    rel = ev("Write", cwd=str(vault_tmp), file_path="propuestas/P-1.md", content="x")
+    assert correr_hook("stop", rel, vault_tmp)[0] == "deny"
+
+
+def test_stop_enlace_a_propuestas(correr_hook, vault_tmp):
+    activar(vault_tmp)
+    (vault_tmp / "propuestas").mkdir()
+    (vault_tmp / "wiki/enlace").symlink_to(vault_tmp / "propuestas", target_is_directory=True)
+    e = ev("Write", file_path=str(vault_tmp / "wiki/enlace/P-1.md"), content="x")
+    assert correr_hook("stop", e, vault_tmp)[0] == "deny"
+
+
+def test_stop_no_bloquea_otras_rutas_ni_lecturas(correr_hook, vault_tmp):
+    activar(vault_tmp)
+    assert correr_hook("stop", ev("Write", file_path=str(vault_tmp / "wiki/x.md"), content="x"), vault_tmp)[0] == "allow"
+    assert correr_hook("stop", ev("Write", file_path=str(vault_tmp / "propuestas-viejas/x.md"), content="x"), vault_tmp)[0] == "allow"
+    assert correr_hook("stop", ev("Read", file_path="/var/spool/trovify/entrada/P-1.json"), vault_tmp)[0] == "allow"
+
+
+def test_stop_bash(correr_hook, vault_tmp):
+    activar(vault_tmp)
+    v = str(vault_tmp)
+    for cmd in [
+        "cp x.json /var/spool/trovify/entrada/P-1.json",
+        "echo '{}' > '/var/spool/trovify/entrada/P-1.json'",
+        f"echo x > {v}/propuestas/P-1.md",
+        'echo x > "$TROVIFY_VAULT/propuestas/P-1.md"',
+        "echo x > ${TROVIFY_VAULT}/propuestas/P-1.md",
+        f"cd {v} && echo x > propuestas/P-1.md",
+    ]:
+        decision, motivo = correr_hook("stop", ev("Bash", command=cmd), vault_tmp)
+        assert decision == "deny" and "STOP activo" in motivo, cmd
+    assert correr_hook("stop", ev("Bash", command="ls /tmp && echo hola"), vault_tmp)[0] == "allow"
