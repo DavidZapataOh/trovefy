@@ -5,7 +5,10 @@ description = "Trovify: plugin de Claude Code y paquete Python para un negocio d
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.12,<3.13"
-dependencies = ["pyyaml==6.0.3"]
+dependencies = [
+    "playwright==1.65.0",
+    "pyyaml==6.0.3",
+]
 
 [project.scripts]
 trovify = "trovify.cli:main"
@@ -23,3 +26,8 @@ packages = ["scripts/trovify"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["scripts"]
+addopts = '-m "not integracion and not vivo"'
+markers = [
+    "integracion: usa un navegador real (Chromium de Playwright); se ejecuta con -m integracion",
+    "vivo: toca servicios reales; se ejecuta con -m vivo",
+]
