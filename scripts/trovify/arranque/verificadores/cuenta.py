@@ -24,9 +24,9 @@ from trovify.arranque.verificadores.base import (
 )
 from trovify.arranque.verificadores.meta_ids import (
     SIN_SESION,
-    _capturar_por_defecto,
-    _leer_pagina,
-    _no_medido,
+    capturar_por_defecto,
+    leer_pagina,
+    no_medido,
 )
 from trovify.config import mercados, umbrales
 from trovify.vault import frontmatter
@@ -43,9 +43,44 @@ CONFIRMACION_06 = Confirmacion(
     ),
 )
 
-_MONEDA = re.compile(r"^\s*Currency\s*:\s*([A-Z]{3})\s*$", re.MULTILINE)
-_ZONA = re.compile(r"^\s*Time zone\s*:\s*(?:\(GMT[^)]*\)\s*)?([A-Za-z]+(?:/[A-Za-z_+\-0-9]+)+)\s*$", re.MULTILINE)
-_LIMITE = re.compile(r"^\s*Account spending limit\s*:\s*(?:US)?\$?\s*(\d[\d,]*(?:\.\d+)?)\s*(?:USD)?\s*$", re.MULTILINE)
+ILEGIBLE = "ilegible"  # la línea del límite existe, pero el número es ambiguo
+
+_MONEDA = re.compile(r"^\s*(?:Currency|Moneda)\s*:\s*([A-Z]{3})\s*$", re.MULTILINE)
+_ZONA = re.compile(
+    r"^\s*(?:Time zone|Zona horaria)\s*:\s*(?:\(GMT[^)]*\)\s*)?"
+    r"(UTC|GMT(?:[+\-]\d{1,2}(?::\d{2})?)?|[A-Za-z]+(?:/[A-Za-z_+\-0-9]+)+)\s*$",
+    re.MULTILINE,
+)
+_LIMITE = re.compile(r"^\s*(?:Account spending limit|Límite de gasto de la cuenta)\s*:\s*(.+?)\s*$", re.MULTILINE | re.IGNORECASE)
+
+
+def _numero(texto: str) -> str | None:
+    """Número en formato inglés o español → cadena con punto decimal; None si es ambiguo."""
+    t = re.sub(r"US\$|\$|USD|\s", "", texto)
+    if not re.fullmatch(r"\d[\d.,]*", t):
+        return None
+    puntos, comas = t.count("."), t.count(",")
+    if puntos and comas:
+        dec = "." if t.rfind(".") > t.rfind(",") else ","
+        mil = "," if dec == "." else "."
+        ent, _, frac = t.rpartition(dec)
+        if not re.fullmatch(r"\d{1,2}", frac) or t.count(dec) != 1:
+            return None
+        grupos = ent.split(mil)
+        if mil in frac or not re.fullmatch(r"\d{1,3}", grupos[0]) or not all(re.fullmatch(r"\d{3}", g) for g in grupos[1:]):
+            return None
+        return "".join(grupos) + "." + frac
+    sep = "." if puntos else "," if comas else None
+    if sep is None:
+        return t
+    partes = t.split(sep)
+    if len(partes) == 2 and re.fullmatch(r"\d{1,2}", partes[1]) and partes[0]:
+        return partes[0] + "." + partes[1]
+    if sep == "," and re.fullmatch(r"\d{1,3}", partes[0]) and all(re.fullmatch(r"\d{3}", g) for g in partes[1:]):
+        return "".join(partes)  # 1,000 o 1,000,000: miles
+    if sep == "." and len(partes) > 2 and re.fullmatch(r"\d{1,3}", partes[0]) and all(re.fullmatch(r"\d{3}", g) for g in partes[1:]):
+        return "".join(partes)  # 1.000.000: miles sin ambigüedad
+    return None  # «1.000» o «12,345,6»: no se sabe si son miles o decimales
 
 
 def extraer_act(url: str) -> str | None:
@@ -60,8 +95,9 @@ def leer_ajustes_cuenta(texto: str) -> dict[str, str | None]:
         m = patron.search(texto)
         return m.group(1) if m else None
 
-    limite = uno(_LIMITE)
-    return {"moneda": uno(_MONEDA), "zona": uno(_ZONA), "limite_gasto": limite.replace(",", "") if limite else None}
+    bruto = uno(_LIMITE)
+    limite = None if bruto is None else (_numero(bruto) or ILEGIBLE)
+    return {"moneda": uno(_MONEDA), "zona": uno(_ZONA), "limite_gasto": limite}
 
 
 def mercado_elegido(vault: Path) -> str | None:
@@ -105,10 +141,19 @@ def evaluar_cuenta(ajustes: dict, zona_esperada: str | None, limite_max: float) 
             f"la zona horaria es {ajustes.get('zona') or 'desconocida'}, no {zona_esperada}",
             "cámbiala en Ajustes de pago → Información de la empresa antes de crear campañas (cierra la cuenta y crea otra)",
         )
+    if ajustes.get("limite_gasto") == ILEGIBLE:
+        return resultado(None, "no medido: no se entiende el número del límite de gasto", "revisa el límite en Ajustes de pago (hasta US$ " f"{limite_max:g})")
     try:
         limite = float(ajustes.get("limite_gasto"))  # type: ignore[arg-type]
     except (TypeError, ValueError):
-        return resultado(False, "la cuenta no tiene límite de gasto", f"pon un límite de gasto de la cuenta de hasta US$ {limite_max:g}")
+        return resultado(
+            False,
+            "la cuenta no tiene límite de gasto",
+            f"pon un límite de gasto de la cuenta de hasta US$ {limite_max:g}; si tu cuenta usa fondos prepagados no admite límite: "
+            "cambia a pago automático con tarjeta",
+        )
+    if limite <= 0:
+        return resultado(False, "límite de gasto inválido (debe ser mayor que 0)", f"pon un límite de hasta US$ {limite_max:g}")
     if limite > limite_max:
         return resultado(False, f"el límite de gasto (US$ {limite:g}) supera el máximo (US$ {limite_max:g})", f"bájalo a US$ {limite_max:g} o menos")
     return ResultadoVerificacion(
@@ -129,17 +174,17 @@ def verificar_cuenta(
     vault = vault_root() if vault is None else Path(vault)
     act = _act_guardado(vault)
     url = f"{URL_AJUSTES}?act={act}" if act else URL_AJUSTES
-    cap, png, motivo = _leer_pagina(url, capturar or _capturar_por_defecto)
+    cap, png, motivo = leer_pagina(url, capturar or capturar_por_defecto)
     if cap is None:
-        return _no_medido(motivo or SIN_SESION)
+        return no_medido(motivo or SIN_SESION)
     if not confirmacion.confirmada:
         return resultado_provisional(vault, "06", cap, png)
     ajustes = leer_ajustes_cuenta(cap.texto)
     if ajustes["moneda"] is None and ajustes["zona"] is None:
-        return _no_medido("no medido: la pantalla de ajustes no muestra moneda ni zona horaria")
+        return no_medido("no medido: la pantalla de ajustes no muestra moneda ni zona horaria")
     act = extraer_act(cap.url_final) or act
     if act is None:
-        return _no_medido("no medido: no se ve el número de la cuenta (`act=`) en la dirección")
+        return no_medido("no medido: no se ve el número de la cuenta (`act=`) en la dirección")
     r = evaluar_cuenta(ajustes, mercado_elegido(vault), umbrales.valor(vault, CLAVE_LIMITE))
     if r.ok is not True:
         return r

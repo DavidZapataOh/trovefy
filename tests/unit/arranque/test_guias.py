@@ -88,3 +88,9 @@ def test_guia_06_avisa_antes_de_crear_nada():
     assert "/trovify:auditar" in t and "compras internacionales" in t
     assert "cuenta.limite_gasto_inicial_usd" in t and "US$ 250" in t and "Fase 1" in t
     assert "trovify arranque hecho 06 --dato act_id=" in t
+
+
+def test_guia_06_pide_pago_automatico():
+    t = _t("06-cuenta-publicitaria.md")
+    assert t.count("pago automático") >= 3 and "141820733085330" in t
+    assert t.index("pago automático") < t.index("**Pasos**")

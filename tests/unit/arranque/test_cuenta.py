@@ -152,3 +152,38 @@ def test_06_usa_el_act_guardado(tmp_path):
     cap = falso()
     verificar_cuenta(v, capturar=cap)
     assert cap.llamadas[0][1].endswith("?act=555")
+
+
+import pytest
+
+
+@pytest.mark.parametrize(
+    "bruto,esperado",
+    [
+        ("250,00", "250.00"), ("1.000,00", "1000.00"), ("1,000.00", "1000.00"), ("250,00 US$", "250.00"),
+        ("US$250.00", "250.00"), ("250 USD", "250"), ("$1,250.50", "1250.50"), ("1,000", "1000"), ("1.000.000", "1000000"),
+        ("1.000", ilegible := "ilegible"), ("12,345,6", ilegible), ("1.000,000", ilegible), ("abc", ilegible),
+    ],
+)
+def test_numeros_en_formato_local(bruto, esperado):
+    assert leer_ajustes_cuenta(f"Account spending limit: {bruto}")["limite_gasto"] == esperado
+
+
+def test_etiquetas_en_espanol_y_zonas_utc():
+    t = "Moneda: USD\nZona horaria: (GMT+02:00) Europe/Bucharest\nLímite de gasto de la cuenta: 250,00 US$\n"
+    assert leer_ajustes_cuenta(t) == {"moneda": "USD", "zona": "Europe/Bucharest", "limite_gasto": "250.00"}
+    assert leer_ajustes_cuenta("Time zone: UTC")["zona"] == "UTC"
+    assert leer_ajustes_cuenta("Time zone: GMT+3")["zona"] == "GMT+3"
+    r = evaluar_cuenta({**BIEN, "zona": "UTC"}, "Europe/Bucharest", 250)
+    assert r.ok is False and "UTC" in r.motivo
+
+
+def test_limite_ilegible_es_no_medido_y_cero_es_invalido():
+    assert evaluar_cuenta({**BIEN, "limite_gasto": "ilegible"}, "Europe/Bucharest", 250).ok is None
+    r = evaluar_cuenta({**BIEN, "limite_gasto": "0"}, "Europe/Bucharest", 250)
+    assert r.ok is False and "inválido" in r.motivo
+
+
+def test_sin_limite_menciona_prepago():
+    r = evaluar_cuenta({**BIEN, "limite_gasto": None}, "Europe/Bucharest", 250)
+    assert r.ok is False and "pago automático con tarjeta" in " ".join(r.arreglos)

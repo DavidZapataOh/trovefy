@@ -53,13 +53,13 @@ def extraer_page_id(html: str) -> str | None:
     return cuenta.most_common(1)[0][0] if cuenta else None
 
 
-def _capturar_por_defecto(servicio: str, url: str, **kw):
+def capturar_por_defecto(servicio: str, url: str, **kw):
     from trovify.navegador import capturar
 
     return capturar(servicio, url, **kw)
 
 
-def _leer_pagina(url: str, capturar: Callable) -> tuple[object | None, bytes | None, str | None]:
+def leer_pagina(url: str, capturar: Callable) -> tuple[object | None, bytes | None, str | None]:
     """Devuelve (captura, png, motivo_no_medido)."""
     from trovify.navegador import NavegadorError, sesion_caducada
 
@@ -75,7 +75,7 @@ def _leer_pagina(url: str, capturar: Callable) -> tuple[object | None, bytes | N
     return cap, png, None
 
 
-def _no_medido(motivo: str) -> ResultadoVerificacion:
+def no_medido(motivo: str) -> ResultadoVerificacion:
     return ResultadoVerificacion(None, [], motivo, [], {}, [f"? {motivo}"])
 
 
@@ -88,9 +88,9 @@ def verificar_business(
     vault: Path | None = None, capturar: Callable | None = None, confirmacion: Confirmacion = CONFIRMACION_04
 ) -> ResultadoVerificacion:
     vault = vault_root() if vault is None else Path(vault)
-    cap, png, motivo = _leer_pagina(URL_BUSINESS, capturar or _capturar_por_defecto)
+    cap, png, motivo = leer_pagina(URL_BUSINESS, capturar or capturar_por_defecto)
     if cap is None:
-        return _no_medido(motivo)
+        return no_medido(motivo)
     if not confirmacion.confirmada:
         return resultado_provisional(vault, "04", cap, png)
     bid = extraer_business_id(cap.url_final)
@@ -140,9 +140,9 @@ def verificar_pagina(
         m = "no medido: falta la URL de la página (https://www.facebook.com/…)"
         return ResultadoVerificacion(None, [], m, ["guárdala con `trovify arranque hecho 05 --dato url=https://www.facebook.com/<tu-página>`"],
                                      {}, [f"? {m}"])
-    cap, png, motivo = _leer_pagina(url, capturar or _capturar_por_defecto)
+    cap, png, motivo = leer_pagina(url, capturar or capturar_por_defecto)
     if cap is None:
-        return _no_medido(motivo)
+        return no_medido(motivo)
     if not confirmacion.confirmada:
         return resultado_provisional(vault, "05", cap, png)
     pid = extraer_page_id(cap.html)
