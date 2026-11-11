@@ -393,3 +393,18 @@ def test_titulo_distinto_y_contenido_a_medias_es_no_medido():
     medio = "<title>Oferta especial</title>" + "Kit completo de recetas caseras y postres faciles " * 5
     d = resolver_destino("https://tienda.example.com/", Falso(p), lambda u: (u, medio))
     assert d.cloaker is None and "no medido" in d.motivo and "título" in d.motivo
+
+
+@pytest.mark.parametrize(("url", "clave"), [
+    ("https://geriactiva.impultienda.ar/", "geriactiva.impultienda.ar"),
+    ("https://formacion-contable.impultienda.ar/", "formacion-contable.impultienda.ar"),
+    ("https://mi-kit.lovable.app/", "mi-kit.lovable.app"),
+    ("https://otro-kit.lovable.app/", "otro-kit.lovable.app"),
+    ("https://kits.web.app/pdf", "kits.web.app/pdf"),
+    ("https://ana.wixsite.com/kit", "ana.wixsite.com/kit"),
+    ("https://www.therapytoolkit.com/es/pagina", "therapytoolkit.com"),
+])
+def test_tiendas_en_plataformas_compartidas_no_se_juntan(url, clave):
+    # sin checkout, el dominio registrable de una plataforma compartida (lovable.app, impultienda.ar...)
+    # juntaría productos de operadores distintos en una sola oferta
+    assert clave_oferta(url, None) == clave

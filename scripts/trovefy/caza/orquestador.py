@@ -28,11 +28,12 @@ from trovefy.caza import filtros, snapshots
 from trovefy.caza.biblioteca import url_biblioteca
 from trovefy.caza.cliente import SesionBloqueada
 from trovefy.caza.destino import (
-    _DOMINIOS_COMPARTIDOS,
     Destino,
     _host,
     _registrable,
     deshacer_redireccion_fb,
+    detectar_gateway,
+    sitio,
     veredicto_landing,
 )
 from trovefy.caza.hueco import HuecoPais, hueco_pais
@@ -505,15 +506,22 @@ def _frase(o: Oferta, page_id: str) -> str | None:
 
 
 def _dominio(o: Oferta) -> str | None:
+    """Sitio de la landing para buscar el original; None si no identifica a un operador.
+
+    Una landing en la propia pasarela (pay.hotmart.com, gumroad.com, whop.com...) comparte dominio con
+    todos los productores de la plataforma: buscar por él junta productos ajenos. Las tiendas con
+    subdominio propio (*.impultienda.ar, *.mycartpanda.com) sí identifican al operador."""
     d = o.destino
     if d is None or d.estado != "ok" or d.red_social:
         return None
-    host = _host(d.url_final or d.url_anuncio).removeprefix("www.")
+    url = d.url_final or d.url_anuncio
+    host = _host(url)
     if not host:
         return None
-    if any(host == x or host.endswith("." + x) for x in _DOMINIOS_COMPARTIDOS):
-        return host
-    return _registrable(host)
+    s = sitio(host)
+    if detectar_gateway([url]) and s == _registrable(host):
+        return None
+    return s
 
 
 @dataclass
@@ -673,7 +681,7 @@ class _Corrida:
         if r.estado != "ok":
             return o
         con_destino = [a for a in r.anuncios if a.enlace_destino]
-        ajenos = [a for a in con_destino if dominio not in deshacer_redireccion_fb(a.enlace_destino).lower()]
+        ajenos = [a for a in con_destino if sitio(_host(deshacer_redireccion_fb(a.enlace_destino))) != dominio]
         if ajenos:
             self.errores.append(
                 f"no medido: dominio contaminado: la búsqueda «{dominio}» ({pais}) trae {len(ajenos)} anuncios "

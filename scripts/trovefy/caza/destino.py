@@ -19,7 +19,15 @@ from urllib.parse import parse_qs, urlparse
 from trovefy.caza.huellas import GATEWAYS, TRACKERS_POR_NOMBRE
 from trovefy.navegador import NavegadorError, _un_navegador_a_la_vez, sesion_caducada
 
-_DOMINIOS_COMPARTIDOS = ("netlify.app", "vercel.app", "pages.dev", "github.io")
+# Plataformas donde cada subdominio (o ruta) es la tienda de otro operador: su dominio registrable no
+# identifica la oferta (caza LatAm 2026-11-11: tiendas distintas de *.impultienda.ar juntas).
+_DOMINIOS_COMPARTIDOS = (
+    "netlify.app", "vercel.app", "pages.dev", "github.io", "impultienda.ar", "lovable.app", "web.app",
+    "firebaseapp.com", "wixsite.com", "carrd.co", "webflow.io", "framer.website", "hotmart.host",
+    "systeme.io", "myshopify.com", "mycartpanda.com", "blogspot.com", "wordpress.com", "godaddysites.com",
+    "mystrikingly.com", "mykajabi.com", "teachable.com", "thinkific.com", "notion.site", "canva.site",
+    "onrender.com", "herokuapp.com", "replit.app", "glitch.me", "surge.sh",
+)
 # Segmentos genéricos que no identifican la oferta (whop.com/checkout/<plan>, gumroad /l/<slug>).
 _GENERICOS = {"checkout", "l", "buy", "b", "c", "pay", "p"}
 _SEGUNDO_NIVEL = {"com", "co", "org", "net", "gov", "edu", "ac"}
@@ -155,6 +163,15 @@ def _registrable(host: str) -> str:
     if len(partes) >= 3 and len(partes[-1]) == 2 and partes[-2] in _SEGUNDO_NIVEL:
         return ".".join(partes[-3:])
     return ".".join(partes[-2:]) if len(partes) >= 2 else host
+
+
+def sitio(host: str) -> str:
+    """El sitio de un operador: el host entero en una plataforma compartida (cada tienda es de otro),
+    si no el dominio registrable (``ptp.abatools.pro`` y ``abatools.pro`` son el mismo sitio)."""
+    host = host.lower().removeprefix("www.")
+    if any(_en_dominio(host, d) for d in _DOMINIOS_COMPARTIDOS):
+        return host
+    return _registrable(host)
 
 
 def _segmentos(url: str) -> list[str]:
