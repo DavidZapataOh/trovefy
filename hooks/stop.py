@@ -1,6 +1,6 @@
-"""Hook PreToolUse: con ``<vault>/.trovify/STOP`` no se deposita nada (§5.9).
+"""Hook PreToolUse: con ``<vault>/.trovefy/STOP`` no se deposita nada (§5.9).
 
-Deniega escribir en ``/var/spool/trovify/`` y en ``<vault>/propuestas/``.
+Deniega escribir en ``/var/spool/trovefy/`` y en ``<vault>/propuestas/``.
 Las rutas se comparan resueltas. Las lecturas nunca se bloquean. Solo
 biblioteca estándar; falla cerrado.
 """
@@ -22,7 +22,7 @@ from _comun import (
 )
 
 MOTIVO = "STOP activo: no se deposita nada (ni en el buzón ni en propuestas/)"
-SPOOL = pathlib.Path("/var/spool/trovify")
+SPOOL = pathlib.Path("/var/spool/trovefy")
 
 
 def _cadena(valor: object) -> str:
@@ -56,7 +56,7 @@ def _solo_lectura(comando: str) -> bool:
 
 def _bash_menciona(original: str, vault: pathlib.Path, vault_res: pathlib.Path, cwd: str | None) -> bool:
     for comando in (original, re.sub(r"[\"']", "", original)):
-        if "/var/spool/trovify" in comando:
+        if "/var/spool/trovefy" in comando:
             return True
     sin_comillas = re.sub(r"[\"']", "", original)
     bases = bases_vault(vault, vault_res)

@@ -2,16 +2,16 @@ from datetime import date
 
 import pytest
 from ejemplos import ejecucion_ejemplo
-from trovify import cli
-from trovify.caza import orquestador
-from trovify.vault.andamio import crear_vault
+from trovefy import cli
+from trovefy.caza import orquestador
+from trovefy.vault.andamio import crear_vault
 
 
 @pytest.fixture
 def vault(tmp_path, monkeypatch):
     v = tmp_path / "v"
     crear_vault(v)
-    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     return v
 
@@ -48,7 +48,7 @@ def test_region_desconocida(vault, capsys):
 def test_resumen_marca_palabras_a_reescribir():
     from dataclasses import replace
 
-    from trovify.caza.salida import Consulta
+    from trovefy.caza.salida import Consulta
     e = replace(ejecucion_ejemplo(), consultas=[Consulta("poca", "RO", 3, "u"), Consulta("bien", "RO", 90, "u")])
     texto = orquestador.resumen(e, 20)
     linea = next(x for x in texto.splitlines() if "reescribir" in x)
@@ -72,8 +72,8 @@ def test_rutina_parada_no_deja_ok(vault, monkeypatch):
 
 
 def test_hueco_cli(vault, monkeypatch, capsys):
-    from trovify.caza.hueco import HuecoPais
-    from trovify.caza.senales import Medida
+    from trovefy.caza.hueco import HuecoPais
+    from trovefy.caza.senales import Medida
     vistas = {}
 
     def falso(v, oferta, pais, frases, **kw):
@@ -87,8 +87,8 @@ def test_hueco_cli(vault, monkeypatch, capsys):
 
 
 def test_hueco_cli_parada(vault, monkeypatch, capsys):
-    from trovify.caza.hueco import HuecoPais
-    from trovify.caza.senales import Medida
+    from trovefy.caza.hueco import HuecoPais
+    from trovefy.caza.senales import Medida
     monkeypatch.setattr(orquestador, "medir_hueco", lambda *a, **k: (
         HuecoPais("RO", Medida(None, "no medido: bloqueo"), "no_medido", None, []), "bloqueo de Meta: captcha",
         "meta"))
@@ -115,7 +115,7 @@ def test_caza_yaml_se_crea_si_falta(vault, monkeypatch):
 
 
 def test_perfil_desconocido_sale_con_2_sin_buscar(vault, capsys, monkeypatch):
-    from trovify.caza import cliente as m
+    from trovefy.caza import cliente as m
 
     def nunca(*a, **k):
         raise AssertionError("no debe crear el cliente")
@@ -172,8 +172,8 @@ def test_region_obligatoria_fuera_de_vigilar(vault, capsys):
 
 
 def test_hueco_cli_cuota_no_es_parada(vault, monkeypatch, capsys):
-    from trovify.caza.hueco import HuecoPais
-    from trovify.caza.senales import Medida
+    from trovefy.caza.hueco import HuecoPais
+    from trovefy.caza.senales import Medida
     monkeypatch.setattr(orquestador, "medir_hueco", lambda *a, **k: (
         HuecoPais("RO", Medida(None, "no medido: cuota"), "no_medido", None, []),
         "cuota del día agotada (Presupuesto del día agotado)", "cuota"))
@@ -185,7 +185,7 @@ def test_hueco_cli_cuota_no_es_parada(vault, monkeypatch, capsys):
 def test_resumen_pone_las_ya_vistas_aparte():
     import dataclasses
 
-    from trovify.caza.filtros import Descarte
+    from trovefy.caza.filtros import Descarte
     e = ejecucion_ejemplo()
     r = e.resultados[0]
     vista = dataclasses.replace(r, oferta=dataclasses.replace(r.oferta, oferta_id="o-vista"), decision="descartada",
@@ -208,8 +208,8 @@ def test_rutina_omitida_si_otra_caza_esta_en_curso(vault, monkeypatch, capsys):
 
 
 def test_caza_yaml_con_no_sin_comillas_lee_noruega(vault):
-    from trovify import caza_cli
-    from trovify.caza import orquestador as caza_orq
+    from trovefy import caza_cli
+    from trovefy.caza import orquestador as caza_orq
 
     ruta = vault / "config/caza.yaml"
     ruta.write_text(ruta.read_text(encoding="utf-8").replace('"NO"', "NO"), encoding="utf-8")
@@ -220,7 +220,7 @@ def test_caza_yaml_con_no_sin_comillas_lee_noruega(vault):
 
 
 def test_plantilla_caza_yaml_lleva_no_entre_comillas():
-    from trovify.vault.andamio import PLANTILLA
+    from trovefy.vault.andamio import PLANTILLA
 
     assert '"NO"' in (PLANTILLA / "config/caza.yaml").read_text(encoding="utf-8")
     assert '\n"NO":' in (PLANTILLA / "config/mercados.yaml").read_text(encoding="utf-8")

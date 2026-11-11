@@ -3,16 +3,16 @@ import pathlib
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from trovify.caza import cliente as m
-from trovify.caza.cache import Cache
-from trovify.caza.cliente import (
+from trovefy.caza import cliente as m
+from trovefy.caza.cache import Cache
+from trovefy.caza.cliente import (
     ClienteBibliotecaPublica,
     ErrorDeRed,
     PaginaCapturada,
     SesionBloqueada,
 )
-from trovify.caza.modelo import ResultadoBusqueda
-from trovify.caza.presupuesto import ParadaPorErrores, Presupuesto
+from trovefy.caza.modelo import ResultadoBusqueda
+from trovefy.caza.presupuesto import ParadaPorErrores, Presupuesto
 
 FIX = pathlib.Path(__file__).resolve().parents[2] / "fixtures/biblioteca"
 
@@ -166,7 +166,7 @@ def test_cache_ida_y_vuelta_y_sin_medios(tmp_path):
 
 
 def test_cache_por_defecto_en_el_vault(monkeypatch, tmp_path):
-    monkeypatch.setenv("TROVIFY_VAULT", str(tmp_path))
+    monkeypatch.setenv("TROVEFY_VAULT", str(tmp_path))
     assert Cache.por_defecto().dir == tmp_path / "data" / "cache" / "biblioteca"
 
 
@@ -198,7 +198,7 @@ def test_total_texto_con_mayor_que():
 
 
 def test_descartados_en_el_motivo(monkeypatch):
-    from trovify.caza.modelo import Parseo
+    from trovefy.caza.modelo import Parseo
 
     real = m.parsear_detalle
     monkeypatch.setattr(m, "parsear_detalle", lambda *a, **k: Parseo(real(*a, **k).anuncios, 3, 10))
@@ -350,7 +350,7 @@ def test_completo_solo_cuando_meta_dice_que_no_hay_mas():
 def test_recortar_o_descartar_no_es_completo(monkeypatch):
     r = cliente([_pagina(_con(["1", "2", "3"], hay_mas=False))]).buscar("RO", q="x", max_anuncios=2)
     assert len(r.anuncios) == 2 and r.completo is False
-    from trovify.caza.modelo import Parseo
+    from trovefy.caza.modelo import Parseo
 
     real = m.parsear_detalle
     monkeypatch.setattr(m, "parsear_detalle", lambda *a, **k: Parseo(real(*a, **k).anuncios, 1, None, False))

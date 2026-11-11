@@ -77,7 +77,7 @@ def test_resolver_enlace_simbolico(tmp_path):
 
 def test_stop_activo(vault_tmp):
     assert not _comun.stop_activo(vault_tmp)
-    (vault_tmp / ".trovify" / "STOP").write_text("", encoding="utf-8")
+    (vault_tmp / ".trovefy" / "STOP").write_text("", encoding="utf-8")
     assert _comun.stop_activo(vault_tmp)
 
 

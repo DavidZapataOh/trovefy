@@ -2,7 +2,7 @@ import importlib
 import sys
 
 import pytest
-from trovify import cli
+from trovefy import cli
 
 
 @pytest.fixture
@@ -28,30 +28,30 @@ def test_subcomando_registrado_se_ejecuta(registro_aislado):
 
 
 def test_descubre_modulos_cli(registro_aislado, tmp_path, monkeypatch):
-    import trovify
+    import trovefy
 
     modulo = tmp_path / "zz_prueba_cli.py"
     modulo.write_text(
-        "from trovify.cli import registrar\n"
+        "from trovefy.cli import registrar\n"
         "registrar('zz-prueba', lambda p: None, lambda a: 9)\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(trovify, "__path__", [*trovify.__path__, str(tmp_path)])
-    monkeypatch.delitem(sys.modules, "trovify.zz_prueba_cli", raising=False)
+    monkeypatch.setattr(trovefy, "__path__", [*trovefy.__path__, str(tmp_path)])
+    monkeypatch.delitem(sys.modules, "trovefy.zz_prueba_cli", raising=False)
     importlib.invalidate_caches()
     assert cli.main(["zz-prueba"]) == 9
 
 
 def test_modulo_roto_no_impide_el_resto(registro_aislado, tmp_path, monkeypatch, capsys):
-    import trovify
+    import trovefy
 
     (tmp_path / "zz_roto_cli.py").write_text("import modulo_que_no_existe_zz\n", encoding="utf-8")
-    monkeypatch.setattr(trovify, "__path__", [*trovify.__path__, str(tmp_path)])
-    monkeypatch.delitem(sys.modules, "trovify.zz_roto_cli", raising=False)
+    monkeypatch.setattr(trovefy, "__path__", [*trovefy.__path__, str(tmp_path)])
+    monkeypatch.delitem(sys.modules, "trovefy.zz_roto_cli", raising=False)
     importlib.invalidate_caches()
     assert cli.main(["version"]) == 0
     err = capsys.readouterr().err
-    assert "aviso: no se pudo cargar trovify.zz_roto_cli: ModuleNotFoundError" in err
+    assert "aviso: no se pudo cargar trovefy.zz_roto_cli: ModuleNotFoundError" in err
 
 
 def test_registrar_sin_ayuda_sigue_funcionando(registro_aislado):
@@ -70,7 +70,7 @@ def test_ayuda_del_subcomando_sale_en_help(registro_aislado, capsys):
 
 def test_todos_los_subcomandos_reales_tienen_ayuda(registro_aislado, monkeypatch, capsys):
     # Se reimportan los *_cli reales para que se registren en el registro aislado.
-    for nombre in [m for m in sys.modules if m.startswith("trovify.") and m.endswith("_cli")]:
+    for nombre in [m for m in sys.modules if m.startswith("trovefy.") and m.endswith("_cli")]:
         monkeypatch.delitem(sys.modules, nombre)
     with pytest.raises(SystemExit):
         cli.main(["--help"])

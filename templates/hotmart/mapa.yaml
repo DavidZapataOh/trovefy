@@ -1,6 +1,6 @@
 # Mapa de pantallas de Hotmart (paso 10b). Solo lectura.
 # capturado: null = construido desde el Centro de Ayuda público, NO confirmado con tu cuenta real.
-# Se confirma con `trovify arranque confirmar 10b` (config/confirmaciones.yaml del vault) o poniendo aquí la fecha en un commit.
+# Se confirma con `trovefy arranque confirmar 10b` (config/confirmaciones.yaml del vault) o poniendo aquí la fecha en un commit.
 capturado: null
 fuente: >-
   https://help.hotmart.com/es/article/23867226765709/ y

@@ -1,10 +1,10 @@
 import pathlib
 
 import pytest
-from trovify.caza.filtros import Descarte
-from trovify.caza.nota import calcular_nota, decidir, lineal, log_share
-from trovify.caza.senales import Medida, Senales
-from trovify.config.umbrales import cargar
+from trovefy.caza.filtros import Descarte
+from trovefy.caza.nota import calcular_nota, decidir, lineal, log_share
+from trovefy.caza.senales import Medida, Senales
+from trovefy.config.umbrales import cargar
 
 U = cargar(pathlib.Path(__file__).resolve().parents[3] / "templates/cerebro/config/umbrales.yaml")
 NM = Medida(None, "no medido: prueba")

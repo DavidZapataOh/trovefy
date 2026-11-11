@@ -1,7 +1,7 @@
 ---
 name: recordar
 description: Convierte una corrección del usuario (o el motivo de un Rechazar) en una regla fechada R-nnn del cerebro, actualiza los umbrales y detecta contradicciones con las reglas vigentes. Úsala cuando el usuario diga «recuerda que…», corrija una decisión o quiera cambiar un umbral.
-allowed-tools: Read, Bash(trovify cerebro regla *), Bash(trovify cerebro lint)
+allowed-tools: Read, Bash(trovefy cerebro regla *), Bash(trovefy cerebro lint)
 ---
 
 # /recordar: de corrección a regla fechada
@@ -14,7 +14,7 @@ Responde siempre en español. Una regla nueva solo se escribe tras la confirmaci
 4. **Simula.** Pasa el JSON por stdin, sin crear archivos, con `--simular` (valida todo y no escribe nada):
 
    ```
-   trovify cerebro regla --simular --json - <<'JSON'
+   trovefy cerebro regla --simular --json - <<'JSON'
    {"titulo": "…", "regla": "…", "porque": "…", "como": "…", "fuente": "…",
     "umbrales": {"clave.del.umbral": 20}, "reemplaza": []}
    JSON
@@ -23,4 +23,4 @@ Responde siempre en español. Una regla nueva solo se escribe tras la confirmaci
    `umbrales` y `reemplaza` son opcionales. Muestra al usuario exactamente la salida: el id nuevo, los archivos que cambian, los valores de umbral que cambian, las páginas cuyo valor citado se actualiza («Se actualiza el valor citado en R-009, R-010») y las líneas «R-nnn pasa a ser dueña de <clave> (valor sin cambios)» (umbrales heredados de la regla reemplazada). Pide confirmación explícita; solo entonces ejecuta el mismo comando **sin** `--simular`, que escribe y repite el resumen y la ruta.
 5. **Si sale con código 3**, imprime los ids de las reglas vigentes que chocan. Léelas (Read en `wiki/reglas/`), muéstraselas al usuario y pregunta cuál manda. Si manda la nueva, no la reescribas a escondidas: dilo.
 6. **Repite (simulación y luego real) con `reemplaza`** (por ejemplo `"reemplaza": ["R-006"]`) solo cuando el usuario haya dicho que la nueva sustituye a la vieja. La vieja queda como «reemplazada», no se borra.
-7. **Comprueba el cerebro** con `trovify cerebro lint` y cuéntale al usuario el resultado. Si el comando sale con código 2, explica el mensaje de error y corrige el JSON.
+7. **Comprueba el cerebro** con `trovefy cerebro lint` y cuéntale al usuario el resultado. Si el comando sale con código 2, explica el mensaje de error y corrige el JSON.

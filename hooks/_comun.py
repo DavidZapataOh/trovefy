@@ -1,4 +1,4 @@
-"""Base común de los hooks de Trovify. Solo biblioteca estándar; falla cerrado.
+"""Base común de los hooks de Trovefy. Solo biblioteca estándar; falla cerrado.
 
 Formato (docs de Claude Code, PreToolUse): entrada JSON por stdin con
 ``tool_name``, ``tool_input`` y ``cwd``; para denegar se imprime
@@ -60,14 +60,14 @@ def herramienta(entrada: dict) -> tuple[str, dict]:
 
 
 def vault_root() -> pathlib.Path:
-    valor = os.environ.get("TROVIFY_VAULT")
+    valor = os.environ.get("TROVEFY_VAULT")
     if valor:
         return pathlib.Path(valor).expanduser()
-    return pathlib.Path("~/trovify-cerebro").expanduser()
+    return pathlib.Path("~/trovefy-cerebro").expanduser()
 
 
 def stop_activo(vault: pathlib.Path) -> bool:
-    return (vault / ".trovify" / "STOP").exists()
+    return (vault / ".trovefy" / "STOP").exists()
 
 
 def resolver(ruta: str, cwd: str | None) -> pathlib.Path:
@@ -79,8 +79,8 @@ def resolver(ruta: str, cwd: str | None) -> pathlib.Path:
 
 def bases_vault(vault: pathlib.Path, vault_res: pathlib.Path) -> set[str]:
     """Todas las grafías posibles de la ruta del vault dentro de un comando."""
-    bases = {str(vault), str(vault_res), "$TROVIFY_VAULT", "${TROVIFY_VAULT}"}
-    literal = os.environ.get("TROVIFY_VAULT")
+    bases = {str(vault), str(vault_res), "$TROVEFY_VAULT", "${TROVEFY_VAULT}"}
+    literal = os.environ.get("TROVEFY_VAULT")
     if literal:
         bases.add(literal)
         bases.add(os.path.expandvars(literal))
@@ -104,7 +104,7 @@ _DENY_FIJO = (
 def _salir_bloqueando(motivo: str) -> NoReturn:
     """Último recurso: código 2 con stderr bloquea aunque stdout falle."""
     try:
-        sys.stderr.write(f"trovify hook: {motivo}\n")
+        sys.stderr.write(f"trovefy hook: {motivo}\n")
         sys.stderr.flush()
     except BaseException:  # noqa: BLE001, S110 - no hay nada más que hacer
         pass
@@ -113,7 +113,7 @@ def _salir_bloqueando(motivo: str) -> NoReturn:
 
 def _diagnostico(texto: str) -> None:
     try:
-        sys.stderr.write(f"trovify hook: {texto}\n")
+        sys.stderr.write(f"trovefy hook: {texto}\n")
         sys.stderr.flush()
     except BaseException:  # noqa: BLE001, S110
         pass
@@ -155,7 +155,7 @@ def ejecutar_guardia(decidir: Callable[[dict], tuple[str, str]]) -> NoReturn:
         decision, motivo = "deny", f"fallo interno del hook: {type(exc).__name__}"
         _diagnostico(motivo)
     if decision == "deny" and not motivo:
-        motivo = "denegado por política de Trovify"
+        motivo = "denegado por política de Trovefy"
     _emitir(decision, motivo)
 
 

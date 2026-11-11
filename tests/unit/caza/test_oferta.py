@@ -1,7 +1,7 @@
 from datetime import date
 
 from ayudas import URL_TIENDA, anuncio, destino_impultienda
-from trovify.caza.oferta import agrupar, marcar_original
+from trovefy.caza.oferta import agrupar, marcar_original
 
 
 def test_original_y_copias():
@@ -98,7 +98,7 @@ def test_precio_reemplazado_quita_el_motivo_ambiguo():
 
 
 def test_precio_en_la_moneda_del_pais_de_los_anuncios():
-    from trovify.config.mercados import Mercado
+    from trovefy.config.mercados import Mercado
     u1 = "https://x.com/a"
     d = _d(u1, precio=29.0, moneda="EUR")
     d.precios = [(29.0, "EUR"), (120.0, "RON")]

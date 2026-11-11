@@ -2,21 +2,21 @@ import json
 import pathlib
 
 import pytest
-from trovify.caza import firecrawl as fc
-from trovify.caza.cache import Cache
-from trovify.caza.cliente import (
+from trovefy.caza import firecrawl as fc
+from trovefy.caza.cache import Cache
+from trovefy.caza.cliente import (
     ClienteBibliotecaPublica,
     ErrorDeRed,
     PaginaCapturada,
     SesionBloqueada,
 )
-from trovify.caza.firecrawl import (
+from trovefy.caza.firecrawl import (
     FirecrawlNoDisponible,
     FirecrawlRechazo,
     NavegadorFirecrawl,
     clave_firecrawl,
 )
-from trovify.caza.presupuesto import Presupuesto
+from trovefy.caza.presupuesto import Presupuesto
 
 FIX = pathlib.Path(__file__).resolve().parents[2] / "fixtures/biblioteca"
 CLAVE = "".join(["fc", "-", "prueba", "-", "x" * 12])  # construida: nunca un literal de clave
@@ -242,7 +242,7 @@ def test_success_false_es_error_con_texto_corto_sin_clave():
 
 
 def test_tres_rechazos_seguidos_paran_la_sesion():
-    from trovify.caza.presupuesto import ParadaPorErrores
+    from trovefy.caza.presupuesto import ParadaPorErrores
 
     c, _ = cliente(HttpFalso((400, {}), (400, {}), (400, {})))
     c.buscar("ALL", page_id="1")

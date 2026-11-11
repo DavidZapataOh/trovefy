@@ -3,16 +3,16 @@ from datetime import date
 
 import pytest
 from ejemplos_auditoria import CONTEXTO, link_pagina, oferta_ejemplo, paises_ejemplo
-from trovify.arranque.verificadores.cuenta import mercado_elegido
-from trovify.auditoria.paises import recomendar, tres_senales
-from trovify.auditoria.salida import (
+from trovefy.arranque.verificadores.cuenta import mercado_elegido
+from trovefy.auditoria.paises import recomendar, tres_senales
+from trovefy.auditoria.salida import (
     escribir_auditoria,
     producto_para,
     registrar_eleccion,
     render_auditoria,
 )
-from trovify.vault.andamio import crear_vault
-from trovify.vault.frontmatter import escribir, leer
+from trovefy.vault.andamio import crear_vault
+from trovefy.vault.frontmatter import escribir, leer
 
 GOLD = pathlib.Path(__file__).resolve().parents[2] / "golden/auditoria/AUDITORIA.md"
 HOY = date(2026, 11, 10)
@@ -149,8 +149,8 @@ def test_otra_eleccion_el_mismo_dia_manda_y_no_borra_la_anterior(tmp_path):
 def test_eleccion_sin_hueco_comprobado_se_advierte_aunque_otro_lo_tenga(tmp_path):
     v = vault(tmp_path)
     ps = paises_ejemplo()
-    from trovify.caza.hueco import HuecoPais
-    from trovify.caza.senales import Medida
+    from trovefy.caza.hueco import HuecoPais
+    from trovefy.caza.senales import Medida
 
     ps[1].hueco = HuecoPais("IT", Medida(None, "no medido: x"), "no_medido", None, [])
     p = escribir_auditoria(v, "o-ejemplo", ps, HOY).parent.name
@@ -215,7 +215,7 @@ def test_elegir_un_pais_muerto_no_cambia_su_estado(tmp_path):
     meta, _ = leer(v / "productos" / p / "PRODUCTO.md")
     assert meta["paises"]["RO"]["estado"] == "MUERTO"
     # el historial de otro producto lo sigue viendo
-    from trovify.auditoria.salida import historial_de
+    from trovefy.auditoria.salida import historial_de
 
     assert any("MUERTO" in x for x in historial_de(v, ["RO"]))
 
@@ -258,9 +258,9 @@ def test_golden_conserva_la_nota_de_la_caza_y_la_cobertura_en_la_recomendacion()
 
 
 def test_que_medir_en_el_informe_y_sin_recomendado(tmp_path):
-    from trovify.auditoria.paises import PaisAuditado
-    from trovify.caza.hueco import HuecoPais
-    from trovify.caza.senales import Medida
+    from trovefy.auditoria.paises import PaisAuditado
+    from trovefy.caza.hueco import HuecoPais
+    from trovefy.caza.senales import Medida
 
     h = HuecoPais("RO", Medida(None, "x"), "no_medido", None, [], "no medido: cuota del día agotada")
     ps = [PaisAuditado("RO", h, Medida(13.9), Medida(1.0), 100, [], None)]
@@ -292,11 +292,11 @@ def test_elegir_un_pais_fuera_de_mercados_avisa_y_no_aprueba(tmp_path):
 
 
 def test_ranking_pone_primero_los_de_hueco_comprobado():
-    from trovify.auditoria.paises import PaisAuditado, puntuar_pais
-    from trovify.auditoria.salida import orden_ranking
-    from trovify.caza.hueco import HuecoPais
-    from trovify.caza.senales import Medida
-    from trovify.config.umbrales import cargar
+    from trovefy.auditoria.paises import PaisAuditado, puntuar_pais
+    from trovefy.auditoria.salida import orden_ranking
+    from trovefy.caza.hueco import HuecoPais
+    from trovefy.caza.senales import Medida
+    from trovefy.config.umbrales import cargar
 
     u = cargar(pathlib.Path(__file__).resolve().parents[3] / "templates/cerebro/config/umbrales.yaml")
 
@@ -314,10 +314,10 @@ def test_ranking_pone_primero_los_de_hueco_comprobado():
 
 
 def _pais_n1(codigo, hueco, precio=1.0):
-    from trovify.auditoria.paises import PaisAuditado, puntuar_pais
-    from trovify.caza.hueco import HuecoPais
-    from trovify.caza.senales import Medida
-    from trovify.config.umbrales import cargar
+    from trovefy.auditoria.paises import PaisAuditado, puntuar_pais
+    from trovefy.caza.hueco import HuecoPais
+    from trovefy.caza.senales import Medida
+    from trovefy.config.umbrales import cargar
 
     u = cargar(pathlib.Path(__file__).resolve().parents[3] / "templates/cerebro/config/umbrales.yaml")
     h = HuecoPais(codigo, Medida(0 if hueco else None, None if hueco else "no medido: x"),

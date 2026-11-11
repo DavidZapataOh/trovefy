@@ -2,7 +2,7 @@ import pathlib
 
 import pytest
 import yaml
-from trovify.config.umbrales import UmbralFaltante, UmbralInvalido, cargar, valor
+from trovefy.config.umbrales import UmbralFaltante, UmbralInvalido, cargar, valor
 
 PLANTILLA = pathlib.Path(__file__).resolve().parents[3] / "templates/cerebro/config/umbrales.yaml"
 
@@ -56,7 +56,7 @@ def test_valor_lee_del_vault_y_falta(tmp_path):
 
 def test_valor_no_finito_se_rechaza(tmp_path):
     import pytest
-    from trovify.config.umbrales import UmbralInvalido, cargar
+    from trovefy.config.umbrales import UmbralInvalido, cargar
     for malo in (".nan", ".inf", "-.inf"):
         p = tmp_path / "u.yaml"
         p.write_text(f'a.b:\n  valor: {malo}\n  fuente: "x"\n  fecha: "2026-11-09"\n  gana_sobre: "—"\n  regla: R-001\n')

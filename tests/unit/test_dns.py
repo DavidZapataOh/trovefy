@@ -1,5 +1,5 @@
 import pytest
-from trovify.dns import SinRed, consultar, normalizar
+from trovefy.dns import SinRed, consultar, normalizar
 
 
 def r(tipo, data, nombre="kits-docentes.com."):

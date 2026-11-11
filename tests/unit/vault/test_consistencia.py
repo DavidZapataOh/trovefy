@@ -1,8 +1,8 @@
 import re
 
-from trovify.vault.andamio import crear_vault
-from trovify.vault.frontmatter import leer
-from trovify.vault.reglas import consistencia
+from trovefy.vault.andamio import crear_vault
+from trovefy.vault.frontmatter import leer
+from trovefy.vault.reglas import consistencia
 
 
 def test_semilla_es_consistente(tmp_path):
@@ -46,7 +46,7 @@ def test_paginas_de_wiki_con_frontmatter_y_enlazadas(tmp_path):
 def test_valores_de_las_reglas_coinciden_con_el_yaml():
     from pathlib import Path
 
-    from trovify.vault.reglas import valores_citados, valores_desactualizados
+    from trovefy.vault.reglas import valores_citados, valores_desactualizados
 
     raiz = Path(__file__).resolve().parents[3] / "templates" / "cerebro"
     assert valores_desactualizados(raiz) == []
@@ -75,7 +75,7 @@ def test_r005_esperar_usa_o_no_ni():
 
 
 def test_valores_desactualizados_comparte_implementacion(tmp_path):
-    from trovify.vault.reglas import valores_citados
+    from trovefy.vault.reglas import valores_citados
     crear_vault(tmp_path / "v")
     pares = valores_citados(tmp_path / "v")
     assert len(pares) >= 10 and all(len(x) == 4 for x in pares)

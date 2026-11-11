@@ -1,14 +1,14 @@
-from trovify.arranque.estado import marcar_hecho
-from trovify.arranque.verificadores.base import Confirmacion
-from trovify.arranque.verificadores.dominio import (
+from trovefy.arranque.estado import marcar_hecho
+from trovefy.arranque.verificadores.base import Confirmacion
+from trovefy.arranque.verificadores.dominio import (
     evaluar_ns,
     evaluar_txt,
     verificar_dominio,
     verificar_verificacion_meta,
 )
-from trovify.cli import main
-from trovify.dns import SinRed
-from trovify.navegador import Captura, NavegadorError
+from trovefy.cli import main
+from trovefy.dns import SinRed
+from trovefy.navegador import Captura, NavegadorError
 
 CONF = Confirmacion(fecha="2026-11-11", fuente="prueba")
 SIN_CONF = Confirmacion(fecha=None, fuente="prueba")
@@ -137,14 +137,14 @@ def test_08_navegador_y_sesion(tmp_path):
 def test_dato_dominio_se_normaliza_y_valida(tmp_path):
     v = ["--vault", str(tmp_path)]
     assert main(["arranque", "hecho", "07", *v, "--dato", "dominio=https://www.Kits-Docentes.com/x"]) == 0
-    from trovify.arranque.estado import cargar
+    from trovefy.arranque.estado import cargar
 
     assert next(p for p in cargar(tmp_path) if p.id == "07").datos["dominio"] == "kits-docentes.com"
     assert main(["arranque", "hecho", "07", *v, "--dato", "dominio=192.168.0.1"]) != 0
 
 
 def test_dominio_se_busca_con_limites():
-    from trovify.arranque.verificadores.dominio import _estado_verificado
+    from trovefy.arranque.verificadores.dominio import _estado_verificado
 
     assert not _estado_verificado("mikits.com Verificado\nkits.com No verificado", "kits.com")
     assert not _estado_verificado("mikits.com Verificado", "kits.com")
@@ -163,7 +163,7 @@ def test_07_fallo_guarda_la_medida_como_provisional(tmp_path):
 
 def test_confirmar_08_solo_con_dominio_verificado(tmp_path, capsys):
     import yaml
-    from trovify.arranque.verificadores.dominio import verificar_verificacion_meta
+    from trovefy.arranque.verificadores.dominio import verificar_verificacion_meta
 
     paso(tmp_path)
     dns = dns_falso({"TXT": TXT_OK})

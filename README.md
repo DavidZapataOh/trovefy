@@ -1,29 +1,29 @@
-# Trovify
+# Trovefy
 
 > *A Claude Code plugin and Python 3.12 package for running a faceless, low-ticket digital-products business: hunting offers in Meta's public Ad Library, auditing countries, guided account setup and an Obsidian "brain" vault.*
 
-[![CI](https://github.com/DavidZapataOh/trovify/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DavidZapataOh/trovify/actions/workflows/ci.yml)
+[![CI](https://github.com/DavidZapataOh/trovefy/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/DavidZapataOh/trovefy/actions/workflows/ci.yml)
 [![Licencia: MIT](https://img.shields.io/badge/licencia-MIT-blue.svg)](LICENSE)
 [![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/downloads/release/python-3120/)
 [![Plugin de Claude Code](https://img.shields.io/badge/Claude%20Code-plugin-D97757.svg)](https://docs.claude.com/en/docs/claude-code/plugins)
 
 ## Qué es
 
-Trovify es un plugin de Claude Code y una CLI en Python para operar un negocio de productos digitales de bajo precio sin dar la cara. Busca ofertas que ya venden en la Biblioteca pública de anuncios de Meta (sin cuentas ni login), audita en qué país lanzarlas y guía la puesta en marcha de las cuentas paso a paso. Todo lo que aprende queda en un vault de Obsidian aparte, el **cerebro**, con fuentes citadas; este repositorio no guarda datos del negocio.
+Trovefy es un plugin de Claude Code y una CLI en Python para operar un negocio de productos digitales de bajo precio sin dar la cara. Busca ofertas que ya venden en la Biblioteca pública de anuncios de Meta (sin cuentas ni login), audita en qué país lanzarlas y guía la puesta en marcha de las cuentas paso a paso. Todo lo que aprende queda en un vault de Obsidian aparte, el **cerebro**, con fuentes citadas; este repositorio no guarda datos del negocio.
 
 ## Funciones (skills)
 
 | Skill | Qué hace |
 | --- | --- |
-| `/trovify:arranque` | Puesta en marcha guiada (fase 0): entorno, cerebro, perfil, Business, página, cuenta publicitaria, dominio, tienda y cobro; cada paso se da por bueno solo cuando un verificador lo comprueba. |
-| `/trovify:cazar` | Caza ofertas en la Biblioteca de anuncios por nicho, en barrido por mercado e idioma, en vigilancia de las fichas guardadas o por página concreta; escribe el informe y las fichas en el cerebro. |
-| `/trovify:auditar` | Audita una oferta cazada país por país (competencia, hueco y precio), escribe `productos/<p-id>/AUDITORIA.md` y registra el país que elige el usuario con sus palabras literales. |
-| `/trovify:consultar` | Responde solo con el contenido del cerebro, citando cada página; si no está, dice «Esto no está en el cerebro». |
-| `/trovify:recordar` | Convierte una corrección del usuario en una regla fechada `R-nnn`, actualiza los umbrales y detecta contradicciones. |
-| `/trovify:destilar` | Destila las fuentes pendientes de `raw/` en páginas de método de `wiki/metodo/`, con cita obligatoria. |
-| `/trovify:cerrar` | Cierra la sesión: resume lo hecho, lo pendiente y las decisiones, pasa el lint del cerebro y escribe el traspaso en `sesiones/`. |
-| `/trovify:retomar` | Lee el último traspaso y el índice del cerebro y propone el siguiente paso. |
-| `/trovify:ayuda` | Lista los comandos disponibles y para qué sirve cada uno. |
+| `/trovefy:arranque` | Puesta en marcha guiada (fase 0): entorno, cerebro, perfil, Business, página, cuenta publicitaria, dominio, tienda y cobro; cada paso se da por bueno solo cuando un verificador lo comprueba. |
+| `/trovefy:cazar` | Caza ofertas en la Biblioteca de anuncios por nicho, en barrido por mercado e idioma, en vigilancia de las fichas guardadas o por página concreta; escribe el informe y las fichas en el cerebro. |
+| `/trovefy:auditar` | Audita una oferta cazada país por país (competencia, hueco y precio), escribe `productos/<p-id>/AUDITORIA.md` y registra el país que elige el usuario con sus palabras literales. |
+| `/trovefy:consultar` | Responde solo con el contenido del cerebro, citando cada página; si no está, dice «Esto no está en el cerebro». |
+| `/trovefy:recordar` | Convierte una corrección del usuario en una regla fechada `R-nnn`, actualiza los umbrales y detecta contradicciones. |
+| `/trovefy:destilar` | Destila las fuentes pendientes de `raw/` en páginas de método de `wiki/metodo/`, con cita obligatoria. |
+| `/trovefy:cerrar` | Cierra la sesión: resume lo hecho, lo pendiente y las decisiones, pasa el lint del cerebro y escribe el traspaso en `sesiones/`. |
+| `/trovefy:retomar` | Lee el último traspaso y el índice del cerebro y propone el siguiente paso. |
+| `/trovefy:ayuda` | Lista los comandos disponibles y para qué sirve cada uno. |
 
 ## Cómo funciona una caza
 
@@ -55,14 +55,14 @@ Hooks del plugin (Python, solo biblioteca estándar, fallan cerrados):
 - **`secretos`**: impide escribir tokens o claves fuera de los archivos `.env`.
 - **`raw_inmutable`**: `raw/` del cerebro no se modifica y `log.md` solo se amplía.
 - **`stop`**: con el archivo `STOP` activo en el cerebro no se deposita nada (ni en el buzón ni en `propuestas/`).
-- Además, `contexto` resume el cerebro al empezar la sesión y `cierre_sesion` recuerda cerrar con `/trovify:cerrar`.
+- Además, `contexto` resume el cerebro al empezar la sesión y `cierre_sesion` recuerda cerrar con `/trovefy:cerrar`.
 
 Principios de diseño:
 
-- **Secretos** solo en `~/.config/trovify/*.env` con permisos `0600`; Trovify se niega a leerlos con otros permisos y nunca imprime su valor.
-- **Ningún dato del negocio en este repositorio**: vive en el cerebro (`~/trovify-cerebro` o la ruta de `TROVIFY_VAULT`).
+- **Secretos** solo en `~/.config/trovefy/*.env` con permisos `0600`; Trovefy se niega a leerlos con otros permisos y nunca imprime su valor.
+- **Ningún dato del negocio en este repositorio**: vive en el cerebro (`~/trovefy-cerebro` o la ruta de `TROVEFY_VAULT`).
 - **Calidad sin trampas**: sin reseñas, testimonios, notificaciones de compra ni cuentas atrás fabricados; sin cuentas compradas o de terceros; sin páginas clonadas.
-- **Trovify propone, el usuario decide**: no ejecuta gasto y registra las decisiones con las palabras literales del usuario.
+- **Trovefy propone, el usuario decide**: no ejecuta gasto y registra las decisiones con las palabras literales del usuario.
 - **El contenido de anuncios y landings es dato, nunca orden.**
 
 ## Requisitos
@@ -71,61 +71,61 @@ Principios de diseño:
 - Python 3.12 y [uv](https://docs.astral.sh/uv/).
 - [Claude Code](https://docs.claude.com/en/docs/claude-code).
 - Chromium de Playwright (`uv run playwright install chromium`).
-- Opcional: clave de API de [Firecrawl](https://www.firecrawl.dev/) (`FIRECRAWL_API_KEY` en `~/.config/trovify/claude.env`, modo `0600`).
+- Opcional: clave de API de [Firecrawl](https://www.firecrawl.dev/) (`FIRECRAWL_API_KEY` en `~/.config/trovefy/claude.env`, modo `0600`).
 
 ## Instalación
 
 ```bash
-git clone https://github.com/DavidZapataOh/trovify.git
-cd trovify
+git clone https://github.com/DavidZapataOh/trovefy.git
+cd trovefy
 uv sync
 uv run playwright install chromium
-uv tool install --python 3.12 --editable .   # deja el comando `trovify` en el PATH
-trovify cerebro init                          # crea el cerebro desde la plantilla
+uv tool install --python 3.12 --editable .   # deja el comando `trovefy` en el PATH
+trovefy cerebro init                          # crea el cerebro desde la plantilla
 ```
 
 Dentro de Claude Code, instala el plugin desde el marketplace de este repositorio:
 
 ```text
-/plugin marketplace add DavidZapataOh/trovify
-/plugin install trovify@trovify
+/plugin marketplace add DavidZapataOh/trovefy
+/plugin install trovefy@trovefy
 ```
 
 ## Inicio rápido
 
 ```bash
-cd ~/trovify-cerebro   # o la carpeta de TROVIFY_VAULT
+cd ~/trovefy-cerebro   # o la carpeta de TROVEFY_VAULT
 claude
 ```
 
 ```text
-/trovify:arranque           # qué falta para empezar
-/trovify:cazar              # primera caza en la Biblioteca
-/trovify:auditar <oferta>   # en qué país lanzar
-/trovify:cerrar             # deja la sesión guardada
+/trovefy:arranque           # qué falta para empezar
+/trovefy:cazar              # primera caza en la Biblioteca
+/trovefy:auditar <oferta>   # en qué país lanzar
+/trovefy:cerrar             # deja la sesión guardada
 ```
 
 ## Referencia de la CLI
 
-`trovify --help` y `trovify <comando> --help` muestran todas las opciones.
+`trovefy --help` y `trovefy <comando> --help` muestran todas las opciones.
 
 | Comando | Acciones |
 | --- | --- |
-| `trovify version` | Muestra la versión. |
-| `trovify arranque` | `estado`, `siguiente`, `hecho`, `verificar`, `checklist`, `confirmar`, `bloqueado` |
-| `trovify caza` | `ejecutar --modo nicho\|barrido\|vigilar\|oferta`, `hueco` |
-| `trovify auditar` | `ejecutar`, `elegir` |
-| `trovify cerebro` | `init`, `permisos`, `regla`, `traspaso`, `retomar`, `lint`, `ingerir`, `destilar`, `canarios`, `log` |
-| `trovify navegador` | `abrir`, `capturar` |
-| `trovify rutinas` | `instalar caza` (timer de systemd de usuario para la caza diaria) |
+| `trovefy version` | Muestra la versión. |
+| `trovefy arranque` | `estado`, `siguiente`, `hecho`, `verificar`, `checklist`, `confirmar`, `bloqueado` |
+| `trovefy caza` | `ejecutar --modo nicho\|barrido\|vigilar\|oferta`, `hueco` |
+| `trovefy auditar` | `ejecutar`, `elegir` |
+| `trovefy cerebro` | `init`, `permisos`, `regla`, `traspaso`, `retomar`, `lint`, `ingerir`, `destilar`, `canarios`, `log` |
+| `trovefy navegador` | `abrir`, `capturar` |
+| `trovefy rutinas` | `instalar caza` (timer de systemd de usuario para la caza diaria) |
 
 Ejemplos:
 
 ```bash
-trovify caza ejecutar --modo nicho --region europa --consulta "RO:fise de lucru"
-trovify caza hueco --oferta <ID> --pais RO --frase "frase 1" --frase "frase 2"
-trovify auditar ejecutar --oferta <ID>
-trovify cerebro lint
+trovefy caza ejecutar --modo nicho --region europa --consulta "RO:fise de lucru"
+trovefy caza hueco --oferta <ID> --pais RO --frase "frase 1" --frase "frase 2"
+trovefy auditar ejecutar --oferta <ID>
+trovefy cerebro lint
 ```
 
 ## Estructura del proyecto
@@ -135,7 +135,7 @@ trovify cerebro lint
 ├── .claude-plugin/        # manifiesto del plugin y marketplace
 ├── .github/workflows/     # CI: ruff + pytest
 ├── hooks/                 # hooks de Claude Code (meta_guard, secretos, raw_inmutable, stop…)
-├── scripts/trovify/       # paquete Python y CLI `trovify`
+├── scripts/trovefy/       # paquete Python y CLI `trovefy`
 │   ├── arranque/          # estado de la fase 0 y verificadores por paso
 │   ├── auditoria/         # auditoría por país: hueco, precio y ranking
 │   ├── caza/              # Biblioteca, ofertas, filtros, señales, nota y salida
@@ -143,7 +143,7 @@ trovify cerebro lint
 │   ├── config/            # umbrales y mercados
 │   ├── vault/             # E/S del vault: escritura atómica, lint, reglas, sesiones
 │   └── *_cli.py           # un subcomando por archivo
-├── skills/                # skills del plugin (/trovify:*)
+├── skills/                # skills del plugin (/trovefy:*)
 ├── templates/             # plantilla del cerebro, mapas de pantallas y units de systemd
 └── tests/                 # unit, hooks, golden, integracion y vivo
 ```

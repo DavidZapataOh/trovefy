@@ -13,11 +13,11 @@ Tener un dominio propio gestionado por Cloudflare, que será la dirección públ
 2. En «Registro de dominios» (Domain Registration) busca el nombre y cómpralo en Cloudflare Registrar. Los datos de contacto son los tuyos reales.
 3. Comprobar que el dominio quedó en Cloudflare: en «Sitios web» (Websites) debe aparecer con estado «Activo». Con Registrar, los servidores de nombres ya son los de Cloudflare.
 4. Si lo compraste en otro registrador, añade el dominio en «Sitios web» y cambia en ese registrador los servidores de nombres por los dos que te da Cloudflare (terminan en `.ns.cloudflare.com`).
-5. Guarda el dominio en Trovify (comando de Trovify, no de sistema):
-   `trovify arranque hecho 07 --dato dominio=<tu-dominio>`
+5. Guarda el dominio en Trovefy (comando de Trovefy, no de sistema):
+   `trovefy arranque hecho 07 --dato dominio=<tu-dominio>`
    Escribe el dominio principal (por ejemplo `midominio.com`), no un subdominio como `tienda.midominio.com`.
-   Trovify lo guarda en minúsculas y sin `https://` ni `www.`.
-6. Verifica: `trovify arranque verificar 07`.
+   Trovefy lo guarda en minúsculas y sin `https://` ni `www.`.
+6. Verifica: `trovefy arranque verificar 07`.
 
 **Errores típicos**
 - Síntoma: «el dominio no usa los servidores de nombres de Cloudflare». Arreglo: revisa el paso 4; si acabas de cambiarlos, la propagación del DNS puede tardar desde minutos hasta unas horas. Repite la verificación más tarde.
@@ -26,4 +26,4 @@ Tener un dominio propio gestionado por Cloudflare, que será la dirección públ
 - Síntoma: `--dato dominio` rechazado. Arreglo: escribe solo el dominio (`midominio.com`), sin IP ni espacios.
 
 **Cómo se verifica**
-`trovify arranque verificar 07` pregunta por DNS sobre HTTPS a Cloudflare (`cloudflare-dns.com`, consulta pública, sin cuenta) por los servidores de nombres del dominio y es ✓ si alguno termina en `.ns.cloudflare.com`. Guarda la lista y la fecha en `config/evidencia/07-ns-<fecha>.json`.
+`trovefy arranque verificar 07` pregunta por DNS sobre HTTPS a Cloudflare (`cloudflare-dns.com`, consulta pública, sin cuenta) por los servidores de nombres del dominio y es ✓ si alguno termina en `.ns.cloudflare.com`. Guarda la lista y la fecha en `config/evidencia/07-ns-<fecha>.json`.

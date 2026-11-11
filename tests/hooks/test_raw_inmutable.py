@@ -64,7 +64,7 @@ def test_bash_operadores(correr_hook, vault_tmp):
     denegar = [
         f"mv {v}/raw/a /tmp/a", f"sed -i s/a/b/ {v}/raw/a", f"truncate -s0 {v}/log.md",
         f"echo x > {v}/log.md", f"echo x | tee {v}/raw/a", f"cp /tmp/a {v}/raw/a",
-        f"chmod 777 {v}/raw/a", f"ln -sf /tmp/a {v}/raw/a", "rm -rf $TROVIFY_VAULT/raw/x",
+        f"chmod 777 {v}/raw/a", f"ln -sf /tmp/a {v}/raw/a", "rm -rf $TROVEFY_VAULT/raw/x",
         f"rm {v}/log.md",
     ]
     for c in denegar:
@@ -89,13 +89,13 @@ def _bash(correr_hook, vault, cmd, cwd="/"):
 
 
 def test_bash_vault_con_tilde_y_home(correr_hook, vault_tmp, tmp_path, monkeypatch):
-    home = tmp_path / "casa"; (home / "trovify-cerebro/raw").mkdir(parents=True)
+    home = tmp_path / "casa"; (home / "trovefy-cerebro/raw").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
-    v = home / "trovify-cerebro"
-    for c in ("rm -rf ~/trovify-cerebro/raw/x", "rm $HOME/trovify-cerebro/log.md",
-              "rm ${HOME}/trovify-cerebro/raw/x"):
+    v = home / "trovefy-cerebro"
+    for c in ("rm -rf ~/trovefy-cerebro/raw/x", "rm $HOME/trovefy-cerebro/log.md",
+              "rm ${HOME}/trovefy-cerebro/raw/x"):
         assert _bash(correr_hook, v, c) == "deny", c
-    assert _bash(correr_hook, v, "cat ~/trovify-cerebro/raw/x") == "allow"
+    assert _bash(correr_hook, v, "cat ~/trovefy-cerebro/raw/x") == "allow"
 
 
 def test_bash_env_del_vault_con_tilde(correr_hook, vault_tmp, tmp_path, monkeypatch):
@@ -129,8 +129,8 @@ def test_bash_tee_sin_append_aunque_haya_otro_con_append(correr_hook, vault_tmp)
 
 def test_bash_cd_al_vault_y_relativo(correr_hook, vault_tmp):
     v = str(vault_tmp)
-    for c in ('cd "$TROVIFY_VAULT" && rm -rf raw/x', f"cd {v}; rm -rf raw/x",
-              "cd ${TROVIFY_VAULT} && rm log.md"):
+    for c in ('cd "$TROVEFY_VAULT" && rm -rf raw/x', f"cd {v}; rm -rf raw/x",
+              "cd ${TROVEFY_VAULT} && rm log.md"):
         assert _bash(correr_hook, vault_tmp, c) == "deny", c
     assert _bash(correr_hook, vault_tmp, "cd /tmp && rm -rf raw/x") == "allow"
 
@@ -169,14 +169,14 @@ def test_edit_log_replace_all_y_ocurrencias_repetidas(correr_hook, vault_tmp):
 
 
 def test_bash_comillas_entre_base_y_subruta(correr_hook, vault_tmp, tmp_path, monkeypatch):
-    home = tmp_path / "casa"; (home / "trovify-cerebro").mkdir(parents=True)
+    home = tmp_path / "casa"; (home / "trovefy-cerebro").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
-    v = home / "trovify-cerebro"
-    for c in ('rm "$TROVIFY_VAULT"/raw/x', 'rm "$HOME"/trovify-cerebro/raw/x',
-              "rm '$HOME'/trovify-cerebro/log.md", 'cd "$TROVIFY_VAULT"/ && rm raw/x',
+    v = home / "trovefy-cerebro"
+    for c in ('rm "$TROVEFY_VAULT"/raw/x', 'rm "$HOME"/trovefy-cerebro/raw/x',
+              "rm '$HOME'/trovefy-cerebro/log.md", 'cd "$TROVEFY_VAULT"/ && rm raw/x',
               f'cd -- {v} && rm raw/x', f'pushd "{v}" && rm raw/x'):
         assert _bash(correr_hook, v, c) == "deny", c
-    assert _bash(correr_hook, v, 'cat "$TROVIFY_VAULT"/raw/x') == "allow"
+    assert _bash(correr_hook, v, 'cat "$TROVEFY_VAULT"/raw/x') == "allow"
 
 
 def test_bash_cwd_en_subdirectorio_del_vault(correr_hook, vault_tmp):
@@ -206,8 +206,8 @@ def test_bash_cwd_en_subdirectorio_sin_falsos_positivos(correr_hook, vault_tmp):
 
 def test_bash_cadena_de_cd_con_cwd_dentro_del_vault(correr_hook, vault_tmp):
     w, v = str(vault_tmp / "wiki"), str(vault_tmp)
-    for cmd in ("cd $TROVIFY_VAULT && rm -rf raw/x", f"cd {v} && rm -rf raw/x",
-                "cd .. && rm -rf raw/x", 'cd "$TROVIFY_VAULT" ; rm raw/x',
+    for cmd in ("cd $TROVEFY_VAULT && rm -rf raw/x", f"cd {v} && rm -rf raw/x",
+                "cd .. && rm -rf raw/x", 'cd "$TROVEFY_VAULT" ; rm raw/x',
                 f"cd /tmp || cd {v} && rm log.md"):
         assert _bash(correr_hook, vault_tmp, cmd, w) == "deny", cmd
 

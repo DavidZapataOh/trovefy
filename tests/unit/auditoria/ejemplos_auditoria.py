@@ -6,11 +6,11 @@ IT con hueco y 0,5; FR con el original ya traducido (no tirar).
 
 import pathlib
 
-from trovify.auditoria.orquestador import lineas_busquedas
-from trovify.auditoria.paises import PaisAuditado, no_tirar, puntuar_pais
-from trovify.caza.hueco import HuecoPais
-from trovify.caza.senales import Medida
-from trovify.config.umbrales import cargar
+from trovefy.auditoria.orquestador import lineas_busquedas
+from trovefy.auditoria.paises import PaisAuditado, no_tirar, puntuar_pais
+from trovefy.caza.hueco import HuecoPais
+from trovefy.caza.senales import Medida
+from trovefy.config.umbrales import cargar
 
 _UMBRALES = pathlib.Path(__file__).resolve().parents[3] / "templates/cerebro/config/umbrales.yaml"
 _BIB = "https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country={pais}&media_type=all"

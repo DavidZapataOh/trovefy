@@ -4,19 +4,19 @@ import pathlib
 import re
 import stat
 
-from trovify.arranque.estado import marcar_hecho
-from trovify.arranque.verificadores.base import (
+from trovefy.arranque.estado import marcar_hecho
+from trovefy.arranque.verificadores.base import (
     PantallaProvisional,
     extracto,
     guardar_provisional,
     leer_texto_provisional,
     ultimo_texto_provisional,
 )
-from trovify.arranque.verificadores.impultienda import verificar_impultienda
-from trovify.arranque.verificadores.meta_ids import verificar_pagina
-from trovify.arranque.verificadores.pagos import verificar_hotmart
-from trovify.mapa import cargar
-from trovify.navegador import Captura
+from trovefy.arranque.verificadores.impultienda import verificar_impultienda
+from trovefy.arranque.verificadores.meta_ids import verificar_pagina
+from trovefy.arranque.verificadores.pagos import verificar_hotmart
+from trovefy.mapa import cargar
+from trovefy.navegador import Captura
 
 RAIZ = pathlib.Path(__file__).resolve().parents[3]
 FIX = RAIZ / "tests/fixtures/arranque"
@@ -110,8 +110,8 @@ def test_10b_guarda_las_dos_capturas(tmp_path):
 
 
 def test_navegador_capturar_guarda_el_texto(tmp_path, monkeypatch, capsys):
-    from trovify import navegador
-    from trovify.cli import main
+    from trovefy import navegador
+    from trovefy.cli import main
 
     monkeypatch.setenv("HOME", str(tmp_path))
 
@@ -121,7 +121,7 @@ def test_navegador_capturar_guarda_el_texto(tmp_path, monkeypatch, capsys):
         return Captura(url + "?token=1", "<html>", "Plan actual: Free", captura_png)
 
     monkeypatch.setattr(navegador, "capturar", capturar)
-    monkeypatch.setenv("TROVIFY_VAULT", str(tmp_path / "v"))
+    monkeypatch.setenv("TROVEFY_VAULT", str(tmp_path / "v"))
     destino = tmp_path / "v/config/evidencia/provisional/pantalla.png"
     assert main(["navegador", "capturar", "impultienda", "https://app.impultienda.ar/x", "--png", str(destino)]) == 0
     txt = destino.with_suffix(".txt")
@@ -131,8 +131,8 @@ def test_navegador_capturar_guarda_el_texto(tmp_path, monkeypatch, capsys):
 
 
 def test_navegador_capturar_no_guarda_texto_con_secreto(tmp_path, monkeypatch, capsys):
-    from trovify import navegador
-    from trovify.cli import main
+    from trovefy import navegador
+    from trovefy.cli import main
 
     monkeypatch.setenv("HOME", str(tmp_path))
 
@@ -142,7 +142,7 @@ def test_navegador_capturar_no_guarda_texto_con_secreto(tmp_path, monkeypatch, c
         return Captura(url, "", "clave " + _sk(), captura_png)
 
     monkeypatch.setattr(navegador, "capturar", capturar)
-    monkeypatch.setenv("TROVIFY_VAULT", str(tmp_path / "v"))
+    monkeypatch.setenv("TROVEFY_VAULT", str(tmp_path / "v"))
     destino = tmp_path / "v/config/evidencia/provisional/pantalla.png"
     assert main(["navegador", "capturar", "impultienda", "https://app.impultienda.ar/x", "--png", str(destino)]) == 0
     assert not destino.with_suffix(".txt").exists()
@@ -151,11 +151,11 @@ def test_navegador_capturar_no_guarda_texto_con_secreto(tmp_path, monkeypatch, c
 
 
 def test_navegador_capturar_fuera_del_vault_solo_png(tmp_path, monkeypatch, capsys):
-    from trovify import navegador
-    from trovify.cli import main
+    from trovefy import navegador
+    from trovefy.cli import main
 
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("TROVIFY_VAULT", str(tmp_path / "v"))
+    monkeypatch.setenv("TROVEFY_VAULT", str(tmp_path / "v"))
 
     def capturar(servicio, url, captura_png=None, **kw):
         captura_png.parent.mkdir(parents=True, exist_ok=True)

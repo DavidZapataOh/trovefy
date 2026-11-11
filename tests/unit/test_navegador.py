@@ -1,20 +1,20 @@
 import stat
 
 import pytest
-from trovify.navegador import NavegadorError, perfil, sesion_caducada
+from trovefy.navegador import NavegadorError, perfil, sesion_caducada
 
 
 def test_perfil_privado(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     p = perfil("meta")
-    assert p == tmp_path / ".config/trovify/pw-meta" and stat.S_IMODE(p.stat().st_mode) == 0o700
+    assert p == tmp_path / ".config/trovefy/pw-meta" and stat.S_IMODE(p.stat().st_mode) == 0o700
     with pytest.raises(ValueError):
         perfil("../otro")
 
 
 def test_perfil_existente_se_endurece(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
-    d = tmp_path / ".config/trovify/pw-meta"
+    d = tmp_path / ".config/trovefy/pw-meta"
     d.mkdir(parents=True, mode=0o755)
     d.chmod(0o755)
     assert stat.S_IMODE(perfil("meta").stat().st_mode) == 0o700
@@ -36,7 +36,7 @@ def test_sesion_caducada_no_medido():
 
 def test_cli_servicio_invalido(capsys, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
-    from trovify.cli import main
+    from trovefy.cli import main
 
     assert main(["navegador", "abrir", "../x", "http://127.0.0.1"]) == 2
     assert "Error" in capsys.readouterr().err
@@ -44,15 +44,15 @@ def test_cli_servicio_invalido(capsys, tmp_path, monkeypatch):
 
 def test_cli_url_invalida(capsys, tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
-    from trovify.cli import main
+    from trovefy.cli import main
 
     assert main(["navegador", "capturar", "meta", "no-es-url", "--png", "x.png"]) == 2
 
 
 def test_cli_capturar_error_de_navegador_sin_traza(monkeypatch, capsys, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
-    import trovify.navegador as nav
-    from trovify.cli import main
+    import trovefy.navegador as nav
+    from trovefy.cli import main
 
     def falla(*a, **k):
         raise NavegadorError("no se pudo abrir la página")
@@ -66,20 +66,20 @@ def test_cli_capturar_error_de_navegador_sin_traza(monkeypatch, capsys, tmp_path
 def test_lanzar_activa_sandbox(tmp_path, monkeypatch):
     from unittest.mock import MagicMock
 
-    import trovify.navegador as nav
+    import trovefy.navegador as nav
 
     monkeypatch.setenv("HOME", str(tmp_path))
     p = MagicMock()
     nav._lanzar(p, "meta", True)
     kw = p.chromium.launch_persistent_context.call_args.kwargs
     assert kw["chromium_sandbox"] is True and kw["headless"] is False
-    assert kw["user_data_dir"] == str(tmp_path / ".config/trovify/pw-meta")
+    assert kw["user_data_dir"] == str(tmp_path / ".config/trovefy/pw-meta")
 
 
 def test_lanzar_error_en_espanol(tmp_path, monkeypatch):
     from unittest.mock import MagicMock
 
-    import trovify.navegador as nav
+    import trovefy.navegador as nav
 
     monkeypatch.setenv("HOME", str(tmp_path))
     p = MagicMock()
@@ -91,7 +91,7 @@ def test_lanzar_error_en_espanol(tmp_path, monkeypatch):
 def test_base_privada_modos(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     perfil("meta")
-    assert stat.S_IMODE((tmp_path / ".config/trovify").stat().st_mode) == 0o700
+    assert stat.S_IMODE((tmp_path / ".config/trovefy").stat().st_mode) == 0o700
 
 
 @pytest.mark.parametrize("url", [

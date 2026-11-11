@@ -1,11 +1,11 @@
 import json
 from datetime import datetime, timedelta
 
-from trovify.arranque.verificadores import REGISTRO
-from trovify.cerebro.canarios import cargar, sha256_de
-from trovify.vault.andamio import crear_vault
-from trovify.vault.escritura import ZONA_NEGOCIO
-from trovify.vault.frontmatter import escribir
+from trovefy.arranque.verificadores import REGISTRO
+from trovefy.cerebro.canarios import cargar, sha256_de
+from trovefy.vault.andamio import crear_vault
+from trovefy.vault.escritura import ZONA_NEGOCIO
+from trovefy.vault.frontmatter import escribir
 
 
 def _hoy():
@@ -40,7 +40,7 @@ def test_cerebro_sin_canarios_no_verifica(tmp_path):
     crear_vault(tmp_path)
     r = REGISTRO["01"](tmp_path)
     assert r.ok is False and "canarios" in r.motivo
-    assert any("trovify cerebro canarios" in a for a in r.arreglos)
+    assert any("trovefy cerebro canarios" in a for a in r.arreglos)
 
 
 def test_canarios_viejos_no_valen(tmp_path):
@@ -134,7 +134,7 @@ def test_resultado_no_ok(tmp_path):
 
 def test_canarios_yaml_roto(tmp_path, monkeypatch):
     import yaml
-    from trovify.cerebro import canarios
+    from trovefy.cerebro import canarios
 
     def roto(*a, **k):
         raise yaml.YAMLError("mal")

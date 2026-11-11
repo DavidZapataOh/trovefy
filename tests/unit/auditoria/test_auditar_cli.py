@@ -2,12 +2,12 @@ from datetime import date
 
 import pytest
 from ejemplos_auditoria import oferta_ejemplo, paises_ejemplo
-from trovify import auditar_cli, cli
-from trovify.auditoria import orquestador
-from trovify.auditoria.salida import escribir_auditoria
-from trovify.caza import orquestador as caza_orq
-from trovify.vault.andamio import crear_vault
-from trovify.vault.frontmatter import escribir, leer
+from trovefy import auditar_cli, cli
+from trovefy.auditoria import orquestador
+from trovefy.auditoria.salida import escribir_auditoria
+from trovefy.caza import orquestador as caza_orq
+from trovefy.vault.andamio import crear_vault
+from trovefy.vault.frontmatter import escribir, leer
 
 
 @pytest.fixture
@@ -15,7 +15,7 @@ def vault(tmp_path, monkeypatch):
     v = tmp_path / "v"
     crear_vault(v)
     escribir(v / "wiki/ofertas/o-ejemplo.md", oferta_ejemplo(), "")
-    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     return v
 

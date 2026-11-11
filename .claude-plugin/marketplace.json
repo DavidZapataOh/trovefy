@@ -1,14 +1,14 @@
 {
-  "name": "trovify",
-  "owner": { "name": "Trovify" },
-  "description": "Marketplace de Trovify.",
+  "name": "trovefy",
+  "owner": { "name": "Trovefy" },
+  "description": "Marketplace de Trovefy.",
   "plugins": [
     {
-      "name": "trovify",
+      "name": "trovefy",
       "source": "./",
-      "description": "Trovify: caza de ofertas en la Biblioteca de anuncios de Meta, auditoría por país y cerebro en Obsidian para un negocio de productos digitales.",
-      "homepage": "https://github.com/DavidZapataOh/trovify",
-      "repository": "https://github.com/DavidZapataOh/trovify",
+      "description": "Trovefy: caza de ofertas en la Biblioteca de anuncios de Meta, auditoría por país y cerebro en Obsidian para un negocio de productos digitales.",
+      "homepage": "https://github.com/DavidZapataOh/trovefy",
+      "repository": "https://github.com/DavidZapataOh/trovefy",
       "license": "MIT"
     }
   ]

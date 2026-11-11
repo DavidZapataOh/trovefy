@@ -1,6 +1,6 @@
 import pathlib
 
-from trovify.config.mercados import cargar
+from trovefy.config.mercados import cargar
 
 PLANTILLA = pathlib.Path(__file__).resolve().parents[3] / "templates/cerebro/config/mercados.yaml"
 
@@ -35,7 +35,7 @@ def test_no_sin_comillas_es_noruega(tmp_path):
 
 
 def test_yes_on_off_siguen_siendo_texto(tmp_path):
-    from trovify.config.yaml_config import cargar_yaml
+    from trovefy.config.yaml_config import cargar_yaml
 
     datos = cargar_yaml("a: NO\nb: yes\nc: on\nd: off\ne: true\nf: false\ng: n\nYES: 1\n")
     assert datos == {"a": "NO", "b": "yes", "c": "on", "d": "off", "e": True, "f": False, "g": "n", "YES": 1}

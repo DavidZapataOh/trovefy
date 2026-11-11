@@ -2,8 +2,8 @@
 
 Alcance (el plugin corre en todos los proyectos del usuario): las escrituras
 (Write/Edit/MultiEdit/NotebookEdit) se revisan solo si el destino resuelto está
-en el vault, en el repo de Trovify (``CLAUDE_PLUGIN_ROOT``) o en
-``~/.config/trovify/``; allí los ``*.env`` están exentos. Bash se revisa en
+en el vault, en el repo de Trovefy (``CLAUDE_PLUGIN_ROOT``) o en
+``~/.config/trovefy/``; allí los ``*.env`` están exentos. Bash se revisa en
 cualquier cwd, pero solo con los patrones de token de Meta y de bot de
 Telegram (la clave de Firecrawl se revisa solo en las escrituras). El motivo nombra el patrón, jamás el valor. Solo biblioteca estándar;
 falla cerrado.
@@ -63,11 +63,11 @@ def textos_a_revisar(tool_name: str, tool_input: dict) -> list[tuple[str | None,
     return []
 
 
-def _config_trovify() -> pathlib.Path | None:
+def _config_trovefy() -> pathlib.Path | None:
     home = os.environ.get("HOME")
     if not home:
         return None
-    return pathlib.Path(home, ".config", "trovify").resolve(strict=False)
+    return pathlib.Path(home, ".config", "trovefy").resolve(strict=False)
 
 
 def _raices_protegidas() -> list[pathlib.Path]:
@@ -75,7 +75,7 @@ def _raices_protegidas() -> list[pathlib.Path]:
     plugin = os.environ.get("CLAUDE_PLUGIN_ROOT")
     if plugin:
         raices.append(pathlib.Path(plugin).expanduser().resolve(strict=False))
-    config = _config_trovify()
+    config = _config_trovefy()
     if config is not None:
         raices.append(config)
     return raices
@@ -90,7 +90,7 @@ def _en_alcance(destino: pathlib.Path) -> bool:
 
 
 def _es_env_permitido(destino: pathlib.Path) -> bool:
-    config = _config_trovify()
+    config = _config_trovefy()
     return config is not None and destino.name.endswith(".env") and config in destino.parents
 
 
@@ -108,7 +108,7 @@ def decidir(entrada: dict) -> tuple[str, str]:
         if patron:
             return "deny", (
                 f"secreto detectado: {patron}; los secretos solo van en "
-                "~/.config/trovify/*.env"
+                "~/.config/trovefy/*.env"
             )
     return "allow", ""
 

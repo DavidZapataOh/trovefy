@@ -1,4 +1,4 @@
-"""`trovify arranque confirmar`: el usuario confirma un patrón con su pantalla real (I-2)."""
+"""`trovefy arranque confirmar`: el usuario confirma un patrón con su pantalla real (I-2)."""
 
 import dataclasses
 import pathlib
@@ -6,16 +6,16 @@ import shutil
 
 import pytest
 import yaml
-from trovify.arranque.verificadores.base import (
+from trovefy.arranque.verificadores.base import (
     fecha_confirmada,
     ultimo_texto_provisional,
 )
-from trovify.arranque.verificadores.cuenta import verificar_cuenta
-from trovify.arranque.verificadores.impultienda import verificar_impultienda
-from trovify.arranque.verificadores.meta_ids import verificar_business
-from trovify.cli import main
-from trovify.mapa import cargar
-from trovify.navegador import Captura
+from trovefy.arranque.verificadores.cuenta import verificar_cuenta
+from trovefy.arranque.verificadores.impultienda import verificar_impultienda
+from trovefy.arranque.verificadores.meta_ids import verificar_business
+from trovefy.cli import main
+from trovefy.mapa import cargar
+from trovefy.navegador import Captura
 
 RAIZ = pathlib.Path(__file__).resolve().parents[3]
 FIX = RAIZ / "tests/fixtures/arranque"
@@ -165,7 +165,7 @@ def test_mapa_que_no_casa_no_se_confirma(tmp_path, capsys):
 
 
 def test_checklist_acepta_si_con_tilde(tmp_path):
-    from trovify.arranque.verificadores.checklist import CHECKLISTS
+    from trovefy.arranque.verificadores.checklist import CHECKLISTS
 
     claves = list(CHECKLISTS["03"])
     args = ["arranque", "checklist", "03", "--vault", str(tmp_path)]
@@ -210,7 +210,7 @@ def test_mapa_cambiado_invalida_la_confirmacion(tmp_path):
 
 
 def test_patron_de_codigo_cambiado_invalida_la_confirmacion(tmp_path, monkeypatch):
-    from trovify.arranque.verificadores import base
+    from trovefy.arranque.verificadores import base
 
     v = _vault(tmp_path)
     bien = (FIX / "ajustes_cuenta.txt").read_text()
@@ -223,7 +223,7 @@ def test_patron_de_codigo_cambiado_invalida_la_confirmacion(tmp_path, monkeypatc
 
 
 def test_lector_actual_que_ya_no_casa_invalida(tmp_path, monkeypatch):
-    from trovify.arranque.verificadores import base
+    from trovefy.arranque.verificadores import base
 
     v = _vault(tmp_path)
     bien = (FIX / "ajustes_cuenta.txt").read_text()

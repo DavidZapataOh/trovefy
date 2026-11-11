@@ -1,5 +1,5 @@
-from trovify.arranque.verificadores import REGISTRO
-from trovify.vault.frontmatter import escribir
+from trovefy.arranque.verificadores import REGISTRO
+from trovefy.vault.frontmatter import escribir
 
 LINK = "https://www.facebook.com/ads/library/?view_all_page_id=102506312071455&country=DE"
 
@@ -16,7 +16,7 @@ def test_caza_con_enlace_reproducible(tmp_path):
 def test_caza_vacia(tmp_path):
     r = REGISTRO["02"](tmp_path)
     assert r.ok is False
-    assert "/trovify:cazar --modo nicho" in r.arreglos[0] and "plan 07" in r.arreglos[0].lower()
+    assert "/trovefy:cazar --modo nicho" in r.arreglos[0] and "plan 07" in r.arreglos[0].lower()
 
 
 def test_enlace_ajeno_no_vale(tmp_path):

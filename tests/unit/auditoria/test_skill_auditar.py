@@ -20,7 +20,7 @@ def test_sin_recomendado_no_recomienda_y_con_empate_tampoco():
 def test_cuota_del_dia_y_huecos_reutilizados():
     assert "Búsquedas usadas hoy" in SKILL
     assert "se retoma mañana" in SKILL
-    assert "trovify caza hueco" in SKILL
+    assert "trovefy caza hueco" in SKILL
 
 
 def test_cita_entre_comillas_simples():
@@ -34,4 +34,4 @@ def test_senales_de_la_oferta_y_salidas():
 
 
 def test_ayuda_lista_auditar():
-    assert "/trovify:auditar" in (RAIZ / "ayuda/SKILL.md").read_text(encoding="utf-8")
+    assert "/trovefy:auditar" in (RAIZ / "ayuda/SKILL.md").read_text(encoding="utf-8")

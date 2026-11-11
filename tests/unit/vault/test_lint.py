@@ -1,5 +1,5 @@
-from trovify.vault.andamio import crear_vault
-from trovify.vault.lint import lint
+from trovefy.vault.andamio import crear_vault
+from trovefy.vault.lint import lint
 
 
 def _pagina(ruta, cuerpo, meta="tipo: mercado\nfecha: 2026-11-10\nfuente: x\n"):

@@ -5,17 +5,17 @@ Encontrar tu primera oferta ganadora mirando la Biblioteca de anuncios de Meta, 
 
 **Antes de empezar**
 - Pasos 00 y 01 verificados.
-- La caza llega con el plan 07 (`/trovify:cazar --modo nicho`). Hasta entonces este paso no puede completarse: márcalo con `trovify arranque bloqueado 02 --motivo "espera /trovify:cazar (plan 07)"` para que el asistente siga con el paso 03 y los demás (03 a 08 pueden ir en paralelo con la caza).
+- La caza llega con el plan 07 (`/trovefy:cazar --modo nicho`). Hasta entonces este paso no puede completarse: márcalo con `trovefy arranque bloqueado 02 --motivo "espera /trovefy:cazar (plan 07)"` para que el asistente siga con el paso 03 y los demás (03 a 08 pueden ir en paralelo con la caza).
 
 **Pasos**
-1. Cuando el plan 07 esté instalado, escribe `/trovify:cazar --modo nicho` y dile a Claude el nicho que te interesa.
+1. Cuando el plan 07 esté instalado, escribe `/trovefy:cazar --modo nicho` y dile a Claude el nicho que te interesa.
 2. Claude busca en la Biblioteca de anuncios y guarda fichas en `wiki/ofertas/`. Tú eliges con calma cuáles te interesan; Claude te propone opciones y una recomendada.
 3. Cada ficha debe traer el enlace a la Biblioteca de anuncios por país, para que puedas ver tú mismo el anuncio.
 4. Cuando haya al menos una ficha así, pide la verificación.
 
 **Errores típicos**
-- Síntoma: «ninguna ficha de wiki/ofertas/ tiene un enlace reproducible a la Biblioteca de anuncios». Arreglo: ejecuta `/trovify:cazar --modo nicho`; si esa orden todavía no existe, el paso espera al plan 07.
+- Síntoma: «ninguna ficha de wiki/ofertas/ tiene un enlace reproducible a la Biblioteca de anuncios». Arreglo: ejecuta `/trovefy:cazar --modo nicho`; si esa orden todavía no existe, el paso espera al plan 07.
 - Síntoma: hay fichas pero el paso sigue sin pasar. Arreglo: la ficha necesita un enlace que empiece por `https://www.facebook.com/ads/library/` en su campo `link_biblioteca`, dentro de `paises`.
 
 **Cómo se verifica**
-`trovify arranque verificar 02` busca en `wiki/ofertas/` una ficha cuyo `paises.<país>.link_biblioteca` sea un enlace a la Biblioteca de anuncios de Facebook. Con una basta; la ficha queda como evidencia.
+`trovefy arranque verificar 02` busca en `wiki/ofertas/` una ficha cuyo `paises.<país>.link_biblioteca` sea un enlace a la Biblioteca de anuncios de Facebook. Con una basta; la ficha queda como evidencia.

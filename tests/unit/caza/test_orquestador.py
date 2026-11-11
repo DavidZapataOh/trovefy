@@ -6,20 +6,20 @@ import pytest
 from ayudas import anuncio
 from test_cliente import cliente as cliente_falso
 from test_cliente import de_fixture
-from trovify.caza import orquestador, snapshots
-from trovify.caza.biblioteca import url_biblioteca
-from trovify.caza.cliente import SesionBloqueada
-from trovify.caza.destino import Destino
-from trovify.caza.modelo import ResultadoBusqueda
-from trovify.caza.orquestador import (
+from trovefy.caza import orquestador, snapshots
+from trovefy.caza.biblioteca import url_biblioteca
+from trovefy.caza.cliente import SesionBloqueada
+from trovefy.caza.destino import Destino
+from trovefy.caza.modelo import ResultadoBusqueda
+from trovefy.caza.orquestador import (
     aplicar_strikes,
     ejecutar,
     palabras_a_reescribir,
     texto_sin_pie,
 )
-from trovify.caza.presupuesto import Presupuesto, PresupuestoAgotado
-from trovify.vault import frontmatter
-from trovify.vault.andamio import crear_vault
+from trovefy.caza.presupuesto import Presupuesto, PresupuestoAgotado
+from trovefy.vault import frontmatter
+from trovefy.vault.andamio import crear_vault
 
 HOY = date(2026, 11, 10)
 # Hora de captura fija en HOY (Bogotá): las lecturas de otro día de negocio no registran vistos.
@@ -389,7 +389,7 @@ def test_vigilar_vuelve_a_medir_por_pagina_y_pais(tmp_path):
     v = _vault(tmp_path)
     P = "100000000000061"
     url = "https://kit.example/ro/"
-    from trovify.caza.destino import clave_oferta, oferta_id
+    from trovefy.caza.destino import clave_oferta, oferta_id
     oid = oferta_id(clave_oferta(url, "https://pay.hotmart.com/K123"))
     _ficha(v, oid, P)
     _ficha(v, "o-podada-x", "100000000000062", estado="podada")
@@ -407,7 +407,7 @@ def test_vigilar_strike_hasta_podar(tmp_path):
     v = _vault(tmp_path)
     P = "100000000000071"
     url = "https://kit.example/ro/"
-    from trovify.caza.destino import clave_oferta, oferta_id
+    from trovefy.caza.destino import clave_oferta, oferta_id
     oid = oferta_id(clave_oferta(url, "https://pay.hotmart.com/K123"))
     # pocos anuncios y jóvenes: queda en observar
     ads = viejos(P, 2, 2, 12000)
@@ -434,7 +434,7 @@ def test_strikes_reglas():
 
 
 def test_palabras_a_reescribir(tmp_path):
-    from trovify.caza.salida import Consulta
+    from trovefy.caza.salida import Consulta
     cs = [Consulta("a", "RO", 5, "u"), Consulta("b", "RO", 50, "u"), Consulta("c", "RO", None, "u"),
           Consulta("d", "RO", 0, "u")]
     assert [c.palabra for c in palabras_a_reescribir(cs, 20)] == ["a", "d"]
@@ -442,8 +442,8 @@ def test_palabras_a_reescribir(tmp_path):
 
 def test_contador_diario_se_comparte_y_la_cache_no_consume(tmp_path):
     from test_cliente import NavegadorFalso
-    from trovify.caza.cache import Cache
-    from trovify.caza.cliente import ClienteBibliotecaPublica
+    from trovefy.caza.cache import Cache
+    from trovefy.caza.cliente import ClienteBibliotecaPublica
     v = _vault(tmp_path)
     p1 = Presupuesto.desde_umbrales(v, HOY)
     p1._dormir = lambda s: None
@@ -512,7 +512,7 @@ def test_hueco_guardado_entra_en_la_siguiente_caza(tmp_path):
     v = _vault(tmp_path)
     P = "100000000000091"
     url = "https://kit.example/ro/"
-    from trovify.caza.destino import clave_oferta, oferta_id
+    from trovefy.caza.destino import clave_oferta, oferta_id
     oid = oferta_id(clave_oferta(url, "https://pay.hotmart.com/K123"))
     _ficha(v, oid, P)
     meta, cuerpo = frontmatter.leer(v / "wiki/ofertas" / f"{oid}.md")
@@ -621,7 +621,7 @@ def test_pagina_completa_y_atribuida_da_total_exacto(tmp_path):
 
 
 def test_parada_persiste_entre_procesos_hasta_el_dia_siguiente(tmp_path):
-    from trovify.caza.presupuesto import ParadaDelDia
+    from trovefy.caza.presupuesto import ParadaDelDia
     v = _vault(tmp_path)
     Presupuesto.desde_umbrales(v, HOY).registrar_parada("Meta mostró captcha")
     datos = json.loads((v / "data/caza/presupuesto/2026-11-10.json").read_text())
@@ -633,7 +633,7 @@ def test_parada_persiste_entre_procesos_hasta_el_dia_siguiente(tmp_path):
 
 def test_el_cliente_guarda_el_bloqueo_en_el_archivo_del_dia(tmp_path):
     from test_cliente import NavegadorFalso
-    from trovify.caza.cliente import ClienteBibliotecaPublica, PaginaCapturada
+    from trovefy.caza.cliente import ClienteBibliotecaPublica, PaginaCapturada
     v = _vault(tmp_path)
     p = Presupuesto.desde_umbrales(v, HOY)
     p._dormir = lambda s: None
@@ -714,7 +714,7 @@ def test_strike_no_cuenta_si_la_oferta_no_se_midio_entera(tmp_path):
     v = _vault(tmp_path)
     P1, P2 = "100000000000401", "100000000000402"
     url = "https://kit.example/ro/"
-    from trovify.caza.destino import clave_oferta, oferta_id
+    from trovefy.caza.destino import clave_oferta, oferta_id
     oid = oferta_id(clave_oferta(url, "https://pay.hotmart.com/K123"))
     _ficha(v, oid, P1, strikes=2, motivo="nota baja")
     meta, cuerpo = frontmatter.leer(v / "wiki/ofertas" / f"{oid}.md")
@@ -737,7 +737,7 @@ def test_nada_medido_nunca_es_strike():
 
 
 def test_navegador_no_disponible_es_parada_controlada(tmp_path):
-    from trovify.navegador import NavegadorError
+    from trovefy.navegador import NavegadorError
     v = _vault(tmp_path)
     c = ClientePorUrl({}, excepcion_en={url_biblioteca("RO", q="uno"): NavegadorError("no se pudo iniciar Chromium")})
     e = ejecutar(v, "nicho", [("RO", "uno"), ("RO", "dos")], "tomi", 3, cliente=c, resolver=resolver_fijo({}),
@@ -795,12 +795,12 @@ def test_perfil_se_normaliza(tmp_path):
 @pytest.mark.parametrize("paginas", ["red", "respuestas"])
 def test_racha_de_errores_no_bloquea_el_dia(tmp_path, paginas):
     from test_cliente import NavegadorFalso
-    from trovify.caza.cliente import (
+    from trovefy.caza.cliente import (
         ClienteBibliotecaPublica,
         ErrorDeRed,
         PaginaCapturada,
     )
-    from trovify.caza.presupuesto import ParadaPorErrores
+    from trovefy.caza.presupuesto import ParadaPorErrores
     v = _vault(tmp_path)
     p = Presupuesto.desde_umbrales(v, HOY)
     p._dormir = lambda s: None
@@ -949,7 +949,7 @@ def test_strike_no_cuenta_con_cohortes_de_cota_inferior(tmp_path):
     v = _vault(tmp_path)
     P = "100000000000902"
     url = "https://kit.example/ro/"
-    from trovify.caza.destino import clave_oferta, oferta_id
+    from trovefy.caza.destino import clave_oferta, oferta_id
     oid = oferta_id(clave_oferta(url, "https://pay.hotmart.com/K123"))
     _ficha(v, oid, P, strikes=2, motivo="nota baja")
     c = ClientePorUrl({url_biblioteca("RO", page_id=P): ok(viejos(P, 2, 2, 92000), total=300, completo=False)})
@@ -996,7 +996,7 @@ def test_vigilar_marca_la_ficha_vigilada(tmp_path):
     v = _vault(tmp_path)
     P = "100000000000914"
     url = "https://kit.example/ro/"
-    from trovify.caza.destino import clave_oferta, oferta_id
+    from trovefy.caza.destino import clave_oferta, oferta_id
     oid = oferta_id(clave_oferta(url, "https://pay.hotmart.com/K123"))
     _ficha(v, oid, P)
     c = ClientePorUrl({url_biblioteca("RO", page_id=P): ok(viejos(P, 9, 20, 93000))})
@@ -1080,7 +1080,7 @@ def test_pagina_completa_con_otra_oferta_lo_dice_junto_al_enlace(tmp_path):
 
 def test_hueco_actualiza_las_lineas_del_pais_en_la_ficha(tmp_path):
     from ejemplos import ejecucion_ejemplo
-    from trovify.caza.salida import escribir
+    from trovefy.caza.salida import escribir
     v = _vault(tmp_path)
     escribir(v, ejecucion_ejemplo())
     P = "100000000000001"
@@ -1100,7 +1100,7 @@ def test_hueco_actualiza_las_lineas_del_pais_en_la_ficha(tmp_path):
 
 
 def test_tras_un_bloqueo_las_nuevas_pendientes_lo_dicen(tmp_path):
-    from trovify.caza.salida import texto_pendientes
+    from trovefy.caza.salida import texto_pendientes
     v = _vault(tmp_path)
     P = "100000000000961"
     ads = viejos(P, 5, 20, 98000)

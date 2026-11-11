@@ -1,7 +1,7 @@
 import pathlib
 
 import pytest
-from trovify.config.umbrales import cargar
+from trovefy.config.umbrales import cargar
 
 RAIZ = pathlib.Path(__file__).resolve().parents[3] / "templates/cerebro/config"
 

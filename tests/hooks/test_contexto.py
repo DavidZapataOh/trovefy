@@ -13,7 +13,7 @@ def correr(vault, entrada=None):
         capture_output=True,
         check=False,
         text=True,
-        env={"TROVIFY_VAULT": str(vault), "PATH": "/usr/bin:/bin"},
+        env={"TROVEFY_VAULT": str(vault), "PATH": "/usr/bin:/bin"},
     )
     return r
 
@@ -23,8 +23,8 @@ def ctx_de(r):
 
 
 def test_contexto_con_stop_y_producto(tmp_path):
-    (tmp_path / ".trovify").mkdir()
-    (tmp_path / ".trovify/STOP").write_text("")
+    (tmp_path / ".trovefy").mkdir()
+    (tmp_path / ".trovefy/STOP").write_text("")
     (tmp_path / "index.md").write_text("# Índice\n- [[wiki/reglas/R-001-vara-de-caza]]\n")
     p = tmp_path / "productos/p-0001-trusa"
     p.mkdir(parents=True)
@@ -78,8 +78,8 @@ def test_indice_limitado_a_40_lineas_y_total_acotado(tmp_path):
 
 
 def test_contexto_total_acotado_y_no_tapa_stop(tmp_path):
-    (tmp_path / ".trovify").mkdir()
-    (tmp_path / ".trovify/STOP").write_text("")
+    (tmp_path / ".trovefy").mkdir()
+    (tmp_path / ".trovefy/STOP").write_text("")
     (tmp_path / "index.md").write_text("\n".join("y" * 5000 for _ in range(100)))
     (tmp_path / "propuestas").mkdir()
     for i in range(300):
@@ -92,7 +92,7 @@ def test_nunca_falla_con_entrada_basura(tmp_path):
     (tmp_path / "index.md").write_bytes(b"\xff\xfe\x00bad")
     r = subprocess.run(
         [sys.executable, str(HOOK)], input="no json", capture_output=True, text=True, check=False,
-        env={"TROVIFY_VAULT": str(tmp_path), "PATH": "/usr/bin:/bin"},
+        env={"TROVEFY_VAULT": str(tmp_path), "PATH": "/usr/bin:/bin"},
     )
     assert r.returncode == 0 and "Traceback" not in r.stderr
 
@@ -146,8 +146,8 @@ def test_timeout_en_hooks_json():
 
 
 def test_peor_caso_conserva_todas_las_secciones(tmp_path):
-    (tmp_path / ".trovify").mkdir()
-    (tmp_path / ".trovify/STOP").write_text("")
+    (tmp_path / ".trovefy").mkdir()
+    (tmp_path / ".trovefy/STOP").write_text("")
     (tmp_path / "index.md").write_text("\n".join("i" * 200 for _ in range(40)))
     (tmp_path / "propuestas").mkdir()
     (tmp_path / "productos").mkdir()

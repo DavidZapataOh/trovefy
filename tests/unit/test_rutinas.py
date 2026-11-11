@@ -3,30 +3,30 @@ from pathlib import Path
 
 import pytest
 import yaml
-from trovify import rutinas
-from trovify.rutinas import unidad_caza
-from trovify.vault.andamio import crear_vault
+from trovefy import rutinas
+from trovefy.rutinas import unidad_caza
+from trovefy.vault.andamio import crear_vault
 
 
 def test_unidad_de_caza():
-    servicio, timer = unidad_caza(Path("/home/u/trovify-cerebro"), "/usr/local/bin/claude")
+    servicio, timer = unidad_caza(Path("/home/u/trovefy-cerebro"), "/usr/local/bin/claude")
     assert "OnCalendar=Mon..Sat *-*-* 06:30:00 America/Bogota" in timer
-    assert "/trovify:cazar --rutina" in servicio and "WorkingDirectory=/home/u/trovify-cerebro" in servicio
+    assert "/trovefy:cazar --rutina" in servicio and "WorkingDirectory=/home/u/trovefy-cerebro" in servicio
     assert "dangerously" not in servicio
 
 
 def test_unidad_lista_de_herramientas():
-    servicio, timer = unidad_caza(Path("/home/u/trovify-cerebro"), "/usr/local/bin/claude")
-    assert ('ExecStart=/usr/local/bin/claude -p "/trovify:cazar --rutina" '
-            '--allowedTools "Read,Bash(trovify caza *),Bash(trovify cerebro *)"') in servicio
-    assert 'Environment="TROVIFY_VAULT=/home/u/trovify-cerebro"' in servicio
-    assert "Unit=trovify-caza.service" in timer and "WantedBy=timers.target" in timer
+    servicio, timer = unidad_caza(Path("/home/u/trovefy-cerebro"), "/usr/local/bin/claude")
+    assert ('ExecStart=/usr/local/bin/claude -p "/trovefy:cazar --rutina" '
+            '--allowedTools "Read,Bash(trovefy caza *),Bash(trovefy cerebro *)"') in servicio
+    assert 'Environment="TROVEFY_VAULT=/home/u/trovefy-cerebro"' in servicio
+    assert "Unit=trovefy-caza.service" in timer and "WantedBy=timers.target" in timer
 
 
 def test_unidad_con_espacios_y_porcentaje():
     servicio, _ = unidad_caza(Path("/home/u/mi cerebro 100%"), "/usr/local/bin/claude")
     assert "WorkingDirectory=/home/u/mi cerebro 100%%" in servicio
-    assert 'Environment="TROVIFY_VAULT=/home/u/mi cerebro 100%%"' in servicio
+    assert 'Environment="TROVEFY_VAULT=/home/u/mi cerebro 100%%"' in servicio
     with pytest.raises(ValueError):
         unidad_caza(Path('/home/u/raro"'), "/usr/local/bin/claude")
 
@@ -41,10 +41,10 @@ def test_instalar_escribe_en_home_y_activa_el_timer(tmp_path, monkeypatch):
     llamadas = []
     rutas = rutinas.instalar_caza(tmp_path / "cerebro", "/usr/bin/claude", ejecutar=llamadas.append)
     unidad = tmp_path / ".config/systemd/user"
-    assert rutas == [unidad / "trovify-caza.service", unidad / "trovify-caza.timer"]
+    assert rutas == [unidad / "trovefy-caza.service", unidad / "trovefy-caza.timer"]
     assert all(r.exists() for r in rutas)
     assert llamadas == [["systemctl", "--user", "daemon-reload"],
-                        ["systemctl", "--user", "enable", "--now", "trovify-caza.timer"]]
+                        ["systemctl", "--user", "enable", "--now", "trovefy-caza.timer"]]
 
 
 def test_registro_de_la_rutina(tmp_path):
@@ -75,19 +75,19 @@ def test_crear_vault_copia_caza_yaml(tmp_path):
 
 
 def test_cli_rutinas_instalar(tmp_path, monkeypatch, capsys):
-    from trovify import cli
+    from trovefy import cli
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("TROVIFY_VAULT", str(tmp_path / "cerebro"))
+    monkeypatch.setenv("TROVEFY_VAULT", str(tmp_path / "cerebro"))
     llamadas = []
     monkeypatch.setattr(rutinas, "_systemctl", llamadas.append)
     monkeypatch.setattr(rutinas.shutil, "which", lambda n: f"/opt/bin/{n}")
     assert cli.main(["rutinas", "instalar", "caza"]) == 0
-    assert len(llamadas) == 2 and (tmp_path / ".config/systemd/user/trovify-caza.timer").exists()
+    assert len(llamadas) == 2 and (tmp_path / ".config/systemd/user/trovefy-caza.timer").exists()
     assert "06:30" in capsys.readouterr().out
 
 
 def test_cli_rutinas_sin_claude(tmp_path, monkeypatch, capsys):
-    from trovify import cli
+    from trovefy import cli
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(rutinas.shutil, "which", lambda n: None)
     monkeypatch.setattr(rutinas, "_systemctl", lambda c: pytest.fail("no debe llamar a systemctl"))

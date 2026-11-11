@@ -58,7 +58,7 @@ def test_bash_graph_disfrazado(correr_hook, vault_tmp):
         assert correr_hook("meta_guard", {"tool_name": "Bash", "tool_input": {"command": cmd}}, vault_tmp)[0] == "deny"
 
 def test_stop_no_cambia_lecturas(correr_hook, vault_tmp):
-    (vault_tmp / ".trovify" / "STOP").write_text("x")
+    (vault_tmp / ".trovefy" / "STOP").write_text("x")
     assert correr_hook("meta_guard", {"tool_name": "mcp__meta-ads__ads_get_campaigns", "tool_input": {}}, vault_tmp)[0] == "allow"
 
 def test_webfetch_sin_esquema(correr_hook, vault_tmp):

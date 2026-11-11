@@ -4,11 +4,11 @@ from datetime import date, timedelta
 
 import pytest
 from ayudas import URL_TIENDA, anuncio, destino_impultienda
-from trovify.caza.oferta import agrupar
-from trovify.caza.senales import Medida, calcular_senales
-from trovify.caza.snapshots import Snapshot
-from trovify.config.mercados import cargar as cargar_mercados
-from trovify.config.umbrales import cargar
+from trovefy.caza.oferta import agrupar
+from trovefy.caza.senales import Medida, calcular_senales
+from trovefy.caza.snapshots import Snapshot
+from trovefy.config.mercados import cargar as cargar_mercados
+from trovefy.config.umbrales import cargar
 
 HOY = date(2026, 11, 10)
 RAIZ = pathlib.Path(__file__).resolve().parents[3] / "templates/cerebro/config"

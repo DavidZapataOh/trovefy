@@ -1,9 +1,0 @@
-[Unit]
-Description=Trovify: caza diaria en la Biblioteca de anuncios (/trovify:cazar --rutina)
-
-[Service]
-Type=oneshot
-WorkingDirectory={vault}
-Environment="TROVIFY_VAULT={vault}"
-Environment="PATH={path}"
-ExecStart={claude} -p "/trovify:cazar --rutina" --allowedTools "Read,Bash(trovify caza *),Bash(trovify cerebro *)"

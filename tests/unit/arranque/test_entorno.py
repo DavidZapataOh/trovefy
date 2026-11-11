@@ -2,10 +2,10 @@ import json
 import sys
 import time
 
-from trovify.arranque.estado import ResultadoVerificacion, cargar
-from trovify.arranque.verificadores import REGISTRO, base
-from trovify.arranque.verificadores.entorno import comprobar_entorno
-from trovify.cli import main
+from trovefy.arranque.estado import ResultadoVerificacion, cargar
+from trovefy.arranque.verificadores import REGISTRO, base
+from trovefy.arranque.verificadores.entorno import comprobar_entorno
+from trovefy.cli import main
 
 
 def falso(respuestas):
@@ -61,7 +61,7 @@ def test_node_viejo_y_poppler_ausente(tmp_path):
 def test_playwright_sin_navegador_no_usa_npx_suelto(tmp_path):
     elementos = {e.nombre: e for e in comprobar_entorno(falso(BIEN), home=tmp_path, obsidian=[])}
     pw = elementos["playwright"]
-    assert not pw.ok and "cd ~/trovefy/trovify && uv run playwright install chromium" in pw.arreglo and "@latest" not in pw.arreglo
+    assert not pw.ok and "cd ~/trovefy/trovefy && uv run playwright install chromium" in pw.arreglo and "@latest" not in pw.arreglo
     assert "npx" not in pw.arreglo
     assert not elementos["obsidian"].ok
 
@@ -118,7 +118,7 @@ def test_cli_verificar(tmp_path, capsys, monkeypatch):
 
 
 def test_verificador_00_guarda_evidencia(tmp_path, monkeypatch):
-    from trovify.arranque.verificadores import entorno
+    from trovefy.arranque.verificadores import entorno
 
     monkeypatch.setattr(entorno, "comprobar_entorno", lambda *a, **k: [entorno.Elemento("git", True, "git 2", None)])
     r = REGISTRO["00"](tmp_path)

@@ -1,7 +1,7 @@
 # 00 · Entorno
 
 **Objetivo**
-Dejar tu computador (Windows con WSL) con todas las herramientas que Trovify necesita para funcionar.
+Dejar tu computador (Windows con WSL) con todas las herramientas que Trovefy necesita para funcionar.
 
 **Antes de empezar**
 - Windows con WSL (Ubuntu) ya abierto en una terminal.
@@ -9,7 +9,7 @@ Dejar tu computador (Windows con WSL) con todas las herramientas que Trovify nec
 - Abre una **terminal de Ubuntu (WSL) aparte**, fuera de Claude Code. Todos los comandos de esta guía los escribes ahí, sin `!`: dentro de Claude Code el `!` no tiene terminal y no funcionan ni la contraseña de sudo ni el editor nano. Claude no ve tu contraseña.
 
 **Pasos**
-1. Pide la comprobación: `trovify arranque verificar 00`. Te muestra una lista con ✓ y ✗; solo arreglas lo que tenga ✗.
+1. Pide la comprobación: `trovefy arranque verificar 00`. Te muestra una lista con ✓ y ✗; solo arreglas lo que tenga ✗.
 2. Para cada ✗, aplica su arreglo. Hazlos en este orden:
    - **uv** (`uv`): `sudo apt install -y pipx` y luego `pipx install uv==0.11.26`. No ejecutes scripts descargados al vuelo de internet.
    - **Python 3.12** (`python`, necesita uv): `uv python install 3.12`
@@ -18,7 +18,7 @@ Dejar tu computador (Windows con WSL) con todas las herramientas que Trovify nec
    - **ffmpeg** (`ffmpeg`): `sudo apt install -y ffmpeg`. Debe ser el de apt, no el de snap: el de snap se queda colgado en WSL.
    - **poppler** (`poppler`, para leer PDFs): `sudo apt install -y poppler-utils`
    - **Librerías de Pango** (`weasyprint`, para generar PDFs): `sudo apt install -y libpango-1.0-0 libpangoft2-1.0-0`
-   - **Navegador de Playwright** (`playwright`): en una terminal de Ubuntu (WSL) aparte, `cd ~/trovefy/trovify && uv run playwright install chromium`.
+   - **Navegador de Playwright** (`playwright`): en una terminal de Ubuntu (WSL) aparte, `cd ~/trovefy/trovefy && uv run playwright install chromium`.
    - **systemd** (`systemd`): ver el paso 3.
    - **Obsidian** (`obsidian`): instálalo en Windows (no en WSL) desde https://obsidian.md.
 3. Para activar systemd:
@@ -26,14 +26,14 @@ Dejar tu computador (Windows con WSL) con todas las herramientas que Trovify nec
    2. Ábrelo: `sudo nano /etc/wsl.conf`
    3. Si ya hay una sección `[boot]`, añade la línea `systemd=true` debajo de ella. Si no la hay, añade al FINAL del archivo estas dos líneas: `[boot]` y debajo `systemd=true`. No borres ni reemplaces nada de lo que ya estaba. Guarda con Ctrl+O, Enter y sal con Ctrl+X.
    4. Abre **PowerShell de Windows** (no la terminal de Linux) y escribe `wsl --shutdown`. Ojo: esto también cierra Claude Code.
-   5. Vuelve a abrir Ubuntu, entra con `cd ~/trovify-cerebro` y ejecuta `claude` otra vez.
-4. Repite `trovify arranque verificar 00` hasta que no quede ningún ✗. Si solo queda ✗ algo que no puedes arreglar ahora, marca el paso con `trovify arranque hecho 00` y continúa con los demás pasos; vuelve a verificarlo cuando lo arregles.
+   5. Vuelve a abrir Ubuntu, entra con `cd ~/trovefy-cerebro` y ejecuta `claude` otra vez.
+4. Repite `trovefy arranque verificar 00` hasta que no quede ningún ✗. Si solo queda ✗ algo que no puedes arreglar ahora, marca el paso con `trovefy arranque hecho 00` y continúa con los demás pasos; vuelve a verificarlo cuando lo arregles.
 
 **Errores típicos**
 - Síntoma: `ffmpeg` se queda colgado y el verificador dice que no responde. Arreglo: tienes el ffmpeg de snap; instala el de apt con `sudo apt install -y ffmpeg`.
 - Síntoma: systemd sigue en ✗ tras editar `wsl.conf`. Arreglo: falta `wsl --shutdown` desde PowerShell de Windows y reabrir la terminal.
-- Síntoma: Obsidian instalado pero marcado ✗. Arreglo: instálalo para tu usuario de Windows (el instalador normal); Trovify lo busca en `AppData\Local\Programs\Obsidian`.
-- Síntoma: `playwright` en ✗. Arreglo: en una terminal de Ubuntu (WSL) aparte, `cd ~/trovefy/trovify && uv run playwright install chromium`, y vuelve a verificar.
+- Síntoma: Obsidian instalado pero marcado ✗. Arreglo: instálalo para tu usuario de Windows (el instalador normal); Trovefy lo busca en `AppData\Local\Programs\Obsidian`.
+- Síntoma: `playwright` en ✗. Arreglo: en una terminal de Ubuntu (WSL) aparte, `cd ~/trovefy/trovefy && uv run playwright install chromium`, y vuelve a verificar.
 
 **Cómo se verifica**
-`trovify arranque verificar 00` revisa: Python 3.12, uv, Node 20+, git, ffmpeg (con límite de 10 s), poppler, libpango, el navegador de Playwright, systemd (`running` o `degraded`) y Obsidian en Windows. Guarda el detalle en `config/evidencia/` y el paso pasa a `verificado` solo si todos están ✓.
+`trovefy arranque verificar 00` revisa: Python 3.12, uv, Node 20+, git, ffmpeg (con límite de 10 s), poppler, libpango, el navegador de Playwright, systemd (`running` o `degraded`) y Obsidian en Windows. Guarda el detalle en `config/evidencia/` y el paso pasa a `verificado` solo si todos están ✓.

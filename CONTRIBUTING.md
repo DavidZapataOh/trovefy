@@ -25,7 +25,7 @@ uv run playwright install chromium   # solo para las pruebas de integración
 
 - **Todo el texto que ve el usuario va en español**: mensajes de la CLI, ayudas, skills y plantillas.
 - Lo que no se midió se escribe «no medido: <motivo>», nunca 0 ni una estimación.
-- Ningún dato del negocio ni ningún secreto en el repositorio: los datos viven en el vault y los secretos en `~/.config/trovify/*.env`.
+- Ningún dato del negocio ni ningún secreto en el repositorio: los datos viven en el vault y los secretos en `~/.config/trovefy/*.env`.
 - Nada de escrituras en Meta desde el código ni desde las skills.
 - Si una idea viene de otro proyecto, se reescribe sin copiar código; el mantenedor registra la fuente de forma privada.
 

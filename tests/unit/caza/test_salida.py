@@ -4,10 +4,10 @@ import re
 import sqlite3
 
 from ejemplos import ejecucion_ejemplo, ejecucion_fuente_caida
-from trovify.caza.salida import escribir, formatear_medida, render_ficha, render_informe
-from trovify.caza.senales import Medida
-from trovify.vault.andamio import crear_vault
-from trovify.vault.frontmatter import leer, renderizar
+from trovefy.caza.salida import escribir, formatear_medida, render_ficha, render_informe
+from trovefy.caza.senales import Medida
+from trovefy.vault.andamio import crear_vault
+from trovefy.vault.frontmatter import leer, renderizar
 
 GOLD = pathlib.Path(__file__).resolve().parents[2] / "golden/caza"
 
@@ -82,7 +82,7 @@ def test_cota_inferior_queda_marcada_en_la_ficha():
 
 
 def test_el_verificador_02_acepta_la_ficha(tmp_path):
-    from trovify.arranque.verificadores.caza import verificar_caza
+    from trovefy.arranque.verificadores.caza import verificar_caza
     v = tmp_path / "v"
     crear_vault(v)
     meta, cuerpo = render_ficha(ejecucion_ejemplo().resultados[0], None)
@@ -169,7 +169,7 @@ def test_sin_medios_de_terceros(tmp_path):
 
 
 def test_lint_sin_problemas_nuevos(tmp_path):
-    from trovify.vault.lint import lint
+    from trovefy.vault.lint import lint
     v = tmp_path / "v"
     crear_vault(v)
     antes = {(p.tipo, p.ruta) for p in lint(v)}
@@ -248,7 +248,7 @@ def test_snapshot_ultima_medida_gana_por_campo(tmp_path):
 def test_ya_visto_no_toca_ficha_ni_snapshot_ni_indice(tmp_path):
     import dataclasses
 
-    from trovify.caza.filtros import Descarte
+    from trovefy.caza.filtros import Descarte
     v = tmp_path / "v"
     crear_vault(v)
     ficha = v / "wiki/ofertas/o-caida-ejemplo.md"
@@ -278,7 +278,7 @@ def test_snapshot_sin_lectura_completa_no_guarda_nuevos_parados(tmp_path):
 
 
 def test_oferta_de_varias_paginas_es_reproducible():
-    from trovify.caza.biblioteca import url_biblioteca
+    from trovefy.caza.biblioteca import url_biblioteca
     r = ejecucion_ejemplo().resultados[0]
     meta, cuerpo = render_ficha(r, None)
     original = url_biblioteca("RO", page_id="100000000000001")
@@ -301,7 +301,7 @@ def test_ficha_exige_dia():
 
 
 def test_raw_en_espanol():
-    from trovify.caza.salida import _render_raw
+    from trovefy.caza.salida import _render_raw
     texto = _render_raw(ejecucion_fuente_caida())
     assert "None" not in texto and "True" not in texto and "no_medido" not in texto
 
@@ -312,7 +312,7 @@ def test_raw_en_espanol():
 def _en(r, pais, decision, nota=None):
     import dataclasses
 
-    from trovify.caza.nota import Nota
+    from trovefy.caza.nota import Nota
     n = r.nota if nota is None else Nota(nota, r.nota.desglose, r.nota.multiplicadores, r.nota.no_medidas)
     return dataclasses.replace(r, pais=pais, decision=decision, explicacion=f"motivo {pais}", nota=n)
 
@@ -320,7 +320,7 @@ def _en(r, pais, decision, nota=None):
 def test_una_ficha_por_oferta_con_todos_los_paises(tmp_path):
     import dataclasses
 
-    from trovify.arranque.verificadores.caza import verificar_caza
+    from trovefy.arranque.verificadores.caza import verificar_caza
     v = tmp_path / "v"
     crear_vault(v)
     e = ejecucion_ejemplo()
@@ -376,7 +376,7 @@ def test_page_ids_se_suman_a_los_de_la_ficha():
 def test_ya_vistas_aparte_y_fuera_de_csv_y_tasas(tmp_path):
     import dataclasses
 
-    from trovify.caza.filtros import Descarte
+    from trovefy.caza.filtros import Descarte
     v = tmp_path / "v"
     crear_vault(v)
     e = ejecucion_ejemplo()
@@ -404,8 +404,8 @@ def test_etiqueta_semanas_escalonadas():
 def test_fuente_del_snapshot_sin_enlaces_repetidos():
     from datetime import date
 
-    from trovify.caza.salida import _fusionar
-    from trovify.caza.snapshots import Snapshot
+    from trovefy.caza.salida import _fusionar
+    from trovefy.caza.snapshots import Snapshot
     def foto(total, c8, fuente):
         return Snapshot("o", "RO", date(2026, 11, 10), total, None, None, c8, None, None, None, fuente)
 

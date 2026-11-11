@@ -3,7 +3,7 @@ import pathlib
 from datetime import UTC, date, datetime
 
 import pytest
-from trovify.caza.parser import (
+from trovefy.caza.parser import (
     FormatoDesconocido,
     parsear_detalle,
     parsear_respuestas,

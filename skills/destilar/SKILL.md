@@ -1,7 +1,7 @@
 ---
 name: destilar
 description: Destila las fuentes pendientes de raw/ (playbook, vídeos, informes) en las páginas del método de wiki/metodo/, citando siempre vídeo y minuto, § del diseño o ruta raw/. Úsala cuando el usuario pida destilar, convertir las fuentes en método o actualizar wiki/metodo/.
-allowed-tools: Read, Grep, Glob, Write(wiki/**), Edit(wiki/**), Edit(index.md), Bash(trovify cerebro *), Task
+allowed-tools: Read, Grep, Glob, Write(wiki/**), Edit(wiki/**), Edit(index.md), Bash(trovefy cerebro *), Task
 ---
 
 # /destilar: de fuentes en bruto a método con citas
@@ -16,7 +16,7 @@ Reglas de fondo:
 
 Pasos:
 
-1. **Lista lo pendiente.** Ejecuta `trovify cerebro destilar --pendientes`. Salen las rutas de `raw/` que ninguna página de `wiki/metodo/` lista en su `fuentes`. Si no hay ninguna, dilo y termina.
+1. **Lista lo pendiente.** Ejecuta `trovefy cerebro destilar --pendientes`. Salen las rutas de `raw/` que ninguna página de `wiki/metodo/` lista en su `fuentes`. Si no hay ninguna, dilo y termina.
 2. **Destila cada fuente pendiente.** Léela entera con Read. Si es larga, puedes lanzar un subagente por fuente (Task) y pedirle el borrador con sus citas; revisa tú lo que devuelva. Escribe o amplía las páginas de esta estructura objetivo en `wiki/metodo/`:
    - `fases/01-montar-el-sistema.md` … `fases/16-equipo-tiempo-y-costes.md`: una por fase del playbook, con «Lo que enseñan» (con minuto), «Potenciado», «Regla recomendada» y la regla R-nnn que aplica si existe.
    - `cerebro.md` (arquitectura del Cerebro de los vídeos), `contradicciones.md` (tabla «Regla elegida» + ajustes de §4.1 del diseño), `riesgos-de-cuenta.md`, `caza.md` (auditoría de caza §4 + verificación de la Biblioteca), `packs-y-skills.md`, `creacion-de-anuncios.md`, `pagos.md` (tabla de pasarelas), `estrategia.md` (informe final).
@@ -27,6 +27,6 @@ Pasos:
    - archivo de la fuente: `raw/2026-11-10/<slug>.md`.
    El texto anterior al primer `##` no se comprueba, pero tampoco afirmes nada allí.
 3. **Añade las páginas a `index.md`** bajo una sección `## Método`, una línea por página: `- [[wiki/metodo/caza]] — descripción corta`. Usa Edit sobre `index.md`; no toques el resto del índice.
-4. **Valida hasta que pase.** Ejecuta `trovify cerebro destilar --validar` y `trovify cerebro lint`. Corrige lo que señalen (citas que faltan, fuentes inexistentes, enlaces rotos, páginas huérfanas) y repite hasta que ambos terminen con código 0.
+4. **Valida hasta que pase.** Ejecuta `trovefy cerebro destilar --validar` y `trovefy cerebro lint`. Corrige lo que señalen (citas que faltan, fuentes inexistentes, enlaces rotos, páginas huérfanas) y repite hasta que ambos terminen con código 0.
 5. **Propón reglas, no las crees.** Si de las fuentes sale una regla nueva o un cambio de umbral, descríbela al usuario y propón pasarla por `/recordar`. No la escribas tú.
-6. **Deja constancia.** Registra una línea en `log.md` con `trovify cerebro log --skill destilar --que "<qué se destiló>" --archivo wiki/metodo/<página>.md --tokens <N>` (repite `--archivo` por página tocada; `<N>` es una estimación de los tokens consumidos).
+6. **Deja constancia.** Registra una línea en `log.md` con `trovefy cerebro log --skill destilar --que "<qué se destiló>" --archivo wiki/metodo/<página>.md --tokens <N>` (repite `--archivo` por página tocada; `<N>` es una estimación de los tokens consumidos).

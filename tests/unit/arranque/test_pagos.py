@@ -1,9 +1,9 @@
 import pathlib
 
 import pytest
-from trovify.arranque.estado import cargar as cargar_pasos
-from trovify.arranque.estado import marcar_bloqueado, marcar_hecho, siguiente
-from trovify.arranque.verificadores.pagos import (
+from trovefy.arranque.estado import cargar as cargar_pasos
+from trovefy.arranque.estado import marcar_bloqueado, marcar_hecho, siguiente
+from trovefy.arranque.verificadores.pagos import (
     URL_DOCS_WHOP,
     evaluar_hotmart,
     evaluar_whop,
@@ -11,8 +11,8 @@ from trovify.arranque.verificadores.pagos import (
     verificar_hotmart,
     verificar_whop,
 )
-from trovify.mapa import cargar
-from trovify.navegador import Captura
+from trovefy.mapa import cargar
+from trovefy.navegador import Captura
 
 RAIZ = pathlib.Path(__file__).resolve().parents[3]
 FIX = RAIZ / "tests/fixtures/arranque"

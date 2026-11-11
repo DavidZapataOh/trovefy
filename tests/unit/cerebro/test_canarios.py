@@ -4,8 +4,8 @@ import re
 import subprocess
 
 import pytest
-from trovify.cerebro import canarios as mod
-from trovify.cerebro.canarios import Canario, cargar, correr, evaluar, normalizar
+from trovefy.cerebro import canarios as mod
+from trovefy.cerebro.canarios import Canario, cargar, correr, evaluar, normalizar
 
 CANARIOS = pathlib.Path(__file__).resolve().parents[2] / "canarios.yaml"
 
@@ -106,7 +106,7 @@ def test_preguntar_a_claude_comando(tmp_path, monkeypatch):
 
     monkeypatch.setattr(mod.subprocess, "run", falso)
     assert mod.preguntar_a_claude(tmp_path, "¿q?") == "hola"
-    assert visto["cmd"][:3] == ["claude", "-p", "/trovify:consultar ¿q?"]
+    assert visto["cmd"][:3] == ["claude", "-p", "/trovefy:consultar ¿q?"]
     assert "Read,Grep,Glob" in visto["cmd"]
     assert "--dangerously-skip-permissions" not in visto["cmd"]
     assert visto["cwd"] == tmp_path and visto["timeout"] == 300
@@ -124,7 +124,7 @@ def test_cargar_defecto_desde_el_paquete():
 
 
 def test_cli_canarios(tmp_path, monkeypatch, capsys):
-    from trovify import cerebro_cli
+    from trovefy import cerebro_cli
 
     monkeypatch.setattr(mod.correr, "__defaults__", (lambda v, p: "Esto no está en el cerebro", True, None))
     import argparse
@@ -234,7 +234,7 @@ def test_corrida_parcial_no_toca_ultimo(tmp_path):
 def test_cli_solo_y_canarios_no_tocan_ultimo(tmp_path, monkeypatch):
     import argparse
 
-    from trovify import cerebro_cli
+    from trovefy import cerebro_cli
     monkeypatch.setattr(mod.correr, "__defaults__", (lambda v, p: "Esto no está en el cerebro", True, None))
     args = argparse.Namespace(accion="canarios", vault=str(tmp_path), solo="h1", canarios=None)
     assert cerebro_cli._ejecutar(args) == 0

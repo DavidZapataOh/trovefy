@@ -2,7 +2,7 @@ from datetime import datetime
 from multiprocessing import Pool
 from zoneinfo import ZoneInfo
 
-from trovify.vault.escritura import anadir_log, escribir_atomico
+from trovefy.vault.escritura import anadir_log, escribir_atomico
 
 
 def test_escritura_atomica_crea_padres(tmp_path):
@@ -31,7 +31,7 @@ def test_log_concurrente_no_pierde_lineas(tmp_path):
 
 
 def test_log_reemplaza_saltos_de_linea(tmp_path):
-    from trovify.vault.escritura import anadir_log
+    from trovefy.vault.escritura import anadir_log
     linea = anadir_log(tmp_path, "reg\nla", "uno\r\ndos\ntres", ["a\nb.md", "c.md"])
     texto = (tmp_path / "log.md").read_text()
     assert texto.count("\n") == 1 and "\r" not in texto

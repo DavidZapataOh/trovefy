@@ -8,7 +8,7 @@ import random
 import string
 
 import pytest
-from trovify.caza.grabar import (
+from trovefy.caza.grabar import (
     SecretoEnCaptura,
     componer,
     contar_anuncios,

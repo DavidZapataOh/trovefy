@@ -12,7 +12,7 @@ RAIZ = pathlib.Path(__file__).resolve().parents[2]
 @pytest.fixture
 def vault_tmp(tmp_path):
     vault = tmp_path / "vault"
-    for sub in ("raw", "wiki", ".trovify"):
+    for sub in ("raw", "wiki", ".trovefy"):
         (vault / sub).mkdir(parents=True)
     (vault / "log.md").write_text("# Log\n", encoding="utf-8")
     return vault
@@ -29,7 +29,7 @@ def correr_hook_crudo():
         assert script.exists(), f"no existe el hook {nombre}"
         cuerpo = entrada if isinstance(entrada, str) else json.dumps(entrada)
         entorno = {
-            "TROVIFY_VAULT": str(vault),
+            "TROVEFY_VAULT": str(vault),
             "HOME": os.environ.get("HOME", ""),
             "PATH": os.environ.get("PATH", ""),
             **(env_extra or {}),

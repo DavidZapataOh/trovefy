@@ -1,10 +1,10 @@
-from trovify.vault.andamio import crear_vault
+from trovefy.vault.andamio import crear_vault
 
 CARPETAS = ["config", "raw", "wiki/metodo", "wiki/reglas", "wiki/caza", "wiki/ofertas", "wiki/competidores",
             "wiki/mercados", "wiki/nichos", "wiki/angulos", "wiki/banco-de-ideas", "wiki/analisis/partes",
             "wiki/analisis/cierres", "wiki/analisis/semanas", "productos", "propuestas", "ledger/ventas",
             "ledger/gasto", "ledger/caja", "ledger/auditoria", "data/caza", "data/cache", "rutinas/log",
-            "sesiones", ".trovify"]
+            "sesiones", ".trovefy"]
 
 
 def test_init_crea_el_andamio(tmp_path):
@@ -38,7 +38,7 @@ def test_devuelve_solo_lo_creado(tmp_path):
 
 
 def test_cli_init(tmp_path, capsys):
-    from trovify.cli import main
+    from trovefy.cli import main
     v = tmp_path / "cerebro"
     assert main(["cerebro", "init", "--vault", str(v)]) == 0
     assert (v / "CLAUDE.md").is_file()

@@ -1,4 +1,4 @@
-from trovify.idioma import detectar
+from trovefy.idioma import detectar
 
 
 def test_detectar():

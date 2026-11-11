@@ -1,6 +1,6 @@
 import dataclasses
 
-from trovify.caza.destino import (
+from trovefy.caza.destino import (
     Destino,
     PaginaLanding,
     clave_oferta,
@@ -176,7 +176,7 @@ def test_resolver_nunca_abre_facebook_y_desenvuelve():
 def test_fixture_html_minima():
     from pathlib import Path
 
-    from trovify.caza.destino import detectar_tracker, urls_en_html
+    from trovefy.caza.destino import detectar_tracker, urls_en_html
 
     html = (Path(__file__).parents[2] / "fixtures" / "landings" / "hotmart_minima.html").read_text()
     urls = urls_en_html(html)
@@ -234,7 +234,7 @@ def test_url_no_valida_no_llega_al_navegador():
 
 def test_robot_http_rechaza_url_no_valida():
     import pytest
-    from trovify.caza.destino import pedir_como_robot_http
+    from trovefy.caza.destino import pedir_como_robot_http
 
     with pytest.raises(ValueError):
         pedir_como_robot_http("file:///etc/passwd")
@@ -292,7 +292,7 @@ def test_instagram_l_se_desenvuelve():
 
 
 def test_filtro_de_rutas_del_navegador():
-    from trovify.caza.destino import _filtrar_ruta
+    from trovefy.caza.destino import _filtrar_ruta
 
     class Ruta:
         def __init__(self, url):

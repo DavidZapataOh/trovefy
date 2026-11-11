@@ -1,8 +1,8 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from trovify.vault.frontmatter import leer
-from trovify.vault.sesiones import escribir_traspaso, ultimo_traspaso
+from trovefy.vault.frontmatter import leer
+from trovefy.vault.sesiones import escribir_traspaso, ultimo_traspaso
 
 BOGOTA = ZoneInfo("America/Bogota")
 
@@ -42,8 +42,8 @@ def test_cli_traspaso_retomar_lint(tmp_path, monkeypatch, capsys):
     import json
     import sys
 
-    from trovify.cerebro_cli import _configurar, _ejecutar
-    from trovify.vault.andamio import crear_vault
+    from trovefy.cerebro_cli import _configurar, _ejecutar
+    from trovefy.vault.andamio import crear_vault
 
     v = tmp_path / "v"
     crear_vault(v)
@@ -80,12 +80,12 @@ def test_cli_traspaso_escribe_log(tmp_path, monkeypatch):
     import io
     import json
 
-    from trovify import cli
-    from trovify.vault.andamio import crear_vault
+    from trovefy import cli
+    from trovefy.vault.andamio import crear_vault
 
     v = tmp_path / "v"
     crear_vault(v)
-    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps({"hecho": ["x"]})))
     antes = (v / "log.md").read_text().count("\n")
     assert cli.main(["cerebro", "traspaso", "--json", "-"]) == 0

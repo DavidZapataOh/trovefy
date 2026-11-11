@@ -1,13 +1,13 @@
 import pytest
-from trovify.auditoria.paises import (
+from trovefy.auditoria.paises import (
     PaisAuditado,
     no_tirar,
     puntuar_pais,
     recomendar,
     tres_senales,
 )
-from trovify.caza.hueco import HuecoPais
-from trovify.caza.senales import Medida
+from trovefy.caza.hueco import HuecoPais
+from trovefy.caza.senales import Medida
 
 
 def hp(pais, comp, orig, hueco):
@@ -134,7 +134,7 @@ def test_reserva_empatada_no_se_elige_por_orden_alfabetico():
 
 
 def test_sin_pais_recomendable_dice_que_medir():
-    from trovify.auditoria.paises import que_medir
+    from trovefy.auditoria.paises import que_medir
 
     sin_frases = HuecoPais("RO", Medida(None, "no medido: faltan las frases"), "ausente", None, [],
                            "no medido: faltan las frases en el idioma local de RO")

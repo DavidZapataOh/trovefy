@@ -1,9 +1,9 @@
 # Fixtures de la Biblioteca pública de anuncios de Meta
 
-Grabadas el **2026-11-10 (UTC)** con `uv run python -m trovify.caza.grabar` (`scripts/trovify/caza/grabar.py`):
+Grabadas el **2026-11-10 (UTC)** con `uv run python -m trovefy.caza.grabar` (`scripts/trovefy/caza/grabar.py`):
 Chromium de Playwright 1.65.0 sin interfaz, `chromium_sandbox=True`, **contexto efímero** (`browser.new_context()`, sin
 perfil, sin sesión, sin cookies previas, sin parches de sigilo), con el candado de «un navegador a la vez» de
-`trovify.navegador`. Sin login. La interfaz salió **en español** (locale por defecto del Chromium de la máquina).
+`trovefy.navegador`. Sin login. La interfaz salió **en español** (locale por defecto del Chromium de la máquina).
 
 Formato de cada archivo (lo consume la Tarea 3):
 
@@ -18,7 +18,7 @@ Formato de cada archivo (lo consume la Tarea 3):
 |---|---|---|---|---|---|---|
 | `pagina_therapy_toolkit.json` | `?active_status=active&ad_type=all&country=ALL&media_type=all&search_type=page&view_all_page_id=102506312071455` | 15:48:40 | 30 (todos en `html_final`; 0 en `respuestas`) | 1 (`102506312071455`) | «~230 resultados» (`count: 234`) | 83,6 kB |
 | `palabra_impultienda.json` | `?active_status=all&ad_type=all&country=ALL&media_type=all&q=impultienda.ar&search_type=keyword_unordered` | 15:50:08 | 70 (30 en `html_final` + 40 en 4 `respuestas`) | 34 en total; 26 solo en `respuestas` | «>50.000 resultados» (`count: 50001`) | 219 kB |
-| `vacio.json` | `?active_status=active&ad_type=all&country=RO&media_type=all&q=zzqxv+trovify+prueba&search_type=keyword_unordered` | 15:50:31 | 0 | 0 | «No hay ningún anuncio…» (`count: 0`) | 2,6 kB |
+| `vacio.json` | `?active_status=active&ad_type=all&country=RO&media_type=all&q=zzqxv+trovefy+prueba&search_type=keyword_unordered` | 15:50:31 | 0 | 0 | «No hay ningún anuncio…» (`count: 0`) | 2,6 kB |
 
 Todas las URLs empiezan por `https://www.facebook.com/ads/library/`. Meta redirige añadiendo
 `is_targeted_country=false&sort_data[mode]=total_impressions&sort_data[direction]=desc` (queda en `url_final`).
@@ -72,7 +72,7 @@ Cada anuncio: `edges[].node.collated_results[]` con, entre otros, `ad_archive_id
   `datr`, `_js_datr`, `sessionID`/`session_id`, `haste_session`, `end_cursor` y **cualquier campo cuyo nombre contenga
   «token»** → `"<redactado>"`.
 - URLs de medios (host `scontent*` o que contenga `fbcdn`) → `"<media>"`.
-- Después, `trovify.secretos.buscar_secreto` sobre el texto completo del archivo; si encuentra algo, no se escribe.
+- Después, `trovefy.secretos.buscar_secreto` sobre el texto completo del archivo; si encuentra algo, no se escribe.
 
 Los textos de los anuncios (públicos) se conservan como muestra del formato.
 

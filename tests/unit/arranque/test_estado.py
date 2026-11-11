@@ -1,6 +1,6 @@
 import pytest
 import yaml
-from trovify.arranque.estado import (
+from trovefy.arranque.estado import (
     ArranqueCorrupto,
     PasoDesconocido,
     ResultadoVerificacion,
@@ -11,7 +11,7 @@ from trovify.arranque.estado import (
     porcentaje_fase,
     siguiente,
 )
-from trovify.cli import main
+from trovefy.cli import main
 
 
 def _ok(datos=None):
@@ -165,7 +165,7 @@ def test_siguiente_salta_hecho_y_bloqueado(tmp_path):
     marcar_hecho(tmp_path, "00")
     assert siguiente(cargar(tmp_path)).id == "01"
     aplicar_verificacion(tmp_path, "01", _ok())
-    marcar_bloqueado(tmp_path, "02", "espera /trovify:cazar (plan 07)")
+    marcar_bloqueado(tmp_path, "02", "espera /trovefy:cazar (plan 07)")
     assert siguiente(cargar(tmp_path)).id == "03"
 
 
@@ -197,17 +197,17 @@ def test_verificado_a_mano_sin_evidencia_cuenta_como_hecho(tmp_path):
 
 
 def test_estado_cli_muestra_la_nota_truncada(tmp_path, capsys):
-    marcar_bloqueado(tmp_path, "02", "espera /trovify:cazar (plan 07)")
+    marcar_bloqueado(tmp_path, "02", "espera /trovefy:cazar (plan 07)")
     marcar_hecho(tmp_path, "03", "n" * 200)
     capsys.readouterr()
     assert main(["arranque", "estado", "--vault", str(tmp_path)]) == 0
     out = capsys.readouterr().out
-    assert "espera /trovify:cazar (plan 07)" in out
+    assert "espera /trovefy:cazar (plan 07)" in out
     assert "n" * 200 not in out and "n" * 70 in out
 
 
 def _con_verificador(monkeypatch, funcion):
-    from trovify.arranque.verificadores import REGISTRO
+    from trovefy.arranque.verificadores import REGISTRO
     monkeypatch.setitem(REGISTRO, "03", funcion)
 
 

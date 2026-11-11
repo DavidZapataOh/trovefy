@@ -4,10 +4,10 @@ from datetime import date
 
 import pytest
 from ayudas import anuncio, destino_impultienda
-from trovify.caza import palabras
-from trovify.caza.filtros import ContextoFiltros, banderas, filtrar
-from trovify.caza.oferta import agrupar, marcar_original
-from trovify.config.umbrales import cargar
+from trovefy.caza import palabras
+from trovefy.caza.filtros import ContextoFiltros, banderas, filtrar
+from trovefy.caza.oferta import agrupar, marcar_original
+from trovefy.config.umbrales import cargar
 
 U = cargar(pathlib.Path(__file__).resolve().parents[3] / "templates/cerebro/config/umbrales.yaml")
 CTX = ContextoFiltros(set(), set(), U)

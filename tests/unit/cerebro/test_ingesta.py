@@ -2,8 +2,8 @@ import pathlib
 from datetime import date
 
 import pytest
-from trovify.cerebro.ingesta import html_a_texto, ingerir
-from trovify.vault import frontmatter
+from trovefy.cerebro.ingesta import html_a_texto, ingerir
+from trovefy.vault import frontmatter
 
 FIX = pathlib.Path(__file__).resolve().parents[2] / "fixtures/cerebro/mini_playbook.html"
 
@@ -66,7 +66,7 @@ def test_html_se_convierte(tmp_path):
 
 
 def test_cli_ingerir(tmp_path, capsys):
-    from trovify.cli import main
+    from trovefy.cli import main
     f = tmp_path / "n.md"
     f.write_text("x")
     v = tmp_path / "v"
@@ -92,7 +92,7 @@ def test_no_sobrescribe_existente_ni_enlace_roto(tmp_path):
 
 
 def test_carrera_entre_escaneo_y_escritura(tmp_path, monkeypatch):
-    from trovify.cerebro import ingesta
+    from trovefy.cerebro import ingesta
     v = tmp_path / "v"
     f = tmp_path / "nota.md"
     f.write_text("x")
@@ -153,7 +153,7 @@ def test_ingesta_acepta_mencion_de_access_token(tmp_path):
 
 
 def test_cli_ingerir_secreto_sale_2(tmp_path, capsys):
-    from trovify.cli import main
+    from trovefy.cli import main
     f = tmp_path / "s.md"
     f.write_text(_tokens()["clave sk-"])
     v = tmp_path / "v"

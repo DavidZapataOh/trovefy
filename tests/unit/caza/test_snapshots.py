@@ -1,7 +1,7 @@
 from datetime import date
 
 import pytest
-from trovify.caza.snapshots import (
+from trovefy.caza.snapshots import (
     Snapshot,
     abrir,
     dia_anterior,

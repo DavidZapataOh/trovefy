@@ -3,8 +3,8 @@
 import warnings
 
 import pytest
-from trovify.caza.cliente import ClienteBibliotecaPublica
-from trovify.caza.presupuesto import Presupuesto
+from trovefy.caza.cliente import ClienteBibliotecaPublica
+from trovefy.caza.presupuesto import Presupuesto
 
 
 @pytest.mark.vivo

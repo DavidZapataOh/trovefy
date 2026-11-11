@@ -2,10 +2,10 @@ import io
 import pathlib
 from datetime import date
 
-from trovify.auditoria.precio import precio_local, precio_soportable
-from trovify.caza.senales import Medida
-from trovify.config.mercados import cargar
-from trovify.fx import a_eur, cambios
+from trovefy.auditoria.precio import precio_local, precio_soportable
+from trovefy.caza.senales import Medida
+from trovefy.config.mercados import cargar
+from trovefy.fx import a_eur, cambios
 
 XML = (pathlib.Path(__file__).resolve().parents[2] / "fixtures/fx/eurofxref-daily.xml").read_bytes()
 M = cargar(pathlib.Path(__file__).resolve().parents[3] / "templates/cerebro/config/mercados.yaml")
@@ -85,7 +85,7 @@ def test_xml_utf16_con_doctype_es_none(tmp_path):
 
 
 def test_cambio_del_dia_con_fecha_y_fuente(tmp_path):
-    from trovify.fx import URL, cambio_del_dia
+    from trovefy.fx import URL, cambio_del_dia
 
     c = cambio_del_dia(tmp_path, HOY, abrir=abrir_falso)
     assert c.fecha == "2026-11-10" and c.url == URL and c.tasas["RON"] == 5.3442
@@ -100,7 +100,7 @@ def test_cambio_del_dia_con_fecha_y_fuente(tmp_path):
 def test_cache_antigua_sin_fecha_sigue_valiendo(tmp_path):
     import json
 
-    from trovify.fx import cambio_del_dia
+    from trovefy.fx import cambio_del_dia
 
     ruta = tmp_path / "data/cache/fx-2026-11-10.json"
     ruta.parent.mkdir(parents=True)

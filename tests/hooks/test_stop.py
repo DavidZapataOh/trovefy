@@ -3,12 +3,12 @@ def ev(tool, cwd="/", **inp):
 
 
 def activar(vault):
-    (vault / ".trovify/STOP").write_text("")
+    (vault / ".trovefy/STOP").write_text("")
 
 
 def test_stop_bloquea_el_buzon(correr_hook, vault_tmp):
     activar(vault_tmp)
-    e = {"tool_name": "Write", "tool_input": {"file_path": "/var/spool/trovify/entrada/P-1.json", "content": "{}"}}
+    e = {"tool_name": "Write", "tool_input": {"file_path": "/var/spool/trovefy/entrada/P-1.json", "content": "{}"}}
     decision, motivo = correr_hook("stop", e, vault_tmp)
     assert decision == "deny" and "STOP activo: no se deposita nada" in motivo
 
@@ -16,7 +16,7 @@ def test_stop_bloquea_el_buzon(correr_hook, vault_tmp):
 def test_sin_stop_no_bloquea(correr_hook, vault_tmp):
     e = {"tool_name": "Write", "tool_input": {"file_path": str(vault_tmp / "propuestas/P-1.md"), "content": "x"}}
     assert correr_hook("stop", e, vault_tmp)[0] == "allow"
-    e = ev("Write", file_path="/var/spool/trovify/entrada/P-1.json", content="{}")
+    e = ev("Write", file_path="/var/spool/trovefy/entrada/P-1.json", content="{}")
     assert correr_hook("stop", e, vault_tmp)[0] == "allow"
 
 
@@ -44,18 +44,18 @@ def test_stop_no_bloquea_otras_rutas_ni_lecturas(correr_hook, vault_tmp):
     activar(vault_tmp)
     assert correr_hook("stop", ev("Write", file_path=str(vault_tmp / "wiki/x.md"), content="x"), vault_tmp)[0] == "allow"
     assert correr_hook("stop", ev("Write", file_path=str(vault_tmp / "propuestas-viejas/x.md"), content="x"), vault_tmp)[0] == "allow"
-    assert correr_hook("stop", ev("Read", file_path="/var/spool/trovify/entrada/P-1.json"), vault_tmp)[0] == "allow"
+    assert correr_hook("stop", ev("Read", file_path="/var/spool/trovefy/entrada/P-1.json"), vault_tmp)[0] == "allow"
 
 
 def test_stop_bash(correr_hook, vault_tmp):
     activar(vault_tmp)
     v = str(vault_tmp)
     for cmd in [
-        "cp x.json /var/spool/trovify/entrada/P-1.json",
-        "echo '{}' > '/var/spool/trovify/entrada/P-1.json'",
+        "cp x.json /var/spool/trovefy/entrada/P-1.json",
+        "echo '{}' > '/var/spool/trovefy/entrada/P-1.json'",
         f"echo x > {v}/propuestas/P-1.md",
-        'echo x > "$TROVIFY_VAULT/propuestas/P-1.md"',
-        "echo x > ${TROVIFY_VAULT}/propuestas/P-1.md",
+        'echo x > "$TROVEFY_VAULT/propuestas/P-1.md"',
+        "echo x > ${TROVEFY_VAULT}/propuestas/P-1.md",
         f"cd {v} && echo x > propuestas/P-1.md",
     ]:
         decision, motivo = correr_hook("stop", ev("Bash", command=cmd), vault_tmp)

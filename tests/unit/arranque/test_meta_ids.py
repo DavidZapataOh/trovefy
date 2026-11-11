@@ -1,16 +1,16 @@
 import pathlib
 
 import pytest
-from trovify.arranque.estado import marcar_hecho
-from trovify.arranque.verificadores.base import Confirmacion
-from trovify.arranque.verificadores.meta_ids import (
+from trovefy.arranque.estado import marcar_hecho
+from trovefy.arranque.verificadores.base import Confirmacion
+from trovefy.arranque.verificadores.meta_ids import (
     extraer_business_id,
     extraer_page_id,
     verificar_business,
     verificar_pagina,
 )
-from trovify.cli import main
-from trovify.navegador import Captura, NavegadorError
+from trovefy.cli import main
+from trovefy.navegador import Captura, NavegadorError
 
 FIX = pathlib.Path(__file__).resolve().parents[2] / "fixtures/arranque/pagina_publica.html"
 CONF = Confirmacion(fecha="2026-11-11", fuente="prueba")
@@ -75,7 +75,7 @@ def test_04_con_id(tmp_path):
 def test_04_sesion_caducada(tmp_path):
     r = verificar_business(tmp_path, capturar=falso("https://www.facebook.com/login/?next=x"), confirmacion=CONF)
     assert r.ok is None and r.motivo.startswith("no medido: inicia sesión")
-    assert "trovify navegador abrir meta https://business.facebook.com/" in r.motivo and not r.evidencia
+    assert "trovefy navegador abrir meta https://business.facebook.com/" in r.motivo and not r.evidencia
 
 
 def test_04_sin_id(tmp_path):
@@ -85,7 +85,7 @@ def test_04_sin_id(tmp_path):
 
 def test_04_navegador_roto(tmp_path):
     def roto(*a, **k):
-        raise NavegadorError("ya hay un navegador de Trovify abierto")
+        raise NavegadorError("ya hay un navegador de Trovefy abierto")
 
     r = verificar_business(tmp_path, capturar=roto)
     assert r.ok is None and "navegador" in r.motivo
@@ -119,7 +119,7 @@ def test_05_sin_id_y_sesion(tmp_path):
 
 def test_cli_hecho_con_datos(tmp_path):
     assert main(["arranque", "hecho", "05", "--vault", str(tmp_path), "--dato", "url=https://www.facebook.com/x", "--dato", "otro=1"]) == 0
-    from trovify.arranque.estado import cargar
+    from trovefy.arranque.estado import cargar
 
     assert next(p for p in cargar(tmp_path) if p.id == "05").datos == {"url": "https://www.facebook.com/x", "otro": "1"}
 
@@ -130,14 +130,14 @@ def test_cli_hecho_rechaza_datos_malos(tmp_path, dato):
 
 
 def test_cli_dato_url_se_limpia(tmp_path):
-    from trovify.arranque.estado import cargar
+    from trovefy.arranque.estado import cargar
 
     assert main(["arranque", "hecho", "05", "--vault", str(tmp_path), "--dato", "url=https://www.facebook.com/profile.php?id=5&ref=x#a"]) == 0
     assert next(p for p in cargar(tmp_path) if p.id == "05").datos["url"] == "https://www.facebook.com/profile.php?id=5"
 
 
 def test_cli_dato_url_profile_php_solo_id_numerico(tmp_path):
-    from trovify.arranque.estado import cargar
+    from trovefy.arranque.estado import cargar
 
     assert main(["arranque", "hecho", "05", "--vault", str(tmp_path), "--dato", "url=https://www.facebook.com/profile.php?id=abc&x=1"]) == 0
     assert next(p for p in cargar(tmp_path) if p.id == "05").datos["url"] == "https://www.facebook.com/profile.php"
@@ -162,7 +162,7 @@ def test_cli_dato_url_rechazada(tmp_path, url):
 
 
 def test_resultado_provisional_publico_en_base(tmp_path):
-    from trovify.arranque.verificadores.base import resultado_provisional
+    from trovefy.arranque.verificadores.base import resultado_provisional
 
     r = resultado_provisional(tmp_path, "99", Captura("https://www.facebook.com/x?token=1", "", "", None), PNG)
     assert r.ok is None and r.motivo == "no medido: patrón sin confirmar con tu pantalla real" and not r.datos and not r.evidencia

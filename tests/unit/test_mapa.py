@@ -1,6 +1,6 @@
 import pytest
 import yaml
-from trovify.mapa import FirmaAusente, MapaInvalido, cargar, leer_pantalla
+from trovefy.mapa import FirmaAusente, MapaInvalido, cargar, leer_pantalla
 
 PANTALLA = {"firma": ["Mi plan"], "campos": {"plan": {"patron": r"Plan actual:\s*(\w+)"}}}
 

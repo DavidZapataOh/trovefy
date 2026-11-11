@@ -5,12 +5,12 @@ import threading
 import urllib.error
 
 import pytest
-from trovify.arranque.verificadores import REGISTRO
-from trovify.arranque.verificadores.apimart import consultar_saldo, verificar_apimart
-from trovify.secretos import PermisosInseguros, leer_env
+from trovefy.arranque.verificadores import REGISTRO
+from trovefy.arranque.verificadores.apimart import consultar_saldo, verificar_apimart
+from trovefy.secretos import PermisosInseguros, leer_env
 
 CLAVE = "sk-" + "x" * 30
-EXACTO = "en una terminal de Ubuntu (WSL) aparte: `mkdir -p ~/.config/trovify && touch ~/.config/trovify/claude.env && chmod 600 ~/.config/trovify/claude.env`"
+EXACTO = "en una terminal de Ubuntu (WSL) aparte: `mkdir -p ~/.config/trovefy && touch ~/.config/trovefy/claude.env && chmod 600 ~/.config/trovefy/claude.env`"
 
 
 def env(tmp_path, modo=0o600, extra=""):
@@ -201,7 +201,7 @@ def test_redireccion_no_reenvia_la_clave(tmp_path):
 def test_arreglo_no_trunca_un_claude_env_existente():
     import inspect
 
-    from trovify.arranque.verificadores import apimart
+    from trovefy.arranque.verificadores import apimart
     assert "install -m" not in inspect.getsource(apimart)
 
 
@@ -230,7 +230,7 @@ def test_clave_con_caracteres_raros(tmp_path):
 def test_leer_env_fifo_no_se_cuelga(tmp_path):
     import threading
 
-    from trovify.secretos import EnvNoSeguro
+    from trovefy.secretos import EnvNoSeguro
     fifo = tmp_path / "f.env"
     os.mkfifo(fifo, 0o600)
     out = []

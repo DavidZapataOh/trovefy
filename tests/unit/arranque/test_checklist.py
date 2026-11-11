@@ -1,9 +1,9 @@
 import json
 
-from trovify.arranque.estado import cargar
-from trovify.arranque.verificadores import REGISTRO
-from trovify.arranque.verificadores.checklist import CHECKLISTS, verificar_checklist
-from trovify.cli import main
+from trovefy.arranque.estado import cargar
+from trovefy.arranque.verificadores import REGISTRO
+from trovefy.arranque.verificadores.checklist import CHECKLISTS, verificar_checklist
+from trovefy.cli import main
 
 TODO = {"perfil_propio": True, "dos_fa": True, "sin_vpn": True}
 

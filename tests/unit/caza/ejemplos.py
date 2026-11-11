@@ -8,16 +8,16 @@ from dataclasses import replace
 from datetime import date, timedelta
 
 from ayudas import anuncio, destino_impultienda
-from trovify.caza.biblioteca import url_biblioteca
-from trovify.caza.destino import Destino
-from trovify.caza.filtros import Descarte
-from trovify.caza.hueco import HuecoPais
-from trovify.caza.nota import calcular_nota, decidir
-from trovify.caza.oferta import Oferta
-from trovify.caza.salida import Consulta, Ejecucion, ResultadoOferta
-from trovify.caza.senales import Medida, Senales, calcular_senales
-from trovify.config.mercados import cargar as cargar_mercados
-from trovify.config.umbrales import cargar
+from trovefy.caza.biblioteca import url_biblioteca
+from trovefy.caza.destino import Destino
+from trovefy.caza.filtros import Descarte
+from trovefy.caza.hueco import HuecoPais
+from trovefy.caza.nota import calcular_nota, decidir
+from trovefy.caza.oferta import Oferta
+from trovefy.caza.salida import Consulta, Ejecucion, ResultadoOferta
+from trovefy.caza.senales import Medida, Senales, calcular_senales
+from trovefy.config.mercados import cargar as cargar_mercados
+from trovefy.config.umbrales import cargar
 
 _CONFIG = pathlib.Path(__file__).resolve().parents[3] / "templates/cerebro/config"
 U = cargar(_CONFIG / "umbrales.yaml")

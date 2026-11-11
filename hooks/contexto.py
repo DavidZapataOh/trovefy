@@ -89,7 +89,7 @@ def _stop(vault: pathlib.Path) -> str | None:
     from _comun import stop_activo
 
     if stop_activo(vault):
-        return "## STOP activo\nExiste .trovify/STOP: no se debe escribir ni ejecutar acciones hasta retirarlo."
+        return "## STOP activo\nExiste .trovefy/STOP: no se debe escribir ni ejecutar acciones hasta retirarlo."
     return None
 
 

@@ -2,8 +2,8 @@
 
 from datetime import date
 
-from trovify.caza.destino import Destino
-from trovify.caza.modelo import AnuncioBiblioteca
+from trovefy.caza.destino import Destino
+from trovefy.caza.modelo import AnuncioBiblioteca
 
 URL_TIENDA = "https://a.impultienda.ar/"
 

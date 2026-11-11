@@ -1,10 +1,10 @@
 {
-  "name": "trovify",
+  "name": "trovefy",
   "version": "0.1.0",
-  "description": "Trovify: plugin de Claude Code para un negocio de productos digitales de bajo precio: caza de ofertas en la Biblioteca de anuncios de Meta, auditoría por país, puesta en marcha guiada y memoria en un vault de Obsidian.",
-  "author": { "name": "Trovify" },
-  "homepage": "https://github.com/DavidZapataOh/trovify",
-  "repository": "https://github.com/DavidZapataOh/trovify",
+  "description": "Trovefy: plugin de Claude Code para un negocio de productos digitales de bajo precio: caza de ofertas en la Biblioteca de anuncios de Meta, auditoría por país, puesta en marcha guiada y memoria en un vault de Obsidian.",
+  "author": { "name": "Trovefy" },
+  "homepage": "https://github.com/DavidZapataOh/trovefy",
+  "repository": "https://github.com/DavidZapataOh/trovefy",
   "license": "MIT",
   "keywords": ["meta-ads", "ad-library", "obsidian", "productos-digitales"]
 }

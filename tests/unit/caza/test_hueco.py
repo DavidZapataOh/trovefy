@@ -2,17 +2,17 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta
 
 from ayudas import anuncio
-from trovify.caza.cliente import SesionBloqueada
-from trovify.caza.hueco import (
+from trovefy.caza.cliente import SesionBloqueada
+from trovefy.caza.hueco import (
     HuecoPais,
     competencia_local,
     hay_hueco,
     motivo_hueco,
     original_presente,
 )
-from trovify.caza.modelo import ResultadoBusqueda
-from trovify.caza.presupuesto import PresupuestoAgotado
-from trovify.caza.senales import Medida
+from trovefy.caza.modelo import ResultadoBusqueda
+from trovefy.caza.presupuesto import PresupuestoAgotado
+from trovefy.caza.senales import Medida
 
 HOY = date(2026, 11, 10)
 RO = "Fișe de terapie gata de printat, acces imediat după plată, pentru copii"
@@ -186,7 +186,7 @@ def test_vacio_vacio_y_ok_bajo_el_minimo(umbrales):
 
 
 def test_hueco_pais_no_busca_original_tras_parada(umbrales):
-    from trovify.caza.hueco import hueco_pais
+    from trovefy.caza.hueco import hueco_pais
 
     cl = ClienteFalso([SesionBloqueada("x")])
     h = hueco_pais(cl, ["a b", "c d"], ["9"], "RO", "ro", set(), HOY, umbrales)
@@ -199,7 +199,7 @@ def test_hueco_pais_dataclass():
 
 
 def test_hueco_pais_reune_enlaces_y_motivo(umbrales):
-    from trovify.caza.hueco import hueco_pais
+    from trovefy.caza.hueco import hueco_pais
 
     cl = ClienteFalso([vacio(), vacio(), con([ad("a", "9", 40, EN)])])
     h = hueco_pais(cl, ["a b", "c d"], ["9"], "RO", "ro", set(), HOY, umbrales)

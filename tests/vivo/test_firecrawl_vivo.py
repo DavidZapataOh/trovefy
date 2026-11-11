@@ -3,16 +3,16 @@
 import warnings
 
 import pytest
-from trovify.caza.cliente import ClienteBibliotecaPublica
-from trovify.caza.firecrawl import NavegadorFirecrawl, clave_firecrawl
-from trovify.caza.presupuesto import Presupuesto
+from trovefy.caza.cliente import ClienteBibliotecaPublica
+from trovefy.caza.firecrawl import NavegadorFirecrawl, clave_firecrawl
+from trovefy.caza.presupuesto import Presupuesto
 
 
 @pytest.mark.vivo
 def test_therapy_toolkit_por_firecrawl():
     clave = clave_firecrawl()
     if clave is None:
-        pytest.skip("falta FIRECRAWL_API_KEY en ~/.config/trovify/claude.env")
+        pytest.skip("falta FIRECRAWL_API_KEY en ~/.config/trovefy/claude.env")
     nav = NavegadorFirecrawl(clave)
     c = ClienteBibliotecaPublica(Presupuesto(3, 2, 5), firecrawl=nav)
     r = c.buscar("ALL", page_id="102506312071455", estado="all")

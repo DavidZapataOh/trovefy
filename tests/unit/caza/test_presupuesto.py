@@ -2,7 +2,7 @@ import random
 from datetime import date
 
 import pytest
-from trovify.caza.presupuesto import ParadaPorErrores, Presupuesto, PresupuestoAgotado
+from trovefy.caza.presupuesto import ParadaPorErrores, Presupuesto, PresupuestoAgotado
 
 
 def test_presupuesto_agotado():

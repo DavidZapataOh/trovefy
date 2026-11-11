@@ -1,14 +1,14 @@
 import json
 
-from trovify.cli import main
-from trovify.vault.permisos import generar_settings
+from trovefy.cli import main
+from trovefy.vault.permisos import generar_settings
 
 
 def test_deny_fijo():
     deny = generar_settings()["permissions"]["deny"]
     # Sintaxis vigente: ruta absoluta con «//» (un solo «/» es relativo al origen de la config).
-    for regla in ["Bash(curl*graph.facebook.com*)", "Bash(sudo *)", "Read(//home/trovify-exec/**)",
-                  "Edit(//var/spool/trovify/procesadas/**)", "Bash(*graph.facebook.com*)",
+    for regla in ["Bash(curl*graph.facebook.com*)", "Bash(sudo *)", "Read(//home/trovefy-exec/**)",
+                  "Edit(//var/spool/trovefy/procesadas/**)", "Bash(*graph.facebook.com*)",
                   "Bash(su *)", "Bash(* | sh)", "Bash(* | bash)"]:
         assert regla in deny
 
@@ -34,7 +34,7 @@ def test_sin_meta_tools_deniega_todo_ads():
 
 def test_allow_y_servidor_personalizado(tmp_path):
     s = generar_settings(["ads_x"], servidor_meta="fb", vault=tmp_path / "v")
-    assert "Bash(trovify *)" in s["permissions"]["allow"]
+    assert "Bash(trovefy *)" in s["permissions"]["allow"]
     assert f"Read(/{tmp_path / 'v'}/**)" in s["permissions"]["allow"]
     assert "mcp__fb__ads_x" in s["permissions"]["deny"]
 

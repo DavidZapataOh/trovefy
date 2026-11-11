@@ -2,13 +2,13 @@ from datetime import date, datetime
 
 import pytest
 from ejemplos_auditoria import oferta_ejemplo
-from trovify.auditoria import orquestador
-from trovify.caza.cliente import SesionBloqueada
-from trovify.caza.modelo import ResultadoBusqueda
-from trovify.caza.orquestador import CazaEnCurso, cerrojo_caza
-from trovify.caza.presupuesto import PresupuestoAgotado
-from trovify.vault.andamio import crear_vault
-from trovify.vault.frontmatter import escribir, leer
+from trovefy.auditoria import orquestador
+from trovefy.caza.cliente import SesionBloqueada
+from trovefy.caza.modelo import ResultadoBusqueda
+from trovefy.caza.orquestador import CazaEnCurso, cerrojo_caza
+from trovefy.caza.presupuesto import PresupuestoAgotado
+from trovefy.vault.andamio import crear_vault
+from trovefy.vault.frontmatter import escribir, leer
 
 HOY = date(2026, 11, 10)
 FRASES = {"RO": ["fise terapie", "kit terapie"], "IT": ["schede terapia", "kit terapia"]}
@@ -194,7 +194,7 @@ def test_mercados_con_clave_rara_es_error_claro(v):
 
 
 def test_precio_con_su_procedencia_y_el_precio_local(v):
-    from trovify import fx
+    from trovefy import fx
 
     o = oferta_ejemplo()
     o["precio"], o["moneda"] = 79, "RON"
@@ -231,7 +231,7 @@ FRASES4 = {p: [f"{p.lower()} uno", f"{p.lower()} dos"] for p in ("RO", "IT", "FR
 
 class ClienteConPresupuesto(ClienteFalso):
     def __init__(self, v, usadas, hoy=HOY):
-        from trovify.caza.presupuesto import Presupuesto
+        from trovefy.caza.presupuesto import Presupuesto
 
         super().__init__()
         contador = v / "data/caza/presupuesto" / f"{hoy.isoformat()}.json"
@@ -277,9 +277,9 @@ def test_volver_a_auditar_el_mismo_dia_continua_donde_se_quedo(v):
 
 
 def test_reutiliza_el_hueco_reciente_de_la_ficha_sin_buscar(v):
-    from trovify.caza.hueco import HuecoPais
-    from trovify.caza.orquestador import hueco_a_dict
-    from trovify.caza.senales import Medida
+    from trovefy.caza.hueco import HuecoPais
+    from trovefy.caza.orquestador import hueco_a_dict
+    from trovefy.caza.senales import Medida
 
     o = oferta_ejemplo()
     enlace = "https://www.facebook.com/ads/library/?country=RO&q=fise"
@@ -294,7 +294,7 @@ def test_reutiliza_el_hueco_reciente_de_la_ficha_sin_buscar(v):
     ro = por_pais(r)["RO"]
     assert ro.hueco.hueco is True and ro.hueco.enlaces == [enlace]
     texto = r.ruta.read_text()
-    assert "medido el 2026-11-08 (con trovify caza hueco, en la ficha de la oferta)" in texto
+    assert "medido el 2026-11-08 (con trovefy caza hueco, en la ficha de la oferta)" in texto
     assert "hoy no se volvió a buscar" in texto
 
 

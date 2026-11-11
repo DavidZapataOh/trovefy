@@ -3,10 +3,10 @@ from pathlib import Path
 
 import pytest
 import yaml
-from trovify import cli
-from trovify.vault.andamio import crear_vault
-from trovify.vault.frontmatter import leer
-from trovify.vault.reglas import (
+from trovefy import cli
+from trovefy.vault.andamio import crear_vault
+from trovefy.vault.frontmatter import leer
+from trovefy.vault.reglas import (
     ConflictoDeReglas,
     conflictos,
     consistencia,
@@ -96,7 +96,7 @@ def _json(tmp_path, **campos):
 
 def test_cli_regla_ok(tmp_path, monkeypatch, capsys):
     v = _vault(tmp_path)
-    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
     assert cli.main(["cerebro", "regla", "--json", _json(tmp_path)]) == 0
     assert "R-013-no-cazar-en-diciembre.md" in capsys.readouterr().out
 
@@ -104,14 +104,14 @@ def test_cli_regla_ok(tmp_path, monkeypatch, capsys):
 def test_cli_regla_stdin(tmp_path, monkeypatch, capsys):
     import io
     v = _vault(tmp_path)
-    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
     monkeypatch.setattr("sys.stdin", io.StringIO(Path(_json(tmp_path)).read_text()))
     assert cli.main(["cerebro", "regla", "--json", "-"]) == 0
 
 
 def test_cli_regla_conflicto(tmp_path, monkeypatch, capsys):
     v = _vault(tmp_path)
-    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
     j = _json(tmp_path, umbrales={"corte.oferta.sin_ventas_usd": 20})
     assert cli.main(["cerebro", "regla", "--json", j]) == 3
     assert "R-006" in capsys.readouterr().out
@@ -119,7 +119,7 @@ def test_cli_regla_conflicto(tmp_path, monkeypatch, capsys):
 
 def test_cli_regla_errores(tmp_path, monkeypatch, capsys):
     v = _vault(tmp_path)
-    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
     (tmp_path / "mal.json").write_text("{no")
     assert cli.main(["cerebro", "regla", "--json", str(tmp_path / "mal.json")]) == 2
     assert cli.main(["cerebro", "regla", "--json", str(tmp_path / "nada.json")]) == 2
@@ -156,14 +156,14 @@ def test_index_ausente_no_cambia_nada(tmp_path):
 def test_cli_vault_incompleto_sale_2(tmp_path, monkeypatch, capsys):
     v = _vault(tmp_path)
     (v / "index.md").unlink()
-    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
     assert cli.main(["cerebro", "regla", "--json", _json(tmp_path)]) == 2
     assert "index.md" in capsys.readouterr().err
 
 
 def test_slug_vacio_y_fecha_invalida(tmp_path, monkeypatch, capsys):
     v = _vault(tmp_path)
-    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
     assert cli.main(["cerebro", "regla", "--json", _json(tmp_path, titulo="¡¡")]) == 2
     assert cli.main(["cerebro", "regla", "--json", _json(tmp_path, fecha="10/11/2026")]) == 2
     assert not list((v / "wiki/reglas").glob("R-013*"))
@@ -171,7 +171,7 @@ def test_slug_vacio_y_fecha_invalida(tmp_path, monkeypatch, capsys):
 
 def test_simular_no_escribe_y_muestra_heredados(tmp_path, monkeypatch, capsys):
     v = _vault(tmp_path)
-    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
     j = _json(tmp_path, umbrales={"corte.oferta.sin_ventas_usd": 20}, reemplaza=["R-006"])
     antes = _snapshot(v)
     assert cli.main(["cerebro", "regla", "--simular", "--json", j]) == 0
@@ -184,7 +184,7 @@ def test_simular_no_escribe_y_muestra_heredados(tmp_path, monkeypatch, capsys):
 
 def test_real_imprime_mismo_resumen(tmp_path, monkeypatch, capsys):
     v = _vault(tmp_path)
-    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
     j = _json(tmp_path, umbrales={"corte.oferta.sin_ventas_usd": 20}, reemplaza=["R-006"])
     assert cli.main(["cerebro", "regla", "--json", j]) == 0
     out = capsys.readouterr().out
@@ -198,7 +198,7 @@ def test_real_imprime_mismo_resumen(tmp_path, monkeypatch, capsys):
 @pytest.mark.parametrize("malo", ["NaN", "Infinity", '"veinte"', "true"])
 def test_valor_no_numerico_o_no_finito_sale_2_sin_escribir(tmp_path, monkeypatch, capsys, malo):
     v = _vault(tmp_path)
-    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
     f = tmp_path / "r.json"
     f.write_text('{"titulo": "X", "regla": "r", "porque": "p", "como": "c", "fuente": "U", '
                  '"umbrales": {"corte.oferta.sin_ventas_usd": ' + malo + '}, "reemplaza": ["R-006"]}')
@@ -206,14 +206,14 @@ def test_valor_no_numerico_o_no_finito_sale_2_sin_escribir(tmp_path, monkeypatch
     assert cli.main(["cerebro", "regla", "--json", str(f)]) == 2
     assert capsys.readouterr().err
     assert _snapshot(v) == antes
-    from trovify.config.umbrales import valor
+    from trovefy.config.umbrales import valor
     assert valor(v, "corte.oferta.sin_ventas_usd") == 25
 
 
 def test_reemplazo_actualiza_valor_citado_en_otras_reglas(tmp_path, monkeypatch, capsys):
-    from trovify.vault.lint import lint
+    from trovefy.vault.lint import lint
     v = _vault(tmp_path)
-    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
     j = _json(tmp_path, titulo="Escalar a 2,5", umbrales={"roas.escalar": 2.5}, reemplaza=["R-008"])
     assert cli.main(["cerebro", "regla", "--simular", "--json", j]) == 0
     out = capsys.readouterr().out
@@ -231,7 +231,7 @@ def test_reemplazo_actualiza_valor_citado_en_otras_reglas(tmp_path, monkeypatch,
 
 
 def test_formato_del_valor_citado(tmp_path):
-    from trovify.vault.reglas import formatear_valor_citado
+    from trovefy.vault.reglas import formatear_valor_citado
     assert formatear_valor_citado(2.5, "2,0") == "2,5"
     assert formatear_valor_citado(3, "2,0") == "3,0"
     assert formatear_valor_citado(7, "5") == "7"
@@ -242,7 +242,7 @@ def test_formato_del_valor_citado(tmp_path):
 
 def test_titulo_con_salto_de_linea_sale_2(tmp_path, monkeypatch, capsys):
     v = _vault(tmp_path)
-    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
     antes = _snapshot(v)
     for t in ("Uno\ndos", "Uno\rdos"):
         assert cli.main(["cerebro", "regla", "--json", _json(tmp_path, titulo=t)]) == 2
@@ -260,14 +260,14 @@ def test_gana_sobre_apunta_a_la_regla_y_valor_anteriores(tmp_path):
 
 def test_fecha_imposible_sale_2(tmp_path, monkeypatch):
     v = _vault(tmp_path)
-    monkeypatch.setenv("TROVIFY_VAULT", str(v))
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
     for f in ("2026-13-45", "2026-02-30"):
         assert cli.main(["cerebro", "regla", "--json", _json(tmp_path, fecha=f)]) == 2
     assert not list((v / "wiki/reglas").glob("R-013*"))
 
 
 def test_lint_marca_valor_desactualizado_y_consistencia(tmp_path):
-    from trovify.vault.lint import lint
+    from trovefy.vault.lint import lint
     v = _vault(tmp_path)
     p = v / "wiki/reglas/R-009-pre-escala.md"
     p.write_text(p.read_text().replace("`roas.escalar` (2,0)", "`roas.escalar` (3,0)", 1))
@@ -279,7 +279,7 @@ def test_lint_marca_valor_desactualizado_y_consistencia(tmp_path):
 
 
 def test_lint_ignora_paginas_reemplazadas(tmp_path):
-    from trovify.vault.lint import lint
+    from trovefy.vault.lint import lint
     v = _vault(tmp_path)
     nueva_regla(v, "Corte a 20", "r", "p", "c", "U",
                 umbrales={"corte.oferta.sin_ventas_usd": 20}, reemplaza=["R-006"])

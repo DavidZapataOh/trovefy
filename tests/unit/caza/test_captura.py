@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from trovify.caza.captura import escuchar_respuestas
+from trovefy.caza.captura import escuchar_respuestas
 
 
 class _Pagina:

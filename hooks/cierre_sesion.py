@@ -25,7 +25,7 @@ MAX_ENTRADAS_SESIONES = 2000
 ENFRIAMIENTO = 3600
 MENSAJE = (
     "Hoy se trabajó en el cerebro y aún no hay traspaso de sesión. "
-    "Si vas a parar, ejecuta /trovify:cerrar para no perder el contexto."
+    "Si vas a parar, ejecuta /trovefy:cerrar para no perder el contexto."
 )
 
 
@@ -64,14 +64,14 @@ def recordatorio(vault: pathlib.Path) -> str | None:
 def _enfriado(vault: pathlib.Path) -> bool:
     """True si ya se avisó hace menos de una hora (mtime del marcador)."""
     try:
-        return time.time() - (vault / ".trovify" / "cierre-aviso").stat().st_mtime < ENFRIAMIENTO
+        return time.time() - (vault / ".trovefy" / "cierre-aviso").stat().st_mtime < ENFRIAMIENTO
     except OSError:
         return False
 
 
 def _marcar(vault: pathlib.Path) -> None:
     try:
-        marca = vault / ".trovify" / "cierre-aviso"
+        marca = vault / ".trovefy" / "cierre-aviso"
         marca.parent.mkdir(parents=True, exist_ok=True)
         marca.touch()
     except OSError:

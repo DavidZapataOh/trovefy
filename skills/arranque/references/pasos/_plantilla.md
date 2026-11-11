@@ -16,4 +16,4 @@ Qué necesitas tener a mano (cuentas, documentos, tiempo, pasos anteriores verif
 - Síntoma: lo que ves. Arreglo: lo que haces.
 
 **Cómo se verifica**
-`trovify arranque verificar NN` — qué comprueba exactamente y qué evidencia deja en `config/evidencia/`.
+`trovefy arranque verificar NN` — qué comprueba exactamente y qué evidencia deja en `config/evidencia/`.

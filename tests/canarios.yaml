@@ -18,7 +18,7 @@
     - ["2 ×", "2×", "2 ×cpa", "2×cpa", "2x", "2 x", "dos veces", "doble"]
   no_debe_contener: ["72 horas sin ventas"]
 - id: c3
-  pregunta: "¿Qué vara usa Trovify en la caza para decir que una oferta de la Biblioteca de anuncios ya está escalando?"
+  pregunta: "¿Qué vara usa Trovefy en la caza para decir que una oferta de la Biblioteca de anuncios ya está escalando?"
   debe_contener:
     - ["15"]
     - ["c8", "8 dias", "ocho dias"]

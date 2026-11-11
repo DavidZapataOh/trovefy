@@ -1,8 +1,8 @@
 import pathlib
 
-from trovify.arranque.verificadores.impultienda import verificar_impultienda
-from trovify.mapa import FirmaAusente, cargar, leer_pantalla
-from trovify.navegador import Captura, NavegadorError
+from trovefy.arranque.verificadores.impultienda import verificar_impultienda
+from trovefy.mapa import FirmaAusente, cargar, leer_pantalla
+from trovefy.navegador import Captura, NavegadorError
 
 RAIZ = pathlib.Path(__file__).resolve().parents[3]
 FIX = RAIZ / "tests/fixtures/arranque"

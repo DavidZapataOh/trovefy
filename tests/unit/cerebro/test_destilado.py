@@ -1,6 +1,6 @@
 import pytest
-from trovify.cerebro.destilado import CITA, pendientes, validar_pagina
-from trovify.vault.andamio import crear_vault
+from trovefy.cerebro.destilado import CITA, pendientes, validar_pagina
+from trovefy.vault.andamio import crear_vault
 
 RAW = "raw/2026-11-10/playbook-videos-cerebro.md"
 
@@ -84,7 +84,7 @@ def test_fuente_fuera_del_vault_o_basename_no_cuenta(tmp_path):
 
 
 def test_cli_destilar(tmp_path, capsys):
-    from trovify.cli import main
+    from trovefy.cli import main
     v, _ = _vault(tmp_path)
     assert main(["cerebro", "destilar", "--pendientes", "--vault", str(v)]) == 0
     assert RAW in capsys.readouterr().out
@@ -108,14 +108,14 @@ def test_cita_raw_inexistente_se_reporta(tmp_path):
 
 
 def test_validar_sin_metodo(tmp_path, capsys):
-    from trovify.cli import main
+    from trovefy.cli import main
     v, _ = _vault(tmp_path)
     assert main(["cerebro", "destilar", "--validar", "--vault", str(v)]) == 0
     assert "No hay páginas del método" in capsys.readouterr().out
 
 
 def test_cli_log(tmp_path, capsys):
-    from trovify.cli import main
+    from trovefy.cli import main
     v, _ = _vault(tmp_path)
     assert main(["cerebro", "log", "--skill", "destilar", "--que", "a\nb", "--archivo", "x.md",
                  "--archivo", "y.md", "--tokens", "1200", "--vault", str(v)]) == 0

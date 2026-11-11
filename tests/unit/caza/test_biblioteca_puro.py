@@ -1,5 +1,5 @@
 import pytest
-from trovify.caza.biblioteca import aviso_de_bloqueo, detectar_bloqueo, url_biblioteca
+from trovefy.caza.biblioteca import aviso_de_bloqueo, detectar_bloqueo, url_biblioteca
 
 
 def test_url_por_pagina():

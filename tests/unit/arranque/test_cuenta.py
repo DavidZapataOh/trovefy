@@ -2,9 +2,9 @@ import os
 import pathlib
 import shutil
 
-from trovify.arranque.estado import marcar_hecho
-from trovify.arranque.verificadores.base import Confirmacion
-from trovify.arranque.verificadores.cuenta import (
+from trovefy.arranque.estado import marcar_hecho
+from trovefy.arranque.verificadores.base import Confirmacion
+from trovefy.arranque.verificadores.cuenta import (
     CONFIRMACION_06,
     evaluar_cuenta,
     extraer_act,
@@ -12,7 +12,7 @@ from trovify.arranque.verificadores.cuenta import (
     mercado_elegido,
     verificar_cuenta,
 )
-from trovify.navegador import Captura, NavegadorError
+from trovefy.navegador import Captura, NavegadorError
 
 RAIZ = pathlib.Path(__file__).resolve().parents[3]
 FIX = RAIZ / "tests/fixtures/arranque/ajustes_cuenta.txt"

@@ -1,6 +1,6 @@
 import pytest
-from trovify import secretos
-from trovify.cli import main
+from trovefy import secretos
+from trovefy.cli import main
 
 
 def _token_sk():

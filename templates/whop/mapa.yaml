@@ -1,6 +1,6 @@
 # Mapa de pantallas de Whop (paso 10). Solo lectura.
 # capturado: null = construido desde la documentación pública, NO confirmado con tu panel real.
-# Se confirma con `trovify arranque confirmar 10` (config/confirmaciones.yaml del vault) o poniendo aquí la fecha en un commit.
+# Se confirma con `trovefy arranque confirmar 10` (config/confirmaciones.yaml del vault) o poniendo aquí la fecha en un commit.
 capturado: null
 fuente: >-
   https://docs.whop.com/manage-your-business/manage-payouts/set-up-payouts y

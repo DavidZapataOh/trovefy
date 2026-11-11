@@ -1,4 +1,4 @@
-from trovify.vault.frontmatter import escribir, leer
+from trovefy.vault.frontmatter import escribir, leer
 
 
 def test_ida_y_vuelta(tmp_path):
