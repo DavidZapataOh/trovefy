@@ -42,7 +42,7 @@ def frases_de(valores: list[str]) -> dict[str, list[str]]:
 
 def _ejecutar_auditoria(args: argparse.Namespace) -> int:
     from trovify.auditoria import orquestador
-    from trovify.auditoria.paises import recomendar
+    from trovify.auditoria.paises import que_medir, recomendar
     from trovify.caza.orquestador import hoy_negocio
     from trovify.vault.rutas import vault_root
 
@@ -69,6 +69,11 @@ def _ejecutar_auditoria(args: argparse.Namespace) -> int:
         motivo = f" ({p.hueco.motivo})" if p.hueco.hueco is None and p.hueco.motivo else ""
         print(f"{i}. {p.pais} — nota {nota} · hueco {hueco[p.hueco.hueco]}{motivo}{extra}")
     print(f"Recomendación: {recomendar(r.paises)[2]}")
+    pendientes = que_medir(orden)
+    if pendientes:
+        print("Qué medir:")
+        for x in pendientes:
+            print(f"  - {x}")
     # Fin normal (también con la cuota del día agotada): 0. Bloqueo de Meta: 1 (PARADA, dura el día).
     # Racha de errores o navegador caído: 3 (INTERRUMPIDA). Error de uso o configuración: 2.
     if r.parada and r.tipo == "cuota":

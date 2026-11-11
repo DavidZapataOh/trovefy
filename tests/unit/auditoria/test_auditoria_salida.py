@@ -252,4 +252,20 @@ def test_golden_conserva_la_nota_de_la_caza_y_la_cobertura_en_la_recomendacion()
     texto = GOLD.read_text()
     assert "Decisión de la caza: **B** — nota 62,4 < 70 para A" in texto
     assert "sin hueco comprobado" not in texto
-    assert "(nota 100, medida sobre 45 de 100 puntos); reserva: IT (nota 83, medida sobre 45 de 100 puntos)" in texto
+    assert "RO (nota 100, medida sobre 45 de 100 puntos)" in texto
+    assert "reserva: IT (nota 83, medida sobre 45 de 100 puntos)" in texto
+
+
+def test_que_medir_en_el_informe_y_sin_recomendado(tmp_path):
+    from trovify.auditoria.paises import PaisAuditado
+    from trovify.caza.hueco import HuecoPais
+    from trovify.caza.senales import Medida
+
+    h = HuecoPais("RO", Medida(None, "x"), "no_medido", None, [], "no medido: cuota del día agotada")
+    ps = [PaisAuditado("RO", h, Medida(13.9), Medida(1.0), 100, [], None)]
+    texto = render_auditoria(oferta_ejemplo(), ps, recomendar(ps), tres_senales("B", ps), [], HOY)
+    assert "## Qué medir" in texto
+    assert "- RO: no medido: cuota del día agotada → cuota del día agotada: se retoma mañana" in texto
+    assert "no se recomienda ninguno" in texto
+    meta, _ = leer(escribir_auditoria(vault(tmp_path), "o-ejemplo", ps, HOY))
+    assert meta["recomendado"] is None

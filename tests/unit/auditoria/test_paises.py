@@ -97,7 +97,55 @@ def test_tres_senales():
     assert tres_senales("A", [pa("RO", 1, False)])["hueco_por_pais"] is False
 
 
-def test_empate_determinista():
+def test_empate_total_no_recomienda_por_orden_alfabetico():
     a = [pa("IT", 80, True), pa("RO", 80, True), pa("BG", 80, True)]
-    assert recomendar(a)[:2] == ("BG", "IT")
-    assert recomendar(list(reversed(a)))[:2] == ("BG", "IT")
+    for orden in (a, list(reversed(a))):
+        p, r, texto = recomendar(orden)
+        assert (p, r) == (None, None)
+        assert "empate: elige tú" in texto and "BG, IT y RO" in texto
+        assert "mejor" not in texto
+
+
+def pe(pais, nota, original="ausente", comp=0, precio=1.0):
+    h = HuecoPais(pais, Medida(comp), original, True, [])
+    return PaisAuditado(pais, h, Medida(13.9), Medida(precio), nota, [], None)
+
+
+def test_empate_se_rompe_por_el_original_sin_traducir():
+    p, r, texto = recomendar([pe("BG", 100), pe("RO", 100, "sin_traducir"), pe("CZ", 90)])
+    assert p == "RO" and r == "BG"
+    assert "empata" in texto and "sin traducir" in texto and "mejor" not in texto
+
+
+def test_empate_se_rompe_por_menos_competencia():
+    p, _, texto = recomendar([pe("BG", 100, comp=1), pe("RO", 100, comp=0)])
+    assert p == "RO" and "competencia local" in texto
+
+
+def test_empate_se_rompe_por_precio_soportable():
+    p, _, texto = recomendar([pe("BG", 100, precio=0.5), pe("RO", 100, precio=1.0)])
+    assert p == "RO" and "precio soportable" in texto
+
+
+def test_reserva_empatada_no_se_elige_por_orden_alfabetico():
+    p, r, texto = recomendar([pe("RO", 100, "sin_traducir"), pe("BG", 100), pe("CZ", 100)])
+    assert p == "RO" and r is None
+    assert "reserva: empate entre BG y CZ: elige tú" in texto
+
+
+def test_sin_pais_recomendable_dice_que_medir():
+    from trovify.auditoria.paises import que_medir
+
+    sin_frases = HuecoPais("RO", Medida(None, "no medido: faltan las frases"), "ausente", None, [],
+                           "no medido: faltan las frases en el idioma local de RO")
+    cuota = HuecoPais("CZ", Medida(None, "x"), "no_medido", None, [], "no medido: cuota del día agotada")
+    ps = [PaisAuditado("RO", sin_frases, Medida(13.9), Medida(1), 100, [], None),
+          PaisAuditado("CZ", cuota, Medida(13.9), Medida(1), 100, [], None),
+          pa("FR", 33, False, "el original ya anuncia traducido")]
+    p, r, texto = recomendar(ps)
+    assert (p, r) == (None, None)
+    assert "no se recomienda ninguno" in texto and "Qué medir" in texto
+    lineas = que_medir(ps)
+    assert len(lineas) == 2
+    assert lineas[0].startswith("RO: no medido: faltan las frases") and "--frases RO:" in lineas[0]
+    assert lineas[1].startswith("CZ: no medido: cuota del día agotada") and "mañana" in lineas[1]

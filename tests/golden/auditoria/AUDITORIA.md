@@ -122,9 +122,13 @@ Si eliges con «ya se vende» o «hay hueco» en «no», la elección queda escr
 
 ¿Ya lanzamos algo parecido allí? No: ningún producto del cerebro murió en RO, IT ni FR.
 
+## Qué medir
+
+Nada: todos los países auditados tienen el hueco comprobado.
+
 ## Recomendación
 
-RO es el mejor país con hueco comprobado (nota 100, medida sobre 45 de 100 puntos); reserva: IT (nota 83, medida sobre 45 de 100 puntos).
+Recomendado: RO (nota 100, medida sobre 45 de 100 puntos) — la nota más alta entre los países con hueco comprobado; reserva: IT (nota 83, medida sobre 45 de 100 puntos).
 
 Primer test: 1 producto × 1 país (el capital no da para dos a la vez); la reserva es el país al que pasar si el primero no funciona.
 

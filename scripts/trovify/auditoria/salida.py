@@ -14,7 +14,7 @@ import re
 from datetime import date
 from pathlib import Path
 
-from trovify.auditoria.paises import PaisAuditado, cobertura, tres_senales
+from trovify.auditoria.paises import PaisAuditado, cobertura, que_medir, tres_senales
 from trovify.caza.salida import anadir_al_indice, formatear_medida
 from trovify.caza.salida import formatear_numero as _num
 from trovify.caza.senales import Medida
@@ -279,6 +279,9 @@ def render_auditoria(oferta: dict, paises: list[PaisAuditado], recomendacion, se
     else:
         lineas.append(f"¿Ya lanzamos algo parecido allí? No: ningún producto del cerebro murió en "
                       f"{_lista([p.pais for p in orden]) or 'estos países'}.")
+    lineas += ["", "## Qué medir", ""]
+    pendientes = que_medir(orden)
+    lineas += [f"- {x}" for x in pendientes] or ["Nada: todos los países auditados tienen el hueco comprobado."]
     lineas += [
         "",
         "## Recomendación",
