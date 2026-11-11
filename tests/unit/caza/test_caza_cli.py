@@ -193,3 +193,15 @@ def test_resumen_pone_las_ya_vistas_aparte():
     texto = orquestador.resumen(dataclasses.replace(e, resultados=[*e.resultados, vista]), 20)
     assert "Ya vistas (ya en el cerebro; su ficha manda): o-vista (RO)" in texto
     assert "o-vista" not in texto.split("Descartadas:")[1].split("Ya vistas")[0]
+
+
+def test_rutina_omitida_si_otra_caza_esta_en_curso(vault, monkeypatch, capsys):
+    def ocupado(*a, **k):
+        raise orquestador.CazaEnCurso("otra caza está en marcha en este cerebro")
+
+    monkeypatch.setattr(orquestador, "ejecutar", ocupado)
+    monkeypatch.setattr(orquestador, "hoy_negocio", lambda: date(2026, 11, 10))
+    assert cli.main(["caza", "ejecutar", "--modo", "vigilar", "--rutina"]) == 4
+    assert not (vault / "rutinas/log/2026-11-10/ok").exists()
+    assert "omitida: otra caza en curso" in (vault / "rutinas/log/2026-11-10/caza.md").read_text()
+    assert cli.main(["caza", "ejecutar", "--modo", "vigilar"]) == 2  # sin --rutina: error normal

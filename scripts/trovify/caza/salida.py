@@ -59,6 +59,9 @@ class CifraPagina:
     total_pagina: int | None = None  # anuncios activos de la página según Meta (exacto); None = no exacto
     leidos_pagina: int | None = None  # anuncios de la página leídos en esa lectura
     otras_ofertas: bool = False  # la página lleva otras ofertas o anuncios sin atribuir
+    # anuncios activos EXACTOS de la oferta en la página (recuento con frase completo o página
+    # completa solo suya); None = no exacto. Es el mismo número que suma la fila Total.
+    exacto_oferta: int | None = None
 
 
 @dataclass
@@ -303,13 +306,16 @@ def _paginas(r: ResultadoOferta) -> list[str]:
     for p in o.page_ids:
         papel = " (original)" if p == o.original_page_id else (" (copia)" if p in o.copias else "")
         n = sum(1 for a in o.anuncios if a.page_id == p and a.activo and (r.pais == "ALL" or a.pais == r.pais))
-        if r.completo:
+        cp = _cifra(r, p)
+        if cp.exacto_oferta is not None:
+            n = cp.exacto_oferta
+            cuenta = f"{n} anuncios activos"
+        elif r.completo:
             cuenta = f"{n} anuncios activos"
         elif n:
             cuenta = f"≥ {n} anuncios activos"
         else:
             cuenta = "anuncios activos: no medido: no se leyó ningún anuncio de esta página"
-        cp = _cifra(r, p)
         linea = f"{p}{papel}: {cuenta} — {cp.enlace}"
         if cp.enlace != cp.pagina:
             linea += f" · página: {cp.pagina}"
@@ -508,6 +514,8 @@ _PENDIENTES = {
     "tope_nuevas": "por el tope de ofertas nuevas por ejecución (R14)",
     "cuota": "porque no quedaban búsquedas hoy (cuota del día)",
     "landing_sin_abrir": "con la landing sin abrir (tope de landings por ejecución)",
+    "bloqueo": "porque Meta bloqueó la búsqueda y la caza se paró por hoy",
+    "interrumpida": "porque la ejecución se interrumpió (red, Firecrawl o navegador)",
 }
 
 

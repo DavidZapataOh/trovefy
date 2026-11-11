@@ -110,6 +110,17 @@ def _ejecutar_caza(args: argparse.Namespace) -> int:
                                  hoy=dia, region=region, paises=args.pais or None,
                                  max_vigiladas=max_vigiladas if args.rutina else None,
                                  max_busquedas_rutina=cuota_rutina if args.rutina else None)
+    except orquestador.CazaEnCurso as exc:
+        if not args.rutina:
+            return _error(str(exc))
+        # La rutina deja constancia: /vigia distingue «omitida» de un fallo antes de registrar.
+        from trovify import rutinas
+
+        texto = f"Caza omitida: {exc}. No se buscó nada; la próxima rutina lo intentará otra vez."
+        print(texto)
+        rutinas.registrar_ejecucion(vault, "caza", orquestador.hoy_negocio(), texto, ok=False,
+                                    estado="omitida: otra caza en curso")
+        return 4
     except (ValueError, FileNotFoundError, KeyError) as exc:
         return _error(str(exc))
     usadas = None
@@ -121,7 +132,8 @@ def _ejecutar_caza(args: argparse.Namespace) -> int:
     texto = orquestador.resumen(e, u["caza.palabra.min_resultados"].valor, usadas)
     print(texto)
     # Fin normal (también con la cuota del día agotada): 0 y «ok». Bloqueo de Meta: 1 (PARADA, dura
-    # el día). Racha de errores o navegador caído: 3 (INTERRUMPIDA: solo esta ejecución).
+    # el día). Racha de errores o navegador caído: 3 (INTERRUMPIDA: solo esta ejecución). Con
+    # --rutina y otra caza en curso: 4 («omitida», sin «ok»). Error de uso o configuración: 2.
     interrumpida = e.parada is not None and e.tipo_parada == "errores"
     if args.rutina:
         from trovify import rutinas

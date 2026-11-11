@@ -1094,3 +1094,39 @@ def test_hueco_actualiza_las_lineas_del_pais_en_la_ficha(tmp_path):
     assert "Decisión en RO: **B** — nota 62,4 < 70 para A\n" in cuerpo
     assert "Estado: **B** — nota 62,4 < 70 para A\n" in cuerpo
     assert meta["fuente"] == meta["paises"]["RO"]["link_biblioteca"]
+
+
+# --- re-revisión: N1 y N2 ----------------------------------------------------------------------
+
+
+def test_tras_un_bloqueo_las_nuevas_pendientes_lo_dicen(tmp_path):
+    from trovify.caza.salida import texto_pendientes
+    v = _vault(tmp_path)
+    P = "100000000000961"
+    ads = viejos(P, 5, 20, 98000)
+    c = ClientePorUrl(
+        {url_biblioteca("RO", q="uno"): ok(ads, completo=False, exacto=False)},
+        excepcion_en={url_biblioteca("RO", page_id=P): SesionBloqueada("Meta bloqueó la sesión")},
+    )
+    url = "https://kit.example/ro/"
+    e = ejecutar(v, "nicho", [("RO", "uno")], "tomi", 3, cliente=c,
+                 resolver=resolver_fijo({url: destino_ok(url)}), hoy=HOY, region="europa")
+    assert e.pendientes == 1 and e.pendientes_por == {"bloqueo": 1} and e.cuota is None
+    assert "Meta bloqueó" in texto_pendientes(e) and "cuota" not in texto_pendientes(e)
+
+
+def test_recuento_exacto_con_frase_sin_cota_en_la_linea_de_la_pagina(tmp_path):
+    v = _vault(tmp_path)
+    P = "100000000000962"
+    a, b, mapa = _dos_ofertas_en_una_pagina(P, 98100)
+    c = ClientePorUrl({
+        url_biblioteca("RO", page_id=P): ok(a[:4] + b[:4], total=18, completo=False),
+        url_biblioteca("RO", q="Fișe de matematică", page_id=P): ok(a, total=9),
+        url_biblioteca("RO", q="Povești pentru somn", page_id=P): ok(b, total=9),
+    })
+    e = ejecutar(v, "oferta", [], "tomi", 3, page_ids=[P], paises=["RO"], cliente=c, resolver=resolver_fijo(mapa),
+                 hoy=HOY)
+    ra = next(r for r in e.resultados if r.oferta.clave == "hotmart:A1")
+    _, cuerpo = frontmatter.leer(v / "wiki/ofertas" / f"{ra.oferta.oferta_id}.md")
+    linea = next(x for x in cuerpo.splitlines() if x.startswith(f"- {P}"))
+    assert ": 9 anuncios activos" in linea and "≥" not in linea

@@ -40,4 +40,4 @@ Pasos:
    (con `--rutina` nunca pasa de su cuota `rutina.max_busquedas` ni de `rutina.max_vigiladas_por_dia` fichas; el informe se llama `vigilancia`)
    y después, con las palabras guardadas en `config/caza.yaml`, como mucho 3 ofertas nuevas en total:
    `trovify caza ejecutar --modo barrido --region <region> --consulta PAIS:FRASE … --max 3 --rutina`.
-   Si una ejecución imprime `PARADA`, `INTERRUMPIDA` o «Cuota del día agotada», no lances la siguiente (con la cuota agotada la rutina terminó bien: lo pendiente sale mañana). Termina con el resumen tal cual lo imprimió `trovify caza`.
+   Si una ejecución imprime `PARADA`, `INTERRUMPIDA` o «Cuota del día agotada», no lances la siguiente (con la cuota agotada la rutina terminó bien: lo pendiente sale mañana). Si imprime «Caza omitida» (otra caza estaba en marcha), no lances la siguiente: queda anotada en el registro de la rutina. Termina con el resumen tal cual lo imprimió `trovify caza`.

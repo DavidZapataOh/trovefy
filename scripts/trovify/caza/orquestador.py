@@ -531,6 +531,10 @@ class _Corrida:
     # La planificación dejó trabajo fuera porque no quedaban búsquedas hoy (sin llegar a agotarlas).
     cuota_plan: str | None = None
 
+    def motivo_parada(self) -> str:
+        """Clave de ``pendientes_por`` cuando falta por una parada: «bloqueo» (Meta) o «interrumpida»."""
+        return "interrumpida" if self.b.tipo_parada == "errores" else "bloqueo"
+
     def sin_medir(self, que: str) -> None:
         self.errores.append(f"no medido: {self.b.corte}: {que}")
 
@@ -800,7 +804,11 @@ def _ejecutar(
                 continue
             vigiladas[oid], pares_de[oid] = meta, propios
             pares += extra
-        if sin_cuota:
+        if sin_cuota and c.b.parada:  # no caben porque la caza ya se paró, no por la cuota
+            pendientes_por[c.motivo_parada()] += len(sin_cuota)
+            c.errores.append(f"no medido: {c.b.corte}: {', '.join(sin_cuota)} se vigilan otro día; "
+                             "no cuenta como strike")
+        elif sin_cuota:
             c.cuota_plan = f"quedaban {quedan} búsquedas hoy"
             pendientes_por["cuota"] += len(sin_cuota)
             c.errores.append(f"no medido: cuota del día agotada: {', '.join(sin_cuota)} se vigilan otro día "
@@ -829,7 +837,9 @@ def _ejecutar(
             c.errores.append(f"no medido: {len(candidatos) - maximo} páginas de las búsquedas sin recontar "
                              f"(tope caza.max_destinos_por_ejecucion: {maximo}); las de más C8 primero")
         por_cuota = min(len(candidatos), maximo) - min(len(candidatos), tope)
-        if por_cuota > 0:
+        if por_cuota > 0 and c.b.parada:
+            c.errores.append(f"no medido: {c.b.corte}: {por_cuota} páginas de las búsquedas sin recontar")
+        elif por_cuota > 0:
             c.cuota_plan = f"quedaban {quedan} búsquedas hoy"
             c.errores.append(f"no medido: cuota del día agotada: {por_cuota} páginas de las búsquedas sin recontar "
                              f"(quedaban {quedan} búsquedas; se guardan para medir ofertas nuevas)")
@@ -876,8 +886,12 @@ def _ejecutar(
                 continue
             quedan = c.b.restantes()
             if es_nueva and quedan is not None and quedan < _BUSQUEDAS_POR_NUEVA:
-                pendientes_por["cuota"] += 1  # no se mide a medias: sale en la próxima caza
-                c.cuota_plan = c.cuota_plan or f"quedaban {quedan} búsquedas hoy"
+                # no se mide a medias: sale en la próxima caza; el motivo es la parada si la hubo
+                if c.b.parada:
+                    pendientes_por[c.motivo_parada()] += 1
+                else:
+                    pendientes_por["cuota"] += 1
+                    c.cuota_plan = c.cuota_plan or f"quedaban {quedan} búsquedas hoy"
                 continue
             o = c.ampliar(o, multi)
             if es_nueva:
@@ -1059,6 +1073,7 @@ def _cifras_por_pagina(c: _Corrida, o: Oferta, pais: str, alcance: _Alcance) -> 
             total_pagina=lect.total_aprox if lect is not None and lect.total_exacto else None,
             leidos_pagina=len(lect.anuncios) if lect is not None else None,
             otras_ofertas=not (alcance.solo_esta(o, p) and alcance.atribuida(o, p, pais)),
+            exacto_oferta=_total_de_pagina(c, o, p, pais, alcance),
         )
     return out
 
