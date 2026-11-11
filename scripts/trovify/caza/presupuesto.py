@@ -29,9 +29,20 @@ class ParadaPorErrores(RuntimeError):
 
 
 class ParadaDelDia(PresupuestoAgotado):
-    """Hoy ya hubo una parada (bloqueo de Meta o errores seguidos): nadie busca hasta mañana.
+    """Hoy Meta ya bloqueó una búsqueda: nadie busca hasta mañana (hora de Colombia).
 
-    Hereda de :class:`PresupuestoAgotado` para que todo lo que para por presupuesto pare también."""
+    Solo los bloqueos de Meta se guardan para el día; una racha de errores (red, 5xx, Firecrawl
+    caído) para solo el proceso en curso (:class:`ParadaPorErrores`). Hereda de
+    :class:`PresupuestoAgotado` para que todo lo que para por presupuesto pare también."""
+
+
+class ContadorIlegible(PresupuestoAgotado):
+    """El contador del día no se puede leer: no se busca (no es la cuota agotada: hay que revisarlo)."""
+
+
+# Prefijo de las paradas por errores que guardaban versiones anteriores en el archivo del día: ya no
+# bloquean el día (solo los bloqueos de Meta lo hacen).
+_PARADA_POR_ERRORES = "parada por errores"
 
 
 class Presupuesto:
@@ -72,7 +83,8 @@ class Presupuesto:
             datos = self._leer()
             if datos.get("parada"):
                 raise ParadaDelDia(
-                    f"Hoy ya hubo una parada ({datos['parada']}); no se busca hasta mañana (hora de Colombia)."
+                    f"Hoy Meta ya bloqueó una búsqueda ({datos['parada']}); no se busca hasta mañana "
+                    "(hora de Colombia)."
                 )
             hechas = datos["usadas"]
             if hechas >= self.max_busquedas:
@@ -92,7 +104,9 @@ class Presupuesto:
         self.usadas += 1
 
     def registrar_parada(self, motivo: str) -> None:
-        """Guarda la parada en el archivo del día: ningún proceso vuelve a buscar hasta mañana."""
+        """Guarda un bloqueo de Meta en el archivo del día: ningún proceso vuelve a buscar hasta mañana.
+
+        Solo para bloqueos de Meta; las rachas de errores no se guardan."""
         if self.contador is None:
             return
         with self._bloqueo():
@@ -155,12 +169,14 @@ class Presupuesto:
             datos, n, r = {}, None, None
         if any(isinstance(x, bool) or not isinstance(x, int) or x < 0 for x in (n, r)):
             # Sin saber cuántas se hicieron hoy no se arriesga a Meta.
-            raise PresupuestoAgotado(
+            raise ContadorIlegible(
                 f"El contador de búsquedas del día ({self.contador.name}) no se puede leer; "
                 "no se busca para no pasar el tope. Revísalo o bórralo si sabes que hoy no se buscó."
             )
         parada = datos.get("parada")
-        return {"usadas": n, "rutina": r, "parada": parada if isinstance(parada, str) and parada else None}
+        if not isinstance(parada, str) or not parada or parada.startswith(_PARADA_POR_ERRORES):
+            parada = None
+        return {"usadas": n, "rutina": r, "parada": parada}
 
     def exito(self) -> None:
         """El cliente la llama tras una búsqueda correcta: reinicia los errores seguidos."""

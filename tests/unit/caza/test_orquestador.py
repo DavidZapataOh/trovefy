@@ -784,3 +784,46 @@ def test_perfil_se_normaliza(tmp_path):
     e = ejecutar(v, "nicho", [("RO", "fise")], "Europa-Caro", 3, cliente=ClientePorUrl({}),
                  resolver=resolver_fijo({}), hoy=HOY, region="europa")
     assert e.perfil == "europa_caro"
+
+
+# --- ola final: I5 solo los bloqueos de Meta duran el día ----------------------------------------
+
+
+@pytest.mark.parametrize("paginas", ["red", "respuestas"])
+def test_racha_de_errores_no_bloquea_el_dia(tmp_path, paginas):
+    from test_cliente import NavegadorFalso
+    from trovify.caza.cliente import (
+        ClienteBibliotecaPublica,
+        ErrorDeRed,
+        PaginaCapturada,
+    )
+    from trovify.caza.presupuesto import ParadaPorErrores
+    v = _vault(tmp_path)
+    p = Presupuesto.desde_umbrales(v, HOY)
+    p._dormir = lambda s: None
+    if paginas == "red":
+        nav = NavegadorFalso([ErrorDeRed("a"), ErrorDeRed("b"), ErrorDeRed("c")])
+    else:
+        nav = NavegadorFalso([PaginaCapturada("https://www.facebook.com/ads/library/?q=x", "<html></html>", "", [])
+                              for _ in range(3)])
+    c = ClienteBibliotecaPublica(p, nav)
+    with pytest.raises(ParadaPorErrores):
+        for q in ("a", "b", "c"):
+            c.buscar("RO", q=q)
+    with pytest.raises(ParadaPorErrores):  # este proceso no vuelve a buscar
+        c.buscar("RO", q="d")
+    datos = json.loads((v / "data/caza/presupuesto/2026-11-10.json").read_text())
+    assert "parada" not in datos
+    p2 = Presupuesto.desde_umbrales(v, HOY)  # otro proceso sí puede buscar hoy
+    p2.antes_de_buscar()
+    assert p2.restantes() > 0
+
+
+def test_parada_por_errores_antigua_del_archivo_no_bloquea(tmp_path):
+    v = _vault(tmp_path)
+    ruta = v / "data/caza/presupuesto/2026-11-10.json"
+    ruta.parent.mkdir(parents=True)
+    ruta.write_text(json.dumps({"usadas": 3, "rutina": 0, "parada": "parada por errores: 3 búsquedas seguidas"}))
+    p = Presupuesto.desde_umbrales(v, HOY)
+    p.antes_de_buscar()
+    assert p.parada_del_dia() is None
