@@ -7,8 +7,10 @@ Nunca se abre ``facebook.com``/``l.facebook.com``: el salto ``l.php?u=`` se dese
 from __future__ import annotations
 
 import hashlib
+import html
 import ipaddress
 import re
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Literal, Protocol
@@ -17,7 +19,15 @@ from urllib.parse import parse_qs, urlparse
 from trovefy.caza.huellas import GATEWAYS, TRACKERS_POR_NOMBRE
 from trovefy.navegador import NavegadorError, _un_navegador_a_la_vez, sesion_caducada
 
-_DOMINIOS_COMPARTIDOS = ("netlify.app", "vercel.app", "pages.dev", "github.io")
+# Plataformas donde cada subdominio (o ruta) es la tienda de otro operador: su dominio registrable no
+# identifica la oferta (caza LatAm 2026-11-11: tiendas distintas de *.impultienda.ar juntas).
+_DOMINIOS_COMPARTIDOS = (
+    "netlify.app", "vercel.app", "pages.dev", "github.io", "impultienda.ar", "lovable.app", "web.app",
+    "firebaseapp.com", "wixsite.com", "carrd.co", "webflow.io", "framer.website", "hotmart.host",
+    "systeme.io", "myshopify.com", "mycartpanda.com", "blogspot.com", "wordpress.com", "godaddysites.com",
+    "mystrikingly.com", "mykajabi.com", "teachable.com", "thinkific.com", "notion.site", "canva.site",
+    "onrender.com", "herokuapp.com", "replit.app", "glitch.me", "surge.sh",
+)
 # Segmentos genéricos que no identifican la oferta (whop.com/checkout/<plan>, gumroad /l/<slug>).
 _GENERICOS = {"checkout", "l", "buy", "b", "c", "pay", "p"}
 _SEGUNDO_NIVEL = {"com", "co", "org", "net", "gov", "edu", "ac"}
@@ -153,6 +163,15 @@ def _registrable(host: str) -> str:
     if len(partes) >= 3 and len(partes[-1]) == 2 and partes[-2] in _SEGUNDO_NIVEL:
         return ".".join(partes[-3:])
     return ".".join(partes[-2:]) if len(partes) >= 2 else host
+
+
+def sitio(host: str) -> str:
+    """El sitio de un operador: el host entero en una plataforma compartida (cada tienda es de otro),
+    si no el dominio registrable (``ptp.abatools.pro`` y ``abatools.pro`` son el mismo sitio)."""
+    host = host.lower().removeprefix("www.")
+    if any(_en_dominio(host, d) for d in _DOMINIOS_COMPARTIDOS):
+        return host
+    return _registrable(host)
 
 
 def _segmentos(url: str) -> list[str]:
@@ -431,42 +450,66 @@ _ETIQUETAS = re.compile(r"<script.*?</script>|<style.*?</style>|<[^>]+>", re.IGN
 _GEO = ("not available in your country", "no disponible en tu país", "indisponível no seu país", "geo-block")
 
 
+def _normal(texto: str) -> str:
+    """Texto comparable: entidades HTML decodificadas (``&#8211;`` → «–»), NFKC, minúsculas y espacios."""
+    return re.sub(r"\s+", " ", unicodedata.normalize("NFKC", html.unescape(texto or ""))).strip().casefold()
+
+
 def _titulo(s: str) -> str:
     m = _TITULO.search(s or "")
-    return re.sub(r"\s+", " ", m.group(1)).strip().lower() if m else ""
+    return _normal(m.group(1)) if m else ""
 
 
 def _texto_visible(s: str) -> str:
-    return re.sub(r"\s+", " ", _ETIQUETAS.sub(" ", s or "")).strip()
+    return re.sub(r"\s+", " ", html.unescape(_ETIQUETAS.sub(" ", s or ""))).strip()
 
 
-def _sin_www(host: str) -> str:
-    return host.removeprefix("www.")
+def _palabras(texto: str) -> set[str]:
+    return {w for w in re.findall(r"\w+", _normal(texto)) if len(w) >= 3 and not w.isdigit()}
+
+
+def _solape(a: set[str], b: set[str]) -> float:
+    """Parte de las palabras del conjunto menor que están en el otro (0 si alguno está vacío)."""
+    return len(a & b) / min(len(a), len(b)) if a and b else 0.0
 
 
 _MOTIVO_JS = "no medido: la landing se arma con JavaScript"
+_MOTIVO_TITULO = "no medido: el título cambia entre el robot y el móvil (título dinámico o prueba A/B)"
+# Contenido «el mismo» y «otro»: parte de las palabras del texto visible que comparten robot y móvil.
+_MISMO_CONTENIDO, _OTRO_CONTENIDO = 0.6, 0.2
 
 
 def _cloaker(
     url_movil: str, pagina: PaginaLanding, pedir_como_robot: Callable[[str], tuple[str, str]], url: str
 ) -> tuple[bool | None, str | None]:
-    """``(cloaker, motivo)``. True solo si difieren el host final o el título entre robot y móvil.
+    """``(cloaker, motivo)``. True solo con prueba fuerte; lo ambiguo es «no medido» (None con motivo).
 
-    Si el texto visible del robot es < 20 % del móvil (ambos sin etiquetas ni scripts) con mismo host y
-    título, la página es un cascarón de JavaScript: no se puede decidir (None con motivo)."""
+    Prueba fuerte: el robot (UA facebookexternalhit) acaba en otro dominio registrable que el móvil, o
+    ve otra página (títulos sin ninguna palabra en común y texto visible que comparte < 20 %). Una
+    redirección dentro del mismo sitio (subdominio, www) no cuenta. Los títulos se comparan con las
+    entidades HTML decodificadas (el robot lee el HTML crudo: ``&#8211;`` de WordPress; el móvil,
+    ``document.title``). Título distinto con el mismo contenido (≥ 60 %) = título dinámico: no es
+    cloaker. Si el texto visible del robot es < 20 % del móvil (ambos sin etiquetas ni scripts), la
+    página es un cascarón de JavaScript: no se puede decidir."""
     try:
         url_robot, bruto = pedir_como_robot(url)
     except Exception:  # noqa: BLE001 - cualquier fallo del robot = no medido
         return None, "no medido: el robot no pudo pedir la landing"
-    if _sin_www(_host(url_robot)) != _sin_www(_host(url_movil)):
+    if _registrable(_host(url_robot)) != _registrable(_host(url_movil)):
         return True, None
-    t_robot, t_movil = _titulo(bruto), (pagina.titulo or _titulo(pagina.html)).strip().lower()
-    if t_robot and t_movil and t_robot != t_movil:
-        return True, None
+    t_robot, t_movil = _titulo(bruto), _normal(pagina.titulo or "") or _titulo(pagina.html)
     texto_movil = re.sub(r"\s+", " ", pagina.texto).strip()
-    if texto_movil and len(_texto_visible(bruto)) < 0.2 * len(texto_movil):
+    texto_robot = _texto_visible(bruto)
+    if texto_movil and len(texto_robot) < 0.2 * len(texto_movil):
         return None, _MOTIVO_JS
-    return False, None
+    if not (t_robot and t_movil) or t_robot == t_movil:
+        return False, None
+    contenido = _solape(_palabras(texto_robot), _palabras(texto_movil))
+    if contenido >= _MISMO_CONTENIDO:
+        return False, None
+    if not _palabras(t_robot) & _palabras(t_movil) and contenido < _OTRO_CONTENIDO:
+        return True, None
+    return None, _MOTIVO_TITULO
 
 
 def resolver_destino(

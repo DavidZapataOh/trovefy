@@ -28,6 +28,10 @@ class Oferta:
     original_page_id: str | None = None
     copias: list[str] = field(default_factory=list)  # páginas que no son el original
     destinos: list[Destino] = field(default_factory=list)  # destinos distintos de los anuncios del grupo
+    # Otras páginas cuyos anuncios llevan al mismo sitio (la más antigua primero): mismo operador o su
+    # socio, nunca prueba de copia. Lo rellena la búsqueda del original por dominio; ``sitio`` es el dominio.
+    mismo_operador: list[str] = field(default_factory=list)
+    sitio: str | None = None
 
 
 def _clave(destino: Destino | None, page_id: str) -> str:

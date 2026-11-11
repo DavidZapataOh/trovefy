@@ -84,23 +84,42 @@ def test_descartada():
 
 
 def test_a_exige_c8_del_perfil():
+    # bajo el mínimo del perfil nunca es A ni B, aunque la nota dé para A
     s = maximas(c8=Medida(15))
     n = calcular_nota(s, U)
-    assert decidir(n, s.c8, "europa-caro", True, None, U) == ("B", "C8 15 < 20 del perfil europa-caro")
+    assert decidir(n, s.c8, "europa-caro", True, None, U) == ("observar", "C8 15 < 20 del perfil europa-caro")
 
 
-def test_c8_suelo_que_no_alcanza_es_no_comprobado():
-    s = maximas(c8=Medida(10, suelo=True))
+@pytest.mark.parametrize("c8", [5, 8, 11])
+def test_c8_suelo_que_no_alcanza_es_observar_y_volver_a_medir(c8):
+    # caza real del 2026-11-11: C8 ≥ 5, ≥ 8 y ≥ 11 (lecturas parciales) salían como B en el perfil tomi
+    s = maximas(c8=Medida(c8, suelo=True))
     n = calcular_nota(s, U)
-    est, porque = decidir(n, s.c8, "tomi", True, None, U)
-    assert est == "B" and "no comprobado" in porque
+    for hueco, landing in ((True, "modelable"), (None, "dudoso")):
+        est, porque = decidir(n, s.c8, "tomi", hueco, None, U, landing=landing)
+        assert est == "observar"
+        assert porque.startswith(f"C8 ≥ {c8} no alcanza 15 del perfil tomi: lectura parcial, volver a medir")
+
+
+def test_c8_suelo_que_alcanza_sigue_siendo_a_o_b():
     ok = maximas(c8=Medida(20, suelo=True))
-    assert decidir(calcular_nota(ok, U), ok.c8, "tomi", True, None, U)[0] == "A"
+    n = calcular_nota(ok, U)
+    assert decidir(n, ok.c8, "tomi", True, None, U)[0] == "A"
+    assert decidir(n, ok.c8, "tomi", None, None, U) == ("B", "sin hueco comprobado")
+    justo = maximas(c8=Medida(15))
+    assert decidir(calcular_nota(justo, U), justo.c8, "tomi", True, None, U)[0] == "A"
+
+
+def test_c8_exacto_bajo_el_minimo_con_otras_faltas_es_observar():
+    s = maximas(c8=Medida(9))
+    est, porque = decidir(calcular_nota(s, U), s.c8, "tomi", None, None, U, landing="dudoso")
+    assert est == "observar"
+    assert porque == "C8 9 < 15 del perfil tomi; sin hueco comprobado; landing dudosa"
 
 
 def test_santino_usa_c7():
     s = maximas(c7=Medida(10))
     n = calcular_nota(s, U)
-    assert decidir(n, s.c8, "santino", True, None, U, c7=s.c7) == ("B", "C7 10 < 30 del perfil santino")
+    assert decidir(n, s.c8, "santino", True, None, U, c7=s.c7) == ("observar", "C7 10 < 30 del perfil santino")
     s2 = maximas(c7=Medida(30))
     assert decidir(calcular_nota(s2, U), s2.c8, "santino", True, None, U, c7=s2.c7)[0] == "A"

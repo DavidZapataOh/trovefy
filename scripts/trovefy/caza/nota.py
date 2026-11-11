@@ -6,6 +6,9 @@ Una ``Medida`` con ``suelo=True`` es una cota inferior (≥): se puntúa como su
 conservador porque log-share y lineal son crecientes (el valor real puntuaría igual o más).
 Los multiplicadores de castigo no se aplican sobre una cota inferior (el valor real podría
 no estar bajo el umbral).
+
+Por debajo del mínimo de C8 (o C7) del perfil una oferta nunca es A ni B: queda en «observar».
+Si la cifra es una cota inferior (lectura parcial) el motivo pide volver a medir.
 """
 
 from __future__ import annotations
@@ -140,16 +143,19 @@ def decidir(
         etiqueta, medida, minimo = "C8", c8, u[f"caza.perfil.{clave}.c8_min"].valor
 
     faltas: list[str] = []
+    # Bajo el mínimo del perfil nunca es A ni B: se observa. Con cota inferior (lectura parcial) no
+    # se sabe si lo alcanza: hay que volver a medir; con la cifra exacta, no lo alcanza.
+    bajo_minimo = medida.valor is not None and medida.valor < minimo
+    if bajo_minimo:
+        if medida.suelo:
+            faltas.append(f"{etiqueta} ≥ {_n(medida.valor)} no alcanza {_n(minimo)} del perfil {perfil}: "
+                          "lectura parcial, volver a medir")
+        else:
+            faltas.append(f"{etiqueta} {_n(medida.valor)} < {_n(minimo)} del perfil {perfil}")
     if nota.valor < u["caza.nota.a_min"].valor:
         faltas.append(f"nota {nota.valor:.1f} < {_n(u['caza.nota.a_min'].valor)} para A")
     if medida.valor is None:
         faltas.append(f"{etiqueta} no medido")
-    elif medida.valor < minimo:
-        if medida.suelo:  # cota inferior bajo el mínimo: no se sabe, no es un fallo
-            faltas.append(f"{etiqueta} ≥ {_n(medida.valor)} (cota inferior), "
-                          f"no comprobado frente a {_n(minimo)} del perfil {perfil}")
-        else:
-            faltas.append(f"{etiqueta} {_n(medida.valor)} < {_n(minimo)} del perfil {perfil}")
     if hay_hueco is None:
         faltas.append("sin hueco comprobado")
     elif hay_hueco is False:
@@ -159,6 +165,6 @@ def decidir(
     if not faltas:
         return "A", "cumple A"
     motivo = "; ".join(faltas)
-    if nota.valor >= u["caza.nota.b_min"].valor:
+    if not bajo_minimo and nota.valor >= u["caza.nota.b_min"].valor:
         return "B", motivo
     return "observar", motivo

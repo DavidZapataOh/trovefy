@@ -288,3 +288,50 @@ def test_umbral_de_precio_del_cerebro_manda():
     otro = {**U, "caza.precio.min_usd": dataclasses.replace(U["caza.precio.min_usd"], valor=20)}
     ctx = ContextoFiltros(set(), set(), otro, cambio=CAMBIO)
     assert "precio_bajo" in banderas(_con_precio(13.9, "EUR"), ctx)
+
+
+# --- aparatos (caza EE. UU. 2026-11-11: trymodernhearing.com, audífonos a 249 USD, salió como B) ----
+
+# Extracto saneado del anuncio y de la landing reales (sin nombres de personas).
+MODERNHEARING_ANUNCIO = (
+    "Same Tech, 95% Less Cost. Thirty-four cents per day. That's what Modern Hearing hearing aids cost "
+    "over two years. $249, divided by 730 days. Same Knowles receivers. Same processing chips. "
+    "Try Modern Hearing for 45 days at home. Medicare doesn't cover hearing aids."
+)
+MODERNHEARING_LANDING = (
+    "OTC Wireless Hearing Aids · $249 · No doctor visit needed · Wireless charging case · "
+    "Battery life 30+ hours · FDA-registered · 45-day risk-free trial · One-year warranty · "
+    "Complete package with all accessories"
+)
+
+
+def test_audifonos_se_descartan_por_fisico():
+    ctx = ContextoFiltros(set(), set(), U, landings={D.url_anuncio: MODERNHEARING_LANDING})
+    d = filtrar(oferta(MODERNHEARING_ANUNCIO), ctx)
+    assert d is not None and d.codigo == "producto_fisico"
+    assert "hearing aid" in d.detalle and "battery life" in d.detalle
+
+
+@pytest.mark.parametrize("texto", [
+    "OTC wireless hearing aids with wireless charging case",
+    "Audífonos recargables: batería recargable y garantía de un año",
+    "Aparelhos auditivos com carregamento sem fio e todos os acessórios",
+    "Appareils auditifs, boîtier de charge, garantie d'un an",
+    "Apparecchi acustici con custodia di ricarica e garanzia di un anno",
+    "Aparate auditive cu baterie reîncărcabilă, garanție de un an",
+])
+def test_aparatos_en_seis_idiomas(texto):
+    assert filtrar(oferta(texto), CTX).codigo == "producto_fisico"
+
+
+@pytest.mark.parametrize("texto", [
+    "Battery of tests for speech therapists, printable PDF, instant access",
+    "Batería de pruebas de lenguaje en PDF, garantía de 30 días",
+    "Bateria de testes em PDF com garantia de 7 dias e acesso imediato",
+    "45-day risk-free trial, 30-day money-back guarantee, online course",
+    "Curso online para técnicos en audífonos, plantillas descargables",
+    "Ebook: how to extend your phone's battery life, instant download",
+    "Plantillas digitales de por vida, garantía de 30 días, acceso inmediato",
+])
+def test_digitales_con_bateria_garantia_o_prueba_pasan(texto):
+    assert filtrar(oferta(texto), CTX) is None

@@ -324,12 +324,14 @@ def test_texto_sin_pie():
 # --- original por dominio ----------------------------------------------------------------
 
 
-def test_original_por_dominio_marca_copia(tmp_path):
+def test_pagina_mas_antigua_con_el_mismo_sitio_es_mismo_operador_no_copia(tmp_path):
+    # caza Europa 2026-11-11: ptp.abatools.pro (página Therapy Toolkit) salió «posible_copia» de la
+    # página de ABA Tools, que lleva al mismo dominio: el mismo operador (o su socio), no un copión
     v = _vault(tmp_path)
     P, ORIG = "100000000000031", "100000000000032"
-    url = "https://kit.example/ro/"
-    ads = viejos(P, 9, 20, 8000)
-    antiguos = viejos(ORIG, 3, 90, 8100)
+    url = "https://ptp.kit.example/de-v4/"
+    ads = viejos(P, 9, 20, 8000, destino=url)
+    antiguos = viejos(ORIG, 3, 90, 8100, destino="https://kit.example/de/")
     c = ClientePorUrl({
         url_biblioteca("RO", page_id=P): ok(ads),
         url_biblioteca("RO", q="kit.example"): ok(ads[:2] + antiguos, completo=False, exacto=False),
@@ -337,8 +339,58 @@ def test_original_por_dominio_marca_copia(tmp_path):
     e = ejecutar(v, "oferta", [], "tomi", 3, page_ids=[P], paises=["RO"], cliente=c,
                  resolver=resolver_fijo({url: destino_ok(url)}), hoy=HOY)
     r = e.resultados[0]
-    assert r.descarte is not None and r.descarte.codigo == "posible_copia"
-    assert ORIG in r.descarte.detalle
+    assert r.descarte is None
+    assert r.oferta.origen != "copia"
+    assert "mismo_operador" in r.senales.banderas
+    det = r.senales.detalles_banderas["mismo_operador"]
+    assert ORIG in det and "kit.example" in det and "no copia" in det
+    meta, cuerpo = frontmatter.leer(v / "wiki/ofertas" / f"{r.oferta.oferta_id}.md")
+    assert "mismo_operador" in meta["banderas"] and ORIG in cuerpo
+
+
+def test_tiendas_distintas_de_impultienda_no_son_la_misma_oferta(tmp_path):
+    # caza LatAm 2026-11-11: geriactiva, inteligencia-artificial-clau y formacion-contable (tiendas
+    # distintas en *.impultienda.ar) salieron «posible_copia» de la misma página antigua: se buscó el
+    # original por «impultienda.ar» y cualquier tienda de la plataforma contaba como la misma oferta
+    v = _vault(tmp_path)
+    P, OTRA = "100000000000033", "100000000000034"
+    url = "https://geriactiva.impultienda.ar/"
+    ads = viejos(P, 9, 20, 8200, pais="MX", destino=url)
+    ajenos = viejos(OTRA, 3, 90, 8300, pais="MX", destino="https://formacion-contable.impultienda.ar/")
+    mezcla = ok(ads[:2] + ajenos, completo=False, exacto=False)
+    c = ClientePorUrl({
+        url_biblioteca("MX", page_id=P): ok(ads),
+        url_biblioteca("MX", q="impultienda.ar"): mezcla,
+        url_biblioteca("MX", q="geriactiva.impultienda.ar"): mezcla,
+    })
+    d = Destino(url, url, "impultienda", url, 17.0, "MXN", None, False, False, "ok", None)
+    e = ejecutar(v, "oferta", [], "tomi", 3, page_ids=[P], paises=["MX"], cliente=c,
+                 resolver=resolver_fijo({url: d}), hoy=HOY)
+    r = e.resultados[0]
+    assert r.oferta.clave == "impultienda:geriactiva"
+    assert r.descarte is None and r.oferta.origen != "copia"
+    assert url_biblioteca("MX", q="impultienda.ar") not in c.llamadas  # se busca la tienda, no la plataforma
+    assert "mismo_operador" not in r.senales.banderas
+
+
+def test_landing_en_la_pasarela_no_busca_el_original_por_su_dominio(tmp_path):
+    # caza BR 2026-11-11: una oferta con la landing en Hotmart buscó el original por «hotmart.com»: ese
+    # dominio es de todos los productores, así que otro producto de Hotmart no es el mismo operador
+    v = _vault(tmp_path)
+    P, OTRA = "100000000000035", "100000000000036"
+    url = "https://pay.hotmart.com/K123"
+    ads = viejos(P, 9, 20, 8400, destino=url)
+    ajenos = viejos(OTRA, 3, 90, 8500, destino="https://pay.hotmart.com/Z999")
+    c = ClientePorUrl({
+        url_biblioteca("RO", page_id=P): ok(ads),
+        url_biblioteca("RO", q="hotmart.com"): ok(ads[:2] + ajenos, completo=False, exacto=False),
+    })
+    e = ejecutar(v, "oferta", [], "tomi", 3, page_ids=[P], paises=["RO"], cliente=c,
+                 resolver=resolver_fijo({url: destino_ok(url, checkout=url)}), hoy=HOY)
+    r = e.resultados[0]
+    assert r.descarte is None and r.oferta.origen != "copia"
+    assert url_biblioteca("RO", q="hotmart.com") not in c.llamadas
+    assert "mismo_operador" not in r.senales.banderas
 
 
 def test_dominio_contaminado_no_se_usa(tmp_path):

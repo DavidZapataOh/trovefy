@@ -31,6 +31,29 @@ FISICO_FUERTE: list[list[str]] = [
     ["atacado", "por atacado", "no atacado", "atacadista", "atacadistas", "al por mayor", "por mayor", "mayoreo",
      "mayorista", "mayoristas", "wholesale", "vente en gros", "prix de gros", "commerce de gros", "grossiste",
      "grossistes", "all'ingrosso", "ingrosso", "grossista", "grossisti", "en-gros", "engros", "angro"],
+    # Aparatos y electrónica (caza EE. UU. 2026-11-11: audífonos de trymodernhearing.com pasaron).
+    # Frases enteras: «battery of tests», «batería de pruebas» o «garantía de 30 días» no cuentan.
+    ["hearing aid", "hearing aids", "audífono", "audífonos", "aparelho auditivo", "aparelhos auditivos",
+     "aparat auditiv", "aparate auditive", "apparecchio acustico", "apparecchi acustici", "appareil auditif",
+     "appareils auditifs", "aide auditive", "aides auditives", "prothèse auditive", "prothèses auditives"],
+    ["wireless charging", "charging case", "carga inalámbrica", "estuche de carga", "carregamento sem fio",
+     "estojo de carregamento", "case de carregamento", "încărcare wireless", "carcasă de încărcare",
+     "ricarica wireless", "custodia di ricarica", "recharge sans fil", "boîtier de charge"],
+    ["battery life", "rechargeable battery", "rechargeable batteries", "duración de la batería",
+     "batería recargable", "baterías recargables", "duração da bateria", "bateria recarregável",
+     "baterias recarregáveis", "durata bateriei", "baterie reîncărcabilă", "baterii reîncărcabile",
+     "durata della batteria", "batteria ricaricabile", "batterie ricaricabili", "autonomie de la batterie",
+     "batterie rechargeable", "batteries rechargeables"],
+    # Garantía del aparato en años (la de devolución en días es común en ofertas digitales y no cuenta).
+    ["one-year warranty", "one year warranty", "1-year warranty", "1 year warranty", "two-year warranty",
+     "2-year warranty", "garantía de un año", "garantía de 1 año", "garantía de dos años", "garantia de um ano",
+     "garantia de 1 ano", "garantia de dois anos", "garanție de un an", "garanție de 1 an", "garanzia di un anno",
+     "garanzia di 1 anno", "garanzia di due anni", "garantie d'un an", "garantie 1 an", "garantie de deux ans"],
+    ["all accessories", "accessories included", "todos los accesorios", "accesorios incluidos",
+     "todos os acessórios", "acessórios inclusos", "toate accesoriile", "accesorii incluse",
+     "tutti gli accessori", "accessori inclusi", "tous les accessoires", "accessoires inclus"],
+    ["fda-registered", "fda registered", "fda-cleared", "fda cleared", "fda-approved", "fda approved",
+     "aprobado por la fda", "registrado en la fda", "aprovado pela fda", "registrado na anvisa"],
 ]
 # Débiles: palabras corrientes también en ofertas digitales; solo cuentan sin marcadores digitales.
 FISICO_DEBIL: list[list[str]] = [

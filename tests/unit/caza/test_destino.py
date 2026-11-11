@@ -1,5 +1,6 @@
 import dataclasses
 
+import pytest
 from trovefy.caza.destino import (
     Destino,
     PaginaLanding,
@@ -123,9 +124,8 @@ def test_resolver_tracker():
 def test_resolver_cloaker_por_host_titulo_y_longitud():
     p = pagina()
     assert resolver_destino("https://tienda.example.com/", Falso(p), lambda u: ("https://otra.com/", "x" * 400)).cloaker
-    assert resolver_destino(
-        "https://tienda.example.com/", Falso(p), lambda u: (u, "<title>Blog</title>" + "Kit completo " * 20)
-    ).cloaker is True
+    otra = "<title>Blog de viajes</title>" + "Rutas por la montaña y playas del norte " * 10
+    assert resolver_destino("https://tienda.example.com/", Falso(p), lambda u: (u, otra)).cloaker is True
     assert resolver_destino("https://tienda.example.com/", Falso(p), lambda u: (u, "hola")).cloaker is None
 
 
@@ -341,3 +341,70 @@ def test_codigos_de_moneda_solo_en_mayusculas():
     assert extraer_precio("15 COP") == (15.0, "COP")
     assert extraer_precio("ron 5 minute") is None
     assert extraer_precio("Preț: 79 Lei") == (79.0, "RON")  # «lei» es palabra, no código: vale en cualquier caja
+
+
+# --- cloaker: falsos positivos de la caza Brasil 2026-11-11 (7 de ~25 landings) ------------------
+# Títulos reales: el robot los recibe en HTML crudo (entidades de WordPress) y el móvil con
+# ``document.title`` ya decodificado; o el título lo cambia JavaScript en el navegador.
+
+
+def _wp(titulo_movil, titulo_html, url="https://tienda.example.com.br/"):
+    cuerpo = "Atividades de caligrafia em PDF para crianças de 3 a 4 anos, acesso imediato " * 5
+    p = pagina(url_final=url, titulo=titulo_movil, html=f"<title>{titulo_movil}</title>", texto=cuerpo)
+    return p, (lambda u: (url, f"<title>{titulo_html}</title><body>{cuerpo}</body>"))
+
+
+@pytest.mark.parametrize(("movil", "crudo"), [
+    ("Árvore de natal fotos – Teterecoss", "Árvore de natal fotos &#8211; Teterecoss"),
+    ("Lancamentos – Ciência Interativa", "Lancamentos &#8211; Ciência Interativa"),
+    ("KitDeEstimulação – cerebroemacao.com", "KitDeEstimula&ccedil;&atilde;o &#8211; cerebroemacao.com"),
+    ("Curso ABA e Autismo – Aprenda a ter mais segurança",
+     "Curso ABA e Autismo &#8211; Aprenda a ter mais seguran&ccedil;a"),
+    ("Pós-Graduação em Autismo e TDAH", "  Pós-Graduação em\n Autismo e TDAH "),
+])
+def test_titulo_con_entidades_html_no_es_cloaker(movil, crudo):
+    p, robot = _wp(movil, crudo)
+    d = resolver_destino(p.url_final, Falso(p), robot)
+    assert d.cloaker is False and d.motivo is None
+
+
+def test_titulo_dinamico_con_la_misma_pagina_no_es_cloaker():
+    # ecommerce.tarundu.com.br: el navegador cambia el título con JavaScript; el contenido es el mismo
+    p, robot = _wp("Parque Tarundu – Campos do Jordão – Faça sua escolha!",
+                   "Parque Tarundu – Campos do Jordão – Atrações imperdíveis em um único lugar!")
+    assert resolver_destino(p.url_final, Falso(p), robot).cloaker is False
+
+
+def test_redireccion_dentro_del_mismo_sitio_no_es_cloaker():
+    # el robot acaba en el dominio raíz y el móvil en un subdominio del mismo sitio
+    p = pagina(url_final="https://ecommerce.tienda.example.com.br/como-funciona")
+    robot = lambda u: ("https://tienda.example.com.br/", "<title>Kit</title>" + "Kit completo " * 20)
+    assert resolver_destino("https://tienda.example.com.br/", Falso(p), robot).cloaker is False
+
+
+def test_otro_dominio_registrable_es_cloaker():
+    p = pagina()
+    robot = lambda u: ("https://blog-seguro.example.net/", "<title>Kit</title>" + "Kit completo " * 20)
+    assert resolver_destino("https://tienda.example.com/", Falso(p), robot).cloaker is True
+
+
+def test_titulo_distinto_y_contenido_a_medias_es_no_medido():
+    p = pagina(texto="Kit completo de fichas para imprimir hoy " * 5)
+    medio = "<title>Oferta especial</title>" + "Kit completo de recetas caseras y postres faciles " * 5
+    d = resolver_destino("https://tienda.example.com/", Falso(p), lambda u: (u, medio))
+    assert d.cloaker is None and "no medido" in d.motivo and "título" in d.motivo
+
+
+@pytest.mark.parametrize(("url", "clave"), [
+    ("https://geriactiva.impultienda.ar/", "geriactiva.impultienda.ar"),
+    ("https://formacion-contable.impultienda.ar/", "formacion-contable.impultienda.ar"),
+    ("https://mi-kit.lovable.app/", "mi-kit.lovable.app"),
+    ("https://otro-kit.lovable.app/", "otro-kit.lovable.app"),
+    ("https://kits.web.app/pdf", "kits.web.app/pdf"),
+    ("https://ana.wixsite.com/kit", "ana.wixsite.com/kit"),
+    ("https://www.therapytoolkit.com/es/pagina", "therapytoolkit.com"),
+])
+def test_tiendas_en_plataformas_compartidas_no_se_juntan(url, clave):
+    # sin checkout, el dominio registrable de una plataforma compartida (lovable.app, impultienda.ar...)
+    # juntaría productos de operadores distintos en una sola oferta
+    assert clave_oferta(url, None) == clave

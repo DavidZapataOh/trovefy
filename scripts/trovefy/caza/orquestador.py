@@ -28,11 +28,12 @@ from trovefy.caza import filtros, snapshots
 from trovefy.caza.biblioteca import url_biblioteca
 from trovefy.caza.cliente import SesionBloqueada
 from trovefy.caza.destino import (
-    _DOMINIOS_COMPARTIDOS,
     Destino,
     _host,
     _registrable,
     deshacer_redireccion_fb,
+    detectar_gateway,
+    sitio,
     veredicto_landing,
 )
 from trovefy.caza.hueco import HuecoPais, hueco_pais
@@ -505,15 +506,22 @@ def _frase(o: Oferta, page_id: str) -> str | None:
 
 
 def _dominio(o: Oferta) -> str | None:
+    """Sitio de la landing para buscar el original; None si no identifica a un operador.
+
+    Una landing en la propia pasarela (pay.hotmart.com, gumroad.com, whop.com...) comparte dominio con
+    todos los productores de la plataforma: buscar por él junta productos ajenos. Las tiendas con
+    subdominio propio (*.impultienda.ar, *.mycartpanda.com) sí identifican al operador."""
     d = o.destino
     if d is None or d.estado != "ok" or d.red_social:
         return None
-    host = _host(d.url_final or d.url_anuncio).removeprefix("www.")
+    url = d.url_final or d.url_anuncio
+    host = _host(url)
     if not host:
         return None
-    if any(host == x or host.endswith("." + x) for x in _DOMINIOS_COMPARTIDOS):
-        return host
-    return _registrable(host)
+    s = sitio(host)
+    if detectar_gateway([url]) and s == _registrable(host):
+        return None
+    return s
 
 
 @dataclass
@@ -662,6 +670,16 @@ class _Corrida:
 
     # buscar el original
     def buscar_original(self, o: Oferta) -> Oferta:
+        """Busca por el sitio de la landing otras páginas que lleven al mismo sitio.
+
+        Regla (caza 2026-11-11): una página más antigua cuyos anuncios llevan al MISMO sitio (mismo
+        dominio registrable, o la misma tienda en una plataforma compartida como *.impultienda.ar) es el
+        mismo operador o su socio: quien copia no puede vender en el dominio ni en la tienda del otro.
+        Se informa con la bandera ``mismo_operador``, nunca se descarta como ``posible_copia``. Otra
+        tienda de la misma plataforma es otro producto: cuenta como resultado ajeno (búsqueda
+        contaminada) y no se usa. Con la landing en la propia pasarela (pay.hotmart.com...) no se
+        busca: ese dominio no identifica al operador (:func:`_dominio`). Copia = mismo producto (clave
+        de oferta) en otro operador; compartir plataforma o dominio nunca lo es."""
         dominio = _dominio(o)
         if not dominio:
             return o
@@ -673,7 +691,7 @@ class _Corrida:
         if r.estado != "ok":
             return o
         con_destino = [a for a in r.anuncios if a.enlace_destino]
-        ajenos = [a for a in con_destino if dominio not in deshacer_redireccion_fb(a.enlace_destino).lower()]
+        ajenos = [a for a in con_destino if sitio(_host(deshacer_redireccion_fb(a.enlace_destino))) != dominio]
         if ajenos:
             self.errores.append(
                 f"no medido: dominio contaminado: la búsqueda «{dominio}» ({pais}) trae {len(ajenos)} anuncios "
@@ -683,12 +701,10 @@ class _Corrida:
         otras = [a for a in con_destino if a.page_id not in o.page_ids]
         if not otras:
             return o
-        paginas = list(dict.fromkeys([*o.page_ids, *(a.page_id for a in otras)]))
-        m = marcar_original(replace(o, page_ids=paginas, anuncios=[*o.anuncios, *otras]))
-        if m.original_page_id in o.page_ids:
-            return replace(o, origen="original", original_page_id=m.original_page_id,
-                           copias=[p for p in o.page_ids if p != m.original_page_id])
-        return replace(o, origen="copia", original_page_id=m.original_page_id, copias=list(o.page_ids))
+        m = marcar_original(replace(o, page_ids=list(dict.fromkeys([*o.page_ids, *(a.page_id for a in otras)])),
+                                    anuncios=[*o.anuncios, *otras]))
+        orden = [m.original_page_id, *m.copias] if m.original_page_id else m.page_ids
+        return replace(o, mismo_operador=[p for p in orden if p not in o.page_ids], sitio=dominio)
 
     def inactivos(self, o: Oferta, pais: str, multi: set[str]) -> list[AnuncioBiblioteca] | None:
         """Anuncios de una lectura completa ``estado="all"`` de todas sus páginas; si no, None."""
@@ -1069,6 +1085,8 @@ def _evaluar(c: _Corrida, conn, o: Oferta, pais: str, descarte, ya_visto: bool, 
     s.banderas += [x for x in filtros.banderas(o, ctx) if x not in s.banderas]
     if "precio_bajo" in s.banderas:
         s.detalles_banderas["precio_bajo"] = filtros.precio_bajo(o, ctx) or ""
+    if "mismo_operador" in s.banderas:
+        s.detalles_banderas["mismo_operador"] = filtros.mismo_operador(o) or ""
     nota = calcular_nota(s, u)
     huecos = huecos_de(fichas.get(o.oferta_id))
     landing = veredicto_landing(o.destino) if o.destino is not None else "dudoso"
