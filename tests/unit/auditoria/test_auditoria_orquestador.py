@@ -38,8 +38,8 @@ def bloqueado():
                              datetime(2026, 11, 10))
 
 
-def nunca(*_a, **_k):
-    raise AssertionError("no hacía falta el cambio del BCE")
+def nunca(*_a, **_k) -> None:
+    """Sin cambio del BCE (sin red): el precio en EUR se mide; el local de cada país queda «no medido»."""
 
 
 @pytest.fixture
@@ -191,3 +191,31 @@ def test_mercados_con_clave_rara_es_error_claro(v):
     (v / "config/mercados.yaml").write_text("true:\n  idioma: x\n", encoding="utf-8")
     with pytest.raises(ValueError, match="entre comillas"):
         orquestador.auditar(v, "o-ejemplo", None, FRASES, cliente=ClienteFalso(), hoy=HOY, cambios=nunca)
+
+
+def test_precio_con_su_procedencia_y_el_precio_local(v):
+    from trovify import fx
+
+    o = oferta_ejemplo()
+    o["precio"], o["moneda"] = 79, "RON"
+    del o["landing"]  # las fichas del plan 07 la llevan en el cuerpo
+    escribir(v / "wiki/ofertas/o-ejemplo.md", o, "# Oferta\n\n## Destino\n\n- Landing: https://tienda.example/fichas?x=1\n")
+    cambio = fx.Cambio({"EUR": 1.0, "RON": 5.0, "CZK": 25.0}, "2026-11-09", fx.URL)
+    r = orquestador.auditar(v, "o-ejemplo", ["RO", "CZ", "BG"], FRASES, cliente=ClienteFalso(), hoy=HOY,
+                            cambios=lambda vault, hoy: cambio)
+    texto = r.ruta.read_text()
+    assert ("Precio del original en EUR: 79 RON ÷ 5 (cambio de referencia del BCE del 2026-11-09, "
+            "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml) = 15,80 €") in texto
+    assert "Precio del original: 79 RON — landing: https://tienda.example/fichas?x=1" in texto
+    assert "precio local en RO: ≈ 79,00 RON" in texto
+    assert "precio local en CZ: ≈ 395,00 CZK" in texto
+    assert "precio local en BG: 15,80 EUR" in texto
+
+
+def test_sin_cambio_del_bce_el_precio_local_no_se_mide(v):
+    r = orquestador.auditar(v, "o-ejemplo", ["RO", "BG"], FRASES, cliente=ClienteFalso(), hoy=HOY, cambios=nunca)
+    texto = r.ruta.read_text()
+    assert "Precio del original en EUR: 13,90 € (la ficha ya está en euros: sin cambio)" in texto
+    assert "precio local en RO: no medido: sin cambio de referencia para RON" in texto
+    assert "precio local en BG: 13,90 EUR" in texto
+    assert "landing: https://tienda.example/fichas" in texto  # del frontmatter de la ficha

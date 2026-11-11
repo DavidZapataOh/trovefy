@@ -32,6 +32,8 @@ class PaisAuditado:
     no_tirar: str | None
     banda: tuple[float, float] | None = None  # banda_eur del país (config/mercados.yaml)
     fuente_banda: str | None = None
+    precio_local: Medida | None = None  # el precio en EUR llevado a la moneda del país
+    moneda_local: str | None = None
 
 
 def puntuar_pais(hueco: HuecoPais, precio_s: Medida, u: dict[str, Umbral]) -> tuple[float | None, Desglose]:

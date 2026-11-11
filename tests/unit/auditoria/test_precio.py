@@ -82,3 +82,28 @@ def test_xml_utf16_con_doctype_es_none(tmp_path):
     hostil = '<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE a [<!ENTITY x "y">]><a/>'.encode("utf-16")
     assert cambios(tmp_path, HOY, abrir=lambda url, timeout=15: io.BytesIO(hostil)) is None
     assert cambios(tmp_path / "u", HOY, abrir=lambda url, timeout=15: io.BytesIO(XML.replace(b"UTF-8", b"UTF-16"))) is None
+
+
+def test_cambio_del_dia_con_fecha_y_fuente(tmp_path):
+    from trovify.fx import URL, cambio_del_dia
+
+    c = cambio_del_dia(tmp_path, HOY, abrir=abrir_falso)
+    assert c.fecha == "2026-11-10" and c.url == URL and c.tasas["RON"] == 5.3442
+
+    def sin_red(url, timeout=15):
+        raise OSError("sin red")
+
+    c2 = cambio_del_dia(tmp_path, HOY, abrir=sin_red)  # de la caché del día, con su fecha
+    assert c2.fecha == "2026-11-10" and c2.tasas == c.tasas
+
+
+def test_cache_antigua_sin_fecha_sigue_valiendo(tmp_path):
+    import json
+
+    from trovify.fx import cambio_del_dia
+
+    ruta = tmp_path / "data/cache/fx-2026-11-10.json"
+    ruta.parent.mkdir(parents=True)
+    ruta.write_text(json.dumps({"RON": 5.0}), encoding="utf-8")
+    c = cambio_del_dia(tmp_path, HOY, abrir=lambda *a, **k: (_ for _ in ()).throw(OSError("x")))
+    assert c.tasas["RON"] == 5.0 and c.fecha is None

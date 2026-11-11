@@ -2,7 +2,7 @@ import pathlib
 from datetime import date
 
 import pytest
-from ejemplos_auditoria import link_pagina, oferta_ejemplo, paises_ejemplo
+from ejemplos_auditoria import CONTEXTO, link_pagina, oferta_ejemplo, paises_ejemplo
 from trovify.arranque.verificadores.cuenta import mercado_elegido
 from trovify.auditoria.paises import recomendar, tres_senales
 from trovify.auditoria.salida import (
@@ -27,7 +27,8 @@ def vault(tmp_path):
 
 def test_golden():
     ps = paises_ejemplo()
-    assert render_auditoria(oferta_ejemplo(), ps, recomendar(ps), tres_senales("B", ps), [], HOY) == GOLD.read_text()
+    texto = render_auditoria(oferta_ejemplo(), ps, recomendar(ps), tres_senales("B", ps), [], HOY, **CONTEXTO)
+    assert texto == GOLD.read_text()
 
 
 def test_reauditar_reutiliza_el_producto(tmp_path):
@@ -194,7 +195,7 @@ def test_precio_sin_moneda_no_se_asume(tmp_path):
     o["moneda"] = None
     ps = paises_ejemplo()
     texto = render_auditoria(o, ps, recomendar(ps), tres_senales("B", ps), [], HOY)
-    assert "13,90 EUR" not in texto and "moneda no medida" in texto
+    assert "Precio del original: 13,90 EUR" not in texto and "moneda no medida" in texto
 
 
 def _poner_estado(v, p, pais, estado):

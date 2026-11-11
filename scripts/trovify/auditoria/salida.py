@@ -104,7 +104,16 @@ def _precio_pais(p: PaisAuditado) -> str:
     else:
         fuente = f"{p.fuente_banda}, config/mercados.yaml" if p.fuente_banda else "config/mercados.yaml"
         banda = f"banda de {p.pais}: {_num(p.banda[0], 2)}–{_num(p.banda[1], 2)} € (fuente: {fuente})"
-    return f"Precio del original en EUR: {eur} · precio soportable: {soportable} · {banda}"
+    texto = f"Precio del original en EUR: {eur} · precio soportable: {soportable} · {banda}"
+    if p.precio_local is not None:
+        if p.precio_local.valor is None:
+            local = formatear_medida(p.precio_local)
+        elif p.moneda_local == "EUR":
+            local = f"{_num(p.precio_local.valor, 2)} EUR"
+        else:
+            local = f"≈ {_num(p.precio_local.valor, 2)} {p.moneda_local} (al cambio del BCE de «La oferta»)"
+        texto += f" · precio local en {p.pais}: {local}"
+    return texto
 
 
 def _motivo_caza(oferta: dict) -> str:
@@ -122,7 +131,25 @@ def precio_original(oferta: dict) -> str:
         return "no medido: la ficha no tiene el precio del original"
     if not moneda:
         return f"{_num(precio, 2)} (moneda no medida: la landing no dice cuál es; «$» es ambiguo)"
-    return f"{_num(precio, 2)} {moneda}"
+    return f"{_num(precio) if float(precio).is_integer() else _num(precio, 2)} {moneda}"
+
+
+_LANDING = re.compile(r"^- Landing: (https?://\S+)\s*$", re.MULTILINE)
+
+
+def landing_de(meta: dict, cuerpo: str) -> str | None:
+    """La URL completa de la landing: ``landing`` del frontmatter o la línea «- Landing:» de la ficha."""
+    if isinstance(meta.get("landing"), str) and meta["landing"].startswith(("http://", "https://")):
+        return meta["landing"]
+    m = _LANDING.search(cuerpo or "")
+    return m.group(1) if m else None
+
+
+def _landing(oferta: dict) -> str:
+    if oferta.get("landing"):
+        return f"landing: {oferta['landing']}"
+    dominio = f" (dominio: {oferta['dominio']})" if oferta.get("dominio") else ""
+    return f"landing: no medido: la ficha no tiene el enlace de la landing{dominio}"
 
 
 def _cifra(d: dict, nombre: str) -> str:
@@ -215,11 +242,14 @@ def _frontmatter_auditoria(oferta: dict, orden: list[PaisAuditado], recomendacio
 
 
 def render_auditoria(oferta: dict, paises: list[PaisAuditado], recomendacion, senales3: dict,
-                     historial: list[str], hoy: date) -> str:
-    """``AUDITORIA.md`` completo (frontmatter y cuerpo). Pura: la prueba el *golden file*."""
+                     historial: list[str], hoy: date, *, calculo_eur: str | None = None,
+                     cambio: str | None = None, busquedas: list[str] | None = None) -> str:
+    """``AUDITORIA.md`` completo (frontmatter y cuerpo). Pura: la prueba el *golden file*.
+
+    ``calculo_eur``: cómo se pasó el precio a EUR; ``cambio``: el cambio del BCE usado (fecha y
+    enlace); ``busquedas``: líneas sobre las búsquedas del día."""
     oferta_id = str(oferta.get("oferta_id"))
     orden = _orden(paises)
-    landing = f" (landing: {oferta['dominio']})" if oferta.get("dominio") else ""
     lineas = [
         f"# Auditoría de {oferta_id} ({hoy.isoformat()})",
         "",
@@ -230,7 +260,9 @@ def render_auditoria(oferta: dict, paises: list[PaisAuditado], recomendacion, se
         "",
         f"- Ficha: [[wiki/ofertas/{oferta_id}]]",
         f"- Decisión de la caza: **{oferta.get('estado') or 'no medido'}**{_motivo_caza(oferta)}",
-        f"- Precio del original: {precio_original(oferta)}{landing}",
+        f"- Precio del original: {precio_original(oferta)} — {_landing(oferta)}",
+        f"- Precio del original en EUR: {calculo_eur or 'no medido: sin cálculo'}",
+        f"- Cambio de moneda: {cambio or 'no medido: sin cambio de referencia'}",
         *_cifras_caza(oferta),
         "",
         "## Ranking de países",
@@ -431,7 +463,7 @@ def _actualizar_mercado(vault: Path, p: PaisAuditado, oferta_id: str, p_id: str,
     return ruta
 
 
-def escribir_auditoria(vault: Path, oferta_id: str, paises: list[PaisAuditado], hoy: date) -> Path:
+def escribir_auditoria(vault: Path, oferta_id: str, paises: list[PaisAuditado], hoy: date, **contexto) -> Path:
     """Escribe ``productos/<p-id>/AUDITORIA.md`` (archiva la anterior), ``PRODUCTO.md``,
     ``wiki/mercados/<pais>.md``, ``index.md`` y una línea en ``log.md``. Devuelve la ruta de la auditoría."""
     from trovify.auditoria.paises import recomendar
@@ -440,14 +472,19 @@ def escribir_auditoria(vault: Path, oferta_id: str, paises: list[PaisAuditado], 
     ficha = vault / "wiki" / "ofertas" / f"{oferta_id}.md"
     if not ficha.exists():
         raise FileNotFoundError(f"no existe la ficha wiki/ofertas/{oferta_id}.md")
-    oferta = dict(_leer_meta(ficha))
+    try:
+        meta_ficha, cuerpo_ficha = frontmatter.leer(ficha)
+    except (OSError, ValueError):
+        meta_ficha, cuerpo_ficha = {}, ""
+    oferta = dict(meta_ficha or {})
     oferta.setdefault("oferta_id", oferta_id)
+    oferta["landing"] = landing_de(oferta, cuerpo_ficha)
     p_id = producto_para(vault, oferta_id, slug_de_oferta(oferta_id))
     nombres = [p.pais for p in paises]
     recomendacion = recomendar(paises)
     senales3 = tres_senales(str(oferta.get("estado") or ""), paises)
     historial = historial_de(vault, nombres, excluir=p_id)
-    texto = render_auditoria(oferta, paises, recomendacion, senales3, historial, hoy)
+    texto = render_auditoria(oferta, paises, recomendacion, senales3, historial, hoy, **contexto)
 
     ruta = vault / "productos" / p_id / "AUDITORIA.md"
     archivada = _archivar(ruta)  # copia: si la escritura nueva fallara, la anterior sigue en su sitio

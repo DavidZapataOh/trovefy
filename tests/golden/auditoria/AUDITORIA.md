@@ -34,7 +34,9 @@ Dónde lanzar esta oferta, país por país. Lo que no se pudo medir se dice como
 
 - Ficha: [[wiki/ofertas/o-ejemplo]]
 - Decisión de la caza: **B** — nota 62,4 < 70 para A (el hueco por país lo mide esta auditoría, más abajo)
-- Precio del original: 13,90 EUR (landing: tienda.example)
+- Precio del original: 13,90 EUR — landing: https://tienda.example/fichas
+- Precio del original en EUR: 13,90 € (la ficha ya está en euros: sin cambio)
+- Cambio de moneda: referencia del BCE del 2026-11-10 — https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml
 - Cifras de la caza por país:
   - ES: C8 15 · C7 16 · total 32 anuncios activos · el más antiguo lleva 40 días — https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=ES&media_type=all&search_type=page&view_all_page_id=100000000000001
 
@@ -51,7 +53,7 @@ Pesos de la nota: config/umbrales.yaml (auditar.peso.*, [D-13]). Lo no medido no
 ### 1. RO — nota 100 (medida sobre 45 de 100 puntos)
 
 - Hueco: **sí** — competencia local: 0 anunciantes en el idioma local · original: anuncia sin traducir (bonus)
-- Precio del original en EUR: 13,90 € · precio soportable: 1 (1 = dentro de la banda de precios del país; 0 = muy lejos) · banda de RO: 11,90–15,90 € (fuente: vídeos: 11,90–15,90 €, config/mercados.yaml)
+- Precio del original en EUR: 13,90 € · precio soportable: 1 (1 = dentro de la banda de precios del país; 0 = muy lejos) · banda de RO: 11,90–15,90 € (fuente: vídeos: 11,90–15,90 €, config/mercados.yaml) · precio local en RO: ≈ 74,28 RON (al cambio del BCE de «La oferta»)
 - Búsquedas en la Biblioteca que dan estas cifras:
   - https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=RO&media_type=all&q=fise+terapie&search_type=keyword_unordered
   - https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=RO&media_type=all&q=kit+terapie&search_type=keyword_unordered
@@ -70,7 +72,7 @@ Cálculo: 100 × 45 ÷ 45 (solo los pesos medidos) = 100.
 ### 2. IT — nota 83 (medida sobre 45 de 100 puntos)
 
 - Hueco: **sí** — competencia local: 0 anunciantes en el idioma local · original: sin anuncios activos ahora en el país
-- Precio del original en EUR: 13,90 € · precio soportable: 0,5 (1 = dentro de la banda de precios del país; 0 = muy lejos) · banda de IT: 15,90–19,90 € (fuente: banda de ejemplo, config/mercados.yaml)
+- Precio del original en EUR: 13,90 € · precio soportable: 0,5 (1 = dentro de la banda de precios del país; 0 = muy lejos) · banda de IT: 15,90–19,90 € (fuente: banda de ejemplo, config/mercados.yaml) · precio local en IT: 13,90 EUR
 - Búsquedas en la Biblioteca que dan estas cifras:
   - https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=IT&media_type=all&q=schede+terapia&search_type=keyword_unordered
   - https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=IT&media_type=all&q=kit+terapia&search_type=keyword_unordered
@@ -89,7 +91,7 @@ Cálculo: 100 × 37,5 ÷ 45 (solo los pesos medidos) = 83,33.
 ### 3. FR — nota 33 (medida sobre 45 de 100 puntos)
 
 - Hueco: **no** — competencia local: 0 anunciantes en el idioma local · original: ya anuncia traducido al idioma local
-- Precio del original en EUR: 13,90 € · precio soportable: 1 (1 = dentro de la banda de precios del país; 0 = muy lejos) · banda de FR: 11,90–15,90 € (fuente: vídeos: 11,90–15,90 €, config/mercados.yaml)
+- Precio del original en EUR: 13,90 € · precio soportable: 1 (1 = dentro de la banda de precios del país; 0 = muy lejos) · banda de FR: 11,90–15,90 € (fuente: vídeos: 11,90–15,90 €, config/mercados.yaml) · precio local en FR: 13,90 EUR
 - No tirar: el original ya anuncia traducido
 - Búsquedas en la Biblioteca que dan estas cifras:
   - https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=FR&media_type=all&q=fiches+therapie&search_type=keyword_unordered

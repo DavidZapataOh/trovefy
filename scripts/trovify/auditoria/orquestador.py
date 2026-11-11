@@ -16,7 +16,7 @@ from pathlib import Path
 
 from trovify import fx
 from trovify.auditoria.paises import PaisAuditado, no_tirar, puntuar_pais
-from trovify.auditoria.precio import precio_soportable
+from trovify.auditoria.precio import precio_local, precio_soportable
 from trovify.auditoria.salida import escribir_auditoria, producto_para, slug_de_oferta
 from trovify.caza.hueco import (
     HuecoPais,
@@ -26,12 +26,14 @@ from trovify.caza.hueco import (
     original_con_enlaces,
 )
 from trovify.caza.orquestador import VigiaDeParada, cerrojo_caza, hoy_negocio
+from trovify.caza.salida import formatear_numero as _num
 from trovify.caza.senales import Medida
 from trovify.config import mercados as cfg_mercados
 from trovify.config import umbrales as cfg_umbrales
 from trovify.vault import frontmatter
 
-Cambios = Callable[[Path, date], "dict[str, float] | None"]
+# Devuelve el cambio del BCE (``fx.Cambio``; un ``dict`` de tasas sin fecha también vale) o None.
+Cambios = Callable[[Path, date], "fx.Cambio | dict[str, float] | None"]
 
 
 @dataclass
@@ -55,17 +57,43 @@ def _sin_medir(pais: str, motivo: str) -> HuecoPais:
     return HuecoPais(pais, Medida(None, motivo), "no_medido", None, [], motivo)
 
 
-def precio_en_eur(oferta: dict, vault: Path, hoy: date, cambios: Cambios) -> Medida:
-    """El precio del original en EUR. Sin moneda clara («$» ambiguo) no se asume ninguna."""
+def _cambio(cambios: Cambios, vault: Path, hoy: date) -> fx.Cambio | None:
+    c = cambios(vault, hoy)
+    if c is None:
+        return None
+    return fx.Cambio(dict(c), None) if isinstance(c, dict) else c
+
+
+def _tasa(x: float) -> str:
+    return f"{x:g}".replace(".", ",")
+
+
+def precio_en_eur(oferta: dict, cambio: fx.Cambio | None) -> tuple[Medida, str]:
+    """El precio del original en EUR y cómo se calculó (con el cambio del BCE, su fecha y su enlace).
+
+    Sin moneda clara («$» ambiguo) no se asume ninguna; sin cambio fiable, «no medido»."""
     precio, moneda = oferta.get("precio"), oferta.get("moneda")
     if not isinstance(precio, (int, float)) or isinstance(precio, bool):
-        return Medida(None, "no medido: la ficha no tiene el precio del original")
+        m = Medida(None, "no medido: la ficha no tiene el precio del original")
+        return m, m.motivo
     if not moneda:
-        return Medida(None, "no medido: la ficha no dice la moneda del precio («$» es ambiguo); no se asume ninguna")
+        m = Medida(None, "no medido: la ficha no dice la moneda del precio («$» es ambiguo); no se asume ninguna")
+        return m, m.motivo
     moneda = str(moneda).upper()
     if moneda == "EUR":
-        return Medida(float(precio))
-    return fx.a_eur(float(precio), moneda, cambios(vault, hoy))
+        return Medida(float(precio)), f"{_num(precio, 2)} € (la ficha ya está en euros: sin cambio)"
+    m = fx.a_eur(float(precio), moneda, None if cambio is None else cambio.tasas)
+    if m.valor is None:
+        return m, m.motivo
+    return m, (f"{_num(precio)} {moneda} ÷ {_tasa(cambio.tasas[moneda])} (cambio de referencia del BCE del "
+               f"{cambio.fecha or 'día sin fecha en la caché'}, {cambio.url}) = {_num(m.valor, 2)} €")
+
+
+def fuente_del_cambio(cambio: fx.Cambio | None) -> str:
+    if cambio is None:
+        return ("no medido: sin cambio de referencia del BCE (sin red o archivo no válido); los precios "
+                "locales que lo necesitan quedan «no medido»")
+    return f"referencia del BCE del {cambio.fecha or 'día sin fecha en la caché'} — {cambio.url}"
 
 
 def auditar(vault: Path, *args, **kw) -> ResultadoAuditoria:
@@ -81,7 +109,7 @@ def _auditar(
     frases: dict[str, list[str]],
     cliente=None,
     hoy: date | None = None,
-    cambios: Cambios = fx.cambios,
+    cambios: Cambios = fx.cambio_del_dia,
 ) -> ResultadoAuditoria:
     """Audita la oferta en ``paises`` (por defecto, los de ``mercados.yaml`` con ``estado: candidato``)
     con ``frases`` cortas en el idioma local de cada país."""
@@ -105,7 +133,8 @@ def _auditar(
     meta, _ = frontmatter.leer(ficha)
     oferta = dict(meta or {})
     page_ids = [str(p) for p in oferta.get("page_ids") or []]
-    precio_eur = precio_en_eur(oferta, vault, hoy, cambios)
+    cambio = _cambio(cambios, vault, hoy)
+    precio_eur, calculo_eur = precio_en_eur(oferta, cambio)
 
     if cliente is None:
         from trovify.caza.cache import Cache
@@ -130,9 +159,12 @@ def _auditar(
             h = HuecoPais(pais, comp, orig, hay_hueco(comp, orig, u), enlaces, motivo_hueco(comp, orig, u))
         precio_s = precio_soportable(precio_eur, mercado.banda_eur)
         nota, desglose = puntuar_pais(h, precio_s, u)
+        local = (precio_eur if precio_eur.valor is None
+                 else precio_local(precio_eur.valor, mercado, None if cambio is None else cambio.tasas))
         auditados.append(PaisAuditado(pais, h, precio_eur, precio_s, nota, desglose, no_tirar(h),
-                                      mercado.banda_eur, mercado.fuente_banda))
+                                      mercado.banda_eur, mercado.fuente_banda, local, mercado.moneda))
 
-    ruta = escribir_auditoria(vault, oferta_id, auditados, hoy)
+    ruta = escribir_auditoria(vault, oferta_id, auditados, hoy, calculo_eur=calculo_eur,
+                              cambio=fuente_del_cambio(cambio))
     p_id = producto_para(vault, oferta_id, slug_de_oferta(oferta_id))
     return ResultadoAuditoria(ruta, p_id, auditados, vigia.parada, vigia.tipo)

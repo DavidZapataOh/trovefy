@@ -37,6 +37,7 @@ def oferta_ejemplo() -> dict:
         "checkout": "https://tienda.example/checkout",
         "gateway": "hotmart",
         "dominio": "tienda.example",
+        "landing": "https://tienda.example/fichas",
         "paises": {
             "ES": {
                 "c8": 15,
@@ -63,19 +64,28 @@ def oferta_ejemplo() -> dict:
     }
 
 
+# Cómo se calculó el precio en EUR y qué cambio del BCE se usó (lo que el orquestador pasa al informe).
+CONTEXTO = {
+    "calculo_eur": "13,90 € (la ficha ya está en euros: sin cambio)",
+    "cambio": "referencia del BCE del 2026-11-10 — https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml",
+}
+
+
 def _pais(pais, comp, original, hueco, precio_s, enlaces, banda=(11.9, 15.9),
-          fuente="vídeos: 11,90–15,90 €") -> PaisAuditado:
+          fuente="vídeos: 11,90–15,90 €", local=(13.9, "EUR")) -> PaisAuditado:
     u = cargar(_UMBRALES)
     h = HuecoPais(pais, Medida(comp), original, hueco, enlaces)
     ps = Medida(precio_s)
     nota, desglose = puntuar_pais(h, ps, u)
-    return PaisAuditado(pais, h, Medida(13.9), ps, nota, desglose, no_tirar(h), banda, fuente)
+    return PaisAuditado(pais, h, Medida(13.9), ps, nota, desglose, no_tirar(h), banda, fuente,
+                        Medida(local[0]), local[1])
 
 
 def paises_ejemplo() -> list[PaisAuditado]:
     return [
         _pais("RO", 0, "sin_traducir", True, 1.0,
-              [link_frase("RO", "fise terapie"), link_frase("RO", "kit terapie"), link_pagina("RO")]),
+              [link_frase("RO", "fise terapie"), link_frase("RO", "kit terapie"), link_pagina("RO")],
+              local=(13.9 * 5.3442, "RON")),  # cambio del BCE del 2026-11-10 (tests/fixtures/fx)
         _pais("IT", 0, "ausente", True, 0.5,
               [link_frase("IT", "schede terapia"), link_frase("IT", "kit terapia"), link_pagina("IT")],
               banda=(15.9, 19.9), fuente="banda de ejemplo"),  # 13,90 € queda a media banda: 0,5
