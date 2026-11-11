@@ -26,6 +26,11 @@ FISICO_FUERTE: list[list[str]] = [
     ["envío gratis", "envio gratis", "frete grátis", "free shipping", "livrare gratuită", "spedizione gratuita",
      "livraison gratuite"],
     ["correos", "seur", "dhl", "ups", "fedex", "correios", "colissimo", "poste italiane", "fan courier"],
+    # Venta al por mayor de bienes. «en gros» suelto no cuenta (en francés también es «en resumen»);
+    # «atacado» en español es «atacado» (agredido): una sola señal fuerte nunca descarta.
+    ["atacado", "por atacado", "no atacado", "atacadista", "atacadistas", "al por mayor", "por mayor", "mayoreo",
+     "mayorista", "mayoristas", "wholesale", "vente en gros", "prix de gros", "commerce de gros", "grossiste",
+     "grossistes", "all'ingrosso", "ingrosso", "grossista", "grossisti", "en-gros", "engros", "angro"],
 ]
 # Débiles: palabras corrientes también en ofertas digitales; solo cuentan sin marcadores digitales.
 FISICO_DEBIL: list[list[str]] = [
@@ -36,6 +41,11 @@ FISICO_DEBIL: list[list[str]] = [
     ["unidades", "units", "bucati", "pezzi", "exemplaires"],
     ["crema", "cream", "cremă", "crème", "serum", "sérum"],
     ["suplemento", "supplement"],
+    # Prendas de ropa (también aparecen en moldes de costura digitales: por eso son débiles).
+    ["leggings", "legging", "calza", "calzas", "colanți", "shorts", "regata", "regatas", "tank top", "tank tops",
+     "canotta", "canotte", "débardeur", "débardeurs", "maiou", "maiouri", "blusa", "blusas", "blouse", "blouses",
+     "bluza", "bluze", "camicetta", "camicette", "chemisier", "chemisiers", "macacão", "macacões", "enterizo",
+     "enterizos", "jumpsuit", "jumpsuits", "dry fit", "moda fitness", "roupa fitness", "ropa deportiva"],
 ]
 # Marcadores de producto digital: con ellos, las señales débiles de FISICO no cuentan.
 DIGITAL: list[str] = [
@@ -56,6 +66,7 @@ NO_SENAL: list[str] = [
     "cápsulas do tempo", "capsula timpului", "capsule del tempo", "capsula del tempo", "capsule temporelle",
     "capsules temporelles", "stock photo", "stock photos", "foto de stock", "fotos de stock", "stock de fotos",
     "fotos stock", "stock images", "imagens de stock", "poze stock", "foto stock", "photos de stock",
+    "youtube shorts", "shorts de youtube", "shorts do youtube", "shorts del youtube", "shorts di youtube",
 ]
 FISICO: list[str] = [t for g in FISICO_FUERTE + FISICO_DEBIL for t in g]
 

@@ -196,3 +196,39 @@ def test_digitales_con_plurales_y_frases_no_senal(texto):
 def test_app_y_zoom_no_son_marcador_digital():
     assert filtrar(oferta("Cápsulas 500 mg, envío, app, zoom"), CTX).codigo == "producto_fisico"
     assert filtrar(oferta("Talla única, envío, app y zoom"), CTX).codigo == "producto_fisico"
+
+
+# --- mayorista y ropa (caza Brasil 2026-11-11: jeniffermodafitness.com.br pasó como B) --------
+
+JENIFFER = ("Atacado · Leggings · Shorts · Regatas dry fit · Blusas · Macacões · Lançamentos · "
+            "Mais vendidos · Promoções")
+
+
+def test_ropa_al_por_mayor_se_descarta():
+    ctx = ContextoFiltros(set(), set(), U, landings={D.url_anuncio: JENIFFER})
+    d = filtrar(oferta("Garanta já!"), ctx)
+    assert d.codigo == "producto_fisico"
+    assert d.detalle == "señales de producto físico o retail: atacado, leggings"
+
+
+@pytest.mark.parametrize("texto", [
+    "Vente en gros de leggings et shorts", "Wholesale leggings and tank tops",
+    "Calzas y shorts al por mayor", "Leggings all'ingrosso", "Colanți și blusas en-gros",
+    "Mayoreo de blusas y enterizos",
+])
+def test_mayorista_mas_ropa_en_otros_idiomas(texto):
+    assert filtrar(oferta(texto), CTX).codigo == "producto_fisico"
+
+
+@pytest.mark.parametrize("texto", [
+    "Molde de legging em PDF, do 36 ao 46", "Moldes digitais de shorts, regatas e blusas",
+    "Lista de fornecedores de atacado em PDF",  # una sola señal fuerte con marcador digital
+    "Curso online: viraliza con YouTube Shorts", "Aprenda a gravar shorts do YouTube",
+    "En gros, ce PDF t'explique tout",  # «en gros» suelto es «en resumen»: no es señal
+])
+def test_moldes_digitales_y_frases_ambiguas_pasan(texto):
+    assert filtrar(oferta(texto), CTX) is None
+
+
+def test_una_prenda_sola_no_descarta():
+    assert filtrar(oferta("Leggings de regalo para tus alumnas"), CTX) is None
