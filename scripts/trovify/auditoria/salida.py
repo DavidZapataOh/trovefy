@@ -1,0 +1,527 @@
+"""Salida de /auditar (§4.5): ``AUDITORIA.md``, ``PRODUCTO.md``, ``wiki/mercados`` y la elección.
+
+Lo que no se midió se escribe «no medido: <motivo>», nunca 0 ni una estimación. Cada cifra va con
+su enlace (la Biblioteca de la ficha de la oferta y las búsquedas del hueco). La elección del país
+es del usuario: queda en ``decisiones/`` con su cita literal.
+
+``render_auditoria`` es pura (la prueba el *golden file*); lo demás escribe con
+``escribir_atomico``/``frontmatter.escribir`` y deja una línea en ``log.md`` por ejecución.
+"""
+
+from __future__ import annotations
+
+import re
+from datetime import date
+from pathlib import Path
+
+from trovify.auditoria.paises import PaisAuditado, tres_senales
+from trovify.caza.salida import _anadir_al_indice, _num, formatear_medida
+from trovify.caza.senales import Medida
+from trovify.vault import frontmatter
+from trovify.vault.escritura import anadir_log, escribir_atomico
+
+CIERRE = "La elección es tuya: dímela y la registro."
+_PRODUCTO = re.compile(r"^p-(\d{4})-")
+_NOMBRES = {
+    "hueco": "Hueco",
+    "precio": "Precio soportable",
+    "demanda": "Demanda",
+    "cpm": "CPM",
+    "cultural": "Encaje cultural",
+}
+_ORIGINAL = {
+    "traducido": "ya anuncia traducido al idioma local",
+    "sin_traducir": "anuncia sin traducir (bonus)",
+    "ausente_reciente": "anuncia sin traducir desde hace poco",
+    "ausente": "sin anuncios activos ahora en el país",
+    "no_medido": "no medido: no se pudo leer si está traducido",
+}
+_SENALES = (
+    ("ya_se_vende", "Ya se vende (la caza la dejó en A o B)"),
+    ("hueco_por_pais", "Hay hueco en algún país"),
+    ("se_puede_mejorar", "Se puede mejorar"),
+)
+_PENDIENTE = {
+    "ya_se_vende": "la ficha no tiene decisión de la caza",
+    "hueco_por_pais": "ningún país tiene el hueco comprobado todavía",
+    "se_puede_mejorar": "lo confirma la autopsia de /modelar",
+}
+_HUECO_CORTO = {True: "sí", False: "no", None: "no comprobado"}
+# Las dos señales que se pueden medir hoy; ``se_puede_mejorar`` se exige en /modelar.
+MEDIBLES = ("ya_se_vende", "hueco_por_pais")
+
+
+# ---------------------------------------------------------------- formato
+
+
+def _si_no(v: bool | None) -> str:
+    return {True: "sí", False: "no", None: "pendiente"}[v]
+
+
+def _nota(nota: float | None) -> str:
+    return "no medida" if nota is None else f"{nota:.0f}"
+
+
+def _lista(paises: list[str]) -> str:
+    if len(paises) <= 1:
+        return "".join(paises)
+    return ", ".join(paises[:-1]) + f" ni {paises[-1]}"
+
+
+def _competencia(m: Medida) -> str:
+    if m.valor is None:
+        return formatear_medida(m)
+    return f"{formatear_medida(m)} anunciantes en el idioma local"
+
+
+def _hueco(p: PaisAuditado) -> str:
+    h = p.hueco
+    texto = f"**{_HUECO_CORTO[h.hueco]}**"
+    detalle = f"competencia local: {_competencia(h.competencia)} · original: {_ORIGINAL.get(h.original, h.original)}"
+    if h.hueco is None and h.motivo:
+        detalle += f" · por qué: {h.motivo}"
+    return f"{texto} — {detalle}"
+
+
+def _precio_pais(p: PaisAuditado) -> str:
+    eur = formatear_medida(p.precio_eur) if p.precio_eur.valor is None else f"{_num(p.precio_eur.valor, 2)} €"
+    if p.precio_s.valor is None:
+        soportable = formatear_medida(p.precio_s)
+    else:
+        soportable = (f"{_num(p.precio_s.valor)} (1 = dentro de la banda de precios del país; "
+                      "0 = muy lejos)")
+    return f"Precio del original en EUR: {eur} · precio soportable: {soportable}"
+
+
+def precio_original(oferta: dict) -> str:
+    """El precio de la ficha tal cual: sin moneda clara no se asume ninguna."""
+    precio, moneda = oferta.get("precio"), oferta.get("moneda")
+    if not isinstance(precio, (int, float)) or isinstance(precio, bool):
+        return "no medido: la ficha no tiene el precio del original"
+    if not moneda:
+        return f"{_num(precio, 2)} (moneda no medida: la landing no dice cuál es; «$» es ambiguo)"
+    return f"{_num(precio, 2)} {moneda}"
+
+
+def _cifra(d: dict, nombre: str) -> str:
+    v = d.get(nombre)
+    if not isinstance(v, (int, float)) or isinstance(v, bool):
+        return "no medido"
+    return ("≥ " if nombre in (d.get("cota_inferior") or []) else "") + _num(v)
+
+
+def _cifras_caza(oferta: dict) -> list[str]:
+    paises = {k: v for k, v in (oferta.get("paises") or {}).items() if isinstance(v, dict)}
+    if not paises:
+        return ["- Cifras de la caza por país: no medido: la ficha no tiene países medidos"]
+    lineas = ["- Cifras de la caza por país:"]
+    for pais, d in sorted(paises.items()):
+        lineas.append(
+            f"  - {pais}: C8 {_cifra(d, 'c8')} · C7 {_cifra(d, 'c7')} · total {_cifra(d, 'total')} anuncios "
+            f"activos · el más antiguo lleva {_cifra(d, 'edad_max')} días — "
+            f"{d.get('link_biblioteca') or 'sin enlace: no medido'}"
+        )
+    return lineas
+
+
+def _orden(paises: list[PaisAuditado]) -> list[PaisAuditado]:
+    return sorted(paises, key=lambda p: (p.nota is None, -(p.nota or 0), p.pais))
+
+
+def _desglose(p: PaisAuditado) -> list[str]:
+    lineas = ["| Parte | Peso | Valor (0 a 1) |", "|---|---|---|"]
+    for nombre, peso, s, motivo in p.desglose:
+        valor = _num(s) if s is not None else (motivo or "no medido: sin motivo")
+        lineas.append(f"| {_NOMBRES.get(nombre, nombre)} | {_num(peso)} | {valor} |")
+    medidos = [(peso, s) for _, peso, s, _ in p.desglose if s is not None]
+    total = sum(peso for peso, _ in medidos)
+    lineas.append("")
+    if p.nota is None or total <= 0:
+        lineas.append("Cálculo: nota no medida: no se midió ninguna parte.")
+    else:
+        suma = sum(peso * s for peso, s in medidos)
+        nota = _num(p.nota) if float(p.nota).is_integer() else _num(p.nota, 2)
+        lineas.append(f"Cálculo: 100 × {_num(suma)} ÷ {_num(total)} (solo los pesos medidos) = {nota}.")
+    return lineas
+
+
+def _seccion_pais(i: int, p: PaisAuditado) -> list[str]:
+    lineas = [
+        f"### {i}. {p.pais} — nota {_nota(p.nota)}",
+        "",
+        f"- Hueco: {_hueco(p)}",
+        f"- {_precio_pais(p)}",
+    ]
+    if p.no_tirar:
+        lineas.append(f"- No tirar: {p.no_tirar}")
+    if p.hueco.enlaces:
+        lineas.append("- Búsquedas en la Biblioteca que dan estas cifras:")
+        lineas += [f"  - {e}" for e in p.hueco.enlaces]
+    else:
+        lineas.append("- Búsquedas en la Biblioteca: ninguna (no se buscó en este país)")
+    return [*lineas, "", *_desglose(p), ""]
+
+
+def _pruebas_no_tirar(p: PaisAuditado) -> list[str]:
+    """Los enlaces que prueban el motivo: la página del original si está traducido; si no, las frases."""
+    de_pagina = [e for e in p.hueco.enlaces if "view_all_page_id=" in e]
+    otras = [e for e in p.hueco.enlaces if e not in de_pagina]
+    return (de_pagina if p.hueco.original == "traducido" else otras) or p.hueco.enlaces
+
+
+def _frontmatter_auditoria(oferta: dict, orden: list[PaisAuditado], recomendacion, senales3: dict,
+                           hoy: date) -> dict:
+    oferta_id = str(oferta.get("oferta_id"))
+    return {
+        "tipo": "auditoria",
+        "fecha": hoy.isoformat(),
+        "fuente": f"wiki/ofertas/{oferta_id}.md",
+        "oferta_id": oferta_id,
+        "recomendado": recomendacion[0],
+        "reserva": recomendacion[1],
+        "senales": {k: senales3.get(k) for k, _ in _SENALES},
+        "paises": {
+            p.pais: {
+                "puesto": i,
+                "nota": None if p.nota is None else round(p.nota, 2),
+                "hueco": p.hueco.hueco,
+                "no_tirar": p.no_tirar,
+            }
+            for i, p in enumerate(orden, 1)
+        },
+    }
+
+
+def render_auditoria(oferta: dict, paises: list[PaisAuditado], recomendacion, senales3: dict,
+                     historial: list[str], hoy: date) -> str:
+    """``AUDITORIA.md`` completo (frontmatter y cuerpo). Pura: la prueba el *golden file*."""
+    oferta_id = str(oferta.get("oferta_id"))
+    orden = _orden(paises)
+    landing = f" (landing: {oferta['dominio']})" if oferta.get("dominio") else ""
+    lineas = [
+        f"# Auditoría de {oferta_id} ({hoy.isoformat()})",
+        "",
+        ("Dónde lanzar esta oferta, país por país. Lo que no se pudo medir se dice como tal y no puntúa: "
+        "la nota de cada país se calcula solo con lo medido."),
+        "",
+        "## La oferta",
+        "",
+        f"- Ficha: [[wiki/ofertas/{oferta_id}]]",
+        f"- Decisión de la caza: **{oferta.get('estado') or 'no medido'}** — {oferta.get('motivo') or 'sin motivo'}",
+        f"- Precio del original: {precio_original(oferta)}{landing}",
+        *_cifras_caza(oferta),
+        "",
+        "## Ranking de países",
+        "",
+    ]
+    if orden:
+        lineas += ["| # | País | Nota (0 a 100) | Hueco | No tirar |", "|---|---|---|---|---|"]
+        lineas += [
+            f"| {i} | {p.pais} | {_nota(p.nota)} | {_HUECO_CORTO[p.hueco.hueco]} | {p.no_tirar or '—'} |"
+            for i, p in enumerate(orden, 1)
+        ]
+        lineas.append("")
+        for i, p in enumerate(orden, 1):
+            lineas += _seccion_pais(i, p)
+    else:
+        lineas += ["no medido: no se auditó ningún país", ""]
+
+    lineas += ["## No tirar", ""]
+    vetados = [p for p in orden if p.no_tirar]
+    for p in vetados:
+        pruebas = _pruebas_no_tirar(p)
+        lineas.append(f"- {p.pais}: {p.no_tirar}" + (f" — {' · '.join(pruebas)}" if pruebas else ""))
+    if not vetados:
+        lineas.append("Ninguno: ningún país auditado tiene un motivo para no tirar.")
+    lineas += ["", "## Las tres señales", ""]
+    for clave, nombre in _SENALES:
+        v = senales3.get(clave)
+        lineas.append(f"- {nombre}: **{_si_no(v)}**" + (f" — {_PENDIENTE[clave]}" if v is None else ""))
+    lineas += [
+        "",
+        ("Si eliges con «ya se vende» o «hay hueco» en «no», la elección queda escrita como excepción "
+        "en decisiones/."),
+        "",
+        "## Historial del cerebro",
+        "",
+    ]
+    if historial:
+        lineas += ["¿Ya lanzamos algo parecido allí? Sí:", ""]
+        lineas += [f"- {x}" for x in historial]
+    else:
+        lineas.append(f"¿Ya lanzamos algo parecido allí? No: ningún producto del cerebro murió en "
+                      f"{_lista([p.pais for p in orden]) or 'estos países'}.")
+    lineas += [
+        "",
+        "## Recomendación",
+        "",
+        recomendacion[2],
+        "",
+        ("Primer test: 1 producto × 1 país (el capital no da para dos a la vez); la reserva es el país "
+        "al que pasar si el primero no funciona."),
+        "",
+        CIERRE,
+        "",
+    ]
+    meta = _frontmatter_auditoria(oferta, orden, recomendacion, senales3, hoy)
+    return frontmatter.renderizar(meta, "\n".join(lineas))
+
+
+# ---------------------------------------------------------------- productos
+
+
+def _slug(texto: str) -> str:
+    s = re.sub(r"[^a-z0-9]+", "-", texto.lower()).strip("-")
+    return s[:40].strip("-") or "producto"
+
+
+def slug_de_oferta(oferta_id: str) -> str:
+    """``o-fise-terapie-3fa2b1`` → ``fise-terapie`` (sin prefijo ni huella)."""
+    s = re.sub(r"^o-", "", oferta_id)
+    s = re.sub(r"-[0-9a-f]{6}$", "", s)
+    return _slug(s)
+
+
+def _leer_meta(ruta: Path) -> dict:
+    try:
+        meta, _ = frontmatter.leer(ruta)
+    except (OSError, ValueError):
+        return {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def producto_para(vault: Path, oferta_id: str, slug: str) -> str:
+    """``p-NNNN-<slug>``; si ya hay un producto con ``oferta_id`` en su ``PRODUCTO.md``, ese."""
+    base = Path(vault) / "productos"
+    mayor = 0
+    for d in sorted(base.glob("p-*")) if base.exists() else []:
+        m = _PRODUCTO.match(d.name)
+        if not d.is_dir() or not m:
+            continue
+        mayor = max(mayor, int(m.group(1)))
+        if _leer_meta(d / "PRODUCTO.md").get("oferta_id") == oferta_id:
+            return d.name
+    return f"p-{mayor + 1:04d}-{_slug(slug)}"
+
+
+def historial_de(vault: Path, paises: list[str], excluir: str | None = None) -> list[str]:
+    """Productos con estado ``MUERTO`` en esos países y su nota «stop» (§4.5 paso 5)."""
+    out: list[str] = []
+    base = Path(vault) / "productos"
+    for ruta in sorted(base.glob("p-*/PRODUCTO.md")) if base.exists() else []:
+        p_id = ruta.parent.name
+        if p_id == excluir:
+            continue
+        datos = _leer_meta(ruta).get("paises") or {}
+        if not isinstance(datos, dict):
+            continue
+        for pais in paises:
+            d = datos.get(pais)
+            if isinstance(d, dict) and str(d.get("estado") or "").upper() == "MUERTO":
+                motivo = d.get("motivo") or "sin motivo escrito"
+                stop = d.get("stop") or "sin enlace «stop»"
+                out.append(f"[[productos/{p_id}/PRODUCTO]] en {pais}: MUERTO — {motivo} · stop: {stop}")
+    return out
+
+
+def _archivar(ruta: Path) -> Path | None:
+    """La ``AUDITORIA.md`` anterior pasa a ``AUDITORIA-<su fecha>.md`` (``-2``, ``-3``… si ya existe)."""
+    if not ruta.exists():
+        return None
+    fecha = _leer_meta(ruta).get("fecha")
+    fecha = str(fecha) if fecha else "sin-fecha"
+    destino = ruta.with_name(f"AUDITORIA-{fecha}.md")
+    n = 2
+    while destino.exists():
+        destino = ruta.with_name(f"AUDITORIA-{fecha}-{n}.md")
+        n += 1
+    ruta.rename(destino)
+    return destino
+
+
+def _actualizar_producto(vault: Path, p_id: str, oferta_id: str, paises: list[str], hoy: date) -> Path:
+    ruta = Path(vault) / "productos" / p_id / "PRODUCTO.md"
+    if ruta.exists():
+        meta, cuerpo = frontmatter.leer(ruta)
+        meta = dict(meta or {})
+    else:
+        meta, cuerpo = {}, (
+            f"# Producto {p_id}\n\n"
+            f"- Oferta: [[wiki/ofertas/{oferta_id}]]\n"
+            f"- Auditoría: [[productos/{p_id}/AUDITORIA]]\n"
+            "- Decisiones: carpeta decisiones/\n"
+        )
+    estados = {k: dict(v) for k, v in (meta.get("paises") or {}).items() if isinstance(v, dict)}
+    for pais in paises:
+        actual = estados.setdefault(pais, {})
+        if actual.get("estado") in (None, "auditado"):
+            actual["estado"] = "auditado"  # nunca baja a un país ya aprobado o más avanzado
+    meta.update({
+        "tipo": "producto",
+        "fecha": meta.get("fecha") or hoy.isoformat(),
+        "fuente": f"wiki/ofertas/{oferta_id}.md",
+        "oferta_id": oferta_id,
+        "paises": estados,
+    })
+    frontmatter.escribir(ruta, meta, cuerpo)
+    return ruta
+
+
+def _linea_mercado(p: PaisAuditado, oferta_id: str, p_id: str, hoy: date) -> str:
+    h = p.hueco
+    precio = "no medido" if p.precio_s.valor is None else _num(p.precio_s.valor)
+    hueco = _HUECO_CORTO[h.hueco]
+    enlace = h.enlaces[0] if h.enlaces else "sin búsquedas"
+    return (f"- {hoy.isoformat()} · {oferta_id} ([[productos/{p_id}/AUDITORIA]]): competencia local "
+            f"{formatear_medida(h.competencia)} · original {_ORIGINAL.get(h.original, h.original).split(' (')[0]} · "
+            f"precio soportable {precio} · hueco {hueco} — {enlace}")
+
+
+def _actualizar_mercado(vault: Path, p: PaisAuditado, oferta_id: str, p_id: str, hoy: date) -> Path:
+    ruta = Path(vault) / "wiki" / "mercados" / f"{p.pais}.md"
+    if ruta.exists():
+        meta, cuerpo = frontmatter.leer(ruta)
+        meta = dict(meta or {})
+    else:
+        meta, cuerpo = {}, f"# Mercado {p.pais}\n\n## Auditorías\n\n"
+    if "## Auditorías" not in cuerpo:
+        cuerpo = cuerpo.rstrip("\n") + "\n\n## Auditorías\n\n"
+    nueva = _linea_mercado(p, oferta_id, p_id, hoy)
+    prefijo = f"- {hoy.isoformat()} · {oferta_id} "
+    lineas = cuerpo.rstrip("\n").split("\n")
+    existente = next((i for i, x in enumerate(lineas) if x.startswith(prefijo)), None)
+    if existente is not None:
+        lineas[existente] = nueva  # la misma oferta el mismo día: se actualiza, no se duplica
+    else:
+        lineas.append(nueva)
+    meta.update({"tipo": "mercado", "pais": p.pais, "fecha": hoy.isoformat(),
+                 "fuente": "trovify auditar (Biblioteca de anuncios)"})
+    frontmatter.escribir(ruta, meta, "\n".join(lineas) + "\n")
+    return ruta
+
+
+def escribir_auditoria(vault: Path, oferta_id: str, paises: list[PaisAuditado], hoy: date) -> Path:
+    """Escribe ``productos/<p-id>/AUDITORIA.md`` (archiva la anterior), ``PRODUCTO.md``,
+    ``wiki/mercados/<pais>.md``, ``index.md`` y una línea en ``log.md``. Devuelve la ruta de la auditoría."""
+    from trovify.auditoria.paises import recomendar
+
+    vault = Path(vault)
+    ficha = vault / "wiki" / "ofertas" / f"{oferta_id}.md"
+    if not ficha.exists():
+        raise FileNotFoundError(f"no existe la ficha wiki/ofertas/{oferta_id}.md")
+    oferta = dict(_leer_meta(ficha))
+    oferta.setdefault("oferta_id", oferta_id)
+    p_id = producto_para(vault, oferta_id, slug_de_oferta(oferta_id))
+    nombres = [p.pais for p in paises]
+    recomendacion = recomendar(paises)
+    senales3 = tres_senales(str(oferta.get("estado") or ""), paises)
+    historial = historial_de(vault, nombres, excluir=p_id)
+    texto = render_auditoria(oferta, paises, recomendacion, senales3, historial, hoy)
+
+    ruta = vault / "productos" / p_id / "AUDITORIA.md"
+    archivada = _archivar(ruta)
+    escribir_atomico(ruta, texto)
+    producto = _actualizar_producto(vault, p_id, oferta_id, nombres, hoy)
+    mercados = [_actualizar_mercado(vault, p, oferta_id, p_id, hoy) for p in paises]
+    _anadir_al_indice(vault, [
+        ("Productos", f"[[productos/{p_id}/PRODUCTO]]", f"producto de {oferta_id}; última auditoría {hoy.isoformat()}"),
+        ("Productos", f"[[productos/{p_id}/AUDITORIA]]", f"auditoría de {oferta_id} ({hoy.isoformat()})"),
+        *[("Mercados", f"[[wiki/mercados/{p}]]", f"mercado {p}: auditorías por oferta") for p in nombres],
+    ])
+    archivos = [ruta, producto, *mercados] + ([archivada] if archivada else [])
+    anadir_log(vault, "auditar",
+               f"auditoría de {oferta_id} en {', '.join(nombres) or 'ningún país'}; "
+               f"recomendado {recomendacion[0] or 'ninguno'}" + (f", reserva {recomendacion[1]}" if recomendacion[1] else ""),
+               [a.relative_to(vault).as_posix() for a in archivos])
+    return ruta
+
+
+# ---------------------------------------------------------------- elección
+
+
+def _ruta_eleccion(dir_: Path, hoy: date) -> Path:
+    """``AAAA-MM-DD-eleccion.md`` es siempre la última del día (la que lee ``mercado_elegido``); una
+    anterior del mismo día pasa a ``AAAA-MM-DD-N-eleccion.md``, que ordena antes."""
+    ruta = dir_ / f"{hoy.isoformat()}-eleccion.md"
+    if ruta.exists():
+        n = 1
+        while (dir_ / f"{hoy.isoformat()}-{n}-eleccion.md").exists():
+            n += 1
+        ruta.rename(dir_ / f"{hoy.isoformat()}-{n}-eleccion.md")
+    return ruta
+
+
+def registrar_eleccion(vault: Path, p_id: str, pais: str, reserva: str | None, cita: str, hoy: date,
+                       senales3: dict[str, bool] | None = None) -> Path:
+    """Escribe ``productos/<p-id>/decisiones/AAAA-MM-DD-eleccion.md`` con la cita literal del usuario
+    y pone ``paises.<pais>.estado: aprobado`` en ``PRODUCTO.md``.
+
+    Advierte si el país está en «no tirar» o no tiene el hueco comprobado; si alguna de las dos
+    señales medibles es ``False``, la elección queda como excepción. Sin ``senales3`` se leen de la
+    última ``AUDITORIA.md``."""
+    vault = Path(vault)
+    if not cita or not cita.strip():
+        raise ValueError("hace falta la cita literal del usuario (--cita)")
+    pais = pais.strip().upper()
+    reserva = reserva.strip().upper() if reserva and reserva.strip() else None
+    if not re.fullmatch(r"[A-Z]{2}", pais) or (reserva and not re.fullmatch(r"[A-Z]{2}", reserva)):
+        raise ValueError("los países van con su código de dos letras (por ejemplo RO)")
+    dir_producto = vault / "productos" / p_id
+    producto = dir_producto / "PRODUCTO.md"
+    auditoria = dir_producto / "AUDITORIA.md"
+    if not producto.exists() or not auditoria.exists():
+        raise FileNotFoundError(f"no existe la auditoría de {p_id}: ejecuta antes «trovify auditar ejecutar»")
+    am = _leer_meta(auditoria)
+    if senales3 is None:
+        senales3 = am.get("senales") or {}
+    auditados = am.get("paises") or {}
+    datos = auditados.get(pais) if isinstance(auditados, dict) else None
+    datos = datos if isinstance(datos, dict) else {}
+
+    avisos: list[str] = []
+    if not datos:
+        avisos.append(f"Advertencia: {pais} no está en la última auditoría de este producto")
+    if datos.get("no_tirar"):
+        avisos.append(f"Advertencia: {datos['no_tirar']}")
+    if datos.get("hueco") is not True:
+        avisos.append("Advertencia: este país no tiene hueco comprobado")
+    faltan = [k for k in MEDIBLES if senales3.get(k) is False]
+    if faltan:
+        avisos.append(f"Excepción: faltan {', '.join(faltan)} (se elige con menos de las tres señales)")
+
+    cita_md = "\n".join(f"> {x}" if x else ">" for x in cita.split("\n"))
+    lineas = [
+        f"# Elección de país para {p_id} ({hoy.isoformat()})",
+        "",
+        f"País elegido: **{pais}** · reserva: {reserva or 'ninguna'}",
+        "",
+        "Palabras del usuario (cita literal):",
+        "",
+        cita_md,
+        "",
+    ]
+    if avisos:
+        lineas += [*avisos, ""]
+    lineas.append(f"Auditoría: [[productos/{p_id}/AUDITORIA]] ({am.get('fecha') or 'sin fecha'})")
+    lineas.append("")
+    meta = {"tipo": "decision", "fecha": hoy.isoformat(), "fuente": "usuario", "pais": pais,
+            "reserva": reserva, "producto": p_id}
+    dir_decisiones = dir_producto / "decisiones"
+    dir_decisiones.mkdir(parents=True, exist_ok=True)
+    ruta = _ruta_eleccion(dir_decisiones, hoy)
+    frontmatter.escribir(ruta, meta, "\n".join(lineas))
+
+    pm, cuerpo = frontmatter.leer(producto)
+    pm = dict(pm or {})
+    estados = {k: dict(v) for k, v in (pm.get("paises") or {}).items() if isinstance(v, dict)}
+    for otro, d in estados.items():
+        if otro != pais and d.get("estado") == "aprobado":
+            d["estado"] = "auditado"  # 1 producto × 1 país: la elección nueva sustituye a la anterior
+    estados.setdefault(pais, {})["estado"] = "aprobado"
+    pm["paises"] = estados
+    frontmatter.escribir(producto, pm, cuerpo)
+    anadir_log(vault, "auditar",
+               f"elección de {p_id}: {pais}" + (f", reserva {reserva}" if reserva else "")
+               + (f" ({'; '.join(avisos)})" if avisos else ""),
+               [ruta.relative_to(vault).as_posix(), producto.relative_to(vault).as_posix()])
+    return ruta
