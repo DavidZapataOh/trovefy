@@ -47,7 +47,7 @@ def _t(n):
 
 def test_guia_01_abre_el_vault_en_obsidian():
     t = _t("01-cerebro.md")
-    for x in ["Abrir carpeta como bóveda", r"\\wsl.localhost\Ubuntu\home\<tu-usuario>\trovefy-cerebro", "whoami"]:
+    for x in ["Abrir carpeta como bóveda", "obsidian &", "/home/<tu-usuario>/trovefy-cerebro", "whoami", "EISDIR"]:
         assert x in t, x
 
 
