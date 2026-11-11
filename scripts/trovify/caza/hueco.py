@@ -7,7 +7,7 @@ completas; un competidor más allá de la primera página nunca puede producir `
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from typing import Literal
 
 from trovify.caza.cliente import SesionBloqueada
@@ -17,6 +17,7 @@ from trovify.caza.senales import Medida
 from trovify.config.umbrales import Umbral
 from trovify.idioma import detectar
 from trovify.navegador import NavegadorError
+from trovify.vault.escritura import ZONA_NEGOCIO
 
 Original = Literal["traducido", "sin_traducir", "ausente_reciente", "ausente", "no_medido"]
 
@@ -62,7 +63,7 @@ def _incompleta(r: ResultadoBusqueda) -> bool:
 
 
 def _competencia(cliente, frases, pais, idioma, excluir_page_ids, u, hoy) -> tuple[Medida, list[str], bool]:
-    hoy = hoy or date.today()
+    hoy = hoy or datetime.now(ZONA_NEGOCIO).date()  # día de negocio; mejor pasarlo siempre
     minimo = int(u["hueco.competidor_c7_min"].valor)
     intentos = int(u["hueco.intentos_para_cero"].valor)
     enlaces: list[str] = []
@@ -130,7 +131,11 @@ def competencia_local(
     hoy: date | None = None,
 ) -> Medida:
     """Páginas distintas (fuera de ``excluir_page_ids``) con ≥ ``hueco.competidor_c7_min`` anuncios
-    activos de 7+ días en ``idioma``. ``suelo=True`` si alguna lectura quedó incompleta."""
+    activos de 7+ días en ``idioma``. ``suelo=True`` si alguna lectura quedó incompleta.
+
+    ``hoy``: pásalo siempre explícito con el día de negocio de la ejecución (el orquestador lo hace;
+    el plan 08 también debe hacerlo). Sin él se usa el día de America/Bogota de ahora, que puede no
+    coincidir con el de la caza si cruza la medianoche."""
     return _competencia(cliente, frases, pais, idioma, excluir_page_ids, u, hoy)[0]
 
 

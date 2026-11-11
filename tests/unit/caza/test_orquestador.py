@@ -684,6 +684,8 @@ def test_vigilar_rota_las_menos_recientes(tmp_path):
         _ficha(v, oid, p)
         meta, cuerpo = frontmatter.leer(v / "wiki/ofertas" / f"{oid}.md")
         meta["ultima_vez"] = fechas[oid]
+        if fechas[oid] == "2026-11-10":
+            meta["vigilada"] = fechas[oid]  # vigilada hoy: gasta turno
         frontmatter.escribir(v / "wiki/ofertas" / f"{oid}.md", meta, cuerpo)
     c = ClientePorUrl({})
     e = ejecutar(v, "vigilar", [], "tomi", 3, cliente=c, resolver=resolver_fijo({}), hoy=HOY, max_vigiladas=3)
@@ -924,3 +926,101 @@ def test_vigilar_planifica_por_la_cuota(tmp_path):
     assert len(c.llamadas) == 2 and e.parada is None
     assert e.pendientes_por.get("cuota") == 2
     assert any("cuota del día agotada" in x for x in e.errores)
+
+
+# --- ola final: menores ----------------------------------------------------------------------
+
+
+def test_landings_sin_abrir_por_el_tope_quedan_pendientes_sin_ficha(tmp_path):
+    v = _vault(tmp_path)
+    P = "100000000000901"
+    urls = [f"https://l{i}.example/" for i in range(12)]
+    ads = [a for i, url in enumerate(urls) for a in viejos(P, 1, 20, 90000 + i, destino=url)]
+    mapa = {url: destino_ok(url, checkout=f"https://pay.hotmart.com/L{i}") for i, url in enumerate(urls)}
+    c = ClientePorUrl({url_biblioteca("RO", page_id=P): ok(ads)})
+    e = ejecutar(v, "oferta", [], "tomi", 3, page_ids=[P], paises=["RO"], cliente=c, resolver=resolver_fijo(mapa),
+                 hoy=HOY)
+    assert e.pendientes_por.get("landing_sin_abrir") == 1
+    assert not any(r.oferta.clave.startswith("pagina:") for r in e.resultados)
+    assert not list((v / "wiki/ofertas").glob("o-pagina*.md"))
+
+
+def test_strike_no_cuenta_con_cohortes_de_cota_inferior(tmp_path):
+    v = _vault(tmp_path)
+    P = "100000000000902"
+    url = "https://kit.example/ro/"
+    from trovify.caza.destino import clave_oferta, oferta_id
+    oid = oferta_id(clave_oferta(url, "https://pay.hotmart.com/K123"))
+    _ficha(v, oid, P, strikes=2, motivo="nota baja")
+    c = ClientePorUrl({url_biblioteca("RO", page_id=P): ok(viejos(P, 2, 2, 92000), total=300, completo=False)})
+    e = ejecutar(v, "vigilar", [], "tomi", 3, cliente=c, resolver=resolver_fijo({url: destino_ok(url)}), hoy=HOY)
+    assert e.resultados[0].decision == "observar" and e.resultados[0].senales.c8.suelo
+    meta, _ = frontmatter.leer(v / "wiki/ofertas" / f"{oid}.md")
+    assert meta["strikes"] == 2 and meta["estado"] != "podada"
+
+
+def test_dos_cazas_a_la_vez_no(tmp_path):
+    import fcntl
+    v = _vault(tmp_path)
+    cerrojo = v / "data/caza/.caza.lock"
+    cerrojo.parent.mkdir(parents=True, exist_ok=True)
+    c = ClientePorUrl({})
+    with open(cerrojo, "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        with pytest.raises(ValueError, match="otra caza"):
+            ejecutar(v, "nicho", [("RO", "fise")], "tomi", 3, cliente=c, resolver=resolver_fijo({}), hoy=HOY,
+                     region="europa")
+        _ficha_medida(v, "o-lock", "100000000000903")
+        with pytest.raises(ValueError, match="otra caza"):
+            orquestador.medir_hueco(v, "o-lock", "RO", ["a b", "c d"], cliente=c, hoy=HOY)
+    assert c.llamadas == []
+    ejecutar(v, "nicho", [("RO", "fise")], "tomi", 3, cliente=c, resolver=resolver_fijo({}), hoy=HOY,
+             region="europa")  # suelto el cerrojo, se puede
+    assert c.llamadas
+
+
+def test_turno_de_vigilar_solo_cuenta_las_vigiladas_hoy(tmp_path):
+    v = _vault(tmp_path)
+    paginas = {"o-a": "100000000000911", "o-b": "100000000000912", "o-n": "100000000000913"}
+    for oid, p in paginas.items():
+        _ficha(v, oid, p)
+    meta, cuerpo = frontmatter.leer(v / "wiki/ofertas/o-n.md")
+    meta["ultima_vez"] = "2026-11-10"  # la escribió hoy una caza nicho del usuario: no gasta el turno
+    frontmatter.escribir(v / "wiki/ofertas/o-n.md", meta, cuerpo)
+    c = ClientePorUrl({})
+    ejecutar(v, "vigilar", [], "tomi", 3, cliente=c, resolver=resolver_fijo({}), hoy=HOY, max_vigiladas=2)
+    assert len(c.llamadas) == 2
+
+
+def test_vigilar_marca_la_ficha_vigilada(tmp_path):
+    v = _vault(tmp_path)
+    P = "100000000000914"
+    url = "https://kit.example/ro/"
+    from trovify.caza.destino import clave_oferta, oferta_id
+    oid = oferta_id(clave_oferta(url, "https://pay.hotmart.com/K123"))
+    _ficha(v, oid, P)
+    c = ClientePorUrl({url_biblioteca("RO", page_id=P): ok(viejos(P, 9, 20, 93000))})
+    ejecutar(v, "vigilar", [], "tomi", 3, cliente=c, resolver=resolver_fijo({url: destino_ok(url)}), hoy=HOY)
+    meta, _ = frontmatter.leer(v / "wiki/ofertas" / f"{oid}.md")
+    assert meta["vigilada"] == "2026-11-10"
+
+
+def test_consulta_sin_recuento_y_aproximada(tmp_path):
+    v = _vault(tmp_path)
+    P = "100000000000915"
+    ads = viejos(P, 3, 20, 94000)
+    c = ClientePorUrl({
+        url_biblioteca("RO", q="uno"): ok(ads, total=None, completo=False, exacto=False),
+        url_biblioteca("RO", q="dos"): ok(ads, total=230, completo=False, exacto=False),
+        url_biblioteca("RO", page_id=P): ok(ads),
+    })
+    c.respuestas[url_biblioteca("RO", q="uno")].total_aprox = None
+    e = ejecutar(v, "nicho", [("RO", "uno"), ("RO", "dos")], "tomi", 3, cliente=c, resolver=resolver_fijo({}),
+                 hoy=HOY, region="europa")
+    uno, dos = e.consultas
+    assert uno.resultados is None and uno.sin_recuento and uno.ofertas
+    assert dos.resultados == 230 and dos.aproximado
+    informe = (v / "wiki/caza/2026-11-10/europa.md").read_text()
+    assert "| uno | RO | no medido: sin recuento de Meta | 1 |" in informe
+    assert "| dos | RO | ≈ 230 |" in informe
+    assert "búsqueda sin respuesta" not in informe

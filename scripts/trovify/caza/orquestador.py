@@ -13,9 +13,11 @@ vía para esquivar el bloqueo), se escribe lo que ya se midió y lo que faltaba 
 
 from __future__ import annotations
 
+import fcntl
 import re
 from collections import Counter
 from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -436,10 +438,11 @@ def resumen(e: Ejecucion, minimo_palabra: float, usadas_hoy: tuple[int, int] | N
     flojas = palabras_a_reescribir(e.consultas, minimo_palabra)
     if flojas:
         lineas.append(f"Palabras a reescribir (menos de {minimo_palabra:g} resultados): " + ", ".join(
-            f"«{c.palabra}» ({c.pais}: {c.resultados})" for c in flojas))
+            f"«{c.palabra}» ({c.pais}: {'≈ ' if c.aproximado else ''}{c.resultados})" for c in flojas))
     rinden = [c for c in e.consultas if c not in flojas and c.resultados is not None]
     if rinden:
-        lineas.append("Palabras que rinden: " + ", ".join(f"«{c.palabra}» ({c.pais}: {c.resultados})" for c in rinden))
+        lineas.append("Palabras que rinden: " + ", ".join(
+            f"«{c.palabra}» ({c.pais}: {'≈ ' if c.aproximado else ''}{c.resultados})" for c in rinden))
     if e.parada and e.tipo_parada == "errores":
         lineas += ["", (f"INTERRUMPIDA: {e.parada}. No es un bloqueo de Meta: esta ejecución no buscó nada más y "
                         "lo que faltaba quedó «no medido»; se puede volver a cazar más tarde.")]
@@ -540,7 +543,8 @@ class _Corrida:
                 ids.append((pais, set()))
                 continue
             n = r.total_aprox if r.total_aprox is not None else (len(r.anuncios) if r.completo else None)
-            salida.append(Consulta(frase, pais, n, r.url))
+            aprox = r.total_aprox is not None and not r.total_exacto and r.estado == "ok"
+            salida.append(Consulta(frase, pais, n, r.url, aproximado=aprox, sin_recuento=n is None))
             ids.append((pais, {a.library_id for a in r.anuncios}))
             anuncios += r.anuncios
         return salida, anuncios, ids
@@ -678,7 +682,37 @@ class _Corrida:
         return lista
 
 
-def ejecutar(
+class CazaEnCurso(ValueError):
+    """Otra caza (la rutina u otra sesión) está usando la Biblioteca en este cerebro."""
+
+
+@contextmanager
+def _cerrojo_caza(vault: Path):
+    """Una sola caza a la vez por cerebro: dos procesos no consultan a Meta al mismo tiempo."""
+    ruta = Path(vault) / "data/caza/.caza.lock"
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    with open(ruta, "a", encoding="utf-8") as f:
+        try:
+            fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise CazaEnCurso(
+                "otra caza está en marcha en este cerebro (la rutina u otra sesión): espera a que termine y "
+                "vuelve a lanzarla; dos cazas a la vez doblarían el ritmo de búsquedas a Meta"
+            ) from None
+        try:
+            yield
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
+def ejecutar(vault: Path, *args, **kw) -> Ejecucion:
+    """Una ejecución de la caza con el cerrojo del cerebro (:func:`_ejecutar`; ``CazaEnCurso`` si
+    otra caza está en marcha)."""
+    with _cerrojo_caza(Path(vault)):
+        return _ejecutar(vault, *args, **kw)
+
+
+def _ejecutar(
     vault: Path,
     modo: Modo,
     consultas: list[tuple[str, str]],
@@ -902,18 +936,19 @@ def ejecutar(
 
 def _turno_de_vigilancia(c: _Corrida, fichas: dict[str, dict], hoy: date, maximo: int | None) -> dict[str, dict]:
     """Fichas A, B y observar que toca medir hoy: las que hace más tiempo que no se miden, hasta
-    ``maximo`` en el día (las ya medidas hoy cuentan). Sin ``maximo``, todas."""
+    ``maximo`` en el día. Solo gastan turno las ya vigiladas hoy (``vigilada``), no las que escribió
+    hoy una caza nicho o barrido. Sin ``maximo``, todas."""
     todas = {k: m for k, m in fichas.items() if m.get("estado") in _VIGILADAS}
     if maximo is None:
         return todas
     hoy_txt = hoy.isoformat()
-    hechas = sorted(k for k, m in todas.items() if str(m.get("ultima_vez") or "") == hoy_txt)
+    hechas = sorted(k for k, m in todas.items() if str(m.get("vigilada") or "") == hoy_txt)
     resto = sorted((k for k in todas if k not in hechas), key=lambda k: (str(todas[k].get("ultima_vez") or ""), k))
     turno = max(int(maximo) - len(hechas), 0)
     if resto[turno:]:
         c.errores.append(
             f"no medido: turno de vigilancia: {', '.join(resto[turno:])} se miden otro día (tope del día "
-            f"rutina.max_vigiladas_por_dia: {int(maximo)}; ya medidas hoy: {', '.join(hechas) or 'ninguna'})"
+            f"rutina.max_vigiladas_por_dia: {int(maximo)}; ya vigiladas hoy: {', '.join(hechas) or 'ninguna'})"
         )
     return {k: todas[k] for k in resto[:turno]}
 
@@ -1012,13 +1047,15 @@ def _enlace(c: _Corrida, o: Oferta, pais: str, consultas: list[Consulta], ids_co
 
 
 def _strikes(vault: Path, e: Ejecucion, vigiladas: dict[str, dict], u, enteras: set[str]) -> None:
-    """Solo cuentan las vigiladas medidas enteras: sin parada, todas sus páginas y países releídos y
-    la nota medida en cada país. Lo demás no suma ni resta strikes."""
+    """Solo cuentan las vigiladas medidas enteras: sin parada, todas sus páginas y países releídos, la
+    nota medida en cada país y C8/C7 sin cota inferior. Lo demás no suma ni resta strikes."""
     por_oferta: dict[str, ResultadoOferta] = {}
     sin_nota = {r.oferta.oferta_id for r in e.resultados if r.nota.valor is None}
+    # Una cohorte con cota inferior (lectura parcial) no es una medición entera: no hay strike.
+    con_suelo = {r.oferta.oferta_id for r in e.resultados if r.senales.c8.suelo or r.senales.c7.suelo}
     for r in e.resultados:
         oid = r.oferta.oferta_id
-        if oid not in vigiladas or oid not in enteras or oid in sin_nota:
+        if oid not in vigiladas or oid not in enteras or oid in sin_nota or oid in con_suelo:
             continue
         if oid not in por_oferta or _ORDEN[r.decision] < _ORDEN[por_oferta[oid].decision]:
             por_oferta[oid] = r
@@ -1077,7 +1114,13 @@ class _VigiaDeParada:
         return r
 
 
-def medir_hueco(
+def medir_hueco(vault: Path, *args, **kw) -> tuple[HuecoPais, str | None, str | None]:
+    """:func:`_medir_hueco` con el cerrojo del cerebro (``CazaEnCurso`` si otra caza está en marcha)."""
+    with _cerrojo_caza(Path(vault)):
+        return _medir_hueco(vault, *args, **kw)
+
+
+def _medir_hueco(
     vault: Path,
     oferta_id: str,
     pais: str,

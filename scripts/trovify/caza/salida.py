@@ -46,6 +46,8 @@ class Consulta:
     resultados: int | None  # anuncios que dio Meta; None = no medido (bloqueo o error)
     enlace: str  # url_biblioteca de la búsqueda
     ofertas: list[str] = field(default_factory=list)  # oferta_id de los candidatos que salieron de ella
+    aproximado: bool = False  # ``resultados`` es el total aproximado del texto de Meta («~230»)
+    sin_recuento: bool = False  # Meta respondió (hay candidatas) pero no dio recuento
 
 
 @dataclass
@@ -541,7 +543,10 @@ def render_informe(e: Ejecucion) -> str:
         for c in e.consultas:
             candidatas, modelables = _rinde(c, e)
             nm = "no medido: búsqueda sin respuesta"
-            resultados = nm if c.resultados is None else str(c.resultados)
+            if c.resultados is None:
+                resultados = "no medido: sin recuento de Meta" if c.sin_recuento else nm
+            else:
+                resultados = f"≈ {c.resultados}" if c.aproximado else str(c.resultados)
             candidatas = nm if candidatas is None else candidatas
             modelables = nm if modelables is None else modelables
             lineas.append(f"| {c.palabra} | {c.pais} | {resultados} | {candidatas} | {modelables} | {c.enlace} |")
@@ -584,7 +589,7 @@ def render_informe(e: Ejecucion) -> str:
 
 def _rinde(c: Consulta, e: Ejecucion) -> tuple[int | None, int | None]:
     """(candidatas, modelables); (None, None) si la búsqueda no respondió: nunca un 0 inventado."""
-    if c.resultados is None:
+    if c.resultados is None and not c.sin_recuento:
         return None, None
     por_id = {r.oferta.oferta_id: r for r in e.resultados}
     modelables = sum(
@@ -976,6 +981,8 @@ def escribir(vault: Path, e: Ejecucion) -> list[Path]:
         ruta = vault / "wiki/ofertas" / f"{r.oferta.oferta_id}.md"
         previa = frontmatter.leer(ruta)[0] if ruta.exists() else None
         meta, cuerpo = render_ficha(r, previa)
+        if e.modo == "vigilar":
+            meta["vigilada"] = dia  # gasta el turno del día de la vigilancia (no lo gastan nicho/barrido)
         frontmatter.escribir(ruta, meta, cuerpo)
         rutas.append(ruta)
         indice.append(("Ofertas", f"[[wiki/ofertas/{r.oferta.oferta_id}]]", f"{r.decision} · {r.pais} · {dia}"))
