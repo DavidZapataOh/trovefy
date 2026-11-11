@@ -97,7 +97,8 @@ def test_escribir_competidores_y_entidades(tmp_path):
     assert list((v / "wiki/competidores").glob("*.md"))
     assert (v / "data/caza/palabras.csv").read_text().splitlines()[0].startswith("palabra,pais,resultados")
     meta, _ = leer(v / "wiki/competidores/100000000000001.md")
-    assert meta["tipo"] == "competidor" and meta["c7"] == 10 and meta["total"] == 20
+    assert meta["tipo"] == "competidor" and "c7" not in meta and meta["total"] is None  # total de página: no exacto
+    assert meta["cifras"]["o-ejemplo"]["RO"]["c7"] == 10 and meta["cifras"]["o-ejemplo"]["RO"]["total"] == 20
     assert meta["ofertas"] == ["o-ejemplo"] and meta["fuente"].startswith("https://www.facebook.com/ads/library/")
     entidades = (v / "wiki/entidades.md").read_text()
     assert "o-ejemplo" in entidades and "100000000000002" in entidades
@@ -303,3 +304,113 @@ def test_raw_en_espanol():
     from trovify.caza.salida import _render_raw
     texto = _render_raw(ejecucion_fuente_caida())
     assert "None" not in texto and "True" not in texto and "no_medido" not in texto
+
+
+# ------------------------------------------------------------ ola final
+
+
+def _en(r, pais, decision, nota=None):
+    import dataclasses
+
+    from trovify.caza.nota import Nota
+    n = r.nota if nota is None else Nota(nota, r.nota.desglose, r.nota.multiplicadores, r.nota.no_medidas)
+    return dataclasses.replace(r, pais=pais, decision=decision, explicacion=f"motivo {pais}", nota=n)
+
+
+def test_una_ficha_por_oferta_con_todos_los_paises(tmp_path):
+    import dataclasses
+
+    from trovify.arranque.verificadores.caza import verificar_caza
+    v = tmp_path / "v"
+    crear_vault(v)
+    e = ejecucion_ejemplo()
+    r = e.resultados[0]
+    md, ro = _en(r, "MD", "B"), _en(r, "RO", "observar")
+    escribir(v, dataclasses.replace(e, resultados=[md, ro]))
+    meta, cuerpo = leer(v / "wiki/ofertas/o-ejemplo.md")
+    assert meta["estado"] == "B" and meta["motivo"] == "motivo MD"
+    assert meta["paises"]["MD"]["estado"] == "B" and meta["paises"]["RO"]["estado"] == "observar"
+    assert meta["fuente"] == meta["paises"]["MD"]["link_biblioteca"]
+    assert "## Señales en MD" in cuerpo and "## Señales en RO" in cuerpo
+    assert cuerpo.index("## Señales en MD") < cuerpo.index("## Señales en RO")  # el mejor país primero
+    assert "Estado: **B**" in cuerpo
+    assert "[[wiki/ofertas/o-ejemplo]] — B" in (v / "index.md").read_text()
+    assert verificar_caza(v).ok
+    # otra caza mide solo RO: la sección de MD se conserva y el estado sigue siendo el mejor
+    escribir(v, dataclasses.replace(e, resultados=[_en(r, "RO", "observar")]))
+    meta, cuerpo = leer(v / "wiki/ofertas/o-ejemplo.md")
+    assert meta["estado"] == "B" and "## Señales en MD" in cuerpo and "## Señales en RO" in cuerpo
+    assert cuerpo.count("## Señales en RO") == 1
+
+
+def test_empate_de_estado_gana_la_nota_mas_alta(tmp_path):
+    import dataclasses
+    v = tmp_path / "v"
+    crear_vault(v)
+    e = ejecucion_ejemplo()
+    r = e.resultados[0]
+    escribir(v, dataclasses.replace(e, resultados=[_en(r, "MD", "B", 60.0), _en(r, "RO", "B", 65.0)]))
+    meta, _ = leer(v / "wiki/ofertas/o-ejemplo.md")
+    assert meta["motivo"] == "motivo RO"
+
+
+def test_podada_no_se_pisa(tmp_path):
+    v = tmp_path / "v"
+    crear_vault(v)
+    e = ejecucion_ejemplo()
+    escribir(v, e)
+    ruta = v / "wiki/ofertas/o-ejemplo.md"
+    meta, cuerpo = leer(ruta)
+    meta["estado"] = "podada"
+    ruta.write_text(renderizar(meta, cuerpo), encoding="utf-8")
+    escribir(v, e)
+    assert leer(ruta)[0]["estado"] == "podada"
+
+
+def test_page_ids_se_suman_a_los_de_la_ficha():
+    r = ejecucion_ejemplo().resultados[0]
+    meta, _ = render_ficha(r, {"page_ids": ["100000000000009", "100000000000001"]})
+    assert meta["page_ids"] == ["100000000000009", "100000000000001", "100000000000002"]
+
+
+def test_ya_vistas_aparte_y_fuera_de_csv_y_tasas(tmp_path):
+    import dataclasses
+
+    from trovify.caza.filtros import Descarte
+    v = tmp_path / "v"
+    crear_vault(v)
+    e = ejecucion_ejemplo()
+    vista = _como(e.resultados[0], "o-vista", Descarte("ya_visto", "ya visto, excluida o propia"))
+    vista = dataclasses.replace(vista, decision="descartada", explicacion="ya_visto: ya visto")
+    e = dataclasses.replace(e, resultados=[*e.resultados, vista])
+    texto = render_informe(e)
+    descartadas = texto.split("## Descartadas")[1].split("## ")[0]
+    assert "o-vista" not in descartadas and "## Ya vistas" in texto
+    assert "o-vista" in texto.split("## Ya vistas")[1].split("## ")[0]
+    assert "- Ya vistas: 1 — o-vista (RO)" in texto
+    escribir(v, e)
+    hist = list(csv.DictReader((v / "data/caza/historico.csv").open()))
+    assert "o-vista" not in {h["oferta_id"] for h in hist}
+    tasas = list(csv.DictReader((v / "data/caza/tasas.csv").open()))
+    assert tasas[0]["descartadas"] == "1" and tasas[0]["tasa_senal"] == "1"
+
+
+def test_etiqueta_semanas_escalonadas():
+    texto = render_informe(ejecucion_ejemplo())
+    fila = next(x for x in texto.splitlines() if x.startswith("| Semanas escalonadas"))
+    assert "7 días o más" in fila
+
+
+def test_fuente_del_snapshot_sin_enlaces_repetidos():
+    from datetime import date
+
+    from trovify.caza.salida import _fusionar
+    from trovify.caza.snapshots import Snapshot
+    def foto(total, c8, fuente):
+        return Snapshot("o", "RO", date(2026, 11, 10), total, None, None, c8, None, None, None, fuente)
+
+    a = foto(1, None, "u1 | u2")
+    b = foto(None, 3, "u2 | u1")
+    assert _fusionar(a, b).fuente == "u2 | u1"
+    c = foto(None, 3, "u3")
+    assert _fusionar(a, c).fuente == "u3 | u1 | u2"

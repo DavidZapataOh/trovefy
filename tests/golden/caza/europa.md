@@ -41,7 +41,7 @@ Búsqueda donde apareció la oferta: https://www.facebook.com/ads/library/?activ
 | C7 | 16 | anuncios activos con 7 días o más |
 | Total | 32 (suma de 2 páginas) | anuncios activos de la oferta en el país |
 | Supervivencia | 0,5 | parte de los anuncios que llega a 7 días (de 0 a 1) |
-| Semanas escalonadas | 3 | semanas distintas en que arrancaron anuncios que siguen vivos |
+| Semanas escalonadas | 3 | semanas distintas en que arrancaron los anuncios activos con 7 días o más |
 | Edad máxima (días) | 40 | días que lleva el anuncio activo más antiguo |
 | Vida mediana (días) | no medido: sin búsqueda de inactivos | cuánto duraron los anuncios que ya pararon |
 | Crecimiento en 7 días | no medido: primera caza | cambio de anuncios activos frente a hace una semana |

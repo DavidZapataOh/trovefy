@@ -41,7 +41,7 @@ Cifras de RO (enlace reproducible): https://www.facebook.com/ads/library/?active
 | C7 | no medido: búsqueda bloqueada (captcha) | anuncios activos con 7 días o más |
 | Total | no medido: búsqueda bloqueada (captcha) | anuncios activos de la oferta en el país |
 | Supervivencia | no medido: búsqueda bloqueada (captcha) | parte de los anuncios que llega a 7 días (de 0 a 1) |
-| Semanas escalonadas | no medido: búsqueda bloqueada (captcha) | semanas distintas en que arrancaron anuncios que siguen vivos |
+| Semanas escalonadas | no medido: búsqueda bloqueada (captcha) | semanas distintas en que arrancaron los anuncios activos con 7 días o más |
 | Edad máxima (días) | no medido: búsqueda bloqueada (captcha) | días que lleva el anuncio activo más antiguo |
 | Vida mediana (días) | no medido: búsqueda bloqueada (captcha) | cuánto duraron los anuncios que ya pararon |
 | Crecimiento en 7 días | no medido: búsqueda bloqueada (captcha) | cambio de anuncios activos frente a hace una semana |

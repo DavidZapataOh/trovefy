@@ -51,6 +51,17 @@ class Consulta:
 
 
 @dataclass
+class CifraPagina:
+    """De dónde salen las cifras de la oferta en una página y país (O2: el enlace reproduce la cifra)."""
+
+    enlace: str  # la URL que dio la cifra de la oferta: el recuento con frase si lo hubo; si no, la página
+    pagina: str  # la URL de la página en el país (todas sus ofertas)
+    total_pagina: int | None = None  # anuncios activos de la página según Meta (exacto); None = no exacto
+    leidos_pagina: int | None = None  # anuncios de la página leídos en esa lectura
+    otras_ofertas: bool = False  # la página lleva otras ofertas o anuncios sin atribuir
+
+
+@dataclass
 class ResultadoOferta:
     """Una oferta evaluada en un país.
 
@@ -83,6 +94,8 @@ class ResultadoOferta:
     # (todas sus ofertas): ``(page_id, Medida, enlace de la página)``. Es un dato de la página, no de
     # la oferta: no entra en la nota, ni en Snapshot.total, ni en las señales de la oferta.
     crecimiento_pagina: list[tuple[str, Medida, str]] = field(default_factory=list)
+    # page_id → de dónde salen las cifras de la oferta en esa página (sin dato: la página entera).
+    paginas_cifras: dict[str, CifraPagina] = field(default_factory=dict)
 
 
 @dataclass
@@ -173,7 +186,8 @@ _SENALES = (
     ("C7", "c7", "anuncios activos con 7 días o más"),
     ("Total", "total", "anuncios activos de la oferta en el país"),
     ("Supervivencia", "supervivencia", "parte de los anuncios que llega a 7 días (de 0 a 1)"),
-    ("Semanas escalonadas", "escalonado_semanas", "semanas distintas en que arrancaron anuncios que siguen vivos"),
+    ("Semanas escalonadas", "escalonado_semanas",
+     "semanas distintas en que arrancaron los anuncios activos con 7 días o más"),
     ("Edad máxima (días)", "edad_max_dias", "días que lleva el anuncio activo más antiguo"),
     ("Vida mediana (días)", "vida_mediana_dias", "cuánto duraron los anuncios que ya pararon"),
     ("Crecimiento en 7 días", "crecimiento_7d", "cambio de anuncios activos frente a hace una semana"),
@@ -244,17 +258,46 @@ def _varias_paginas(r: ResultadoOferta) -> bool:
     return len(r.oferta.page_ids) > 1
 
 
+def _cifra(r: ResultadoOferta, page_id: str) -> CifraPagina:
+    cp = r.paginas_cifras.get(page_id)
+    if cp is not None:
+        return cp
+    u = url_biblioteca(r.pais, page_id=page_id)
+    return CifraPagina(u, u)
+
+
 def _link_pais(r: ResultadoOferta) -> str:
-    """Enlace único del país (``paises.XX.link_biblioteca``): con varias páginas, la búsqueda de la
-    página original en ese país (cada página tiene además el suyo con su recuento)."""
+    """Enlace único del país (``paises.XX.link_biblioteca``): el que da la cifra. Con varias páginas,
+    el de la página original en ese país (cada página tiene además el suyo con su recuento)."""
     o = r.oferta
     if _varias_paginas(r):
-        return url_biblioteca(r.pais, page_id=o.original_page_id or o.page_ids[0])
+        return _cifra(r, o.original_page_id or o.page_ids[0]).enlace
     return r.enlace
 
 
+def _pagina_pais(r: ResultadoOferta) -> str:
+    """URL de la página (original) en el país, aparte del enlace de la cifra."""
+    o = r.oferta
+    return _cifra(r, o.original_page_id or o.page_ids[0]).pagina
+
+
+def _otras_ofertas(r: ResultadoOferta, cp: CifraPagina, n: int) -> str:
+    if cp.total_pagina is not None:
+        total = str(cp.total_pagina)
+    elif cp.leidos_pagina:
+        total = f"≥ {cp.leidos_pagina}"
+    else:
+        total = "no medido"
+    propios = str(n) if r.completo else f"≥ {n}"
+    d = r.oferta.destino
+    host = _host(d.url_final or d.url_anuncio) if d else None
+    return (f"la página lleva otras ofertas: de los {total} anuncios del enlace, {propios} son de esta "
+            f"(destino {host or 'no medido'})")
+
+
 def _paginas(r: ResultadoOferta) -> list[str]:
-    """Una línea por página: papel, anuncios activos leídos en el país y su enlace reproducible."""
+    """Una línea por página: papel, anuncios activos de la oferta en el país y el enlace que da esa
+    cifra (con la página aparte si la cifra sale de un recuento con frase)."""
     o = r.oferta
     lineas = []
     for p in o.page_ids:
@@ -266,7 +309,13 @@ def _paginas(r: ResultadoOferta) -> list[str]:
             cuenta = f"≥ {n} anuncios activos"
         else:
             cuenta = "anuncios activos: no medido: no se leyó ningún anuncio de esta página"
-        lineas.append(f"{p}{papel}: {cuenta} — {url_biblioteca(r.pais, page_id=p)}")
+        cp = _cifra(r, p)
+        linea = f"{p}{papel}: {cuenta} — {cp.enlace}"
+        if cp.enlace != cp.pagina:
+            linea += f" · página: {cp.pagina}"
+        elif cp.otras_ofertas:
+            linea += f" · {_otras_ofertas(r, cp, n)}"
+        lineas.append(linea)
     return lineas
 
 
@@ -282,7 +331,10 @@ def _crecimiento_pagina(r: ResultadoOferta) -> list[str]:
 
 def _cifras(r: ResultadoOferta) -> list[str]:
     if not _varias_paginas(r):
-        return [f"Cifras de {r.pais} (enlace reproducible): {r.enlace}"]
+        cp = r.paginas_cifras.get(r.oferta.page_ids[0]) if r.oferta.page_ids else None
+        if cp is None or (cp.enlace == cp.pagina and not cp.otras_ofertas):
+            return [f"Cifras de {r.pais} (enlace reproducible): {r.enlace}"]
+        return [f"Cifras de {r.pais} (el enlace reproduce la cifra de esta oferta):", "", *[f"- {x}" for x in _paginas(r)]]
     n = len(r.oferta.page_ids)
     return [
         f"Cifras de {r.pais}: suma de {n} páginas; cada enlace reproduce su parte:",
@@ -365,7 +417,16 @@ def _tabla_huecos(huecos: list[HuecoPais], titulo: bool = True) -> list[str]:
 
 def _ficha_escrita(r: ResultadoOferta) -> bool:
     """Lo ya visto, excluido o propio no se reescribe (su ficha, si la hay, manda)."""
-    return not (r.descarte is not None and r.descarte.codigo == "ya_visto")
+    return not _ya_vista(r)
+
+
+def _ya_vista(r: ResultadoOferta) -> bool:
+    """Ya en el cerebro, excluida o propia: se informa aparte, no es un descarte ni cuenta en tasas."""
+    return r.descarte is not None and r.descarte.codigo == "ya_visto"
+
+
+def _juzgados(rs: list[ResultadoOferta]) -> list[ResultadoOferta]:
+    return [r for r in rs if not _ya_vista(r)]
 
 
 def _bloque_oferta(r: ResultadoOferta) -> list[str]:
@@ -422,7 +483,7 @@ def _hay_hueco(r: ResultadoOferta) -> str:
 
 
 def _resumen(e: Ejecucion, estado: str) -> str:
-    rs = [r for r in e.resultados if r.decision == estado]
+    rs = [r for r in _juzgados(e.resultados) if r.decision == estado]
     if not rs:
         return "ninguna"
     return f"{len(rs)} — " + ", ".join(f"{r.oferta.oferta_id} ({r.pais})" for r in rs)
@@ -471,9 +532,10 @@ def _modelable(r: ResultadoOferta) -> bool | None:
 
 
 def _tasas(e: Ejecucion) -> tuple[tuple[int, int, float | None], tuple[int, int, float | None]]:
-    leidos = [r for r in e.resultados if r.senales.c7.valor is not None]
+    juzgados = _juzgados(e.resultados)
+    leidos = [r for r in juzgados if r.senales.c7.valor is not None]
     con_cohorte = [r for r in leidos if r.senales.c7.valor > 0]
-    verificados = [r for r in e.resultados if _modelable(r) is not None]
+    verificados = [r for r in juzgados if _modelable(r) is not None]
     modelables = [r for r in verificados if _modelable(r)]
     senal = (len(con_cohorte), len(leidos), len(con_cohorte) / len(leidos) if leidos else None)
     modelo = (len(modelables), len(verificados), len(modelables) / len(verificados) if verificados else None)
@@ -511,20 +573,23 @@ def render_informe(e: Ejecucion) -> str:
         f"- Observar: {_resumen(e, 'observar')}",
         f"- Descartadas: {_resumen(e, 'descartada')}",
     ]
+    vistas = [r for r in e.resultados if _ya_vista(r)]
+    if vistas:
+        lineas.append(f"- Ya vistas: {len(vistas)} — " + ", ".join(f"{r.oferta.oferta_id} ({r.pais})" for r in vistas))
     if e.pendientes:
         lineas.append(f"- {texto_pendientes(e)}")
     lineas.append("")
 
     for titulo, estado in (("Ofertas A", "A"), ("Ofertas B", "B"), ("Observar", "observar")):
         lineas += [f"## {titulo}", ""]
-        rs = [r for r in e.resultados if r.decision == estado]
+        rs = [r for r in _juzgados(e.resultados) if r.decision == estado]
         if not rs:
             lineas += ["Ninguna.", ""]
         for r in rs:
             lineas += _bloque_oferta(r)
 
     lineas += ["## Descartadas", ""]
-    descartadas = [r for r in e.resultados if r.decision == "descartada"]
+    descartadas = [r for r in _juzgados(e.resultados) if r.decision == "descartada"]
     if not descartadas:
         lineas += ["Ninguna.", ""]
     for r in descartadas:
@@ -533,6 +598,13 @@ def render_informe(e: Ejecucion) -> str:
         ficha = f" · ficha: [[wiki/ofertas/{r.oferta.oferta_id}]]" if _ficha_escrita(r) else ""
         lineas.append(f"- {r.oferta.oferta_id} ({r.pais}): {motivo} · cifras: {r.enlace}{ficha}")
     if descartadas:
+        lineas.append("")
+    if vistas:
+        lineas += ["## Ya vistas", "",
+                   ("Ya están en el cerebro (o en exclusiones o productos propios): no se vuelven a juzgar aquí; "
+                    "su ficha manda."), ""]
+        lineas += [f"- {r.oferta.oferta_id} ({r.pais}): ficha [[wiki/ofertas/{r.oferta.oferta_id}]] · cifras: "
+                   f"{r.enlace}" for r in vistas]
         lineas.append("")
 
     lineas += ["## Palabras clave", ""]
@@ -567,7 +639,7 @@ def render_informe(e: Ejecucion) -> str:
          "puede mejorar."),
         "",
     ]
-    candidatas = [r for r in e.resultados if r.decision in ("A", "B", "observar")]
+    candidatas = [r for r in _juzgados(e.resultados) if r.decision in ("A", "B", "observar")]
     if not candidatas:
         lineas += ["Ninguna oferta candidata en esta ejecución.", ""]
     for r in candidatas:
@@ -592,10 +664,12 @@ def _rinde(c: Consulta, e: Ejecucion) -> tuple[int | None, int | None]:
     if c.resultados is None and not c.sin_recuento:
         return None, None
     por_id = {r.oferta.oferta_id: r for r in e.resultados}
+    vistas = {r.oferta.oferta_id for r in e.resultados if _ya_vista(r)}
+    candidatas = [oid for oid in c.ofertas if oid not in vistas]  # las ya vistas no son candidatas nuevas
     modelables = sum(
-        1 for oid in c.ofertas if oid in por_id and por_id[oid].descarte is None and _modelable(por_id[oid])
+        1 for oid in candidatas if oid in por_id and por_id[oid].descarte is None and _modelable(por_id[oid])
     )
-    return len(c.ofertas), modelables
+    return len(candidatas), modelables
 
 
 # ---------------------------------------------------------------- ficha
@@ -605,40 +679,142 @@ def _cotas(s: Senales) -> list[str]:
     return [n for n, m in (("c8", s.c8), ("c7", s.c7), ("total", s.total), ("edad_max", s.edad_max_dias)) if m.suelo]
 
 
-def render_ficha(r: ResultadoOferta, previa: dict | None) -> tuple[dict, str]:
-    """Frontmatter y cuerpo de ``wiki/ofertas/<oferta_id>.md``.
+_RANGO = {"A": 0, "B": 1, "observar": 2, "descartada": 3}
 
-    ``previa`` es el frontmatter de la ficha existente: se conservan sus otros países, la
-    ``primera_vez``, los idiomas y las claves que no son de esta función (``strikes``…).
-    """
+
+def mejor_pais(paises: dict) -> str | None:
+    """El país con el mejor estado (A > B > observar > descartada); a igual estado, la nota más alta.
+
+    Es la regla de la ficha: su ``estado``, ``motivo`` y ``fuente`` son los de este país (también
+    al recalcular con ``trovify caza hueco``)."""
+    def clave(item):
+        pais, d = item
+        nota = d.get("nota") if isinstance(d.get("nota"), (int, float)) else -1.0
+        return _RANGO.get(d.get("estado"), 9), -nota, pais
+
+    validos = [(k, d) for k, d in (paises or {}).items() if isinstance(d, dict)]
+    return min(validos, key=clave)[0] if validos else None
+
+
+_SECCION_PAIS = re.compile(r"^## Señales en (\S+) \(.*?(?=^## |\Z)", re.DOTALL | re.MULTILINE)
+
+
+def secciones_de_pais(cuerpo: str | None) -> dict[str, str]:
+    """``país → texto`` de las secciones «## Señales en XX (fecha)» de una ficha."""
+    return {m.group(1): m.group(0).rstrip("\n") for m in _SECCION_PAIS.finditer(cuerpo or "")}
+
+
+def linea_hueco(huecos: list[HuecoPais], pais: str) -> str:
+    """«Hueco en XX: …» de la sección del país (``trovify caza hueco`` la actualiza)."""
+    h = next((x for x in huecos if x.pais == pais), None)
+    if h is None:
+        return f"Hueco en {pais}: no medido: no se buscó competencia local en {pais}"
+    por_que = _por_que(h)
+    return (f"Hueco en {pais}: {_hueco_texto(h)}" + (f" — {por_que}" if por_que != "—" else "")
+            + " (detalle en «Hueco por país»)")
+
+
+def _seccion_pais(r: ResultadoOferta, dia: str) -> list[str]:
     o, s = r.oferta, r.senales
+    activos = sorted((a for a in o.anuncios if a.activo and a.pais == r.pais), key=lambda a: (a.inicio, a.library_id))
+    lineas = [
+        f"## Señales en {r.pais} ({dia})",
+        "",
+        f"Decisión en {r.pais}: **{r.decision}** — {_comas(r.explicacion)}",
+        "",
+        *_cifras(r),
+        "",
+        *_tabla_senales(s, len(o.page_ids)),
+        *_crecimiento_pagina(r),
+        "",
+        f"### Nota en {r.pais}",
+        "",
+        *_desglose(r.nota),
+        "",
+        linea_hueco(r.huecos, r.pais),
+        "",
+        f"### Anuncios de ejemplo en {r.pais}",
+        "",
+    ]
+    if activos:
+        lineas += [f"- {_ANUNCIO}{a.library_id} — activo desde {a.inicio.isoformat()}" for a in activos[:3]]
+    else:
+        lineas.append(f"no medido: no se leyó ningún anuncio activo en {r.pais}")
+    return lineas
+
+
+def _seccion_resumida(pais: str, d: dict) -> list[str]:
+    """País medido en otra caza cuya sección no está en el cuerpo previo: lo guardado en la ficha."""
+    def cifra(nombre):
+        v = d.get(nombre)
+        if v is None:
+            return "no medido"
+        return ("≥ " if nombre in (d.get("cota_inferior") or []) else "") + _num(v)
+
+    nota = d.get("nota")
+    return [
+        f"## Señales en {pais} ({d.get('fecha') or 'sin fecha'})",
+        "",
+        f"Decisión en {pais}: **{d.get('estado') or 'no medido'}** — {_comas(str(d.get('motivo') or 'sin motivo'))}",
+        "",
+        (f"Medido en otra caza: C8 {cifra('c8')}, C7 {cifra('c7')}, total {cifra('total')}, nota "
+         f"{'no medida' if nota is None else _num(nota, 2)}. Enlace: {d.get('link_biblioteca') or 'no medido'}"),
+    ]
+
+
+def render_ficha(rs: ResultadoOferta | list[ResultadoOferta], previa: dict | None,
+                 cuerpo_previo: str | None = None) -> tuple[dict, str]:
+    """Frontmatter y cuerpo de ``wiki/ofertas/<oferta_id>.md``: UNA ficha por oferta con todos sus países.
+
+    ``rs``: los resultados de la oferta en esta ejecución (uno por país). ``previa`` es el
+    frontmatter de la ficha existente y ``cuerpo_previo`` su cuerpo: se conservan sus otros países
+    (datos y sección), la ``primera_vez``, los idiomas, los ``page_ids`` y las claves que no son de
+    esta función (``strikes``…). ``estado``, ``motivo`` y ``fuente`` son los del mejor país
+    (:func:`mejor_pais`); una ficha ``podada`` sigue podada.
+    """
+    rs = [rs] if isinstance(rs, ResultadoOferta) else list(rs)
+    if not rs:
+        raise ValueError("render_ficha necesita al menos un resultado")
+    if any(r.dia is None for r in rs):
+        raise ValueError("render_ficha necesita ResultadoOferta.dia (escribir lo pone desde la Ejecucion)")
+    r0 = rs[0]
+    o = r0.oferta
     previa = dict(previa or {})
     d = o.destino
-    if r.dia is None:
-        raise ValueError("render_ficha necesita ResultadoOferta.dia (escribir lo pone desde la Ejecucion)")
-    dia = r.dia.isoformat()
-    enlace = _link_pais(r)
+    dia = max(r.dia for r in rs).isoformat()
     paises = {k: v for k, v in (previa.get("paises") or {}).items()}
-    paises[r.pais] = {
-        "c8": _entero(s.c8),
-        "c7": _entero(s.c7),  # lo usa `trovify caza hueco` para recalcular la decisión (perfil santino)
-        "total": _entero(s.total),
-        "edad_max": _entero(s.edad_max_dias),
-        "link_biblioteca": enlace,
-        "estado": r.decision,
-        "nota": None if r.nota.valor is None else round(r.nota.valor, 2),
-        "cota_inferior": _cotas(s),
-        "fecha": dia,
-    }
+    for r in rs:
+        s = r.senales
+        paises[r.pais] = {
+            "c8": _entero(s.c8),
+            "c7": _entero(s.c7),  # lo usa `trovify caza hueco` para recalcular la decisión (perfil santino)
+            "total": _entero(s.total),
+            "edad_max": _entero(s.edad_max_dias),
+            "link_biblioteca": _link_pais(r),
+            "pagina": _pagina_pais(r),
+            "estado": r.decision,
+            "motivo": r.explicacion,
+            "nota": None if r.nota.valor is None else round(r.nota.valor, 2),
+            "cota_inferior": _cotas(s),
+            "fecha": r.dia.isoformat(),
+        }
+    mejor = mejor_pais(paises)
+    m = paises[mejor]
     idiomas = list(previa.get("idiomas") or [])
-    idiomas += [i for i in s.idiomas if i not in idiomas]
+    banderas: list[str] = []
+    for r in rs:
+        idiomas += [i for i in r.senales.idiomas if i not in idiomas]
+        banderas += [b for b in r.senales.banderas if b not in banderas]
+    page_ids = [str(p) for p in previa.get("page_ids") or []]
+    page_ids += [p for p in o.page_ids if p not in page_ids]
+    podada = previa.get("estado") == "podada"
     meta = dict(previa)
     meta.update({
         "tipo": "oferta",
         "fecha": dia,
-        "fuente": enlace,
+        "fuente": m.get("link_biblioteca"),
         "oferta_id": o.oferta_id,
-        "page_ids": list(o.page_ids),
+        "page_ids": page_ids,
         "original_page_id": o.original_page_id,
         "origen": o.origen,
         "checkout": d.checkout if d else None,
@@ -648,28 +824,28 @@ def render_ficha(r: ResultadoOferta, previa: dict | None) -> tuple[dict, str]:
         "idiomas": idiomas,
         "precio": d.precio if d else None,
         "moneda": d.moneda if d else None,
-        "estado": r.decision,
-        "motivo": r.explicacion,
+        "estado": "podada" if podada else m.get("estado"),
+        "motivo": previa.get("motivo") if podada else m.get("motivo"),
         "primera_vez": previa.get("primera_vez") or dia,
         "ultima_vez": dia,
-        "banderas": list(s.banderas),
+        "banderas": banderas,
     })
 
-    paginas = _paginas(r)
     if d is None:
         landing = checkout = "no medido: sin destino resuelto"
     else:
         landing = d.url_final or _no_medido(d.motivo)
         checkout = (f"{d.checkout} ({d.gateway})" if d.gateway else d.checkout) if d.checkout else (
             _no_medido(motivo_dudoso(d)))
-    activos = sorted((a for a in o.anuncios if a.activo and a.pais == r.pais), key=lambda a: (a.inicio, a.library_id))
+    varios = len(paises) > 1
+    etiqueta = f" (el mejor país: {mejor})" if varios else ""
     lineas = [
         f"# Oferta {o.oferta_id}",
         "",
-        f"Estado: **{r.decision}** — {_comas(r.explicacion)}",
+        f"Estado: **{meta['estado']}** — {_comas(str(meta['motivo'] or 'sin motivo'))}{etiqueta}",
         "",
-        (f"Enlace principal (página original en {r.pais}): {enlace}" if _varias_paginas(r)
-         else f"Fuente de las cifras: {enlace}"),
+        (f"Enlace principal (página original en {mejor}): {m.get('link_biblioteca')}"
+         if len(page_ids) > 1 else f"Fuente de las cifras ({mejor}): {m.get('link_biblioteca')}"),
         "",
         f"Vista por primera vez: {meta['primera_vez']} · última: {dia}",
         "",
@@ -678,34 +854,30 @@ def render_ficha(r: ResultadoOferta, previa: dict | None) -> tuple[dict, str]:
         f"- Landing: {landing}",
         f"- Checkout: {checkout}",
         f"- Precio: {_dinero(d.precio, d.moneda) if d else _no_medido('sin destino resuelto')}",
-        f"- Páginas que la llevan en {r.pais}:",
-        *[f"  - {p}" for p in paginas],
         f"- Idiomas de los anuncios: {', '.join(idiomas) if idiomas else 'no medido: idioma no detectado'}",
         "",
-        f"## Señales en {r.pais} ({dia})",
-        "",
-        *_cifras(r),
-        "",
-        *_tabla_senales(s, len(o.page_ids)),
-        *_crecimiento_pagina(r),
-        "",
-        "## Nota",
-        "",
-        *_desglose(r.nota),
-        "",
+    ]
+    medidos = {r.pais: r for r in rs}
+    previas = secciones_de_pais(cuerpo_previo)
+    orden = sorted(paises, key=lambda k: (k != mejor, _RANGO.get(paises[k].get("estado"), 9), k))
+    for pais in orden:
+        if pais in medidos:
+            lineas += _seccion_pais(medidos[pais], medidos[pais].dia.isoformat())
+        elif pais in previas:
+            lineas.append(previas[pais])
+        elif isinstance(paises[pais], dict):
+            lineas += _seccion_resumida(pais, paises[pais])
+        lineas.append("")
+    huecos = next((r.huecos for r in rs if r.huecos), r0.huecos)
+    lineas += [
         "## Hueco por país",
         "",
-        *_tabla_huecos(r.huecos, titulo=False),
+        *_tabla_huecos(huecos, titulo=False),
         "",
-        "## Anuncios de ejemplo",
+        "## Banderas",
         "",
     ]
-    if activos:
-        lineas += [f"- {_ANUNCIO}{a.library_id} — activo desde {a.inicio.isoformat()}" for a in activos[:3]]
-    else:
-        lineas.append("no medido: no se leyó ningún anuncio activo en este país")
-    lineas += ["", "## Banderas", ""]
-    lineas += [f"- {b}: {_BANDERAS[b]}" if b in _BANDERAS else f"- {b}" for b in s.banderas] or ["ninguna"]
+    lineas += [f"- {b}: {_BANDERAS[b]}" if b in _BANDERAS else f"- {b}" for b in banderas] or ["ninguna"]
     lineas.append("")
     return meta, "\n".join(lineas)
 
@@ -852,52 +1024,73 @@ def _entidades(vault: Path, rs: list[ResultadoOferta]) -> bool:
 
 
 def _competidores(vault: Path, rs: list[ResultadoOferta], dia: str) -> list[tuple[Path, str | None]]:
-    rutas: list[tuple[Path, str | None]] = []
+    """Una ficha por página. El ``total`` de arriba es el de la PÁGINA (exacto de Meta, todas sus
+    ofertas) o null; las cifras de cada oferta van aparte en ``cifras.<oferta_id>.<país>``, sin pisar
+    las de otra oferta de la misma página."""
+    rutas: dict[Path, str | None] = {}
     for r in rs:
         if r.descarte is not None:
             continue
         o, d = r.oferta, r.oferta.destino
+        hoy = r.dia or date.fromisoformat(dia)
         for pid in o.page_ids:
             propios = [a for a in o.anuncios if a.page_id == pid and a.pais == r.pais and a.activo]
-            hoy = r.dia or date.fromisoformat(dia)
             c7 = sum(1 for a in propios if (hoy - a.inicio).days >= 7)
+            cp = _cifra(r, pid)
             ruta = vault / "wiki/competidores" / f"{pid}.md"
             previa, _ = frontmatter.leer(ruta) if ruta.exists() else ({}, "")
             ofertas = list(previa.get("ofertas") or [])
             if o.oferta_id not in ofertas:
                 ofertas.append(o.oferta_id)
+            cifras = {k: dict(v) for k, v in (previa.get("cifras") or {}).items() if isinstance(v, dict)}
+            cifras.setdefault(o.oferta_id, {})[r.pais] = {
+                # Recuentos de la oferta en la página: exactos solo con lectura completa; si no, cota inferior.
+                "c7": c7 if propios else None,
+                "total": len(propios) if (r.completo and propios) else None,
+                "cota_inferior": [] if r.completo else (["c7"] if propios else []),
+                "fecha": dia,
+                "fuente": cp.enlace,
+            }
             nombre = next((a.page_name for a in propios), previa.get("nombre"))
-            fuente = url_biblioteca(r.pais, page_id=pid)
             meta = dict(previa)
+            meta.pop("c7", None)  # cifra de una oferta: va en ``cifras``, nunca como de la página
             meta.update({
                 "tipo": "competidor",
                 "page_id": pid,
                 "nombre": nombre,
                 "pais": r.pais,
-                # Recuentos por página: exactos solo con lectura completa; si no, cota inferior.
-                "c7": c7 if propios else None,
-                "total": len(propios) if (r.completo and propios) else None,
-                "cota_inferior": [] if r.completo else (["c7"] if propios else []),
+                "total": cp.total_pagina,  # la página entera según Meta; null si no se midió exacto
+                "cota_inferior": [],
                 "checkout": d.checkout if d else None,
                 "precio": d.precio if d else None,
                 "moneda": d.moneda if d else None,
                 "fecha": dia,
-                "fuente": fuente,
+                "fuente": cp.pagina,
                 "ofertas": ofertas,
+                "cifras": cifras,
             })
-            cuerpo = "\n".join([
+            lineas = [
                 f"# Competidor {pid}" + (f" · {nombre}" if nombre else ""),
                 "",
-                f"Página en la Biblioteca de anuncios ({r.pais}): {fuente}",
+                f"Página en la Biblioteca de anuncios ({r.pais}): {cp.pagina}",
                 "",
-                "Ofertas que lleva:",
+                ("Anuncios activos de la página (todas sus ofertas): "
+                 + (str(cp.total_pagina) if cp.total_pagina is not None else "no medido: Meta no dio el total exacto")),
                 "",
-                *[f"- [[wiki/ofertas/{x}]]" for x in ofertas],
+                "Ofertas que lleva (cifras de cada una en la página, con su enlace):",
                 "",
-            ])
-            frontmatter.escribir(ruta, meta, cuerpo)
-            rutas.append((ruta, nombre))
-    return rutas
+            ]
+            for oid in ofertas:
+                lineas.append(f"- [[wiki/ofertas/{oid}]]")
+                for pais, c in sorted((cifras.get(oid) or {}).items()):
+                    cota = "≥ " if "c7" in (c.get("cota_inferior") or []) else ""
+                    c7_txt = "no medido" if c.get("c7") is None else f"{cota}{c['c7']}"
+                    total_txt = "no medido" if c.get("total") is None else str(c["total"])
+                    lineas.append(f"  - {pais} ({c.get('fecha')}): C7 {c7_txt}, activos {total_txt} — {c.get('fuente')}")
+            lineas.append("")
+            frontmatter.escribir(ruta, meta, "\n".join(lineas))
+            rutas[ruta] = nombre
+    return list(rutas.items())
 
 
 def _snapshot(r: ResultadoOferta, dia: date) -> snapshots.Snapshot:
@@ -916,7 +1109,7 @@ def _snapshot(r: ResultadoOferta, dia: date) -> snapshots.Snapshot:
         nuevos=exacta(s.nuevos) if r.completo else None,
         parados=exacta(s.parados) if r.completo else None,
         alcance_ue=None if s.alcance_ue.suelo else s.alcance_ue.valor,
-        fuente=" | ".join(url_biblioteca(r.pais, page_id=p) for p in r.oferta.page_ids)
+        fuente=" | ".join(dict.fromkeys(_cifra(r, p).enlace for p in r.oferta.page_ids))
         if _varias_paginas(r) else r.enlace,
     )
 
@@ -938,6 +1131,7 @@ def _fusionar(previa: snapshots.Snapshot | None, nueva: snapshots.Snapshot) -> s
         fuente = f"{nueva.fuente} | {previa.fuente}"
     else:
         fuente = nueva.fuente
+    fuente = " | ".join(dict.fromkeys(x.strip() for x in fuente.split(" | ") if x.strip()))
     return replace(nueva, **valores, fuente=fuente)
 
 
@@ -975,17 +1169,20 @@ def escribir(vault: Path, e: Ejecucion) -> list[Path]:
          + ("" if informe.stem == e.region else f", ejecución {informe.stem.rsplit('-', 1)[1]} del día")),
         ("Caza", f"[[wiki/caza/{dia}/veredicto]]", f"veredicto del {dia}: la decisión del usuario"),
     ]
+    por_oferta: dict[str, list[ResultadoOferta]] = {}
     for r in rs:
-        if not _ficha_escrita(r):
-            continue
-        ruta = vault / "wiki/ofertas" / f"{r.oferta.oferta_id}.md"
-        previa = frontmatter.leer(ruta)[0] if ruta.exists() else None
-        meta, cuerpo = render_ficha(r, previa)
+        if _ficha_escrita(r):
+            por_oferta.setdefault(r.oferta.oferta_id, []).append(r)
+    for oid, grupo in por_oferta.items():  # una ficha por oferta, con todos sus países
+        ruta = vault / "wiki/ofertas" / f"{oid}.md"
+        previa, cuerpo_previo = frontmatter.leer(ruta) if ruta.exists() else (None, None)
+        meta, cuerpo = render_ficha(grupo, previa, cuerpo_previo)
         if e.modo == "vigilar":
             meta["vigilada"] = dia  # gasta el turno del día de la vigilancia (no lo gastan nicho/barrido)
         frontmatter.escribir(ruta, meta, cuerpo)
         rutas.append(ruta)
-        indice.append(("Ofertas", f"[[wiki/ofertas/{r.oferta.oferta_id}]]", f"{r.decision} · {r.pais} · {dia}"))
+        mejor = mejor_pais(meta["paises"])
+        indice.append(("Ofertas", f"[[wiki/ofertas/{oid}]]", f"{meta['estado']} · {mejor} · {dia}"))
 
     for ruta, nombre in _competidores(vault, rs, dia):
         rutas.append(ruta)
@@ -1013,15 +1210,15 @@ def escribir(vault: Path, e: Ejecucion) -> list[Path]:
         datos / "historico.csv",
         ["fecha", "region", "modo", "oferta_id", "pais", "decision", "motivo", "nota", "enlace"],
         [[dia, e.region, e.modo, r.oferta.oferta_id, r.pais, r.decision, r.explicacion,
-          None if r.nota.valor is None else round(r.nota.valor, 2), r.enlace] for r in rs],
+          None if r.nota.valor is None else round(r.nota.valor, 2), r.enlace] for r in _juzgados(rs)],
     )
     (_, _, ts), (_, _, tm) = _tasas(e)
-    cuenta = {k: sum(1 for r in rs if r.decision == k) for k in _ESTADOS}
+    cuenta = {k: sum(1 for r in _juzgados(rs) if r.decision == k) for k in _ESTADOS}
     _anadir_csv(
         datos / "tasas.csv",
         ["fecha", "region", "modo", "candidatos", "A", "B", "observar", "descartadas", "pendientes",
          "busquedas", "bloqueos", "vacios", "tasa_senal", "tasa_modelo", "creditos_firecrawl"],
-        [[dia, e.region, e.modo, len(rs) + e.pendientes, cuenta["A"], cuenta["B"], cuenta["observar"],
+        [[dia, e.region, e.modo, len(_juzgados(rs)) + e.pendientes, cuenta["A"], cuenta["B"], cuenta["observar"],
           cuenta["descartada"], e.pendientes, e.busquedas, e.bloqueos, e.vacios, ts, tm, e.creditos]],
     )
     _anadir_csv(

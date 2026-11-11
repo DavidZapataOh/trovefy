@@ -45,6 +45,7 @@ from trovify.caza.presupuesto import (
     PresupuestoAgotado,
 )
 from trovify.caza.salida import (
+    CifraPagina,
     Consulta,
     Ejecucion,
     ResultadoOferta,
@@ -53,6 +54,8 @@ from trovify.caza.salida import (
     _tabla_huecos,
     escribir,
     formatear_medida,
+    linea_hueco,
+    mejor_pais,
     texto_pendientes,
 )
 from trovify.caza.senales import VENTANA_FOTO, Medida, calcular_senales, crecimiento
@@ -416,12 +419,16 @@ def resumen(e: Ejecucion, minimo_palabra: float, usadas_hoy: tuple[int, int] | N
 
     lineas = [f"Caza del {e.dia.isoformat()} · {e.region} · modo {e.modo} · perfil {e.perfil}", ""]
     lineas += [f"A: {lista('A')}", f"B: {lista('B')}", f"Observar: {lista('observar')}"]
-    descartadas = [r for r in e.resultados if r.decision == "descartada"]
+    vistas = [r for r in e.resultados if r.descarte is not None and r.descarte.codigo == "ya_visto"]
+    descartadas = [r for r in e.resultados if r.decision == "descartada" and r not in vistas]
     if descartadas:
         lineas.append("Descartadas:")
         lineas += [f"  - {r.oferta.oferta_id} ({r.pais}): {r.explicacion}" for r in descartadas]
     else:
         lineas.append("Descartadas: ninguna")
+    if vistas:
+        lineas.append("Ya vistas (ya en el cerebro; su ficha manda): "
+                      + ", ".join(f"{r.oferta.oferta_id} ({r.pais})" for r in vistas))
     if e.pendientes:
         lineas.append(texto_pendientes(e))
     paises: dict[str, list[float]] = {}
@@ -518,6 +525,9 @@ class _Corrida:
     # completo, con count exacto y sin ningún anuncio ajeno (vale como total exacto de la oferta).
     recuentos: dict[tuple[str, str, str], int] = field(default_factory=dict)
     sin_abrir: set[str] = field(default_factory=set)  # enlaces de landings sin abrir por el tope
+    # (oferta_id, page_id, pais) → URL del recuento con frase que trajo anuncios de la oferta: es el
+    # enlace que reproduce sus cifras en una página que lleva otras ofertas.
+    frases_url: dict[tuple[str, str, str], str] = field(default_factory=dict)
     # La planificación dejó trabajo fuera porque no quedaban búsquedas hoy (sin llegar a agotarlas).
     cuota_plan: str | None = None
 
@@ -626,6 +636,7 @@ class _Corrida:
                     # solo los anuncios cuyo destino es el de esta oferta: lo demás no se atribuye
                     if a.page_id == page_id and a.enlace_destino in propios:
                         nuevos.setdefault((a.library_id, a.pais), a)
+                        self.frases_url[(o.oferta_id, page_id, pais)] = r.url
                     else:
                         todos_propios = False
                 leidos = {a.library_id for a in r.anuncios}
@@ -1031,12 +1042,33 @@ def _evaluar(c: _Corrida, conn, o: Oferta, pais: str, descarte, ya_visto: bool, 
     decision, motivo = decidir(nota, s.c8, c.perfil, _hay_hueco(huecos), descarte, u, landing, c7=s.c7)
     return ResultadoOferta(o, pais, s, nota, decision, motivo, descarte, huecos,
                            _enlace(c, o, pais, consultas, ids_consulta), dia=hoy, total_meta=total_meta,
-                           completo=completo, crecimiento_pagina=_crecimiento_paginas(c, conn, o, pais, alcance))
+                           completo=completo, crecimiento_pagina=_crecimiento_paginas(c, conn, o, pais, alcance),
+                           paginas_cifras=_cifras_por_pagina(c, o, pais, alcance))
+
+
+def _cifras_por_pagina(c: _Corrida, o: Oferta, pais: str, alcance: _Alcance) -> dict[str, CifraPagina]:
+    """De dónde sale la cifra de la oferta en cada página: el recuento con frase si lo hubo (la
+    página aparte) y, si no, la lectura de la página, diciendo si lleva otras ofertas."""
+    out: dict[str, CifraPagina] = {}
+    for p in o.page_ids:
+        lect = c.lecturas.get((p, pais))
+        pagina = lect.url if lect is not None else url_biblioteca(pais, page_id=p)
+        out[p] = CifraPagina(
+            enlace=c.frases_url.get((o.oferta_id, p, pais)) or pagina,
+            pagina=pagina,
+            total_pagina=lect.total_aprox if lect is not None and lect.total_exacto else None,
+            leidos_pagina=len(lect.anuncios) if lect is not None else None,
+            otras_ofertas=not (alcance.solo_esta(o, p) and alcance.atribuida(o, p, pais)),
+        )
+    return out
 
 
 def _enlace(c: _Corrida, o: Oferta, pais: str, consultas: list[Consulta], ids_consulta) -> str:
     """El enlace reproducible de donde salen las cifras de la oferta en ``pais``."""
     if len(o.page_ids) == 1:
+        frase = c.frases_url.get((o.oferta_id, o.page_ids[0], pais))
+        if frase is not None:  # la cifra salió del recuento con frase dentro de la página
+            return frase
         r = c.lecturas.get((o.page_ids[0], pais))
         if r is not None:
             return r.url
@@ -1078,6 +1110,12 @@ def _strikes(vault: Path, e: Ejecucion, vigiladas: dict[str, dict], u, enteras: 
 
 _ESTADO = re.compile(r"^Estado: \*\*[^*]+\*\*.*$", re.MULTILINE)
 _SECCION_HUECO = re.compile(r"(## Hueco por país\n\n)(.*?)(?=\n## |\Z)", re.DOTALL)
+
+
+def _linea_pais(cuerpo: str, que: str, pais: str, texto: str) -> str:
+    """Cambia la línea «<que> en <pais>: …» de la sección del país, si la ficha la tiene."""
+    patron = re.compile(rf"^{re.escape(que)} en {re.escape(pais)}: .*$", re.MULTILINE)
+    return patron.sub(lambda _: f"{que} en {pais}: {texto}", cuerpo, count=1)
 
 
 def _linea_estado(cuerpo: str, estado: str, motivo: str) -> str:
@@ -1168,8 +1206,8 @@ def _medir_hueco(
     meta["huecos"] = huecos
     hay = _hay_hueco(huecos_de(meta))
     landing = "modelable" if meta.get("checkout") and meta.get("precio") is not None else "dudoso"
-    mejor: tuple[str, str] | None = None
-    for datos in (meta.get("paises") or {}).values():
+    paises_ficha = meta.get("paises") or {}
+    for pais_f, datos in paises_ficha.items():
         if not isinstance(datos, dict) or datos.get("estado") == "descartada":
             continue
         cotas = set(datos.get("cota_inferior") or [])
@@ -1180,11 +1218,17 @@ def _medir_hueco(
         )
         datos["estado"] = decision
         datos["motivo"] = motivo
-        if mejor is None or _ORDEN[decision] < _ORDEN[mejor[0]]:
-            mejor = (decision, motivo)
+        cuerpo = _linea_pais(cuerpo, "Decisión", pais_f, f"**{decision}** — {_comas(motivo)}")
+    # Misma regla que la salida de la caza: el mejor país manda en estado, motivo y fuente.
+    mejor = mejor_pais({k: d for k, d in paises_ficha.items() if isinstance(d, dict)})
     if mejor is not None and meta.get("estado") != "podada":
-        meta["estado"], meta["motivo"] = mejor
-        cuerpo = _linea_estado(cuerpo, *mejor)
+        datos = paises_ficha[mejor]
+        meta["estado"], meta["motivo"] = datos.get("estado"), datos.get("motivo")
+        if datos.get("link_biblioteca"):
+            meta["fuente"] = datos["link_biblioteca"]
+        varios = f" (el mejor país: {mejor})" if len(paises_ficha) > 1 else ""
+        cuerpo = _linea_estado(cuerpo, str(meta["estado"]), f"{meta['motivo'] or 'sin motivo'}{varios}")
+    cuerpo = _linea_pais(cuerpo, "Hueco", pais, linea_hueco(huecos_de(meta), pais).split(": ", 1)[1])
     tabla = "\n".join(_tabla_huecos(huecos_de(meta), titulo=False)) + "\n"
     if _SECCION_HUECO.search(cuerpo):
         cuerpo = _SECCION_HUECO.sub(lambda m: m.group(1) + tabla, cuerpo, count=1)

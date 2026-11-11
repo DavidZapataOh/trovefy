@@ -180,3 +180,16 @@ def test_hueco_cli_cuota_no_es_parada(vault, monkeypatch, capsys):
     assert cli.main(["caza", "hueco", "--oferta", "o-x", "--pais", "RO", "--frase", "a b", "--frase", "c d"]) == 0
     out = capsys.readouterr().out
     assert "PARADA" not in out and "cuota" in out.lower()
+
+
+def test_resumen_pone_las_ya_vistas_aparte():
+    import dataclasses
+
+    from trovify.caza.filtros import Descarte
+    e = ejecucion_ejemplo()
+    r = e.resultados[0]
+    vista = dataclasses.replace(r, oferta=dataclasses.replace(r.oferta, oferta_id="o-vista"), decision="descartada",
+                                descarte=Descarte("ya_visto", "ya visto"), explicacion="ya_visto: ya visto")
+    texto = orquestador.resumen(dataclasses.replace(e, resultados=[*e.resultados, vista]), 20)
+    assert "Ya vistas (ya en el cerebro; su ficha manda): o-vista (RO)" in texto
+    assert "o-vista" not in texto.split("Descartadas:")[1].split("Ya vistas")[0]

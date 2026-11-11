@@ -1024,3 +1024,73 @@ def test_consulta_sin_recuento_y_aproximada(tmp_path):
     assert "| uno | RO | no medido: sin recuento de Meta | 1 |" in informe
     assert "| dos | RO | ≈ 230 |" in informe
     assert "búsqueda sin respuesta" not in informe
+
+
+# --- ola final: I2 el enlace reproduce la cifra ------------------------------------------------
+
+
+def _dos_ofertas_en_una_pagina(P, base):
+    ua, ub = "https://a-kit.example/", "https://b-kit.example/"
+    a = [replace(x, titulo="Fișe de matematică") for x in viejos(P, 9, 20, base, destino=ua)]
+    b = [replace(x, titulo="Povești pentru somn") for x in viejos(P, 9, 20, base + 100, destino=ub)]
+    mapa = {ua: destino_ok(ua, checkout="https://pay.hotmart.com/A1"),
+            ub: destino_ok(ub, checkout="https://pay.hotmart.com/B1")}
+    return a, b, mapa
+
+
+def test_enlace_de_la_oferta_en_pagina_compartida_es_el_recuento(tmp_path):
+    v = _vault(tmp_path)
+    P = "100000000000951"
+    a, b, mapa = _dos_ofertas_en_una_pagina(P, 95000)
+    frase_a = url_biblioteca("RO", q="Fișe de matematică", page_id=P)
+    c = ClientePorUrl({
+        url_biblioteca("RO", page_id=P): ok(a[:4] + b[:4], total=18, completo=False),
+        frase_a: ok(a, total=9),
+        url_biblioteca("RO", q="Povești pentru somn", page_id=P): ok(b, total=9),
+    })
+    e = ejecutar(v, "oferta", [], "tomi", 3, page_ids=[P], paises=["RO"], cliente=c, resolver=resolver_fijo(mapa),
+                 hoy=HOY)
+    ra = next(r for r in e.resultados if r.oferta.clave == "hotmart:A1")
+    assert ra.enlace == frase_a
+    meta, cuerpo = frontmatter.leer(v / "wiki/ofertas" / f"{ra.oferta.oferta_id}.md")
+    assert meta["paises"]["RO"]["link_biblioteca"] == frase_a == meta["fuente"]
+    assert meta["paises"]["RO"]["pagina"] == url_biblioteca("RO", page_id=P)
+    assert f"página: {url_biblioteca('RO', page_id=P)}" in cuerpo
+    # la ficha del competidor guarda las cifras de cada oferta aparte y el total de la página
+    comp, _ = frontmatter.leer(v / "wiki/competidores" / f"{P}.md")
+    assert comp["total"] == 18
+    ids = {r.oferta.oferta_id for r in e.resultados}
+    assert set(comp["cifras"]) == ids
+    assert all(comp["cifras"][oid]["RO"]["c7"] == 9 for oid in ids)
+    assert comp["cifras"][ra.oferta.oferta_id]["RO"]["fuente"] == frase_a
+
+
+def test_pagina_completa_con_otra_oferta_lo_dice_junto_al_enlace(tmp_path):
+    v = _vault(tmp_path)
+    P = "100000000000952"
+    a, b, mapa = _dos_ofertas_en_una_pagina(P, 96000)
+    c = ClientePorUrl({url_biblioteca("RO", page_id=P): ok(a + b[:6], total=15)})  # recuentos: vacíos
+    e = ejecutar(v, "oferta", [], "tomi", 3, page_ids=[P], paises=["RO"], cliente=c, resolver=resolver_fijo(mapa),
+                 hoy=HOY)
+    ra = next(r for r in e.resultados if r.oferta.clave == "hotmart:A1")
+    assert ra.enlace == url_biblioteca("RO", page_id=P)
+    _, cuerpo = frontmatter.leer(v / "wiki/ofertas" / f"{ra.oferta.oferta_id}.md")
+    assert "la página lleva otras ofertas: de los 15 anuncios del enlace, 9 son de esta (destino a-kit.example)" in cuerpo
+
+
+def test_hueco_actualiza_las_lineas_del_pais_en_la_ficha(tmp_path):
+    from ejemplos import ejecucion_ejemplo
+    from trovify.caza.salida import escribir
+    v = _vault(tmp_path)
+    escribir(v, ejecucion_ejemplo())
+    P = "100000000000001"
+    en_ingles = [replace(a, texto="Printable worksheets for kids, download the PDF and learn at home every day.")
+                 for a in viejos(P, 3, 60, 97000)]
+    c = ClientePorUrl({url_biblioteca("RO", page_id=P): ok(en_ingles)})
+    orquestador.medir_hueco(v, "o-ejemplo", "RO", ["fise de lucru", "fise pentru copii"], cliente=c,
+                                      hoy=HOY)
+    meta, cuerpo = frontmatter.leer(v / "wiki/ofertas/o-ejemplo.md")
+    assert "Hueco en RO: sí" in cuerpo
+    assert "Decisión en RO: **B** — nota 62,4 < 70 para A\n" in cuerpo
+    assert "Estado: **B** — nota 62,4 < 70 para A\n" in cuerpo
+    assert meta["fuente"] == meta["paises"]["RO"]["link_biblioteca"]
