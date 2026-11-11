@@ -118,7 +118,11 @@ def _ejecutar_eleccion(args: argparse.Namespace) -> int:
     pais = args.pais.strip().upper()
     meta, _ = frontmatter.leer(vault / "productos" / args.producto / "PRODUCTO.md")
     estado = ((meta.get("paises") or {}).get(pais) or {}).get("estado")
-    if estado == "aprobado":
+    if estado != "aprobado" and "no está en tus mercados" in ruta.read_text(encoding="utf-8"):
+        print(f"{pais} no está en config/mercados.yaml: tu decisión queda escrita con tu cita, pero {pais} "
+              "no pasa a «aprobado». Si es una errata, vuelve a elegir con el código bueno; si no, añade "
+              "el país a config/mercados.yaml y vuelve a elegir.")
+    elif estado == "aprobado":
         print(f"{pais} queda «aprobado» en productos/{args.producto}/PRODUCTO.md. La zona horaria de "
               "la cuenta publicitaria (paso 06 de /arranque) será la de ese país.")
     else:

@@ -270,3 +270,22 @@ def test_que_medir_en_el_informe_y_sin_recomendado(tmp_path):
     assert "no se recomienda ninguno" in texto
     meta, _ = leer(escribir_auditoria(vault(tmp_path), "o-ejemplo", ps, HOY))
     assert meta["recomendado"] is None
+
+
+def test_ficha_sin_estado_no_dice_que_no_se_vende(tmp_path):
+    v = vault(tmp_path)
+    o = oferta_ejemplo()
+    del o["estado"]
+    escribir(v / "wiki/ofertas/o-ejemplo.md", o, "")
+    texto = escribir_auditoria(v, "o-ejemplo", paises_ejemplo(), HOY).read_text()
+    assert "Ya se vende (la caza la dejó en A o B): **pendiente** — la ficha no tiene decisión de la caza" in texto
+
+
+def test_elegir_un_pais_fuera_de_mercados_avisa_y_no_aprueba(tmp_path):
+    v = vault(tmp_path)
+    p = escribir_auditoria(v, "o-ejemplo", paises_ejemplo(), HOY).parent.name
+    d = registrar_eleccion(v, p, "RU", None, "Rusia, sin duda", HOY)
+    texto = d.read_text()
+    assert "Rusia, sin duda" in texto and "Advertencia: RU no está en tus mercados" in texto
+    meta, _ = leer(v / "productos" / p / "PRODUCTO.md")
+    assert (meta["paises"].get("RU") or {}).get("estado") != "aprobado"

@@ -149,3 +149,8 @@ def test_sin_pais_recomendable_dice_que_medir():
     assert len(lineas) == 2
     assert lineas[0].startswith("RO: no medido: faltan las frases") and "--frases RO:" in lineas[0]
     assert lineas[1].startswith("CZ: no medido: cuota del día agotada") and "mañana" in lineas[1]
+
+
+def test_ficha_sin_decision_de_la_caza_queda_pendiente():
+    assert tres_senales("", [pa("RO", 90, True)])["ya_se_vende"] is None
+    assert tres_senales(None, [pa("RO", 90, True)])["ya_se_vende"] is None

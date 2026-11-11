@@ -491,7 +491,7 @@ def escribir_auditoria(vault: Path, oferta_id: str, paises: list[PaisAuditado], 
     p_id = producto_para(vault, oferta_id, slug_de_oferta(oferta_id))
     nombres = [p.pais for p in paises]
     recomendacion = recomendar(paises)
-    senales3 = tres_senales(str(oferta.get("estado") or ""), paises)
+    senales3 = tres_senales(str(oferta.get("estado") or "") or None, paises)
     historial = historial_de(vault, nombres, excluir=p_id)
     texto = render_auditoria(oferta, paises, recomendacion, senales3, historial, hoy, **contexto)
 
@@ -528,6 +528,16 @@ def _ruta_eleccion(dir_: Path, hoy: date) -> Path:
     return ruta
 
 
+def _fuera_de_mercados(vault: Path, pais: str) -> bool:
+    """True si ``pais`` no está en ``config/mercados.yaml`` (una errata como «RU» no se aprueba)."""
+    from trovify.config import mercados as cfg_mercados
+
+    ruta = Path(vault) / "config" / "mercados.yaml"
+    if not ruta.exists():
+        return False  # sin la lista no se puede saber; los demás avisos siguen valiendo
+    return pais not in cfg_mercados.cargar(ruta)
+
+
 def registrar_eleccion(vault: Path, p_id: str, pais: str, reserva: str | None, cita: str, hoy: date,
                        senales3: dict[str, bool] | None = None) -> Path:
     """Escribe ``productos/<p-id>/decisiones/AAAA-MM-DD-eleccion.md`` con la cita literal del usuario
@@ -558,6 +568,10 @@ def registrar_eleccion(vault: Path, p_id: str, pais: str, reserva: str | None, c
     datos = datos if isinstance(datos, dict) else {}
 
     avisos: list[str] = []
+    fuera_de_mercados = _fuera_de_mercados(vault, pais)
+    if fuera_de_mercados:
+        avisos.append(f"Advertencia: {pais} no está en tus mercados (config/mercados.yaml); la decisión queda "
+                      "escrita, pero el país no pasa a «aprobado»")
     if not datos:
         avisos.append(f"Advertencia: {pais} no está en la última auditoría de este producto")
     if datos.get("no_tirar"):
@@ -601,7 +615,7 @@ def registrar_eleccion(vault: Path, p_id: str, pais: str, reserva: str | None, c
     ruta = _ruta_eleccion(dir_decisiones, hoy)
     frontmatter.escribir(ruta, meta, "\n".join(lineas))
 
-    if actual in APROBABLES:
+    if actual in APROBABLES and not fuera_de_mercados:
         for otro, d in estados.items():
             if otro != pais and d.get("estado") == "aprobado":
                 d["estado"] = "auditado"  # 1 producto × 1 país: la elección nueva sustituye a la anterior

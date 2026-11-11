@@ -142,3 +142,12 @@ def test_avisa_si_las_frases_no_se_usaron_por_un_hueco_reutilizado(vault, monkey
     captura = capsys.readouterr()
     assert "RO: hueco medido el 2026-11-08" in captura.out
     assert "Búsquedas usadas hoy: no medido" in captura.out
+
+
+def test_elegir_un_pais_fuera_de_mercados_sale_con_0_y_lo_explica(vault, monkeypatch, capsys):
+    monkeypatch.setattr(caza_orq, "hoy_negocio", lambda: date(2026, 11, 10))
+    p = escribir_auditoria(vault, "o-ejemplo", paises_ejemplo(), date(2026, 11, 10)).parent.name
+    assert cli.main(["auditar", "elegir", "--producto", p, "--pais", "ru", "--cita", "Rusia"]) == 0
+    out = capsys.readouterr().out
+    assert "Advertencia: RU no está en tus mercados" in out
+    assert "no pasa a «aprobado»" in out and "queda «aprobado»" not in out

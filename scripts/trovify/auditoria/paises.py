@@ -66,7 +66,8 @@ def no_tirar(hueco: HuecoPais) -> str | None:
     return None
 
 
-def tres_senales(decision_caza: str, paises: list[PaisAuditado]) -> dict[str, bool | None]:
+def tres_senales(decision_caza: str | None, paises: list[PaisAuditado]) -> dict[str, bool | None]:
+    """``ya_se_vende`` es None («pendiente») si la ficha no trae la decisión de la caza."""
     huecos = [p.hueco.hueco for p in paises]
     if any(h is True for h in huecos):
         hueco = True
@@ -75,7 +76,7 @@ def tres_senales(decision_caza: str, paises: list[PaisAuditado]) -> dict[str, bo
     else:
         hueco = None
     return {
-        "ya_se_vende": decision_caza in ("A", "B"),
+        "ya_se_vende": decision_caza in ("A", "B") if decision_caza else None,
         "hueco_por_pais": hueco,
         # pendiente: la confirma la autopsia de /modelar (Fase 2)
         "se_puede_mejorar": None,
