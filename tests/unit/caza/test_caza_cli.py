@@ -78,7 +78,7 @@ def test_hueco_cli(vault, monkeypatch, capsys):
 
     def falso(v, oferta, pais, frases, **kw):
         vistas.update(oferta=oferta, pais=pais, frases=frases, **kw)
-        return HuecoPais(pais, Medida(0), "sin_traducir", True, ["u"]), None
+        return HuecoPais(pais, Medida(0), "sin_traducir", True, ["u"]), None, None
 
     monkeypatch.setattr(orquestador, "medir_hueco", falso)
     assert cli.main(["caza", "hueco", "--oferta", "o-x", "--pais", "RO", "--frase", "a b", "--frase", "c d"]) == 0
@@ -90,7 +90,8 @@ def test_hueco_cli_parada(vault, monkeypatch, capsys):
     from trovify.caza.hueco import HuecoPais
     from trovify.caza.senales import Medida
     monkeypatch.setattr(orquestador, "medir_hueco", lambda *a, **k: (
-        HuecoPais("RO", Medida(None, "no medido: bloqueo"), "no_medido", None, []), "bloqueo de Meta: captcha"))
+        HuecoPais("RO", Medida(None, "no medido: bloqueo"), "no_medido", None, []), "bloqueo de Meta: captcha",
+        "meta"))
     assert cli.main(["caza", "hueco", "--oferta", "o-x", "--pais", "RO", "--frase", "a b", "--frase", "c d"]) == 1
     assert "PARADA" in capsys.readouterr().out
 
@@ -124,3 +125,58 @@ def test_perfil_desconocido_sale_con_2_sin_buscar(vault, capsys, monkeypatch):
                      "--perfil", "Tommi"]) == 2
     err = capsys.readouterr().err
     assert "perfil desconocido" in err and "tomi, santino, europa_caro" in err
+
+
+# --- ola final: I4/I5 finales de la ejecución y etiqueta de vigilancia --------------------------
+
+
+def test_rutina_con_cuota_agotada_termina_bien(vault, monkeypatch, capsys):
+    from dataclasses import replace
+    e = replace(ejecucion_ejemplo(), cuota="Cuota de la rutina agotada: 20 de 20", pendientes=3,
+                pendientes_por={"tope_nuevas": 1, "cuota": 2})
+    monkeypatch.setattr(orquestador, "ejecutar", lambda *a, **k: e)
+    monkeypatch.setattr(orquestador, "hoy_negocio", lambda: date(2026, 11, 10))
+    assert cli.main(["caza", "ejecutar", "--modo", "barrido", "--region", "europa", "--consulta", "RO:x",
+                     "--rutina"]) == 0
+    out = capsys.readouterr().out
+    assert "PARADA" not in out and "Cuota del día agotada" in out
+    assert "Sin evaluar: 3 candidatas: 1 por el tope" in out and "2 porque no quedaban búsquedas hoy" in out
+    assert (vault / "rutinas/log/2026-11-10/ok").exists()
+
+
+def test_racha_de_errores_es_interrupcion_no_parada(vault, monkeypatch, capsys):
+    from dataclasses import replace
+    e = replace(ejecucion_ejemplo(), parada="ParadaPorErrores: 3 errores", tipo_parada="errores")
+    monkeypatch.setattr(orquestador, "ejecutar", lambda *a, **k: e)
+    monkeypatch.setattr(orquestador, "hoy_negocio", lambda: date(2026, 11, 10))
+    assert cli.main(["caza", "ejecutar", "--modo", "vigilar", "--rutina"]) == 3
+    out = capsys.readouterr().out
+    assert "PARADA" not in out and "INTERRUMPIDA" in out
+    assert not (vault / "rutinas/log/2026-11-10/ok").exists()
+    assert "interrumpida" in (vault / "rutinas/log/2026-11-10/caza.md").read_text()
+
+
+def test_vigilar_sin_region_se_llama_vigilancia_y_sin_tope_fuera_de_la_rutina(vault, monkeypatch):
+    vistas = {}
+    monkeypatch.setattr(orquestador, "ejecutar", lambda *a, **k: vistas.update(k) or ejecucion_ejemplo())
+    assert cli.main(["caza", "ejecutar", "--modo", "vigilar"]) == 0
+    assert vistas["region"] == "vigilancia" and vistas["max_vigiladas"] is None
+    vistas.clear()
+    assert cli.main(["caza", "ejecutar", "--modo", "vigilar", "--region", "europa", "--rutina"]) == 0
+    assert vistas["region"] == "vigilancia" and vistas["max_vigiladas"] == 6
+
+
+def test_region_obligatoria_fuera_de_vigilar(vault, capsys):
+    assert cli.main(["caza", "ejecutar", "--modo", "nicho", "--consulta", "RO:x"]) == 2
+    assert "--region" in capsys.readouterr().err
+
+
+def test_hueco_cli_cuota_no_es_parada(vault, monkeypatch, capsys):
+    from trovify.caza.hueco import HuecoPais
+    from trovify.caza.senales import Medida
+    monkeypatch.setattr(orquestador, "medir_hueco", lambda *a, **k: (
+        HuecoPais("RO", Medida(None, "no medido: cuota"), "no_medido", None, []),
+        "cuota del día agotada (Presupuesto del día agotado)", "cuota"))
+    assert cli.main(["caza", "hueco", "--oferta", "o-x", "--pais", "RO", "--frase", "a b", "--frase", "c d"]) == 0
+    out = capsys.readouterr().out
+    assert "PARADA" not in out and "cuota" in out.lower()

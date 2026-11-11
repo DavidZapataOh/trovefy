@@ -73,13 +73,15 @@ def buscar_claude() -> str | None:
 
 
 def registrar_ejecucion(vault: Path, rutina: str, dia: date, texto: str, ok: bool,
-                        ahora: datetime | None = None) -> Path:
-    """Añade el resumen a ``rutinas/log/<dia>/<rutina>.md``; deja ``ok`` solo si no hubo parada."""
+                        ahora: datetime | None = None, estado: str | None = None) -> Path:
+    """Añade el resumen a ``rutinas/log/<dia>/<rutina>.md``; deja ``ok`` solo si terminó bien.
+
+    ``estado`` es la etiqueta de la entrada (por defecto «ok» o «parada»; p. ej. «interrumpida»)."""
     carpeta = Path(vault) / "rutinas" / "log" / dia.isoformat()
     ruta = carpeta / f"{rutina}.md"
     previo = ruta.read_text(encoding="utf-8") if ruta.exists() else f"# Rutina {rutina} · {dia.isoformat()}\n"
     hora = (ahora or datetime.now(ZONA_NEGOCIO)).astimezone(ZONA_NEGOCIO)
-    estado = "ok" if ok else "parada"
+    estado = estado or ("ok" if ok else "parada")
     escribir_atomico(ruta, f"{previo.rstrip()}\n\n## {hora:%H:%M} COT · {estado}\n\n{texto.rstrip()}\n")
     marca = carpeta / "ok"
     if ok:

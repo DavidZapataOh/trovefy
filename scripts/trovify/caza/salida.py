@@ -107,9 +107,17 @@ class Ejecucion:
     creditos: int | None = None
     consultas: list[Consulta] = field(default_factory=list)
     vara: tuple[str, float] | None = None
-    # Motivo por el que la ejecución se detuvo (bloqueo de Meta, errores seguidos, presupuesto del
-    # día); None si terminó. Lo que quedó sin medir sale en ``errores`` como «no medido: …».
+    # Motivo por el que la ejecución se detuvo (bloqueo de Meta o, solo en este proceso, errores
+    # seguidos o navegador caído); None si terminó. Lo que quedó sin medir sale en ``errores``.
     parada: str | None = None
+    # «meta» (bloqueo de Meta: dura el día) o «errores» (red/Firecrawl/navegador: solo este proceso).
+    tipo_parada: str | None = None
+    # Motivo si se acabó la cuota de búsquedas del día (tuya o de la rutina): es un final normal, no
+    # una parada; lo que no cupo queda pendiente para otra caza.
+    cuota: str | None = None
+    # Candidatas sin evaluar por motivo: «tope_nuevas» (R14), «cuota» (búsquedas del día) y
+    # «landing_sin_abrir» (tope de landings por ejecución). La suma es ``pendientes``.
+    pendientes_por: dict[str, int] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------- formato
@@ -433,6 +441,25 @@ def _cabecera_via(e: Ejecucion) -> str:
     return f"{texto} · créditos de Firecrawl: {creditos}"
 
 
+_PENDIENTES = {
+    "tope_nuevas": "por el tope de ofertas nuevas por ejecución (R14)",
+    "cuota": "porque no quedaban búsquedas hoy (cuota del día)",
+    "landing_sin_abrir": "con la landing sin abrir (tope de landings por ejecución)",
+}
+
+
+def texto_pendientes(e: Ejecucion) -> str:
+    """«Sin evaluar: N candidatas …» con cada motivo y cuántas por él."""
+    por = {k: n for k, n in (e.pendientes_por or {"tope_nuevas": e.pendientes}).items() if n}
+    nombre = "candidata" if e.pendientes == 1 else "candidatas"
+    if len(por) == 1:
+        (k, _), = por.items()
+        detalle = f"{e.pendientes} {nombre} {_PENDIENTES.get(k, k)}"
+    else:
+        detalle = f"{e.pendientes} {nombre}: " + ", ".join(f"{n} {_PENDIENTES.get(k, k)}" for k, n in por.items())
+    return f"Sin evaluar: {detalle}; salen en la próxima caza."
+
+
 def _modelable(r: ResultadoOferta) -> bool | None:
     """True/False si la landing se verificó; None si no hay destino verificado."""
     d = r.oferta.destino
@@ -483,11 +510,7 @@ def render_informe(e: Ejecucion) -> str:
         f"- Descartadas: {_resumen(e, 'descartada')}",
     ]
     if e.pendientes:
-        lineas.append(
-            f"- Sin evaluar: {e.pendientes} "
-            f"{'candidata' if e.pendientes == 1 else 'candidatas'} por el tope de ofertas nuevas por "
-            "ejecución (R14); salen en la próxima caza."
-        )
+        lineas.append(f"- {texto_pendientes(e)}")
     lineas.append("")
 
     for titulo, estado in (("Ofertas A", "A"), ("Ofertas B", "B"), ("Observar", "observar")):

@@ -226,11 +226,12 @@ def test_excepcion_del_cliente_detiene_la_ejecucion(tmp_path):
 
 
 def test_presupuesto_agotado_detiene_y_lo_dice(tmp_path):
+    # ola final I4: agotar la cuota no es una parada, pero se dice y no se busca más
     v = _vault(tmp_path)
     c = ClientePorUrl({}, excepcion_en={url_biblioteca("RO", q="uno"): PresupuestoAgotado("Presupuesto del día agotado")})
     e = ejecutar(v, "nicho", [("RO", "uno")], "tomi", 3, cliente=c, resolver=resolver_fijo({}), hoy=HOY,
                  region="europa")
-    assert e.parada and "PresupuestoAgotado" in e.parada and e.consultas[0].resultados is None
+    assert e.parada is None and "Presupuesto del día agotado" in e.cuota and e.consultas[0].resultados is None
     assert "Presupuesto del día agotado" in (v / "raw/2026-11-10/caza-europa.md").read_text()
 
 
@@ -487,7 +488,7 @@ def test_hueco_actualiza_la_ficha_y_recalcula(tmp_path):
     en_ingles = [replace(a, texto="Printable worksheets for kids, download the PDF and learn at home every day.")
                  for a in viejos(P, 3, 60, 13000)]
     c = ClientePorUrl({url_biblioteca("RO", page_id=P): ok(en_ingles)})
-    h, parada = orquestador.medir_hueco(v, "o-hueco", "RO", ["fise de lucru", "fise pentru copii"], cliente=c, hoy=HOY)
+    h, parada, _ = orquestador.medir_hueco(v, "o-hueco", "RO", ["fise de lucru", "fise pentru copii"], cliente=c, hoy=HOY)
     assert h.hueco is True and h.original == "sin_traducir" and parada is None
     meta, cuerpo = frontmatter.leer(v / "wiki/ofertas/o-hueco.md")
     assert meta["huecos"]["RO"]["hueco"] is True and meta["huecos"]["RO"]["enlaces"]
@@ -501,7 +502,7 @@ def test_hueco_no_comprobado_no_inventa_a(tmp_path):
     _ficha_medida(v, "o-hueco2", P)
     bloqueado = ResultadoBusqueda("bloqueado", "", None, [], "Meta mostró captcha", datetime.now(UTC))
     c = ClientePorUrl({url_biblioteca("RO", q="fise de lucru"): bloqueado})
-    h, _ = orquestador.medir_hueco(v, "o-hueco2", "RO", ["fise de lucru", "fise pentru copii"], cliente=c, hoy=HOY)
+    h, _, _ = orquestador.medir_hueco(v, "o-hueco2", "RO", ["fise de lucru", "fise pentru copii"], cliente=c, hoy=HOY)
     assert h.hueco is None
     meta, _ = frontmatter.leer(v / "wiki/ofertas/o-hueco2.md")
     assert meta["estado"] == "B" and meta["huecos"]["RO"]["competencia"] is None
@@ -655,7 +656,7 @@ def test_hueco_informa_la_parada(tmp_path):
     _ficha_medida(v, "o-hp", P)
     bloqueado = ResultadoBusqueda("bloqueado", "", None, [], "Meta mostró captcha", datetime.now(UTC))
     c = ClientePorUrl({url_biblioteca("RO", q="fise de lucru"): bloqueado})
-    h, parada = orquestador.medir_hueco(v, "o-hp", "RO", ["fise de lucru", "fise pentru copii"], cliente=c,
+    h, parada, _ = orquestador.medir_hueco(v, "o-hp", "RO", ["fise de lucru", "fise pentru copii"], cliente=c,
                                         hoy=HOY)
     assert h.hueco is None and parada and "captcha" in parada
 
@@ -720,7 +721,7 @@ def test_strike_no_cuenta_si_la_oferta_no_se_midio_entera(tmp_path):
     c = ClientePorUrl({url_biblioteca("RO", page_id=P1): ok(viejos(P1, 2, 2, 31000))},
                       excepcion_en={url_biblioteca("RO", page_id=P2): PresupuestoAgotado("agotado")})
     e = ejecutar(v, "vigilar", [], "tomi", 3, cliente=c, resolver=resolver_fijo({url: destino_ok(url)}), hoy=HOY)
-    assert e.resultados[0].decision == "observar" and e.parada
+    assert e.resultados[0].decision == "observar" and e.cuota
     meta, _ = frontmatter.leer(v / "wiki/ofertas" / f"{oid}.md")
     assert meta["strikes"] == 2 and meta["estado"] != "podada"
 
@@ -827,3 +828,99 @@ def test_parada_por_errores_antigua_del_archivo_no_bloquea(tmp_path):
     p = Presupuesto.desde_umbrales(v, HOY)
     p.antes_de_buscar()
     assert p.parada_del_dia() is None
+
+
+# --- ola final: I4 agotar la cuota es un final normal -------------------------------------------
+
+
+class ClienteConPresupuesto(ClientePorUrl):
+    """Como ClientePorUrl, pero con el presupuesto real del día (contador en el vault de la prueba)."""
+
+    def __init__(self, respuestas, presupuesto):
+        super().__init__(respuestas)
+        self.presupuesto = presupuesto
+
+    def buscar(self, pais, q=None, page_id=None, estado="active", max_anuncios=60, completa=False):
+        self.presupuesto.antes_de_buscar()
+        url = url_biblioteca(pais, q, page_id, estado)
+        self.llamadas.append(url)
+        r = self.respuestas.get(url)
+        if r is None:
+            return ResultadoBusqueda("vacio", url, 0, [], None, CAPTURA, True, "firecrawl", 1, total_exacto=True)
+        return replace(r, url=url)
+
+
+def _usadas(v, usadas, rutina=0):
+    ruta = v / "data/caza/presupuesto/2026-11-10.json"
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    ruta.write_text(json.dumps({"usadas": usadas, "rutina": rutina}))
+
+
+def _mercado_de_ofertas(n, base=60000):
+    """n páginas, cada una con su oferta (landing propia), y las búsquedas por palabra que las traen."""
+    respuestas, mapa, muestra = {}, {}, []
+    for i in range(n):
+        p = f"1000000000007{i:02d}"
+        url = f"https://kit{i}.example/"
+        ads = viejos(p, 10 + i, 20, base + 100 * i, destino=url)
+        respuestas[url_biblioteca("RO", page_id=p)] = ok(ads)
+        mapa[url] = destino_ok(url, checkout=f"https://pay.hotmart.com/Q{i}")
+        muestra += ads[:2]
+    return respuestas, mapa, muestra
+
+
+def test_cuota_de_la_rutina_agotada_a_mitad_de_barrido_es_final_normal(tmp_path):
+    v = _vault(tmp_path)
+    _usadas(v, 15, rutina=15)  # vigilar ya gastó 15 de las 20 de la rutina
+    respuestas, mapa, muestra = _mercado_de_ofertas(6)
+    frases = ["fise a", "fise b", "fise c", "fise d"]
+    for f in frases:
+        respuestas[url_biblioteca("RO", q=f)] = ok(muestra, total=200, completo=False, exacto=False)
+    p = Presupuesto.desde_umbrales(v, HOY, max_rutina=20)
+    c = ClienteConPresupuesto(respuestas, p)
+    e = ejecutar(v, "barrido", [("RO", f) for f in frases], "tomi", 3, cliente=c, resolver=resolver_fijo(mapa),
+                 hoy=HOY, region="europa", max_busquedas_rutina=20)
+    assert len(c.llamadas) <= 5
+    assert e.parada is None and e.cuota
+    assert e.pendientes >= 1 and e.pendientes_por.get("cuota", 0) >= 1
+    texto = orquestador.resumen(e, 20)
+    assert "PARADA" not in texto and "cuota" in texto.lower() and "pendiente" in texto.lower()
+
+
+def test_usuario_con_10_busquedas_evalua_algo(tmp_path):
+    v = _vault(tmp_path)
+    _usadas(v, 20)
+    respuestas, mapa, muestra = _mercado_de_ofertas(6, base=61000)
+    frases = ["fise a", "fise b", "fise c", "fise d"]
+    for f in frases:
+        respuestas[url_biblioteca("RO", q=f)] = ok(muestra, total=200, completo=False, exacto=False)
+    p = Presupuesto.desde_umbrales(v, HOY)
+    c = ClienteConPresupuesto(respuestas, p)
+    e = ejecutar(v, "nicho", [("RO", f) for f in frases], "tomi", 3, cliente=c, resolver=resolver_fijo(mapa),
+                 hoy=HOY, region="europa")
+    assert len(c.llamadas) <= 10 and e.parada is None
+    assert [r for r in e.resultados if r.descarte is None]  # al menos una oferta nueva medida
+    assert e.pendientes_por.get("cuota", 0) >= 1
+
+
+def test_cuota_agotada_por_sorpresa_no_es_parada(tmp_path):
+    v = _vault(tmp_path)
+    c = ClientePorUrl({}, excepcion_en={url_biblioteca("RO", q="dos"): PresupuestoAgotado("Cuota de la rutina agotada")})
+    e = ejecutar(v, "nicho", [("RO", "uno"), ("RO", "dos"), ("RO", "tres")], "tomi", 3, cliente=c,
+                 resolver=resolver_fijo({}), hoy=HOY, region="europa")
+    assert e.parada is None and "Cuota de la rutina agotada" in e.cuota
+    assert url_biblioteca("RO", q="tres") not in c.llamadas
+    assert e.consultas[2].resultados is None
+    assert any("cuota del día agotada" in x for x in e.errores)
+
+
+def test_vigilar_planifica_por_la_cuota(tmp_path):
+    v = _vault(tmp_path)
+    for i in range(4):
+        _ficha(v, f"o-v{i}", f"10000000000080{i}")
+    c = ClientePorUrl({})
+    c.presupuesto.restantes = lambda: 2
+    e = ejecutar(v, "vigilar", [], "tomi", 3, cliente=c, resolver=resolver_fijo({}), hoy=HOY)
+    assert len(c.llamadas) == 2 and e.parada is None
+    assert e.pendientes_por.get("cuota") == 2
+    assert any("cuota del día agotada" in x for x in e.errores)

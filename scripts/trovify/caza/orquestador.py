@@ -36,7 +36,12 @@ from trovify.caza.hueco import HuecoPais, hueco_pais
 from trovify.caza.modelo import AnuncioBiblioteca, ResultadoBusqueda
 from trovify.caza.nota import Nota, calcular_nota, decidir, validar_perfil
 from trovify.caza.oferta import Oferta, agrupar, marcar_original
-from trovify.caza.presupuesto import ParadaPorErrores, PresupuestoAgotado
+from trovify.caza.presupuesto import (
+    ContadorIlegible,
+    ParadaDelDia,
+    ParadaPorErrores,
+    PresupuestoAgotado,
+)
 from trovify.caza.salida import (
     Consulta,
     Ejecucion,
@@ -46,6 +51,7 @@ from trovify.caza.salida import (
     _tabla_huecos,
     escribir,
     formatear_medida,
+    texto_pendientes,
 )
 from trovify.caza.senales import VENTANA_FOTO, Medida, calcular_senales, crecimiento
 from trovify.config import mercados as cfg_mercados
@@ -146,12 +152,31 @@ def resolver_por_defecto() -> Resolver:
 # --- búsquedas con parada -------------------------------------------------------------------
 
 
+def clasificar_corte(exc: BaseException) -> tuple[str, str]:
+    """``(tipo, motivo)`` de una excepción que corta las búsquedas.
+
+    - ``meta``: Meta bloqueó (ahora o antes hoy): dura el día entero.
+    - ``errores``: racha de errores, navegador que no arranca o contador ilegible: solo este proceso.
+    - ``cuota``: se acabaron las búsquedas del día (tuyas o de la rutina): un final normal.
+    """
+    motivo = f"{type(exc).__name__}: {exc}"
+    if isinstance(exc, (SesionBloqueada, ParadaDelDia)):
+        return "meta", motivo
+    if isinstance(exc, NavegadorError):
+        return "errores", f"navegador no disponible: {exc}"
+    if isinstance(exc, (ParadaPorErrores, ContadorIlegible)):
+        return "errores", motivo
+    return "cuota", str(exc)
+
+
 class _Buscador:
-    """Envuelve el cliente: tras la primera parada no vuelve a llamarlo nunca."""
+    """Envuelve el cliente: tras la primera parada o con la cuota agotada no vuelve a llamarlo nunca."""
 
     def __init__(self, cliente):
         self.cliente = cliente
         self.parada: str | None = None
+        self.tipo_parada: str | None = None  # «meta» o «errores»
+        self.cuota: str | None = None  # motivo si se acabó la cuota del día (final normal)
         self.via: Counter[str] = Counter()
         self.creditos = 0
         self.creditos_desconocidos = False
@@ -162,18 +187,26 @@ class _Buscador:
     def _presupuesto(self):
         return getattr(self.cliente, "presupuesto", None)
 
-    def buscar(self, pais: str, **kw) -> ResultadoBusqueda | None:
+    @property
+    def corte(self) -> str | None:
+        """Por qué ya no se busca: la parada o la cuota agotada; None si se puede seguir."""
         if self.parada is not None:
+            return self.parada
+        return f"cuota del día agotada ({self.cuota})" if self.cuota is not None else None
+
+    def buscar(self, pais: str, **kw) -> ResultadoBusqueda | None:
+        if self.corte is not None:
             return None
         p = self._presupuesto()
         antes = p.usadas if p is not None else None
         try:
             r = self.cliente.buscar(pais, max_anuncios=_MAX_ANUNCIOS, **kw)
-        except _PARADAS as exc:
-            self.parada = f"{type(exc).__name__}: {exc}"
-            return None
-        except NavegadorError as exc:  # Chromium no arranca: parada controlada, nunca un fallo
-            self.parada = f"navegador no disponible: {exc}"
+        except (*_PARADAS, NavegadorError) as exc:  # Chromium que no arranca: parada controlada
+            tipo, motivo = clasificar_corte(exc)
+            if tipo == "cuota":
+                self.cuota = motivo
+            else:
+                self.parada, self.tipo_parada = motivo, tipo
             return None
         navego = p is None or p.usadas > antes
         if navego:
@@ -188,12 +221,12 @@ class _Buscador:
                 self.vacios += 1
         if r.estado == "bloqueado":
             self.bloqueos += 1
-            self.parada = f"bloqueo de Meta: {r.motivo or 'acceso bloqueado'}"
+            self.parada, self.tipo_parada = f"bloqueo de Meta: {r.motivo or 'acceso bloqueado'}", "meta"
         return r
 
     def restantes(self) -> int | None:
         """Búsquedas que quedan hoy a este proceso; None si el cliente no lo sabe."""
-        if self.parada is not None:
+        if self.corte is not None:
             return 0
         f = getattr(self._presupuesto(), "restantes", None)
         return f() if callable(f) else None
@@ -388,7 +421,7 @@ def resumen(e: Ejecucion, minimo_palabra: float, usadas_hoy: tuple[int, int] | N
     else:
         lineas.append("Descartadas: ninguna")
     if e.pendientes:
-        lineas.append(f"Sin evaluar (tope de nuevas de R14 o pocas búsquedas restantes hoy): {e.pendientes}")
+        lineas.append(texto_pendientes(e))
     paises: dict[str, list[float]] = {}
     for r in e.resultados:
         if r.decision in ("A", "B", "observar"):
@@ -407,8 +440,15 @@ def resumen(e: Ejecucion, minimo_palabra: float, usadas_hoy: tuple[int, int] | N
     rinden = [c for c in e.consultas if c not in flojas and c.resultados is not None]
     if rinden:
         lineas.append("Palabras que rinden: " + ", ".join(f"«{c.palabra}» ({c.pais}: {c.resultados})" for c in rinden))
-    if e.parada:
-        lineas += ["", f"PARADA: {e.parada}. No se buscó nada más; lo que faltaba quedó «no medido»."]
+    if e.parada and e.tipo_parada == "errores":
+        lineas += ["", (f"INTERRUMPIDA: {e.parada}. No es un bloqueo de Meta: esta ejecución no buscó nada más y "
+                        "lo que faltaba quedó «no medido»; se puede volver a cazar más tarde.")]
+    elif e.parada:
+        lineas += ["", (f"PARADA: {e.parada}. Meta bloqueó: no se buscó nada más y lo que faltaba quedó "
+                        "«no medido». Hoy no se vuelve a buscar.")]
+    elif e.cuota:
+        lineas += ["", (f"Cuota del día agotada: {e.cuota}. Es un final normal: "
+                        f"{e.pendientes_por.get('cuota', 0)} quedan pendientes para la próxima caza.")]
     if e.errores:
         lineas += ["", "Avisos:"] + [f"  - {x}" for x in e.errores]
     lineas += ["", f"Informe: wiki/caza/{e.dia.isoformat()}/ · decisión del usuario: wiki/caza/{e.dia.isoformat()}/veredicto.md"]
@@ -474,9 +514,12 @@ class _Corrida:
     # (oferta_id, page_id, pais) → anuncios de la oferta en la página según un recuento con frase
     # completo, con count exacto y sin ningún anuncio ajeno (vale como total exacto de la oferta).
     recuentos: dict[tuple[str, str, str], int] = field(default_factory=dict)
+    sin_abrir: set[str] = field(default_factory=set)  # enlaces de landings sin abrir por el tope
+    # La planificación dejó trabajo fuera porque no quedaban búsquedas hoy (sin llegar a agotarlas).
+    cuota_plan: str | None = None
 
     def sin_medir(self, que: str) -> None:
-        self.errores.append(f"no medido: {self.b.parada}: {que}")
+        self.errores.append(f"no medido: {self.b.corte}: {que}")
 
     # paso 2
     def consultas(self, consultas: list[tuple[str, str]]):
@@ -538,10 +581,11 @@ class _Corrida:
                 abiertas += 1
                 self._resolver(url)
         quedan = {u for cola in colas for u in cola if u not in intentadas}
+        self.sin_abrir = quedan
         if quedan:
             self.errores.append(
                 f"no medido: {len(quedan)} landings sin abrir por el tope caza.max_destinos_por_ejecucion "
-                f"({maximo}); sus anuncios quedan agrupados por página"
+                f"({maximo}); sus anuncios quedan sin evaluar (sin ficha) hasta que se abran en otra caza"
             )
 
     def _resolver(self, url: str) -> None:
@@ -692,31 +736,58 @@ def ejecutar(
     # 2) búsquedas por palabra
     salida_consultas, de_palabras, ids_consulta = c.consultas(list(consultas))
 
-    # 3) recuento por página y país
+    # 3) recuento por página y país, planificado con las búsquedas que quedan hoy (I4: agotar la
+    # cuota es un final normal; lo que no cabe queda pendiente, nunca medido a medias)
+    pendientes_por: Counter[str] = Counter()
     pares: list[tuple[str, str]] = []
     vigiladas: dict[str, dict] = {}
     pares_de: dict[str, list[tuple[str, str]]] = {}
     if modo == "vigilar":
-        vigiladas = _turno_de_vigilancia(c, fichas, hoy, max_vigiladas)
-        for oid, meta in vigiladas.items():
-            pares_de[oid] = []
-            for pais in (meta.get("paises") or {}):
-                if paises and pais not in paises:
-                    continue
-                pares_de[oid] += [(str(p), str(pais)) for p in meta.get("page_ids") or []]
-            pares += pares_de[oid]
+        quedan = c.b.restantes()
+        sin_cuota: list[str] = []
+        for oid, meta in _turno_de_vigilancia(c, fichas, hoy, max_vigiladas).items():
+            propios = list(dict.fromkeys(
+                (str(p), str(pais)) for pais in (meta.get("paises") or {}) if not paises or pais in paises
+                for p in meta.get("page_ids") or []))
+            extra = [x for x in propios if x not in pares]
+            if quedan is not None and len(pares) + len(extra) > quedan:
+                sin_cuota.append(oid)
+                continue
+            vigiladas[oid], pares_de[oid] = meta, propios
+            pares += extra
+        if sin_cuota:
+            c.cuota_plan = f"quedaban {quedan} búsquedas hoy"
+            pendientes_por["cuota"] += len(sin_cuota)
+            c.errores.append(f"no medido: cuota del día agotada: {', '.join(sin_cuota)} se vigilan otro día "
+                             f"(quedaban {quedan} búsquedas); no cuenta como strike")
     for p in page_ids or []:
         pares += [(p, pais) for pais in (paises or ["ALL"])]
     if de_palabras:
         por_par: dict[tuple[str, str], list[AnuncioBiblioteca]] = {}
         for a in de_palabras:
             por_par.setdefault((a.page_id, a.pais), []).append(a)
-        orden = sorted(por_par, key=lambda k: (-_c8(por_par[k], hoy), -len(por_par[k]), k))
+        # Las páginas de fichas ya guardadas van al final: sus ofertas ya se vieron (se informan aparte).
+        conocidas = {str(p) for m in fichas.values() for p in (m.get("page_ids") or [])}
+        orden = sorted(por_par, key=lambda k: (k[0] in conocidas, -_c8(por_par[k], hoy), -len(por_par[k]), k))
+        candidatos = [k for k in orden if k not in pares]
         maximo = int(u["caza.max_destinos_por_ejecucion"].valor)
-        pares += [k for k in orden if k not in pares][:maximo]
-        if len(orden) > maximo:
-            c.errores.append(f"no medido: {len(orden) - maximo} páginas de las búsquedas sin recontar "
+        tope = maximo
+        quedan = c.b.restantes()
+        if quedan is not None:
+            # Se reservan las búsquedas extra de las ofertas nuevas que caben hoy; si no cabe
+            # ninguna, no se recuenta nada (no se gasta en cifras que no se podrían evaluar).
+            libres = max(quedan - len(dict.fromkeys(pares)), 0)
+            caben = min(max_nuevas, libres // (1 + _BUSQUEDAS_POR_NUEVA))
+            tope = min(maximo, libres - _BUSQUEDAS_POR_NUEVA * caben) if caben else 0
+        pares += candidatos[:tope]
+        if len(candidatos) > maximo:
+            c.errores.append(f"no medido: {len(candidatos) - maximo} páginas de las búsquedas sin recontar "
                              f"(tope caza.max_destinos_por_ejecucion: {maximo}); las de más C8 primero")
+        por_cuota = min(len(candidatos), maximo) - min(len(candidatos), tope)
+        if por_cuota > 0:
+            c.cuota_plan = f"quedaban {quedan} búsquedas hoy"
+            c.errores.append(f"no medido: cuota del día agotada: {por_cuota} páginas de las búsquedas sin recontar "
+                             f"(quedaban {quedan} búsquedas; se guardan para medir ofertas nuevas)")
     c.recontar(list(dict.fromkeys(pares)))
 
     pool: dict[tuple[str, str], AnuncioBiblioteca] = {}
@@ -743,20 +814,25 @@ def ejecutar(
 
     # 5) filtros, tope de nuevas, recuento dentro de la página y búsqueda del original
     evaluar: list[tuple[Oferta, filtros.Descarte | None, bool]] = []
-    pendientes = nuevas = 0
+    nuevas = 0
     inactivos: dict[tuple[str, str], list[AnuncioBiblioteca] | None] = {}
     for o in sorted(ofertas, key=lambda x: (-_c8(x.anuncios, hoy), x.oferta_id)):
         if modo == "vigilar" and o.oferta_id not in vigiladas:
             continue  # en vigilar solo se miden las vigiladas
-        descarte = filtros.filtrar(o, ctx)
         es_nueva = o.oferta_id not in fichas
+        if es_nueva and o.clave.startswith("pagina:") and any(a.enlace_destino in c.sin_abrir for a in o.anuncios):
+            # Landing sin abrir por el tope: su clave cambiará cuando se abra; sin ficha hasta entonces.
+            pendientes_por["landing_sin_abrir"] += 1
+            continue
+        descarte = filtros.filtrar(o, ctx)
         if descarte is None:
             if es_nueva and nuevas >= max_nuevas:
-                pendientes += 1
+                pendientes_por["tope_nuevas"] += 1
                 continue
             quedan = c.b.restantes()
             if es_nueva and quedan is not None and quedan < _BUSQUEDAS_POR_NUEVA:
-                pendientes += 1  # no se mide a medias: sale en la próxima caza
+                pendientes_por["cuota"] += 1  # no se mide a medias: sale en la próxima caza
+                c.cuota_plan = c.cuota_plan or f"quedaban {quedan} búsquedas hoy"
                 continue
             o = c.ampliar(o, multi)
             if es_nueva:
@@ -771,7 +847,7 @@ def ejecutar(
         evaluar.append((o, descarte, es_nueva))
     for oid in vigiladas:
         if oid not in {o.oferta_id for o, _, _ in evaluar}:
-            motivo = c.b.parada or "no apareció en la relectura de sus páginas"
+            motivo = c.b.corte or "no apareció en la relectura de sus páginas"
             c.errores.append(f"no medido: {oid}: {motivo}; no cuenta como strike")
 
     # 6–8) señales, nota y decisión
@@ -798,13 +874,21 @@ def ejecutar(
 
     busquedas, bloqueos, vacios = c.b.cuentas()
     errores = list(c.errores)
-    if c.b.parada:
+    if c.b.parada and c.b.tipo_parada == "meta":
         errores.insert(0, f"Parada: {c.b.parada}. No se hizo ninguna búsqueda más ni se cambió de vía; "
-                          "lo que faltaba quedó «no medido».")
+                          "lo que faltaba quedó «no medido». Hoy no se vuelve a buscar (hora de Colombia).")
+    elif c.b.parada:
+        errores.insert(0, f"Interrumpida: {c.b.parada}. No es un bloqueo de Meta: esta ejecución no buscó nada "
+                          "más y lo que faltaba quedó «no medido»; se puede volver a cazar más tarde.")
+    cuota = c.b.cuota or c.cuota_plan
+    if not c.b.parada and cuota:
+        errores.insert(0, f"Cuota del día agotada: {cuota}. Es un final normal: lo que no cupo quedó "
+                          "pendiente o «no medido» para la próxima caza.")
     e = Ejecucion(
         dia=hoy, region=region or modo, modo=modo, perfil=perfil, busquedas=busquedas, bloqueos=bloqueos,
-        vacios=vacios, errores=errores, resultados=resultados, pendientes=pendientes, via=dict(c.b.via),
-        creditos=c.b.creditos_totales(), consultas=salida_consultas, vara=_vara(perfil, u), parada=c.b.parada,
+        vacios=vacios, errores=errores, resultados=resultados, pendientes=sum(pendientes_por.values()),
+        via=dict(c.b.via), creditos=c.b.creditos_totales(), consultas=salida_consultas, vara=_vara(perfil, u),
+        parada=c.b.parada, tipo_parada=c.b.tipo_parada, cuota=cuota, pendientes_por=dict(pendientes_por),
     )
     escribir(vault, e)
 
@@ -971,25 +1055,25 @@ def _medida_ficha(valor, suelo: bool, nombre: str) -> Medida:
 
 
 class _VigiaDeParada:
-    """Cliente para el hueco: anota la primera parada y, tras ella, no vuelve a llamar a Meta."""
+    """Cliente para el hueco: anota el primer corte (y su tipo) y, tras él, no vuelve a llamar a Meta."""
 
     def __init__(self, cliente):
         self.cliente = cliente
         self.parada: str | None = None
+        self.tipo: str | None = None  # «meta», «errores» o «cuota» (ver :func:`clasificar_corte`)
 
     def buscar(self, pais: str, **kw) -> ResultadoBusqueda:
         if self.parada is not None:
             raise SesionBloqueada(self.parada)
         try:
             r = self.cliente.buscar(pais, **kw)
-        except _PARADAS as exc:
-            self.parada = f"{type(exc).__name__}: {exc}"
-            raise
-        except NavegadorError as exc:
-            self.parada = f"navegador no disponible: {exc}"
+        except (*_PARADAS, NavegadorError) as exc:
+            self.tipo, self.parada = clasificar_corte(exc)
+            if self.tipo == "cuota":
+                self.parada = f"cuota del día agotada ({self.parada})"
             raise
         if r.estado == "bloqueado":
-            self.parada = f"bloqueo de Meta: {r.motivo or 'acceso bloqueado'}"
+            self.tipo, self.parada = "meta", f"bloqueo de Meta: {r.motivo or 'acceso bloqueado'}"
         return r
 
 
@@ -1002,12 +1086,13 @@ def medir_hueco(
     hoy: date | None = None,
     idioma: str | None = None,
     perfil: str | None = None,
-) -> tuple[HuecoPais, str | None]:
+) -> tuple[HuecoPais, str | None, str | None]:
     """Mide el hueco de la oferta en ``pais`` con ``frases`` en el idioma local, lo guarda en la
     ficha (``huecos.<pais>``) y recalcula la decisión de cada país medido de la ficha.
 
-    Devuelve ``(hueco, parada)``: ``parada`` es el motivo si Meta bloqueó o la búsqueda se detuvo
-    (lo no medido queda «no medido» en la ficha); None si no hubo parada."""
+    Devuelve ``(hueco, corte, tipo)``: ``corte`` es el motivo si las búsquedas se cortaron (lo no
+    medido queda «no medido» en la ficha) y ``tipo`` es «meta» (bloqueo: dura el día), «errores»
+    (solo este proceso) o «cuota» (búsquedas del día agotadas: final normal); None si no hubo corte."""
     vault = Path(vault)
     ruta = vault / "wiki/ofertas" / f"{oferta_id}.md"
     if not ruta.exists():
@@ -1068,7 +1153,7 @@ def medir_hueco(
                f"hueco de {oferta_id} en {pais}: {texto} (competencia {formatear_medida(h.competencia)}); "
                f"estado {meta.get('estado')}" + (f"; parada: {vigia.parada}" if vigia.parada else ""),
                [ruta.relative_to(vault).as_posix()])
-    return h, vigia.parada
+    return h, vigia.parada, vigia.tipo
 
 
 def _perfil_config(vault: Path) -> str:
