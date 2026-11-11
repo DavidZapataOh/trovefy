@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass, field, replace
 from datetime import date
 from typing import Literal
 
-from trovify.caza.destino import Destino, clave_oferta, oferta_id, veredicto_landing
+from trovify.caza.destino import (
+    Destino,
+    clave_oferta,
+    elegir_precio,
+    oferta_id,
+    veredicto_landing,
+)
 from trovify.caza.modelo import AnuncioBiblioteca
 
 
@@ -30,11 +37,28 @@ def _clave(destino: Destino | None, page_id: str) -> str:
     return clave_oferta(destino.url_final or destino.url_anuncio, destino.checkout)
 
 
-def _consolidar(candidatos: list[tuple[date, Destino]]) -> tuple[Destino, list[Destino]]:
+_AMBIGUO = "no medido: símbolo $ ambiguo"
+
+
+def _sin_ambiguo(motivo: str | None) -> str | None:
+    partes = [m.strip() for m in (motivo or "").split(";") if m.strip() and m.strip() != _AMBIGUO]
+    return "; ".join(partes) or None
+
+
+def _precio_de(d: Destino, moneda_pais: str | None) -> tuple[float, str | None] | None:
+    if d.precios:
+        return elegir_precio(d.precios, moneda_pais)
+    return (d.precio, d.moneda) if d.precio is not None else None
+
+
+def _consolidar(candidatos: list[tuple[date, Destino]], moneda_pais: str | None = None
+                ) -> tuple[Destino, list[Destino]]:
     """Destino único y determinista de un grupo, sea cual sea el orden de los anuncios.
 
     Destinos distintos ordenados por fecha de inicio del anuncio; ``destino`` = el primero modelable
-    (si no, el primero), con ``cloaker`` True si alguno lo tiene y el precio explícito más bajo.
+    (si no, el primero), con ``cloaker`` True si alguno lo tiene. Precio: un ``$`` ambiguo nunca gana
+    a uno con moneda; entre monedas, la del país de los anuncios (``moneda_pais``), si no la del
+    elegido, si no la primera; nunca el mínimo entre monedas. Dentro de esa moneda, el más bajo.
     """
     unicos: dict[str, tuple[date, Destino]] = {}
     for inicio, d in candidatos:
@@ -43,22 +67,33 @@ def _consolidar(candidatos: list[tuple[date, Destino]]) -> tuple[Destino, list[D
             unicos[d.url_anuncio] = (inicio, d)
     destinos = [d for _, d in sorted(unicos.values(), key=lambda t: (t[0], t[1].url_anuncio))]
     elegido = next((d for d in destinos if veredicto_landing(d) == "modelable"), destinos[0])
-    precios = [d for d in destinos if d.precio is not None and d.moneda is not None]
-    if elegido.moneda is not None:
-        precios = [d for d in precios if d.moneda == elegido.moneda]
+    precios = [(p, d) for d in destinos if (p := _precio_de(d, moneda_pais)) is not None]
+    conocidos = [(p, d) for p, d in precios if p[1] is not None]
     cambios: dict = {}
     if any(d.cloaker for d in destinos):
         cambios["cloaker"] = True
-    if precios:
-        barato = min(precios, key=lambda d: (d.precio, d.url_anuncio))
-        cambios.update(precio=barato.precio, moneda=barato.moneda)
+    if conocidos:
+        monedas = [p[1] for p, _ in conocidos]
+        propia = _precio_de(elegido, moneda_pais)
+        if moneda_pais in monedas:
+            moneda = moneda_pais
+        elif propia is not None and propia[1] is not None:
+            moneda = propia[1]
+        else:
+            moneda = monedas[0]
+        (precio, moneda), _ = min(((p, d) for p, d in conocidos if p[1] == moneda),
+                                  key=lambda x: (x[0][0], x[1].url_anuncio))
+        cambios.update(precio=precio, moneda=moneda, motivo=_sin_ambiguo(elegido.motivo))
     return replace(elegido, **cambios), destinos
 
 
-def agrupar(anuncios: list[AnuncioBiblioteca], destinos: dict[str, Destino]) -> list[Oferta]:
+def agrupar(anuncios: list[AnuncioBiblioteca], destinos: dict[str, Destino], mercados: dict | None = None
+            ) -> list[Oferta]:
     """Agrupa por clave de oferta; ``destinos`` va por ``enlace_destino``. Orden: primera aparición.
 
-    Si varios anuncios del grupo tienen destinos distintos se guardan todos en ``Oferta.destinos``."""
+    Si varios anuncios del grupo tienen destinos distintos se guardan todos en ``Oferta.destinos``.
+    ``mercados`` (config/mercados.yaml) da la moneda del país con más anuncios del grupo: el precio
+    se elige en esa moneda si la landing la muestra."""
     grupos: dict[str, Oferta] = {}
     candidatos: dict[str, list[tuple[date, Destino]]] = {}
     for a in anuncios:
@@ -75,7 +110,10 @@ def agrupar(anuncios: list[AnuncioBiblioteca], destinos: dict[str, Destino]) -> 
             o.page_ids.append(a.page_id)
     for clave, o in grupos.items():
         if candidatos[clave]:
-            o.destino, o.destinos = _consolidar(candidatos[clave])
+            paises = Counter(a.pais for a in o.anuncios).most_common()
+            principal = min(paises, key=lambda kv: (-kv[1], kv[0]))[0] if paises else None
+            mercado = (mercados or {}).get(principal)
+            o.destino, o.destinos = _consolidar(candidatos[clave], getattr(mercado, "moneda", None))
     return list(grupos.values())
 
 

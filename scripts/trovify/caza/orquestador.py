@@ -846,7 +846,7 @@ def _ejecutar(
 
     # 4) destinos y clave de oferta
     c.resolver_destinos(anuncios)
-    ofertas = [marcar_original(o) for o in agrupar(anuncios, c.destinos)]
+    ofertas = [marcar_original(o) for o in agrupar(anuncios, c.destinos, c.mercados)]
     claves_por_pagina: dict[str, set[str]] = {}
     sin_atribuir: dict[tuple[str, str], set[str]] = {}  # (página, país) → grupos sin destino resuelto
     for o in ofertas:

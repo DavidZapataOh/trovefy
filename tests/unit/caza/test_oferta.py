@@ -85,3 +85,26 @@ def test_precio_explicito_gana_a_moneda_ambigua():
     ds = {u1: _d(u1, precio=5.0, moneda=None), u2: _d(u2, precio=30.0, moneda="EUR")}
     [o] = agrupar([anuncio("1", "1", date(2026, 9, 1), destino=u1), anuncio("2", "2", date(2026, 9, 2), destino=u2)], ds)
     assert (o.destino.precio, o.destino.moneda) == (30.0, "EUR")
+
+
+def test_precio_reemplazado_quita_el_motivo_ambiguo():
+    u1, u2 = "https://x.com/a", "https://x.com/b"
+    d1 = _d(u1, precio=5.0, moneda=None)
+    d1.motivo = "no medido: símbolo $ ambiguo"
+    ds = {u1: d1, u2: _d(u2, precio=30.0, moneda="EUR")}
+    [o] = agrupar([anuncio("1", "1", date(2026, 9, 1), destino=u1), anuncio("2", "2", date(2026, 9, 2), destino=u2)], ds)
+    assert (o.destino.precio, o.destino.moneda) == (30.0, "EUR")
+    assert "ambiguo" not in (o.destino.motivo or "")
+
+
+def test_precio_en_la_moneda_del_pais_de_los_anuncios():
+    from trovify.config.mercados import Mercado
+    u1 = "https://x.com/a"
+    d = _d(u1, precio=29.0, moneda="EUR")
+    d.precios = [(29.0, "EUR"), (120.0, "RON")]
+    ads = [anuncio("1", "1", date(2026, 9, 1), "RO", destino=u1), anuncio("2", "1", date(2026, 9, 2), "RO", destino=u1)]
+    ro = Mercado("RO", "ro", "RON", "Europe/Bucharest", (11.9, 15.9), None, "candidato")
+    [o] = agrupar(ads, {u1: d}, {"RO": ro})
+    assert (o.destino.precio, o.destino.moneda) == (120.0, "RON")
+    [o] = agrupar(ads, {u1: d})
+    assert (o.destino.precio, o.destino.moneda) == (29.0, "EUR")

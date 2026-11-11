@@ -223,7 +223,9 @@ _MONEDAS = {
     "kč": "CZK", "czk": "CZK", "zł": "PLN", "pln": "PLN", "mxn": "MXN", "ars": "ARS", "cop": "COP",
     "clp": "CLP", "pen": "PEN", "uyu": "UYU", "$": None,
 }
-_CODIGOS = "USD|BRL|EUR|RON|CZK|PLN|MXN|ARS|COP|CLP|PEN|UYU|lei|d[óo]lar(?:es)?|dollars?"
+# Los códigos ISO solo en mayúsculas («pen», «cop», «ron» son palabras corrientes); «lei» y «dólares»
+# son palabras de moneda y valen en cualquier caja.
+_CODIGOS = "(?-i:USD|BRL|EUR|RON|CZK|PLN|MXN|ARS|COP|CLP|PEN|UYU)|lei|d[óo]lar(?:es)?|dollars?"
 _CUR = rf"(?:US\$|R\$|\$|€|(?<![A-Za-z])(?:{_CODIGOS})(?![A-Za-z])|Kč|zł)"
 _NUM = r"\d[\d.,]*\d|\d"
 _PRECIO = re.compile(rf"(?:(?P<c1>{_CUR})\s*(?P<n1>{_NUM})|(?P<n2>{_NUM})\s*(?P<c2>{_CUR}))", re.IGNORECASE)
@@ -257,13 +259,11 @@ _CODIGO_ANTES = re.compile(rf"(?<![A-Za-z])({_CODIGOS})\s*\$", re.IGNORECASE)
 _CODIGO_DESPUES = re.compile(rf"\$\s*({_NUM})\s*({_CODIGOS})(?![A-Za-z])", re.IGNORECASE)
 
 
-def extraer_precio(texto: str) -> tuple[float, str | None] | None:
-    """Precio al contado y moneda: ignora parcelas («12x de», «3 cuotas de»), envíos y descuentos, y
-    devuelve el menor (el ancla es el mayor).
-
-    La moneda es ``None`` cuando solo hay un ``$`` suelto (ambiguo: USD, MXN, ARS, COP...): el importe
-    se conserva y quien llama anota «no medido: símbolo $ ambiguo». USD solo con ``US$``, ``USD`` o
-    «dólares»; un código cercano (``MXN $499``, ``$499 ARS``) manda sobre el ``$``."""
+def extraer_precios(texto: str) -> list[tuple[float, str | None]]:
+    """Todos los precios al contado del texto, en orden: sin parcelas («12x de», «3 cuotas de»),
+    envíos ni descuentos. La moneda es ``None`` para un ``$`` suelto (ambiguo: USD, MXN, ARS, COP...);
+    USD solo con ``US$``, ``USD`` o «dólares»; un código cercano (``MXN $499``, ``$499 ARS``) manda
+    sobre el ``$``."""
     texto = _CODIGO_DESPUES.sub(r"\1 \2", _CODIGO_ANTES.sub(r"\1 ", texto or ""))
     limpio = _NO_PRECIO.sub(" ", _PARCELA.sub(" ", texto))
     precios = []
@@ -272,7 +272,32 @@ def extraer_precio(texto: str) -> tuple[float, str | None] | None:
         valor = _numero(m.group("n1") or m.group("n2"))
         if valor and valor > 0:
             precios.append((valor, _MONEDAS[cur.lower()]))
-    return min(precios, key=lambda p: p[0]) if precios else None
+    return precios
+
+
+def elegir_precio(precios: list[tuple[float, str | None]], moneda_pais: str | None = None
+                  ) -> tuple[float, str | None] | None:
+    """El precio de la oferta entre los candidatos (en orden de aparición).
+
+    - Un ``$`` ambiguo nunca gana a un precio con moneda conocida.
+    - Con varias monedas conocidas: la del país del anuncio (``moneda_pais``, de config/mercados.yaml)
+      si está; si no, la primera explícita. Nunca el mínimo entre monedas distintas.
+    - Dentro de la moneda elegida, el menor (el ancla «antes» es el mayor).
+    """
+    conocidos = [p for p in precios if p[1] is not None]
+    if not conocidos:
+        return min(precios, key=lambda p: p[0]) if precios else None
+    monedas = [m for _, m in conocidos]
+    moneda = moneda_pais if moneda_pais in monedas else monedas[0]
+    return min((p for p in conocidos if p[1] == moneda), key=lambda p: p[0])
+
+
+def extraer_precio(texto: str, moneda_pais: str | None = None) -> tuple[float, str | None] | None:
+    """Precio al contado y moneda del texto (:func:`extraer_precios` + :func:`elegir_precio`).
+
+    La moneda es ``None`` cuando solo hay un ``$`` suelto: el importe se conserva y quien llama
+    anota «no medido: símbolo $ ambiguo»."""
+    return elegir_precio(extraer_precios(texto), moneda_pais)
 
 
 # --- destino --------------------------------------------------------------------------------
@@ -292,6 +317,9 @@ class Destino:
     estado: Literal["ok", "no_medido"]
     motivo: str | None
     vsl: bool = False
+    # Todos los precios vistos (landing y, si se abrió, checkout) en orden: la oferta vuelve a elegir
+    # con la moneda del país de sus anuncios (``oferta.agrupar`` con los mercados).
+    precios: list[tuple[float, str | None]] = field(default_factory=list)
 
 
 def motivo_dudoso(d: Destino) -> str | None:
@@ -490,12 +518,14 @@ def resolver_destino(
     destino.vsl = p.reproductor
     destino.cloaker, destino.motivo = _cloaker(p.url_final, p, pedir_como_robot, real)
 
-    precio = extraer_precio(p.texto)
-    if precio is None and destino.checkout and not es_red_social(destino.checkout) and destino.checkout != p.url_final:
+    precios = extraer_precios(p.texto)
+    if not precios and destino.checkout and not es_red_social(destino.checkout) and destino.checkout != p.url_final:
         try:
-            precio = extraer_precio(navegador.abrir_landing(destino.checkout).texto)
+            precios = extraer_precios(navegador.abrir_landing(destino.checkout).texto)
         except Exception:  # noqa: BLE001 - sin precio del checkout: queda «dudoso»
-            precio = None
+            precios = []
+    destino.precios = precios
+    precio = elegir_precio(precios)
     if precio:
         destino.precio, destino.moneda = precio
         if destino.moneda is None:

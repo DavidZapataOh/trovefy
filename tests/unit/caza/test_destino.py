@@ -319,3 +319,25 @@ def test_filtro_de_rutas_del_navegador():
         r = Ruta(url)
         _filtrar_ruta(r)
         assert r.accion == accion, url
+
+
+# --- ola final: precios y monedas -------------------------------------------------------------
+
+
+def test_dolar_ambiguo_no_gana_a_un_precio_con_moneda():
+    assert extraer_precio("Plan básico $9 · Precio final 49 lei") == (49.0, "RON")
+
+
+def test_varias_monedas_nunca_el_minimo_entre_monedas():
+    assert extraer_precio("120 lei sau 29 €") == (120.0, "RON")  # la primera explícita
+    assert extraer_precio("120 lei sau 29 €", moneda_pais="EUR") == (29.0, "EUR")  # la del país del anuncio
+    assert extraer_precio("Antes 159 lei, hoy 120 lei; 29 €", moneda_pais="RON") == (120.0, "RON")
+    assert extraer_precio("120 lei sau 29 €", moneda_pais="MDL") == (120.0, "RON")  # sin la del país: la primera
+
+
+def test_codigos_de_moneda_solo_en_mayusculas():
+    assert extraer_precio("compra 2 pen") is None
+    assert extraer_precio("cop 15 unidades") is None
+    assert extraer_precio("15 COP") == (15.0, "COP")
+    assert extraer_precio("ron 5 minute") is None
+    assert extraer_precio("Preț: 79 Lei") == (79.0, "RON")  # «lei» es palabra, no código: vale en cualquier caja
