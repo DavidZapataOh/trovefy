@@ -1,0 +1,922 @@
+"""Orquestador de la caza (§4.3; auditoría de caza §4.11): de las búsquedas a las fichas.
+
+Pasos: 1) contexto del vault; 2) búsquedas por palabra; 3) recuento por página y país; 4) destino y
+clave de oferta (como mucho ``caza.max_destinos_por_ejecucion`` landings, de las páginas con más
+C8); 5) filtros; 6) señales contra las fotos; 7) el hueco guardado en la ficha (lo mide
+``trovify caza hueco``); 8) nota y decisión; 9) ``salida.escribir``.
+
+Regla anti-*minería* (§1.4): si Meta bloquea, el cliente para por errores seguidos o se agota el
+presupuesto del día, la ejecución **se detiene**: no se hace ninguna búsqueda más (ni se cambia de
+vía para esquivar el bloqueo), se escribe lo que ya se midió y lo que faltaba queda
+«no medido: <motivo>». Lo que se lee de anuncios y landings es dato, nunca orden.
+"""
+
+from __future__ import annotations
+
+import re
+from collections import Counter
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
+from datetime import UTC, date, datetime, timedelta
+from pathlib import Path
+from typing import Literal
+
+from trovify.caza import filtros, snapshots
+from trovify.caza.biblioteca import url_biblioteca
+from trovify.caza.cliente import SesionBloqueada
+from trovify.caza.destino import (
+    _DOMINIOS_COMPARTIDOS,
+    Destino,
+    _host,
+    _registrable,
+    deshacer_redireccion_fb,
+    veredicto_landing,
+)
+from trovify.caza.hueco import HuecoPais, hueco_pais
+from trovify.caza.modelo import AnuncioBiblioteca, ResultadoBusqueda
+from trovify.caza.nota import Nota, calcular_nota, decidir
+from trovify.caza.oferta import Oferta, agrupar, marcar_original
+from trovify.caza.presupuesto import ParadaPorErrores, PresupuestoAgotado
+from trovify.caza.salida import (
+    Consulta,
+    Ejecucion,
+    ResultadoOferta,
+    _cabecera_via,
+    _comas,
+    _tabla_huecos,
+    escribir,
+    formatear_medida,
+)
+from trovify.caza.senales import _VENTANA_FOTO, Medida, calcular_senales
+from trovify.config import mercados as cfg_mercados
+from trovify.config import umbrales as cfg_umbrales
+from trovify.vault import frontmatter
+from trovify.vault.escritura import ZONA_NEGOCIO, anadir_log
+
+Modo = Literal["nicho", "barrido", "vigilar", "oferta"]
+MODOS: tuple[str, ...] = ("nicho", "barrido", "vigilar", "oferta")
+# Un resolver recibe el enlace del anuncio y devuelve el destino (con el texto de la landing si lo
+# tiene) o None si no se pudo abrir. Nunca abre facebook.com (``resolver_destino`` lo desenvuelve).
+Resolver = Callable[[str], "Destino | tuple[Destino, str] | None"]
+
+_PARADAS = (SesionBloqueada, ParadaPorErrores, PresupuestoAgotado)
+_MAX_ANUNCIOS = 60  # anuncios por lectura (lo que trae una página de la Biblioteca y su desplazamiento)
+_VIGILADAS = ("A", "B", "observar")
+_FALLOS = ("observar", "descartada")
+_ORDEN = {"A": 0, "B": 1, "observar": 2, "descartada": 3}
+_DIAS_C8 = 8  # definición de la cohorte C8 (igual que en senales.py)
+
+
+def _ahora() -> datetime:
+    return datetime.now(UTC)
+
+
+def hoy_negocio() -> date:
+    """Día de negocio: el corte de día es el de America/Bogota."""
+    return _ahora().astimezone(ZONA_NEGOCIO).date()
+
+
+# --- texto de landings ------------------------------------------------------------------------
+
+_PIE = re.compile(
+    r"©|\(c\)\s*\d{4}|copyright|all rights reserved|todos los derechos|todos os direitos|toate drepturile|"
+    r"tutti i diritti|tous droits|privacy|privacidad|privacidade|confiden[tț]ialitate|términos|terminos|termos|"
+    r"terms of|terms and|termeni|condiții|conditii|condiciones|condições|aviso legal|legal notice|"
+    r"mentions légales|impressum|disclaimer|descargo de responsabilidad|facebook|meta platforms|"
+    r"not part of the|no es parte|não faz parte|nu face parte|cookie policy|política de cookies|"
+    r"politica de cookies|we use cookies|usamos cookies|utilizamos cookies|refund policy|"
+    r"política de reembolso|politica de rambursare|contact us|contáctanos|fale conosco",
+    re.IGNORECASE,
+)
+_MAX_LINEA_PIE = 300  # una línea larga con esas palabras es contenido, no pie
+
+
+def texto_sin_pie(texto: str) -> str:
+    """Texto de la landing sin pie ni avisos legales y sin líneas repetidas (menús, botones).
+
+    El aviso «no es parte de Facebook», la política de privacidad o los términos repiten palabras
+    que no dicen nada de la oferta y podrían disparar filtros (aviso de la Tarea 3)."""
+    vistas: set[str] = set()
+    lineas: list[str] = []
+    for linea in (texto or "").splitlines():
+        limpia = " ".join(linea.split())
+        if not limpia or limpia.casefold() in vistas:
+            continue
+        if len(limpia) <= _MAX_LINEA_PIE and _PIE.search(limpia):
+            continue
+        vistas.add(limpia.casefold())
+        lineas.append(limpia)
+    return "\n".join(lineas)
+
+
+def resolver_por_defecto() -> Resolver:
+    """Abre cada landing con Chromium móvil efímero (nunca Meta) y guarda el texto de la landing."""
+    from trovify.caza.destino import (
+        NavegadorLandingEfimero,
+        pedir_como_robot_http,
+        resolver_destino,
+    )
+
+    navegador = NavegadorLandingEfimero()
+
+    def resolver(url: str):
+        textos: list[str] = []
+
+        class _Grabador:
+            def abrir_landing(self, u: str, espera_s: float = 3.5):
+                p = navegador.abrir_landing(u, espera_s)
+                textos.append(p.texto)
+                return p
+
+        d = resolver_destino(url, _Grabador(), pedir_como_robot_http)
+        return d, (textos[0] if textos else "")
+
+    return resolver
+
+
+# --- búsquedas con parada -------------------------------------------------------------------
+
+
+class _Buscador:
+    """Envuelve el cliente: tras la primera parada no vuelve a llamarlo nunca."""
+
+    def __init__(self, cliente):
+        self.cliente = cliente
+        self.parada: str | None = None
+        self.via: Counter[str] = Counter()
+        self.creditos = 0
+        self.creditos_desconocidos = False
+        self.navegadas = self.bloqueos = self.vacios = 0
+        p = self._presupuesto()
+        self._inicio = (p.usadas, p.bloqueos, p.vacios) if p is not None else None
+
+    def _presupuesto(self):
+        return getattr(self.cliente, "presupuesto", None)
+
+    def buscar(self, pais: str, **kw) -> ResultadoBusqueda | None:
+        if self.parada is not None:
+            return None
+        p = self._presupuesto()
+        antes = p.usadas if p is not None else None
+        try:
+            r = self.cliente.buscar(pais, max_anuncios=_MAX_ANUNCIOS, **kw)
+        except _PARADAS as exc:
+            self.parada = f"{type(exc).__name__}: {exc}"
+            return None
+        navego = p is None or p.usadas > antes
+        if navego:
+            self.navegadas += 1
+            self.via[r.via] += 1
+            if r.via == "firecrawl":
+                if r.creditos is None:
+                    self.creditos_desconocidos = True
+                else:
+                    self.creditos += r.creditos
+            if r.estado == "vacio":
+                self.vacios += 1
+        if r.estado == "bloqueado":
+            self.bloqueos += 1
+            self.parada = f"bloqueo de Meta: {r.motivo or 'acceso bloqueado'}"
+        return r
+
+    def cuentas(self) -> tuple[int, int, int]:
+        p = self._presupuesto()
+        if p is not None and self._inicio is not None:
+            return p.usadas - self._inicio[0], p.bloqueos - self._inicio[1], p.vacios - self._inicio[2]
+        return self.navegadas, self.bloqueos, self.vacios
+
+    def creditos_totales(self) -> int | None:
+        if not self.via.get("firecrawl") or self.creditos_desconocidos:
+            return None
+        return self.creditos
+
+
+# --- contexto del vault ----------------------------------------------------------------------
+
+
+def _exclusiones(vault: Path) -> set[str]:
+    """Claves u ``oferta_id`` de ``wiki/caza/exclusiones.md`` (líneas «- fecha · qué · motivo · fuente»)."""
+    ruta = vault / "wiki/caza/exclusiones.md"
+    if not ruta.exists():
+        return set()
+    _, cuerpo = frontmatter.leer(ruta)
+    out: set[str] = set()
+    for linea in cuerpo.splitlines():
+        t = linea.strip()
+        if not t.startswith(("- ", "* ")):
+            continue
+        partes = [p.strip().strip("`") for p in t[2:].split("·")]
+        que = partes[1] if len(partes) >= 2 else partes[0]
+        if que:
+            out.add(que)
+    return out
+
+
+def _propias(vault: Path) -> set[str]:
+    out: set[str] = set()
+    raiz = vault / "productos"
+    if not raiz.is_dir():
+        return out
+    for ruta in raiz.rglob("*.md"):
+        try:
+            meta, _ = frontmatter.leer(ruta)
+        except Exception:  # noqa: BLE001, S112 - una ficha ilegible no rompe la caza
+            continue
+        for clave in ("oferta_id", "clave"):
+            v = meta.get(clave) if isinstance(meta, dict) else None
+            if isinstance(v, str) and v:
+                out.add(v)
+    return out
+
+
+def _fichas(vault: Path) -> dict[str, dict]:
+    fichas: dict[str, dict] = {}
+    for ruta in sorted((vault / "wiki/ofertas").glob("*.md")):
+        try:
+            meta, _ = frontmatter.leer(ruta)
+        except Exception:  # noqa: BLE001, S112 - una ficha ilegible no rompe la caza
+            continue
+        if isinstance(meta, dict):
+            fichas[str(meta.get("oferta_id") or ruta.stem)] = meta
+    return fichas
+
+
+def _mercados(vault: Path):
+    ruta = vault / "config/mercados.yaml"
+    return cfg_mercados.cargar(ruta) if ruta.exists() else {}
+
+
+# --- hueco guardado en la ficha ------------------------------------------------------------
+
+
+def hueco_a_dict(h: HuecoPais, dia: date) -> dict:
+    return {
+        "competencia": None if h.competencia.valor is None else int(h.competencia.valor),
+        "competencia_suelo": bool(h.competencia.suelo),
+        "competencia_motivo": h.competencia.motivo,
+        "original": h.original,
+        "hueco": h.hueco,
+        "motivo": h.motivo,
+        "enlaces": list(h.enlaces),
+        "fecha": dia.isoformat(),
+    }
+
+
+def huecos_de(meta: dict | None) -> list[HuecoPais]:
+    out: list[HuecoPais] = []
+    for pais, d in sorted(((meta or {}).get("huecos") or {}).items()):
+        if not isinstance(d, dict):
+            continue
+        v = d.get("competencia")
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            comp = Medida(float(v), suelo=bool(d.get("competencia_suelo")))
+        else:
+            comp = Medida(None, d.get("competencia_motivo") or "no medido: sin dato guardado")
+        hueco = d.get("hueco") if d.get("hueco") in (True, False) else None
+        out.append(HuecoPais(str(pais), comp, str(d.get("original") or "no_medido"), hueco,
+                             list(d.get("enlaces") or []), d.get("motivo")))
+    return out
+
+
+def _hay_hueco(huecos: list[HuecoPais]) -> bool | None:
+    """A pide hueco en al menos un país: True si alguno lo tiene; None si alguno no se comprobó."""
+    if any(h.hueco is True for h in huecos):
+        return True
+    if not huecos or any(h.hueco is None for h in huecos):
+        return None
+    return False
+
+
+# --- strikes -------------------------------------------------------------------------------
+
+
+def _limite_plantilla() -> float:
+    from trovify.vault.andamio import PLANTILLA
+
+    return cfg_umbrales.cargar(PLANTILLA / "config/umbrales.yaml")["caza.poda.strikes"].valor
+
+
+def aplicar_strikes(
+    fichas: dict[str, dict], resultados: dict[str, tuple[str, str]], limite: float | None = None
+) -> dict[str, dict]:
+    """Strikes de ``vigilar`` (idea de un repo de referencia, reescrita). Pura: devuelve copias.
+
+    - ``resultados``: ``oferta_id`` → ``(estado, motivo)`` de esta ejecución; las vigiladas sin
+      resultado (no medidas) no cambian.
+    - Bajar a observar o descartada suma un strike si el motivo es el mismo que el anterior; con
+      otro motivo la cuenta vuelve a 1. Al llegar a ``limite`` (``caza.poda.strikes``; por defecto el
+      de la plantilla) pasa a ``estado: podada`` y deja de vigilarse. Si sube, vuelve a 0.
+    - Si con 2 o más vigiladas medidas fallan más de la mitad a la vez, es un fallo de entorno y no
+      se cuenta ningún strike.
+    """
+    limite = _limite_plantilla() if limite is None else limite
+    out = {k: dict(v) for k, v in fichas.items()}
+    medidas = {k: v for k, v in resultados.items() if k in out}
+    fallan = [k for k, (estado, _) in medidas.items() if estado in _FALLOS]
+    if len(medidas) >= 2 and 2 * len(fallan) > len(medidas):
+        return out
+    for k, (estado, motivo) in medidas.items():
+        f = out[k]
+        if estado in _FALLOS:
+            previos = int(f.get("strikes") or 0)
+            if previos and f.get("motivo_strike") == motivo:
+                f["strikes"] = previos + 1
+            else:
+                f["strikes"] = 1
+                f["motivo_strike"] = motivo
+            f["estado"] = "podada" if f["strikes"] >= limite else estado
+        else:
+            f["strikes"] = 0
+            f.pop("motivo_strike", None)
+            f["estado"] = estado
+    return out
+
+
+def _motivo_strike(r: ResultadoOferta) -> str:
+    if r.descarte is not None:
+        return r.descarte.codigo
+    if "cayendo" in r.senales.banderas:
+        return "cayendo"
+    return "nada medido" if r.nota.valor is None else "nota baja"
+
+
+# --- palabras y resumen ---------------------------------------------------------------------
+
+
+def palabras_a_reescribir(consultas: list[Consulta], minimo: float) -> list[Consulta]:
+    """Consultas medidas con menos de ``minimo`` resultados (``caza.palabra.min_resultados``).
+    Una consulta no medida no se marca: no se sabe cuánto rinde."""
+    return [c for c in consultas if c.resultados is not None and c.resultados < minimo]
+
+
+def resumen(e: Ejecucion, minimo_palabra: float, usadas_hoy: tuple[int, int] | None = None) -> str:
+    """Resumen corto para la terminal y el registro de la rutina."""
+    def lista(estado: str) -> str:
+        rs = [r for r in e.resultados if r.decision == estado]
+        return ", ".join(f"{r.oferta.oferta_id} ({r.pais}, {_nota(r.nota)})" for r in rs) or "ninguna"
+
+    lineas = [f"Caza del {e.dia.isoformat()} · {e.region} · modo {e.modo} · perfil {e.perfil}", ""]
+    lineas += [f"A: {lista('A')}", f"B: {lista('B')}", f"Observar: {lista('observar')}"]
+    descartadas = [r for r in e.resultados if r.decision == "descartada"]
+    if descartadas:
+        lineas.append("Descartadas:")
+        lineas += [f"  - {r.oferta.oferta_id} ({r.pais}): {r.explicacion}" for r in descartadas]
+    else:
+        lineas.append("Descartadas: ninguna")
+    if e.pendientes:
+        lineas.append(f"Sin evaluar por el tope de nuevas (R14): {e.pendientes}")
+    paises: dict[str, list[float]] = {}
+    for r in e.resultados:
+        if r.decision in ("A", "B", "observar"):
+            paises.setdefault(r.pais, []).append(r.senales.c8.valor or 0.0)
+    top = sorted(paises.items(), key=lambda kv: (-len(kv[1]), -sum(kv[1]), kv[0]))
+    lineas.append("Top de países: " + (", ".join(
+        f"{p} ({len(v)} {'candidata' if len(v) == 1 else 'candidatas'})" for p, v in top[:5]) or "ninguno"))
+    lineas += ["", _cabecera_via(e)]
+    if usadas_hoy is not None:
+        lineas.append(f"Búsquedas usadas hoy (tu sesión y la rutina): {usadas_hoy[0]} de {usadas_hoy[1]}")
+    lineas.append(f"Bloqueos: {e.bloqueos} · búsquedas sin resultados: {e.vacios}")
+    flojas = palabras_a_reescribir(e.consultas, minimo_palabra)
+    if flojas:
+        lineas.append(f"Palabras a reescribir (menos de {minimo_palabra:g} resultados): " + ", ".join(
+            f"«{c.palabra}» ({c.pais}: {c.resultados})" for c in flojas))
+    rinden = [c for c in e.consultas if c not in flojas and c.resultados is not None]
+    if rinden:
+        lineas.append("Palabras que rinden: " + ", ".join(f"«{c.palabra}» ({c.pais}: {c.resultados})" for c in rinden))
+    if e.parada:
+        lineas += ["", f"PARADA: {e.parada}. No se buscó nada más; lo que faltaba quedó «no medido»."]
+    if e.errores:
+        lineas += ["", "Avisos:"] + [f"  - {x}" for x in e.errores]
+    lineas += ["", f"Informe: wiki/caza/{e.dia.isoformat()}/ · decisión del usuario: wiki/caza/{e.dia.isoformat()}/veredicto.md"]
+    return "\n".join(lineas)
+
+
+def _nota(n: Nota) -> str:
+    return "nota no medida" if n.valor is None else f"nota {n.valor:.1f}".replace(".", ",")
+
+
+# --- la corrida ------------------------------------------------------------------------------
+
+
+def _c8(anuncios: list[AnuncioBiblioteca], hoy: date) -> int:
+    return sum(1 for a in anuncios if a.activo and (hoy - a.inicio).days >= _DIAS_C8)
+
+
+def _vara(perfil: str, u) -> tuple[str, float] | None:
+    clave = perfil.replace("-", "_")
+    if f"caza.perfil.{clave}.c7_min" in u:
+        return "C7", u[f"caza.perfil.{clave}.c7_min"].valor
+    if f"caza.perfil.{clave}.c8_min" in u:
+        return "C8", u[f"caza.perfil.{clave}.c8_min"].valor
+    return None
+
+
+def _frase(o: Oferta, page_id: str) -> str | None:
+    """Una frase del creativo de la oferta en esa página: el título más repetido o el arranque del texto."""
+    propios = [a for a in o.anuncios if a.page_id == page_id]
+    titulos = Counter(" ".join((a.titulo or "").split()) for a in propios if (a.titulo or "").strip())
+    if titulos:
+        return titulos.most_common(1)[0][0][:80]
+    textos = Counter(" ".join(a.texto.split()[:5]) for a in propios if a.texto.strip())
+    return textos.most_common(1)[0][0][:80] if textos else None
+
+
+def _dominio(o: Oferta) -> str | None:
+    d = o.destino
+    if d is None or d.estado != "ok" or d.red_social:
+        return None
+    host = _host(d.url_final or d.url_anuncio).removeprefix("www.")
+    if not host:
+        return None
+    if any(host == x or host.endswith("." + x) for x in _DOMINIOS_COMPARTIDOS):
+        return host
+    return _registrable(host)
+
+
+@dataclass
+class _Corrida:
+    vault: Path
+    modo: str
+    perfil: str
+    hoy: date
+    u: dict
+    mercados: dict
+    b: _Buscador
+    resolver: Resolver
+    errores: list[str] = field(default_factory=list)
+    lecturas: dict[tuple[str, str], ResultadoBusqueda] = field(default_factory=dict)
+    destinos: dict[str, Destino] = field(default_factory=dict)
+    landings: dict[str, str] = field(default_factory=dict)
+
+    def sin_medir(self, que: str) -> None:
+        self.errores.append(f"no medido: {self.b.parada}: {que}")
+
+    # paso 2
+    def consultas(self, consultas: list[tuple[str, str]]):
+        salida: list[Consulta] = []
+        anuncios: list[AnuncioBiblioteca] = []
+        ids: list[tuple[str, set[str]]] = []
+        for pais, frase in consultas:
+            url = url_biblioteca(pais, q=frase)
+            r = self.b.buscar(pais, q=frase)
+            if r is None:
+                self.sin_medir(f"consulta «{frase}» ({pais}) sin hacer")
+                salida.append(Consulta(frase, pais, None, url))
+                ids.append((pais, set()))
+                continue
+            if r.estado not in ("ok", "vacio"):
+                self.errores.append(f"no medido: consulta «{frase}» ({pais}): {r.motivo or r.estado}")
+                salida.append(Consulta(frase, pais, None, r.url))
+                ids.append((pais, set()))
+                continue
+            n = r.total_aprox if r.total_aprox is not None else (len(r.anuncios) if r.completo else None)
+            salida.append(Consulta(frase, pais, n, r.url))
+            ids.append((pais, {a.library_id for a in r.anuncios}))
+            anuncios += r.anuncios
+        return salida, anuncios, ids
+
+    # paso 3
+    def recontar(self, pares: list[tuple[str, str]]) -> None:
+        for page_id, pais in pares:
+            if (page_id, pais) in self.lecturas:
+                continue
+            r = self.b.buscar(pais, page_id=page_id)
+            if r is None:
+                self.sin_medir(f"página {page_id} en {pais} sin recontar")
+            elif r.estado in ("ok", "vacio"):
+                self.lecturas[(page_id, pais)] = r
+            else:
+                self.errores.append(f"no medido: recuento de la página {page_id} en {pais}: {r.motivo or r.estado}")
+
+    # paso 4
+    def resolver_destinos(self, anuncios: list[AnuncioBiblioteca]) -> None:
+        maximo = int(self.u["caza.max_destinos_por_ejecucion"].valor)
+        por_pagina: dict[str, list[AnuncioBiblioteca]] = {}
+        for a in anuncios:
+            por_pagina.setdefault(a.page_id, []).append(a)
+        orden = sorted(por_pagina, key=lambda p: (-_c8(por_pagina[p], self.hoy), -len(por_pagina[p]), p))
+        colas = []
+        for p in orden:
+            enlaces = Counter(a.enlace_destino for a in por_pagina[p] if a.enlace_destino)
+            colas.append([u for u, _ in sorted(enlaces.items(), key=lambda kv: (-kv[1], kv[0]))])
+        abiertas, intentadas = 0, set()
+        while abiertas < maximo and any(colas):
+            for cola in colas:
+                while cola and cola[0] in intentadas:
+                    cola.pop(0)
+                if not cola or abiertas >= maximo:
+                    continue
+                url = cola.pop(0)
+                intentadas.add(url)
+                abiertas += 1
+                self._resolver(url)
+        quedan = {u for cola in colas for u in cola if u not in intentadas}
+        if quedan:
+            self.errores.append(
+                f"no medido: {len(quedan)} landings sin abrir por el tope caza.max_destinos_por_ejecucion "
+                f"({maximo}); sus anuncios quedan agrupados por página"
+            )
+
+    def _resolver(self, url: str) -> None:
+        try:
+            res = self.resolver(url)
+        except Exception:  # noqa: BLE001 - una landing que no abre no para la caza
+            res = None
+        if res is None:
+            return
+        destino, texto = (res, "") if isinstance(res, Destino) else res
+        self.destinos[url] = destino
+        if texto:
+            self.landings[destino.url_anuncio] = texto_sin_pie(texto)
+
+    # varias ofertas en una página
+    def ampliar(self, o: Oferta, multi: set[str]) -> Oferta:
+        nuevos: dict[tuple[str, str], AnuncioBiblioteca] = {(a.library_id, a.pais): a for a in o.anuncios}
+        propios = {d.url_anuncio for d in o.destinos}
+        for page_id in o.page_ids:
+            if page_id not in multi:
+                continue
+            frase = _frase(o, page_id)
+            if not frase:
+                continue
+            for pais in sorted({a.pais for a in o.anuncios if a.page_id == page_id}):
+                r = self.b.buscar(pais, q=frase, page_id=page_id)
+                if r is None:
+                    self.sin_medir(f"recuento de {o.oferta_id} dentro de la página {page_id} ({pais})")
+                    return replace(o, anuncios=list(nuevos.values()))
+                if r.estado != "ok":
+                    continue
+                for a in r.anuncios:
+                    # solo los anuncios cuyo destino es el de esta oferta: lo demás no se atribuye
+                    if a.page_id == page_id and a.enlace_destino in propios:
+                        nuevos.setdefault((a.library_id, a.pais), a)
+        return replace(o, anuncios=list(nuevos.values()))
+
+    # buscar el original
+    def buscar_original(self, o: Oferta) -> Oferta:
+        dominio = _dominio(o)
+        if not dominio:
+            return o
+        pais = Counter(a.pais for a in o.anuncios).most_common(1)[0][0]
+        r = self.b.buscar(pais, q=dominio)
+        if r is None:
+            self.sin_medir(f"búsqueda del original de {o.oferta_id} por «{dominio}»")
+            return o
+        if r.estado != "ok":
+            return o
+        con_destino = [a for a in r.anuncios if a.enlace_destino]
+        ajenos = [a for a in con_destino if dominio not in deshacer_redireccion_fb(a.enlace_destino).lower()]
+        if ajenos:
+            self.errores.append(
+                f"no medido: dominio contaminado: la búsqueda «{dominio}» ({pais}) trae {len(ajenos)} anuncios "
+                f"con otro destino; no se usa para buscar el original de {o.oferta_id} · {r.url}"
+            )
+            return o
+        otras = [a for a in con_destino if a.page_id not in o.page_ids]
+        if not otras:
+            return o
+        paginas = list(dict.fromkeys([*o.page_ids, *(a.page_id for a in otras)]))
+        m = marcar_original(replace(o, page_ids=paginas, anuncios=[*o.anuncios, *otras]))
+        if m.original_page_id in o.page_ids:
+            return replace(o, origen="original", original_page_id=m.original_page_id,
+                           copias=[p for p in o.page_ids if p != m.original_page_id])
+        return replace(o, origen="copia", original_page_id=m.original_page_id, copias=list(o.page_ids))
+
+    def inactivos(self, o: Oferta, pais: str, multi: set[str]) -> list[AnuncioBiblioteca] | None:
+        """Anuncios de una lectura completa ``estado="all"`` de todas sus páginas; si no, None."""
+        if any(p in multi for p in o.page_ids):
+            return None
+        lista: list[AnuncioBiblioteca] = []
+        for page_id in o.page_ids:
+            r = self.b.buscar(pais, page_id=page_id, estado="all")
+            if r is None:
+                self.sin_medir(f"anuncios parados de {o.oferta_id} en {pais}")
+                return None
+            if r.estado not in ("ok", "vacio") or not r.completo:
+                return None
+            lista += r.anuncios
+        return lista
+
+
+def ejecutar(
+    vault: Path,
+    modo: Modo,
+    consultas: list[tuple[str, str]],
+    perfil: str,
+    max_nuevas: int,
+    page_ids: list[str] | None = None,
+    cliente=None,
+    resolver: Resolver | None = None,
+    hoy: date | None = None,
+    *,
+    region: str | None = None,
+    paises: list[str] | None = None,
+) -> Ejecucion:
+    """Una ejecución de la caza; escribe con ``salida.escribir`` y devuelve la :class:`Ejecucion`.
+
+    - ``consultas``: ``[(pais, frase)]``; ``page_ids`` y ``paises`` (por defecto ``["ALL"]``) se
+      recuentan en ``oferta``; en ``vigilar`` se vuelven a medir las fichas A, B y observar por
+      ``page_id`` y país.
+    - ``cliente`` por defecto: ``ClienteBibliotecaPublica`` con el presupuesto del día del vault y
+      la caché de ``data/cache/biblioteca`` (Firecrawl si hay clave [D-11b], si no Playwright).
+    - Como mucho ``max_nuevas`` ofertas nuevas pasan los filtros; el resto cuenta como ``pendientes``.
+    """
+    vault = Path(vault)
+    if modo not in MODOS:
+        raise ValueError(f"modo desconocido: {modo!r}; usa {', '.join(MODOS)}")
+    if modo == "oferta" and not page_ids:
+        raise ValueError("el modo oferta necesita al menos un --page-id")
+    hoy = hoy or hoy_negocio()
+    u = cfg_umbrales.cargar(vault / "config/umbrales.yaml")
+    if cliente is None:
+        from trovify.caza.cache import Cache
+        from trovify.caza.cliente import ClienteBibliotecaPublica
+        from trovify.caza.presupuesto import Presupuesto
+
+        # = Cache.por_defecto() con el vault de TROVIFY_VAULT; aquí sale del vault recibido.
+        cliente = ClienteBibliotecaPublica(Presupuesto.desde_umbrales(vault, hoy),
+                                           cache=Cache(vault / "data" / "cache" / "biblioteca"))
+    c = _Corrida(vault, modo, perfil, hoy, u, _mercados(vault), _Buscador(cliente),
+                 resolver or resolver_por_defecto())
+
+    # 1) contexto
+    fichas = _fichas(vault)
+    excluidas = _exclusiones(vault)
+    if modo in ("nicho", "barrido"):
+        excluidas |= set(fichas)  # ya vistas: se informan, no se vuelven a juzgar
+    ctx = filtros.ContextoFiltros(excluidas, _propias(vault), u, c.landings)
+
+    # 2) búsquedas por palabra
+    salida_consultas, de_palabras, ids_consulta = c.consultas(list(consultas))
+
+    # 3) recuento por página y país
+    pares: list[tuple[str, str]] = []
+    vigiladas: dict[str, dict] = {}
+    if modo == "vigilar":
+        vigiladas = {k: m for k, m in fichas.items() if m.get("estado") in _VIGILADAS}
+        for meta in vigiladas.values():
+            for pais in (meta.get("paises") or {}):
+                if paises and pais not in paises:
+                    continue
+                pares += [(str(p), str(pais)) for p in meta.get("page_ids") or []]
+    for p in page_ids or []:
+        pares += [(p, pais) for pais in (paises or ["ALL"])]
+    if de_palabras:
+        por_par: dict[tuple[str, str], list[AnuncioBiblioteca]] = {}
+        for a in de_palabras:
+            por_par.setdefault((a.page_id, a.pais), []).append(a)
+        orden = sorted(por_par, key=lambda k: (-_c8(por_par[k], hoy), -len(por_par[k]), k))
+        maximo = int(u["caza.max_destinos_por_ejecucion"].valor)
+        pares += [k for k in orden if k not in pares][:maximo]
+        if len(orden) > maximo:
+            c.errores.append(f"no medido: {len(orden) - maximo} páginas de las búsquedas sin recontar "
+                             f"(tope caza.max_destinos_por_ejecucion: {maximo}); las de más C8 primero")
+    c.recontar(list(dict.fromkeys(pares)))
+
+    pool: dict[tuple[str, str], AnuncioBiblioteca] = {}
+    for r in c.lecturas.values():
+        for a in r.anuncios:
+            pool[(a.library_id, a.pais)] = a
+    for a in de_palabras:
+        if (a.page_id, a.pais) not in c.lecturas:
+            pool.setdefault((a.library_id, a.pais), a)
+    anuncios = list(pool.values())
+
+    # 4) destinos y clave de oferta
+    c.resolver_destinos(anuncios)
+    ofertas = [marcar_original(o) for o in agrupar(anuncios, c.destinos)]
+    claves_por_pagina: dict[str, set[str]] = {}
+    for o in ofertas:
+        for p in o.page_ids:
+            claves_por_pagina.setdefault(p, set()).add(o.clave)
+    multi = {p for p, cl in claves_por_pagina.items() if len(cl) > 1}
+
+    # 5) filtros, tope de nuevas, recuento dentro de la página y búsqueda del original
+    evaluar: list[tuple[Oferta, filtros.Descarte | None, bool]] = []
+    pendientes = nuevas = 0
+    inactivos: dict[tuple[str, str], list[AnuncioBiblioteca] | None] = {}
+    for o in sorted(ofertas, key=lambda x: (-_c8(x.anuncios, hoy), x.oferta_id)):
+        if modo == "vigilar" and o.oferta_id not in vigiladas:
+            continue  # en vigilar solo se miden las vigiladas
+        descarte = filtros.filtrar(o, ctx)
+        es_nueva = o.oferta_id not in fichas
+        if descarte is None:
+            if es_nueva and nuevas >= max_nuevas:
+                pendientes += 1
+                continue
+            o = c.ampliar(o, multi)
+            if es_nueva:
+                o = c.buscar_original(o)
+                descarte = filtros.filtrar(o, ctx)
+            if descarte is None:
+                if es_nueva:
+                    nuevas += 1
+                if es_nueva or modo == "oferta":
+                    for pais in sorted({a.pais for a in o.anuncios}):
+                        inactivos[(o.oferta_id, pais)] = c.inactivos(o, pais, multi)
+        evaluar.append((o, descarte, es_nueva))
+    for oid in vigiladas:
+        if oid not in {o.oferta_id for o, _, _ in evaluar}:
+            motivo = c.b.parada or "no apareció en la relectura de sus páginas"
+            c.errores.append(f"no medido: {oid}: {motivo}; no cuenta como strike")
+
+    # 6–8) señales, nota y decisión
+    resultados: list[ResultadoOferta] = []
+    conn = snapshots.abrir(vault / "data/caza/snapshots.sqlite")
+    try:
+        for o, descarte, _ in evaluar:
+            ya_visto = descarte is not None and descarte.codigo == "ya_visto"
+            for pais in sorted({a.pais for a in o.anuncios}):
+                resultados.append(_evaluar(c, conn, o, pais, descarte, ya_visto, ctx, fichas, inactivos,
+                                           multi, salida_consultas, ids_consulta))
+    finally:
+        conn.close()
+
+    for consulta, (pais, ids) in zip(salida_consultas, ids_consulta, strict=True):
+        for r in resultados:
+            if r.pais == pais and r.oferta.oferta_id not in consulta.ofertas and any(
+                    a.library_id in ids for a in r.oferta.anuncios):
+                consulta.ofertas.append(r.oferta.oferta_id)
+
+    busquedas, bloqueos, vacios = c.b.cuentas()
+    errores = list(c.errores)
+    if c.b.parada:
+        errores.insert(0, f"Parada: {c.b.parada}. No se hizo ninguna búsqueda más ni se cambió de vía; "
+                          "lo que faltaba quedó «no medido».")
+    e = Ejecucion(
+        dia=hoy, region=region or modo, modo=modo, perfil=perfil, busquedas=busquedas, bloqueos=bloqueos,
+        vacios=vacios, errores=errores, resultados=resultados, pendientes=pendientes, via=dict(c.b.via),
+        creditos=c.b.creditos_totales(), consultas=salida_consultas, vara=_vara(perfil, u), parada=c.b.parada,
+    )
+    escribir(vault, e)
+
+    # strikes de vigilar
+    if modo == "vigilar":
+        _strikes(vault, e, vigiladas, u)
+    return e
+
+
+def _evaluar(c: _Corrida, conn, o: Oferta, pais: str, descarte, ya_visto: bool, ctx, fichas, inactivos,
+             multi: set[str], consultas: list[Consulta], ids_consulta) -> ResultadoOferta:
+    hoy, u = c.hoy, c.u
+    lecturas = [c.lecturas.get((p, pais)) for p in o.page_ids]
+    completo = all(r is not None and r.completo for r in lecturas)
+    # Total exacto de Meta: la suma de las páginas, solo si cada búsqueda dio el count exacto y
+    # ninguna página lleva otra oferta (entonces su total no sería el de esta oferta).
+    total_meta = None
+    if all(r is not None and r.total_exacto and r.total_aprox is not None for r in lecturas) and not (
+            set(o.page_ids) & multi):
+        total_meta = sum(r.total_aprox for r in lecturas)
+    vistos = None
+    if completo and not ya_visto:
+        activos = {a.library_id for a in o.anuncios if a.activo and a.pais == pais}
+        n, par = snapshots.registrar_vistos(conn, o.oferta_id, pais, activos, hoy, completo=True)
+        vistos = (n, par, snapshots.dia_anterior(conn, o.oferta_id, pais, hoy))
+    historial = [s for s in snapshots.historial(conn, o.oferta_id, pais, hoy - timedelta(days=_VENTANA_FOTO[1]))
+                 if s.dia < hoy]
+    s = calcular_senales(
+        o, pais, hoy, historial, inactivos.get((o.oferta_id, pais)), total_meta, completo,
+        total_meta=total_meta, umbrales=u, vistos=vistos, mercados=c.mercados,
+    )
+    s.banderas += [x for x in filtros.banderas(o, ctx) if x not in s.banderas]
+    nota = calcular_nota(s, u)
+    huecos = huecos_de(fichas.get(o.oferta_id))
+    landing = veredicto_landing(o.destino) if o.destino is not None else "dudoso"
+    decision, motivo = decidir(nota, s.c8, c.perfil, _hay_hueco(huecos), descarte, u, landing, c7=s.c7)
+    return ResultadoOferta(o, pais, s, nota, decision, motivo, descarte, huecos,
+                           _enlace(c, o, pais, consultas, ids_consulta), dia=hoy, total_meta=total_meta,
+                           completo=completo)
+
+
+def _enlace(c: _Corrida, o: Oferta, pais: str, consultas: list[Consulta], ids_consulta) -> str:
+    """El enlace reproducible de donde salen las cifras de la oferta en ``pais``."""
+    if len(o.page_ids) == 1:
+        r = c.lecturas.get((o.page_ids[0], pais))
+        if r is not None:
+            return r.url
+    for consulta, (p, ids) in zip(consultas, ids_consulta, strict=True):
+        if p == pais and any(a.library_id in ids for a in o.anuncios):
+            return consulta.enlace
+    return url_biblioteca(pais, page_id=o.original_page_id or o.page_ids[0])
+
+
+def _strikes(vault: Path, e: Ejecucion, vigiladas: dict[str, dict], u) -> None:
+    por_oferta: dict[str, ResultadoOferta] = {}
+    for r in e.resultados:
+        oid = r.oferta.oferta_id
+        if oid in vigiladas and (oid not in por_oferta or _ORDEN[r.decision] < _ORDEN[por_oferta[oid].decision]):
+            por_oferta[oid] = r
+    if not por_oferta:
+        return
+    rutas = {oid: vault / "wiki/ofertas" / f"{oid}.md" for oid in por_oferta}
+    actuales = {oid: frontmatter.leer(ruta)[0] for oid, ruta in rutas.items() if ruta.exists()}
+    nuevas = aplicar_strikes(actuales, {oid: (r.decision, _motivo_strike(r)) for oid, r in por_oferta.items()},
+                             u["caza.poda.strikes"].valor)
+    for oid, meta in nuevas.items():
+        _, cuerpo = frontmatter.leer(rutas[oid])
+        if meta.get("estado") == "podada":
+            meta["motivo"] = (f"podada: {int(meta['strikes'])} veces seguidas por «{meta.get('motivo_strike')}»; "
+                              "deja de vigilarse")
+            cuerpo = _linea_estado(cuerpo, "podada", meta["motivo"])
+        frontmatter.escribir(rutas[oid], meta, cuerpo)
+
+
+# --- hueco por país (trovify caza hueco) ------------------------------------------------------
+
+_ESTADO = re.compile(r"^Estado: \*\*[^*]+\*\*.*$", re.MULTILINE)
+_SECCION_HUECO = re.compile(r"(## Hueco por país\n\n)(.*?)(?=\n## |\Z)", re.DOTALL)
+
+
+def _linea_estado(cuerpo: str, estado: str, motivo: str) -> str:
+    nueva = f"Estado: **{estado}** — {_comas(motivo)}"
+    return _ESTADO.sub(lambda _: nueva, cuerpo, count=1) if _ESTADO.search(cuerpo) else cuerpo
+
+
+def _medida_ficha(valor, suelo: bool, nombre: str) -> Medida:
+    if isinstance(valor, (int, float)) and not isinstance(valor, bool):
+        return Medida(float(valor), suelo=suelo)
+    return Medida(None, f"no medido: sin {nombre} en la ficha")
+
+
+def medir_hueco(
+    vault: Path,
+    oferta_id: str,
+    pais: str,
+    frases: list[str],
+    cliente=None,
+    hoy: date | None = None,
+    idioma: str | None = None,
+    perfil: str | None = None,
+) -> HuecoPais:
+    """Mide el hueco de la oferta en ``pais`` con ``frases`` en el idioma local, lo guarda en la
+    ficha (``huecos.<pais>``) y recalcula la decisión de cada país medido de la ficha."""
+    vault = Path(vault)
+    ruta = vault / "wiki/ofertas" / f"{oferta_id}.md"
+    if not ruta.exists():
+        raise FileNotFoundError(f"no existe la ficha wiki/ofertas/{oferta_id}.md")
+    frases = [f.strip() for f in frases if f and f.strip()]
+    if not frases:
+        raise ValueError("hace falta al menos una frase en el idioma local")
+    hoy = hoy or hoy_negocio()
+    u = cfg_umbrales.cargar(vault / "config/umbrales.yaml")
+    if idioma is None:
+        mercado = _mercados(vault).get(pais)
+        if mercado is None:
+            raise ValueError(f"no sé el idioma de {pais}: añade el país a config/mercados.yaml o usa --idioma")
+        idioma = mercado.idioma
+    if cliente is None:
+        from trovify.caza.cache import Cache
+        from trovify.caza.cliente import ClienteBibliotecaPublica
+        from trovify.caza.presupuesto import Presupuesto
+
+        cliente = ClienteBibliotecaPublica(Presupuesto.desde_umbrales(vault, hoy),
+                                           cache=Cache(vault / "data" / "cache" / "biblioteca"))
+    meta, cuerpo = frontmatter.leer(ruta)
+    page_ids = [str(p) for p in meta.get("page_ids") or []]
+    h = hueco_pais(cliente, frases, page_ids, pais, idioma, set(page_ids), hoy, u)
+
+    huecos = dict(meta.get("huecos") or {})
+    huecos[pais] = hueco_a_dict(h, hoy)
+    meta["huecos"] = huecos
+    hay = _hay_hueco(huecos_de(meta))
+    perfil = perfil or _perfil_config(vault)
+    landing = "modelable" if meta.get("checkout") and meta.get("precio") is not None else "dudoso"
+    mejor: tuple[str, str] | None = None
+    for datos in (meta.get("paises") or {}).values():
+        if not isinstance(datos, dict) or datos.get("estado") == "descartada":
+            continue
+        cotas = set(datos.get("cota_inferior") or [])
+        nota = Nota(datos.get("nota") if isinstance(datos.get("nota"), (int, float)) else None)
+        decision, motivo = decidir(
+            nota, _medida_ficha(datos.get("c8"), "c8" in cotas, "C8"), perfil, hay, None, u, landing,
+            c7=_medida_ficha(datos.get("c7"), "c7" in cotas, "C7"),
+        )
+        datos["estado"] = decision
+        datos["motivo"] = motivo
+        if mejor is None or _ORDEN[decision] < _ORDEN[mejor[0]]:
+            mejor = (decision, motivo)
+    if mejor is not None and meta.get("estado") != "podada":
+        meta["estado"], meta["motivo"] = mejor
+        cuerpo = _linea_estado(cuerpo, *mejor)
+    tabla = "\n".join(_tabla_huecos(huecos_de(meta), titulo=False)) + "\n"
+    if _SECCION_HUECO.search(cuerpo):
+        cuerpo = _SECCION_HUECO.sub(lambda m: m.group(1) + tabla, cuerpo, count=1)
+    else:
+        cuerpo = cuerpo.rstrip("\n") + "\n\n## Hueco por país\n\n" + tabla
+    frontmatter.escribir(ruta, meta, cuerpo)
+    texto = {True: "sí", False: "no", None: "no comprobado"}[h.hueco]
+    anadir_log(vault, "cazar",
+               f"hueco de {oferta_id} en {pais}: {texto} (competencia {formatear_medida(h.competencia)}); "
+               f"estado {meta.get('estado')}", [ruta.relative_to(vault).as_posix()])
+    return h
+
+
+def _perfil_config(vault: Path) -> str:
+    import yaml
+
+    ruta = vault / "config/caza.yaml"
+    if ruta.exists():
+        datos = yaml.safe_load(ruta.read_text(encoding="utf-8")) or {}
+        if isinstance(datos, dict) and isinstance(datos.get("perfil"), str):
+            return datos["perfil"]
+    return "tomi"

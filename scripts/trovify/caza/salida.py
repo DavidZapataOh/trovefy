@@ -103,6 +103,9 @@ class Ejecucion:
     creditos: int | None = None
     consultas: list[Consulta] = field(default_factory=list)
     vara: tuple[str, float] | None = None
+    # Motivo por el que la ejecución se detuvo (bloqueo de Meta, errores seguidos, presupuesto del
+    # día); None si terminó. Lo que quedó sin medir sale en ``errores`` como «no medido: …».
+    parada: str | None = None
 
 
 # ---------------------------------------------------------------- formato
@@ -556,7 +559,7 @@ def _rinde(c: Consulta, e: Ejecucion) -> tuple[int | None, int | None]:
 
 
 def _cotas(s: Senales) -> list[str]:
-    return [n for n, m in (("c8", s.c8), ("total", s.total), ("edad_max", s.edad_max_dias)) if m.suelo]
+    return [n for n, m in (("c8", s.c8), ("c7", s.c7), ("total", s.total), ("edad_max", s.edad_max_dias)) if m.suelo]
 
 
 def render_ficha(r: ResultadoOferta, previa: dict | None) -> tuple[dict, str]:
@@ -575,6 +578,7 @@ def render_ficha(r: ResultadoOferta, previa: dict | None) -> tuple[dict, str]:
     paises = {k: v for k, v in (previa.get("paises") or {}).items()}
     paises[r.pais] = {
         "c8": _entero(s.c8),
+        "c7": _entero(s.c7),  # lo usa `trovify caza hueco` para recalcular la decisión (perfil santino)
         "total": _entero(s.total),
         "edad_max": _entero(s.edad_max_dias),
         "link_biblioteca": enlace,

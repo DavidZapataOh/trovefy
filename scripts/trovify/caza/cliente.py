@@ -438,8 +438,8 @@ class ClienteBibliotecaPublica:
     def _interpretar(self, url: str, pais: str, p: PaginaCapturada, max_anuncios: int) -> ResultadoBusqueda:
         ahora = datetime.now(UTC)
 
-        def resultado(estado, total=None, anuncios=(), motivo=None, completo=False):
-            return ResultadoBusqueda(estado, url, total, list(anuncios), motivo, ahora, completo)
+        def resultado(estado, total=None, anuncios=(), motivo=None, completo=False, exacto=False):
+            return ResultadoBusqueda(estado, url, total, list(anuncios), motivo, ahora, completo, total_exacto=exacto)
 
         if p.estado_http in _LIMITADO:
             return resultado("bloqueado", motivo=f"Meta limitó las búsquedas (HTTP {p.estado_http})")
@@ -459,14 +459,15 @@ class ClienteBibliotecaPublica:
             parseo = parsear_detalle(p.cuerpos, pais, p.html)
         except FormatoDesconocido as exc:
             if sin_resultados(p.html):
-                return resultado("vacio", total=0, completo=True)
+                return resultado("vacio", total=0, completo=True, exacto=True)
             return resultado("error", motivo=f"formato de la Biblioteca no reconocido: {exc}")
         if not parseo.anuncios:
             if sin_resultados(p.html):
-                return resultado("vacio", total=0, completo=True)
+                return resultado("vacio", total=0, completo=True, exacto=True)
             motivo = "la página no trae anuncios ni aviso de «sin resultados»"
             return resultado("error", motivo=f"{motivo}; {parcial}" if parcial else motivo)
         total, motivo_total = parseo.total_json, None
+        exacto = total is not None and total <= TOPE_META
         if total is not None:
             if total > TOPE_META:
                 total, motivo_total = TOPE_META, _MOTIVO_TOPE
@@ -492,4 +493,4 @@ class ClienteBibliotecaPublica:
         # ni se descartó nada: si no, es una muestra y sus cifras son «≥».
         sin_mas = parseo.hay_mas is False or (parseo.total_json is not None and parseo.total_json <= len(leidos))
         completo = sin_mas and len(anuncios) == len(leidos) and not parseo.descartados and not parcial
-        return resultado("ok", total, anuncios, "; ".join(motivos) or None, completo)
+        return resultado("ok", total, anuncios, "; ".join(motivos) or None, completo, exacto)

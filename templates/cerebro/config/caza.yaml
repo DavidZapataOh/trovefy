@@ -1,0 +1,17 @@
+# Preferencias de /cazar. La skill rellena «nichos» y «palabras» con el usuario en la primera caza
+# y guarda aquí las palabras que rinden (las que no, se reescriben).
+perfil: tomi
+
+# Regiones R9: EE. UU. + GB, Brasil, LatAm en español y Europa (los mercados de config/mercados.yaml).
+regiones:
+  eeuu_gb: [US, GB]
+  br: [BR]
+  latam_es: [MX, CO, AR, CL, PE, EC, GT, DO, UY, CR, PA, BO, PY]
+  europa: [RO, MD, CZ, HU, BG, IT, FR, ES, PT, PL, GR, SE, NO, DK, FI]
+
+# Nichos elegidos por el usuario (por ejemplo «fichas de terapia», «recursos para docentes»).
+nichos: []
+
+# Frases de 2–3 palabras por idioma (código ISO 639-1), por ejemplo:
+#   ro: [fise de lucru, fise pentru copii]
+palabras: {}

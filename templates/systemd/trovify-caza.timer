@@ -1,0 +1,10 @@
+[Unit]
+Description=Trovify: caza diaria de lunes a sábado a las 06:30 (hora de Colombia)
+
+[Timer]
+OnCalendar=Mon..Sat *-*-* 06:30:00 America/Bogota
+Persistent=true
+Unit=trovify-caza.service
+
+[Install]
+WantedBy=timers.target

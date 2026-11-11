@@ -63,3 +63,6 @@ class ResultadoBusqueda:
     via: Literal["firecrawl", "playwright"] = "playwright"
     creditos: int | None = None  # metadata.creditsUsed de Firecrawl; None con Playwright
     proxy: str | None = None  # metadata.proxyUsed de Firecrawl; None con Playwright
+    # True solo si ``total_aprox`` es el ``count`` exacto de Meta (sin tope ni cota), o un ``vacio``.
+    # Un total leído del texto («~230 resultados») es aproximado: False.
+    total_exacto: bool = False

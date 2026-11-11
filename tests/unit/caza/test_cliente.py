@@ -612,3 +612,13 @@ def test_otro_fallo_al_desplazar_es_lectura_parcial():
     r = cliente([p]).buscar("RO", q="x")
     assert r.estado == "ok" and len(r.anuncios) == 40
     assert r.completo is False and "lectura parcial: Meta respondió HTTP 500 al desplazar" in r.motivo
+
+
+def test_total_exacto_solo_con_count_de_meta(tmp_path):
+    assert cliente([_pagina_con_total(120, "~900 resultados")]).buscar("RO", q="x").total_exacto is True
+    assert cliente([_pagina_con_total(None, "~230 resultados")]).buscar("RO", q="x").total_exacto is False
+    assert cliente([_pagina_con_total(50001)]).buscar("RO", q="x").total_exacto is False
+    assert cliente([de_fixture("vacio.json")]).buscar("RO", q="x").total_exacto is True
+    cache = Cache(tmp_path / "c")
+    cliente([_pagina_con_total(120)], cache=cache).buscar("RO", q="x")
+    assert cliente([], cache=cache).buscar("RO", q="x").total_exacto is True
