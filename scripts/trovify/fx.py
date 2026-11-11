@@ -37,8 +37,11 @@ def _tasa_valida(x: float) -> bool:
 
 
 def _parsear(datos: bytes) -> dict[str, float] | None:
-    cabecera = datos.upper()
-    if b"<!DOCTYPE" in cabecera or b"<!ENTITY" in cabecera:
+    try:
+        texto = datos.decode("utf-8")  # cualquier otra codificación (UTF-16…) se rechaza
+    except UnicodeDecodeError:
+        return None
+    if "<!DOCTYPE" in texto.upper() or "<!ENTITY" in texto.upper():
         return None
     try:
         raiz = ElementTree.fromstring(datos)

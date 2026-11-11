@@ -76,3 +76,9 @@ def test_xml_hostil_o_invalido_es_none(tmp_path):
     assert cambios(tmp_path / "c", HOY, abrir=con(malo)) is None
     nan = XML.replace(b"rate='1.1214'", b"rate='nan'")
     assert cambios(tmp_path / "d", HOY, abrir=con(nan)) is None
+
+
+def test_xml_utf16_con_doctype_es_none(tmp_path):
+    hostil = '<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE a [<!ENTITY x "y">]><a/>'.encode("utf-16")
+    assert cambios(tmp_path, HOY, abrir=lambda url, timeout=15: io.BytesIO(hostil)) is None
+    assert cambios(tmp_path / "u", HOY, abrir=lambda url, timeout=15: io.BytesIO(XML.replace(b"UTF-8", b"UTF-16"))) is None
