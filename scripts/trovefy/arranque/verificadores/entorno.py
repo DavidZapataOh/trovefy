@@ -10,7 +10,9 @@ from trovefy.arranque.estado import ResultadoVerificacion
 from trovefy.arranque.verificadores import base, verificador
 from trovefy.vault.rutas import vault_root
 
-_OBSIDIAN = "/mnt/c/Users/*/AppData/Local/Programs/Obsidian/Obsidian.exe"
+# Obsidian para Linux (corre en WSLg): el de Windows no puede abrir una bóveda dentro de WSL
+# (falla con «EISDIR: illegal operation on a directory, watch \\\\wsl.localhost\\…»).
+_OBSIDIAN_LINUX = ("/usr/bin/obsidian", "/opt/Obsidian/obsidian")
 _NODE_MINIMO = 20
 
 
@@ -92,14 +94,16 @@ def comprobar_entorno(
             "`systemd=true` debajo; si no, añade al final `[boot]` y `systemd=true` (por ejemplo con `sudo nano /etc/wsl.conf`), "
             "sin borrar lo que ya hay; luego ejecuta `wsl --shutdown` desde PowerShell de Windows y reabre Ubuntu",
         ))
-    candidatos = [Path(p) for p in sorted(glob.glob(_OBSIDIAN))] if obsidian is None else [Path(p) for p in obsidian]
+    candidatos = [Path(p) for p in _OBSIDIAN_LINUX] if obsidian is None else [Path(p) for p in obsidian]
     encontrado = next((p for p in candidatos if p.exists()), None)
     if encontrado:
         elementos.append(Elemento("obsidian", True, str(encontrado), None))
     else:
         elementos.append(Elemento(
-            "obsidian", False, "no se encontró Obsidian.exe en Windows",
-            "instala Obsidian en Windows desde https://obsidian.md (lo haces tú) y vuelve a verificar",
+            "obsidian", False, "no se encontró Obsidian para Linux en WSL",
+            "la versión de Windows no abre bóvedas dentro de WSL; descarga el .deb (amd64) desde "
+            "https://obsidian.md/download, comprueba su `sha256sum` con el que publica GitHub en la versión, y en una "
+            "terminal de Ubuntu (WSL) aparte: `sudo apt install ./obsidian_<versión>_amd64.deb`; ábrelo con `obsidian &`",
         ))
     return elementos
 

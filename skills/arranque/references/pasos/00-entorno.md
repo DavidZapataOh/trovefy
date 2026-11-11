@@ -20,7 +20,7 @@ Dejar tu computador (Windows con WSL) con todas las herramientas que Trovefy nec
    - **Librerías de Pango** (`weasyprint`, para generar PDFs): `sudo apt install -y libpango-1.0-0 libpangoft2-1.0-0`
    - **Navegador de Playwright** (`playwright`): en una terminal de Ubuntu (WSL) aparte, `cd ~/trovefy/trovefy && uv run playwright install chromium`.
    - **systemd** (`systemd`): ver el paso 3.
-   - **Obsidian** (`obsidian`): instálalo en Windows (no en WSL) desde https://obsidian.md.
+   - **Obsidian** (`obsidian`): instala la versión **para Linux** dentro de WSL (se abre como ventana normal de Windows gracias a WSLg). La de Windows no sirve: no puede abrir una bóveda que esté dentro de WSL. Descarga el `.deb` (amd64) desde https://obsidian.md/download, comprueba `sha256sum` contra el que publica GitHub en esa versión, e instálalo con `sudo apt install ./obsidian_<versión>_amd64.deb`. Ábrelo con `obsidian &` y elige «Abrir carpeta como bóveda» → `/home/<tu-usuario>/trovefy-cerebro`.
 3. Para activar systemd:
    1. Mira el archivo actual: `cat /etc/wsl.conf` (si dice que no existe, no pasa nada).
    2. Ábrelo: `sudo nano /etc/wsl.conf`
@@ -32,8 +32,8 @@ Dejar tu computador (Windows con WSL) con todas las herramientas que Trovefy nec
 **Errores típicos**
 - Síntoma: `ffmpeg` se queda colgado y el verificador dice que no responde. Arreglo: tienes el ffmpeg de snap; instala el de apt con `sudo apt install -y ffmpeg`.
 - Síntoma: systemd sigue en ✗ tras editar `wsl.conf`. Arreglo: falta `wsl --shutdown` desde PowerShell de Windows y reabrir la terminal.
-- Síntoma: Obsidian instalado pero marcado ✗. Arreglo: instálalo para tu usuario de Windows (el instalador normal); Trovefy lo busca en `AppData\Local\Programs\Obsidian`.
+- Síntoma: Obsidian de Windows dice «EISDIR: illegal operation on a directory, watch '\\wsl.localhost\…'». Arreglo: es un fallo conocido de Obsidian para Windows con carpetas de WSL; usa la versión para Linux (arriba). Trovefy la busca en `/usr/bin/obsidian`.
 - Síntoma: `playwright` en ✗. Arreglo: en una terminal de Ubuntu (WSL) aparte, `cd ~/trovefy/trovefy && uv run playwright install chromium`, y vuelve a verificar.
 
 **Cómo se verifica**
-`trovefy arranque verificar 00` revisa: Python 3.12, uv, Node 20+, git, ffmpeg (con límite de 10 s), poppler, libpango, el navegador de Playwright, systemd (`running` o `degraded`) y Obsidian en Windows. Guarda el detalle en `config/evidencia/` y el paso pasa a `verificado` solo si todos están ✓.
+`trovefy arranque verificar 00` revisa: Python 3.12, uv, Node 20+, git, ffmpeg (con límite de 10 s), poppler, libpango, el navegador de Playwright, systemd (`running` o `degraded`) y Obsidian para Linux en WSL. Guarda el detalle en `config/evidencia/` y el paso pasa a `verificado` solo si todos están ✓.

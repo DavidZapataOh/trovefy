@@ -127,3 +127,13 @@ def test_verificador_00_guarda_evidencia(tmp_path, monkeypatch):
     monkeypatch.setattr(entorno, "comprobar_entorno", lambda *a, **k: [entorno.Elemento("git", False, "no instalado", "sudo apt install -y git")])
     r = REGISTRO["00"](tmp_path)
     assert r.ok is False and r.arreglos == ["git: sudo apt install -y git"]
+
+
+def test_obsidian_se_busca_en_linux_y_el_arreglo_es_el_deb(tmp_path):
+    from trovefy.arranque.verificadores import entorno
+
+    assert "/usr/bin/obsidian" in entorno._OBSIDIAN_LINUX
+    elementos = {e.nombre: e for e in comprobar_entorno(falso(BIEN), home=tmp_path, obsidian=[])}
+    arreglo = elementos["obsidian"].arreglo
+    assert "obsidian.md/download" in arreglo and ".deb" in arreglo and "sha256sum" in arreglo
+    assert "Windows" in arreglo  # explica por qué no la versión de Windows

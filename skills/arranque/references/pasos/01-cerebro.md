@@ -10,8 +10,8 @@ Tener el cerebro (la carpeta de Obsidian con el método y las reglas) construido
 
 **Pasos**
 1. Abre la terminal de Ubuntu (WSL) y escribe `whoami`: lo que responde es tu `<tu-usuario>`. WSL tiene que estar en marcha (la terminal de Ubuntu abierta).
-2. Abre Obsidian en Windows y elige **Abrir carpeta como bóveda**.
-3. Escribe esta ruta cambiando `<tu-usuario>` por tu usuario: `\\wsl.localhost\Ubuntu\home\<tu-usuario>\trovefy-cerebro`
+2. En esa terminal escribe `obsidian &` (es Obsidian para Linux, instalado en el paso 00; se abre como ventana de Windows) y elige **Abrir carpeta como bóveda**.
+3. Elige la carpeta `/home/<tu-usuario>/trovefy-cerebro`. No uses Obsidian para Windows con la ruta `\\wsl.localhost\…`: falla con «EISDIR».
 4. Confirma que ves las carpetas del cerebro (`wiki`, `raw`, `config`…) y sigue con las comprobaciones.
 5. Comprueba el orden del vault: `trovefy cerebro lint`. Si señala algo, corrígelo con Claude y repite hasta que no haya problemas.
 6. Comprueba que existen páginas del método en `wiki/metodo/`. Si no las hay, destílalas con `/trovefy:destilar`.
