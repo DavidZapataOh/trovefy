@@ -219,3 +219,86 @@ def test_sin_cambio_del_bce_el_precio_local_no_se_mide(v):
     assert "precio local en RO: no medido: sin cambio de referencia para RON" in texto
     assert "precio local en BG: 13,90 EUR" in texto
     assert "landing: https://tienda.example/fichas" in texto  # del frontmatter de la ficha
+
+
+# ------------------------------------------------------------------ presupuesto del día (I-4)
+
+CUATRO = "".join(
+    f"{p}:\n  idioma: {i}\n  moneda: EUR\n  zona: Europe/Rome\n  banda_eur: [11.90, 15.90]\n  estado: candidato\n"
+    for p, i in (("RO", "ro"), ("IT", "it"), ("FR", "fr"), ("ES", "es")))
+FRASES4 = {p: [f"{p.lower()} uno", f"{p.lower()} dos"] for p in ("RO", "IT", "FR", "ES")}
+
+
+class ClienteConPresupuesto(ClienteFalso):
+    def __init__(self, v, usadas, hoy=HOY):
+        from trovify.caza.presupuesto import Presupuesto
+
+        super().__init__()
+        contador = v / "data/caza/presupuesto" / f"{hoy.isoformat()}.json"
+        contador.parent.mkdir(parents=True, exist_ok=True)
+        contador.write_text(f'{{"usadas": {usadas}, "rutina": 0}}\n', encoding="utf-8")
+        self.presupuesto = Presupuesto(30, 0, 0, dormir=lambda s: None, contador=contador)
+
+    def buscar(self, pais, **kw):
+        self.presupuesto.antes_de_buscar()
+        return super().buscar(pais, **kw)
+
+
+def paises_llamados(c):
+    return list(dict.fromkeys(p for p, _, _ in c.llamadas))
+
+
+def test_por_defecto_mide_lo_que_cabe_en_la_cuota_empezando_por_los_de_la_ficha(v):
+    (v / "config/mercados.yaml").write_text(CUATRO, encoding="utf-8")
+    c = ClienteConPresupuesto(v, usadas=23)  # quedan 7: caben 2 países de 3 búsquedas
+    r = orquestador.auditar(v, "o-ejemplo", None, FRASES4, cliente=c, hoy=HOY, cambios=nunca)
+    assert paises_llamados(c) == ["ES", "RO"]  # ES está en la ficha: va primero
+    ps = por_pais(r)
+    assert ps["ES"].hueco.hueco is True and ps["RO"].hueco.hueco is True
+    for p in ("IT", "FR"):
+        assert ps[p].hueco.motivo == "no medido: cuota del día agotada — se retoma mañana"
+    assert r.tipo == "cuota" and (r.usadas_hoy, r.max_hoy, r.hechas) == (29, 30, 6)
+    texto = r.ruta.read_text()
+    assert "Búsquedas de hoy: 29 de 30 usadas (quedan 1); esta auditoría hizo 6" in texto
+    assert "3 por país" in texto
+
+
+def test_volver_a_auditar_el_mismo_dia_continua_donde_se_quedo(v):
+    (v / "config/mercados.yaml").write_text(CUATRO, encoding="utf-8")
+    orquestador.auditar(v, "o-ejemplo", None, FRASES4, cliente=ClienteConPresupuesto(v, usadas=23), hoy=HOY,
+                        cambios=nunca)
+    c = ClienteConPresupuesto(v, usadas=24)  # quedan 6: los dos que faltaban
+    r = orquestador.auditar(v, "o-ejemplo", None, FRASES4, cliente=c, hoy=HOY, cambios=nunca)
+    assert paises_llamados(c) == ["IT", "FR"]
+    ps = por_pais(r)
+    assert all(ps[p].hueco.hueco is True for p in ("ES", "RO", "IT", "FR"))
+    assert "medido el 2026-11-10 (en una auditoría anterior de esta oferta)" in ps["RO"].hueco_medido
+    assert r.tipo is None
+
+
+def test_reutiliza_el_hueco_reciente_de_la_ficha_sin_buscar(v):
+    from trovify.caza.hueco import HuecoPais
+    from trovify.caza.orquestador import hueco_a_dict
+    from trovify.caza.senales import Medida
+
+    o = oferta_ejemplo()
+    enlace = "https://www.facebook.com/ads/library/?country=RO&q=fise"
+    o["huecos"] = {
+        "RO": hueco_a_dict(HuecoPais("RO", Medida(0), "ausente", True, [enlace]), date(2026, 11, 8)),
+        "IT": hueco_a_dict(HuecoPais("IT", Medida(0), "ausente", True, []), date(2026, 11, 1)),  # 9 días
+    }
+    escribir(v / "wiki/ofertas/o-ejemplo.md", o, "")
+    c = ClienteFalso()
+    r = orquestador.auditar(v, "o-ejemplo", ["RO", "IT"], FRASES, cliente=c, hoy=HOY, cambios=nunca)
+    assert paises_llamados(c) == ["IT"]
+    ro = por_pais(r)["RO"]
+    assert ro.hueco.hueco is True and ro.hueco.enlaces == [enlace]
+    texto = r.ruta.read_text()
+    assert "medido el 2026-11-08 (con trovify caza hueco, en la ficha de la oferta)" in texto
+    assert "hoy no se volvió a buscar" in texto
+
+
+def test_con_pais_explicito_no_se_planifica_la_cuota(v):
+    c = ClienteConPresupuesto(v, usadas=27)  # quedan 3: un país; con --pais se intenta y la cuota corta
+    r = orquestador.auditar(v, "o-ejemplo", ["RO", "IT"], FRASES, cliente=c, hoy=HOY, cambios=nunca)
+    assert paises_llamados(c) == ["RO"] and r.tipo == "cuota"

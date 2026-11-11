@@ -68,7 +68,15 @@ def _ejecutar_auditoria(args: argparse.Namespace) -> int:
         extra = f" · no tirar: {p.no_tirar}" if p.no_tirar else ""
         motivo = f" ({p.hueco.motivo})" if p.hueco.hueco is None and p.hueco.motivo else ""
         print(f"{i}. {p.pais} — nota {nota} · hueco {hueco[p.hueco.hueco]}{motivo}{extra}")
+        if p.hueco_medido:
+            print(f"   {p.pais}: hueco {p.hueco_medido}" + (" (las frases de ese país no se usaron)"
+                                                       if p.pais in frases else ""))
     print(f"Recomendación: {recomendar(r.paises)[2]}")
+    if r.usadas_hoy is None or r.max_hoy is None:
+        print("Búsquedas usadas hoy: no medido (sin contador del día)")
+    else:
+        print(f"Búsquedas usadas hoy: {r.usadas_hoy} de {r.max_hoy} (quedan {max(r.max_hoy - r.usadas_hoy, 0)}); "
+              f"esta auditoría hizo {r.hechas or 0}")
     pendientes = que_medir(orden)
     if pendientes:
         print("Qué medir:")
@@ -77,7 +85,8 @@ def _ejecutar_auditoria(args: argparse.Namespace) -> int:
     # Fin normal (también con la cuota del día agotada): 0. Bloqueo de Meta: 1 (PARADA, dura el día).
     # Racha de errores o navegador caído: 3 (INTERRUMPIDA). Error de uso o configuración: 2.
     if r.parada and r.tipo == "cuota":
-        print("Cuota del día agotada: los países que faltaban quedaron «no medido»; audítalos otro día.")
+        print("Cuota del día agotada: los países que faltaban quedaron «no medido: cuota del día agotada»; "
+              "mañana, la misma orden sigue donde se quedó (lo medido no se repite).")
     elif r.parada and r.tipo == "errores":
         print(f"INTERRUMPIDA: {r.parada}. No es un bloqueo de Meta; lo que faltaba quedó «no medido». "
               "Se puede volver a intentar más tarde.")

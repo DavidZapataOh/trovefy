@@ -34,6 +34,7 @@ class PaisAuditado:
     fuente_banda: str | None = None
     precio_local: Medida | None = None  # el precio en EUR llevado a la moneda del país
     moneda_local: str | None = None
+    hueco_medido: str | None = None  # «medido el AAAA-MM-DD (…); hoy no se volvió a buscar» si se reutilizó
 
 
 def puntuar_pais(hueco: HuecoPais, precio_s: Medida, u: dict[str, Umbral]) -> tuple[float | None, Desglose]:

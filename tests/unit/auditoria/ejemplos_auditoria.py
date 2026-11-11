@@ -6,6 +6,7 @@ IT con hueco y 0,5; FR con el original ya traducido (no tirar).
 
 import pathlib
 
+from trovify.auditoria.orquestador import lineas_busquedas
 from trovify.auditoria.paises import PaisAuditado, no_tirar, puntuar_pais
 from trovify.caza.hueco import HuecoPais
 from trovify.caza.senales import Medida
@@ -68,6 +69,7 @@ def oferta_ejemplo() -> dict:
 CONTEXTO = {
     "calculo_eur": "13,90 € (la ficha ya está en euros: sin cambio)",
     "cambio": "referencia del BCE del 2026-11-10 — https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml",
+    "busquedas": lineas_busquedas(21, 30, 9),
 }
 
 

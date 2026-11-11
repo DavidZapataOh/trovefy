@@ -118,3 +118,27 @@ def test_mercados_mal_escrito_sale_con_2_sin_traza(vault, capsys):
     assert err.startswith("Error:") and "entre comillas" in err and "Traceback" not in err
     (vault / "config/mercados.yaml").write_text("RO: [\n", encoding="utf-8")
     assert cli.main(["auditar", "ejecutar", "--oferta", "o-ejemplo"]) == 2
+
+
+def test_imprime_las_busquedas_del_dia(vault, monkeypatch, capsys):
+    def auditar(v, oferta_id, paises, frases, hoy=None, **kw):
+        ruta = escribir_auditoria(v, oferta_id, paises_ejemplo(), hoy)
+        return orquestador.ResultadoAuditoria(ruta, ruta.parent.name, paises_ejemplo(), None, None, 29, 30, 6)
+
+    monkeypatch.setattr(orquestador, "auditar", auditar)
+    assert cli.main(["auditar", "ejecutar", "--oferta", "o-ejemplo"]) == 0
+    assert "Búsquedas usadas hoy: 29 de 30 (quedan 1); esta auditoría hizo 6" in capsys.readouterr().out
+
+
+def test_avisa_si_las_frases_no_se_usaron_por_un_hueco_reutilizado(vault, monkeypatch, capsys):
+    def auditar(v, oferta_id, paises, frases, hoy=None, **kw):
+        ps = paises_ejemplo()
+        ps[0].hueco_medido = "medido el 2026-11-08 (…); hoy no se volvió a buscar en RO"
+        ruta = escribir_auditoria(v, oferta_id, ps, hoy)
+        return orquestador.ResultadoAuditoria(ruta, ruta.parent.name, ps, None, None)
+
+    monkeypatch.setattr(orquestador, "auditar", auditar)
+    assert cli.main(["auditar", "ejecutar", "--oferta", "o-ejemplo", "--frases", "RO:a b|c d"]) == 0
+    captura = capsys.readouterr()
+    assert "RO: hueco medido el 2026-11-08" in captura.out
+    assert "Búsquedas usadas hoy: no medido" in captura.out

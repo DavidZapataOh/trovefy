@@ -199,6 +199,7 @@ def _seccion_pais(i: int, p: PaisAuditado) -> list[str]:
         f"### {i}. {p.pais} — nota {_nota_con_cobertura(p)}",
         "",
         f"- Hueco: {_hueco(p)}",
+        *([f"- Hueco reutilizado: {p.hueco_medido}"] if p.hueco_medido else []),
         f"- {_precio_pais(p)}",
     ]
     if p.no_tirar:
@@ -311,6 +312,8 @@ def render_auditoria(oferta: dict, paises: list[PaisAuditado], recomendacion, se
     else:
         lineas.append(f"¿Ya lanzamos algo parecido allí? No: ningún producto del cerebro murió en "
                       f"{_lista([p.pais for p in orden]) or 'estos países'}.")
+    if busquedas:
+        lineas += ["", "## Búsquedas de hoy", "", *[f"- {x}" for x in busquedas]]
     lineas += ["", "## Qué medir", ""]
     pendientes = que_medir(orden)
     lineas += [f"- {x}" for x in pendientes] or ["Nada: todos los países auditados tienen el hueco comprobado."]
@@ -365,6 +368,12 @@ def producto_para(vault: Path, oferta_id: str, slug: str) -> str:
         if _leer_meta(d / "PRODUCTO.md").get("oferta_id") == oferta_id:
             return d.name
     return f"p-{mayor + 1:04d}-{_slug(slug)}"
+
+
+def producto_existente(vault: Path, oferta_id: str) -> str | None:
+    """El p-id del producto de ``oferta_id`` si ya existe (sin proponer uno nuevo)."""
+    p_id = producto_para(vault, oferta_id, slug_de_oferta(oferta_id))
+    return p_id if (Path(vault) / "productos" / p_id / "PRODUCTO.md").exists() else None
 
 
 def historial_de(vault: Path, paises: list[str], excluir: str | None = None) -> list[str]:
