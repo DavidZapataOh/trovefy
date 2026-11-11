@@ -111,3 +111,16 @@ def test_caza_yaml_se_crea_si_falta(vault, monkeypatch):
     monkeypatch.setattr(orquestador, "ejecutar", lambda *a, **k: ejecucion_ejemplo())
     assert cli.main(["caza", "ejecutar", "--modo", "vigilar", "--region", "europa"]) == 0
     assert "rutina" in (vault / "config/caza.yaml").read_text()
+
+
+def test_perfil_desconocido_sale_con_2_sin_buscar(vault, capsys, monkeypatch):
+    from trovify.caza import cliente as m
+
+    def nunca(*a, **k):
+        raise AssertionError("no debe crear el cliente")
+
+    monkeypatch.setattr(m, "ClienteBibliotecaPublica", nunca)
+    assert cli.main(["caza", "ejecutar", "--modo", "nicho", "--region", "europa", "--consulta", "RO:fise",
+                     "--perfil", "Tommi"]) == 2
+    err = capsys.readouterr().err
+    assert "perfil desconocido" in err and "tomi, santino, europa_caro" in err

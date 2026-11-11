@@ -34,7 +34,7 @@ from trovify.caza.destino import (
 )
 from trovify.caza.hueco import HuecoPais, hueco_pais
 from trovify.caza.modelo import AnuncioBiblioteca, ResultadoBusqueda
-from trovify.caza.nota import Nota, calcular_nota, decidir
+from trovify.caza.nota import Nota, calcular_nota, decidir, validar_perfil
 from trovify.caza.oferta import Oferta, agrupar, marcar_original
 from trovify.caza.presupuesto import ParadaPorErrores, PresupuestoAgotado
 from trovify.caza.salida import (
@@ -670,6 +670,7 @@ def ejecutar(
         raise ValueError("el modo oferta necesita al menos un --page-id")
     hoy = hoy or hoy_negocio()
     u = cfg_umbrales.cargar(vault / "config/umbrales.yaml")
+    perfil = validar_perfil(u, perfil)  # antes de cualquier búsqueda
     if cliente is None:
         from trovify.caza.cache import Cache
         from trovify.caza.cliente import ClienteBibliotecaPublica
@@ -1016,6 +1017,7 @@ def medir_hueco(
         raise ValueError("hace falta al menos una frase en el idioma local")
     hoy = hoy or hoy_negocio()
     u = cfg_umbrales.cargar(vault / "config/umbrales.yaml")
+    perfil = validar_perfil(u, perfil or _perfil_config(vault))  # antes de cualquier búsqueda
     if idioma is None:
         mercado = _mercados(vault).get(pais)
         if mercado is None:
@@ -1037,7 +1039,6 @@ def medir_hueco(
     huecos[pais] = hueco_a_dict(h, hoy)
     meta["huecos"] = huecos
     hay = _hay_hueco(huecos_de(meta))
-    perfil = perfil or _perfil_config(vault)
     landing = "modelable" if meta.get("checkout") and meta.get("precio") is not None else "dudoso"
     mejor: tuple[str, str] | None = None
     for datos in (meta.get("paises") or {}).values():

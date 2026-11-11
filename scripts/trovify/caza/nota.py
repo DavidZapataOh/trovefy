@@ -13,6 +13,7 @@ no estar bajo el umbral).
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -94,6 +95,25 @@ def calcular_nota(s: Senales, u: dict[str, Umbral]) -> Nota:
     for _, m in mult:
         valor *= m
     return Nota(valor, desglose, mult, no_medidas)
+
+
+_PERFIL = re.compile(r"^caza\.perfil\.([^.]+)\.c[78]_min$")
+
+
+def perfiles(u: dict[str, Umbral]) -> list[str]:
+    """Perfiles de umbral que hay en ``config/umbrales.yaml`` (los que tienen ``c8_min`` o ``c7_min``)."""
+    return list(dict.fromkeys(m.group(1) for k in u if (m := _PERFIL.match(k))))
+
+
+def validar_perfil(u: dict[str, Umbral], perfil: str) -> str:
+    """El perfil normalizado (minúsculas, «-» → «_»); ValueError con la lista si no existe.
+
+    Se llama antes de cualquier búsqueda: un perfil mal escrito no puede gastar el presupuesto."""
+    clave = (perfil or "").strip().casefold().replace("-", "_")
+    validos = perfiles(u)
+    if clave not in validos:
+        raise ValueError(f"perfil desconocido: «{perfil}»; los que hay son {', '.join(validos) or 'ninguno'}")
+    return clave
 
 
 def _n(x: float) -> str:

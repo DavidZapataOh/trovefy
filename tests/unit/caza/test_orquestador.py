@@ -761,3 +761,26 @@ def test_lectura_de_otro_dia_no_registra_vistos(tmp_path):
     assert r.senales.nuevos.valor is None and r.senales.parados.valor is None
     conn = sqlite3.connect(v / "data/caza/snapshots.sqlite")
     assert conn.execute("SELECT COUNT(*) FROM corridas").fetchone()[0] == 0
+
+
+# --- ola final: I3 perfil validado antes de buscar --------------------------------------------
+
+
+def test_perfil_desconocido_para_antes_de_buscar(tmp_path):
+    v = _vault(tmp_path)
+    c = ClientePorUrl({})
+    with pytest.raises(ValueError, match="perfil desconocido: «Tommi»; los que hay son tomi, santino, europa_caro"):
+        ejecutar(v, "nicho", [("RO", "fise")], "Tommi", 3, cliente=c, resolver=resolver_fijo({}), hoy=HOY,
+                 region="europa")
+    assert c.llamadas == []
+    _ficha_medida(v, "o-perfil", "100000000000601")
+    with pytest.raises(ValueError, match="perfil desconocido"):
+        orquestador.medir_hueco(v, "o-perfil", "RO", ["a b", "c d"], cliente=c, hoy=HOY, perfil="Tommi")
+    assert c.llamadas == []
+
+
+def test_perfil_se_normaliza(tmp_path):
+    v = _vault(tmp_path)
+    e = ejecutar(v, "nicho", [("RO", "fise")], "Europa-Caro", 3, cliente=ClientePorUrl({}),
+                 resolver=resolver_fijo({}), hoy=HOY, region="europa")
+    assert e.perfil == "europa_caro"
