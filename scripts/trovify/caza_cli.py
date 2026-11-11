@@ -5,9 +5,8 @@ import re
 import sys
 from pathlib import Path
 
-import yaml
-
 from trovify.cli import registrar
+from trovify.config.yaml_config import cargar_yaml
 
 _PAIS = re.compile(r"^(ALL|[A-Z]{2}):(.+)$")
 
@@ -51,7 +50,7 @@ def _config(vault: Path) -> dict:
 
         escribir_atomico(ruta, (PLANTILLA / "config/caza.yaml").read_text(encoding="utf-8"))
         print("Aviso: no había config/caza.yaml; se creó desde la plantilla.", file=sys.stderr)
-    datos = yaml.safe_load(ruta.read_text(encoding="utf-8")) or {}
+    datos = cargar_yaml(ruta.read_text(encoding="utf-8")) or {}
     if not isinstance(datos, dict):
         raise ValueError("config/caza.yaml no es un mapa")  # noqa: TRY004 - error de configuración para el usuario
     return datos

@@ -1259,11 +1259,11 @@ def _medir_hueco(
 
 
 def _perfil_config(vault: Path) -> str:
-    import yaml
+    from trovify.config.yaml_config import cargar_yaml
 
     ruta = vault / "config/caza.yaml"
     if ruta.exists():
-        datos = yaml.safe_load(ruta.read_text(encoding="utf-8")) or {}
+        datos = cargar_yaml(ruta.read_text(encoding="utf-8")) or {}
         if isinstance(datos, dict) and isinstance(datos.get("perfil"), str):
             return datos["perfil"]
     return "tomi"

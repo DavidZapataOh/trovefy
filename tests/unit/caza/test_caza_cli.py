@@ -205,3 +205,22 @@ def test_rutina_omitida_si_otra_caza_esta_en_curso(vault, monkeypatch, capsys):
     assert not (vault / "rutinas/log/2026-11-10/ok").exists()
     assert "omitida: otra caza en curso" in (vault / "rutinas/log/2026-11-10/caza.md").read_text()
     assert cli.main(["caza", "ejecutar", "--modo", "vigilar"]) == 2  # sin --rutina: error normal
+
+
+def test_caza_yaml_con_no_sin_comillas_lee_noruega(vault):
+    from trovify import caza_cli
+    from trovify.caza import orquestador as caza_orq
+
+    ruta = vault / "config/caza.yaml"
+    ruta.write_text(ruta.read_text(encoding="utf-8").replace('"NO"', "NO"), encoding="utf-8")
+    assert ", NO," in ruta.read_text(encoding="utf-8")
+    assert "NO" in caza_cli._config(vault)["regiones"]["europa"]
+    ruta.write_text("perfil: no\n", encoding="utf-8")
+    assert caza_orq._perfil_config(vault) == "no"
+
+
+def test_plantilla_caza_yaml_lleva_no_entre_comillas():
+    from trovify.vault.andamio import PLANTILLA
+
+    assert '"NO"' in (PLANTILLA / "config/caza.yaml").read_text(encoding="utf-8")
+    assert '\n"NO":' in (PLANTILLA / "config/mercados.yaml").read_text(encoding="utf-8")

@@ -7,7 +7,7 @@ regiones:
   eeuu_gb: [US, GB]
   br: [BR]
   latam_es: [MX, CO, AR, CL, PE, EC, GT, DO, UY, CR, PA, BO, PY]
-  europa: [RO, MD, CZ, HU, BG, IT, FR, ES, PT, PL, GR, SE, NO, DK, FI]
+  europa: [RO, MD, CZ, HU, BG, IT, FR, ES, PT, PL, GR, SE, "NO", DK, FI]
 
 # Nichos elegidos por el usuario (por ejemplo «fichas de terapia», «recursos para docentes»).
 nichos: []

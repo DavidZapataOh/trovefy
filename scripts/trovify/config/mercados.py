@@ -5,6 +5,8 @@ from pathlib import Path
 
 import yaml
 
+from trovify.config.yaml_config import cargar_yaml
+
 
 @dataclass(frozen=True)
 class Mercado:
@@ -19,9 +21,22 @@ class Mercado:
 
 
 def cargar(ruta: Path) -> dict[str, Mercado]:
-    datos = yaml.safe_load(Path(ruta).read_text(encoding="utf-8")) or {}
+    try:
+        datos = cargar_yaml(Path(ruta).read_text(encoding="utf-8")) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"config/mercados.yaml no se puede leer: {exc}") from None
+    if not isinstance(datos, dict):
+        raise ValueError("config/mercados.yaml no es un mapa de países")  # noqa: TRY004 - error de configuración
     mercados: dict[str, Mercado] = {}
     for pais, e in datos.items():
+        if not isinstance(pais, str) or not pais.strip():
+            raise ValueError(f"la clave {pais!r} de config/mercados.yaml no es un código de país: escríbela "
+                             'entre comillas, por ejemplo "NO":')
+        if not isinstance(e, dict):
+            raise ValueError(f"el país {pais} de config/mercados.yaml no es un mapa")  # noqa: TRY004
+        faltan = [c for c in ("idioma", "moneda", "zona", "banda_eur", "estado") if c not in e]
+        if faltan:
+            raise ValueError(f"al país {pais} de config/mercados.yaml le falta: {', '.join(faltan)}")
         banda = e["banda_eur"]
         mercados[pais] = Mercado(
             pais=pais,

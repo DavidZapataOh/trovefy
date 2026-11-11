@@ -5,7 +5,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
+from trovify.config.yaml_config import cargar_yaml
 
 _CAMPOS = ("valor", "fuente", "fecha", "gana_sobre", "regla")
 _REGLA = re.compile(r"R-\d{3}")
@@ -43,7 +43,7 @@ def cargar(ruta: Path) -> dict[str, Umbral]:
 
 def cargar_texto(texto: str) -> dict[str, Umbral]:
     """Valida el contenido de un umbrales.yaml con las mismas reglas que `cargar`."""
-    datos = yaml.safe_load(texto) or {}
+    datos = cargar_yaml(texto) or {}
     umbrales: dict[str, Umbral] = {}
     for clave, entrada in datos.items():
         if not isinstance(entrada, dict):

@@ -109,3 +109,12 @@ def test_elegir_un_pais_muerto_no_dice_aprobado(vault, monkeypatch, capsys):
     assert "queda «aprobado»" not in out and "zona horaria" not in out
     assert "Decisión registrada" in out or "Elección registrada" in out
     assert "el estado de RO sigue siendo MUERTO" in out
+
+
+def test_mercados_mal_escrito_sale_con_2_sin_traza(vault, capsys):
+    (vault / "config/mercados.yaml").write_text("1:\n  idioma: x\n", encoding="utf-8")
+    assert cli.main(["auditar", "ejecutar", "--oferta", "o-ejemplo"]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("Error:") and "entre comillas" in err and "Traceback" not in err
+    (vault / "config/mercados.yaml").write_text("RO: [\n", encoding="utf-8")
+    assert cli.main(["auditar", "ejecutar", "--oferta", "o-ejemplo"]) == 2

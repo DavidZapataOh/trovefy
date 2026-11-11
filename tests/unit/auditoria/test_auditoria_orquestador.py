@@ -175,3 +175,19 @@ def test_reauditar_mismo_producto(v):
     assert r1.ruta == r2.ruta and r1.p_id == r2.p_id
     meta, _ = leer(r2.ruta)
     assert meta["fecha"] == "2026-11-12"
+
+
+def test_por_defecto_con_la_plantilla_y_no_sin_comillas(v):
+    """C-1: el cerebro de plantilla (y uno viejo con «NO:» sin comillas) audita sin --pais."""
+    r = orquestador.auditar(v, "o-ejemplo", None, FRASES, cliente=ClienteFalso(), hoy=HOY, cambios=nunca)
+    assert "NO" in {p.pais for p in r.paises} and len(r.paises) == 15
+    ruta = v / "config/mercados.yaml"
+    ruta.write_text(ruta.read_text(encoding="utf-8").replace('"NO":', "NO:"), encoding="utf-8")
+    r = orquestador.auditar(v, "o-ejemplo", ["no"], FRASES, cliente=ClienteFalso(), hoy=HOY, cambios=nunca)
+    assert [p.pais for p in r.paises] == ["NO"]
+
+
+def test_mercados_con_clave_rara_es_error_claro(v):
+    (v / "config/mercados.yaml").write_text("true:\n  idioma: x\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="entre comillas"):
+        orquestador.auditar(v, "o-ejemplo", None, FRASES, cliente=ClienteFalso(), hoy=HOY, cambios=nunca)
