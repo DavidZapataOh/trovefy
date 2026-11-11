@@ -1,13 +1,8 @@
 import pathlib
-import sys
 from datetime import date
 
-sys.modules.pop("ejemplos", None)  # la caza también tiene un ejemplos.py: que no se crucen
-from ejemplos import link_pagina, oferta_ejemplo, paises_ejemplo
-
-sys.modules.pop("ejemplos", None)
-
 import pytest
+from ejemplos_auditoria import link_pagina, oferta_ejemplo, paises_ejemplo
 from trovify.arranque.verificadores.cuenta import mercado_elegido
 from trovify.auditoria.paises import recomendar, tres_senales
 from trovify.auditoria.salida import (
@@ -200,3 +195,54 @@ def test_precio_sin_moneda_no_se_asume(tmp_path):
     ps = paises_ejemplo()
     texto = render_auditoria(o, ps, recomendar(ps), tres_senales("B", ps), [], HOY)
     assert "13,90 EUR" not in texto and "moneda no medida" in texto
+
+
+def _poner_estado(v, p, pais, estado):
+    meta, cuerpo = leer(v / "productos" / p / "PRODUCTO.md")
+    meta["paises"][pais] = {**meta["paises"].get(pais, {}), "estado": estado, "motivo": "0 ventas", "stop": "[[x]]"}
+    escribir(v / "productos" / p / "PRODUCTO.md", meta, cuerpo)
+
+
+def test_elegir_un_pais_muerto_no_cambia_su_estado(tmp_path):
+    v = vault(tmp_path)
+    p = escribir_auditoria(v, "o-ejemplo", paises_ejemplo(), HOY).parent.name
+    _poner_estado(v, p, "RO", "MUERTO")
+    d = registrar_eleccion(v, p, "RO", None, "Otra vez Rumanía", HOY)
+    texto = d.read_text()
+    assert "Otra vez Rumanía" in texto
+    assert "Advertencia: este país ya está en MUERTO; el estado no cambia" in texto
+    meta, _ = leer(v / "productos" / p / "PRODUCTO.md")
+    assert meta["paises"]["RO"]["estado"] == "MUERTO"
+    # el historial de otro producto lo sigue viendo
+    from trovify.auditoria.salida import historial_de
+
+    assert any("MUERTO" in x for x in historial_de(v, ["RO"]))
+
+
+def test_elegir_otro_pais_no_toca_uno_mas_avanzado(tmp_path):
+    v = vault(tmp_path)
+    p = escribir_auditoria(v, "o-ejemplo", paises_ejemplo(), HOY).parent.name
+    _poner_estado(v, p, "RO", "TEST")
+    d = registrar_eleccion(v, p, "IT", None, "Italia también", HOY)
+    assert "Advertencia: RO ya está en TEST (1 producto × 1 país)" in d.read_text()
+    meta, _ = leer(v / "productos" / p / "PRODUCTO.md")
+    assert meta["paises"]["RO"]["estado"] == "TEST" and meta["paises"]["IT"]["estado"] == "aprobado"
+
+
+def test_elegir_desde_cazado_aprueba(tmp_path):
+    v = vault(tmp_path)
+    p = escribir_auditoria(v, "o-ejemplo", paises_ejemplo(), HOY).parent.name
+    _poner_estado(v, p, "RO", "cazado")
+    d = registrar_eleccion(v, p, "RO", None, "Rumanía", HOY)
+    assert "el estado no cambia" not in d.read_text()
+    meta, _ = leer(v / "productos" / p / "PRODUCTO.md")
+    assert meta["paises"]["RO"]["estado"] == "aprobado"
+
+
+def test_auditoria_cita_banda_y_pesos():
+    ps = paises_ejemplo()
+    texto = render_auditoria(oferta_ejemplo(), ps, recomendar(ps), tres_senales("B", ps), [], HOY)
+    assert "medida sobre 45 de 100 puntos" in texto
+    assert "banda de RO: 11,90–15,90 € (fuente: vídeos: 11,90–15,90 €, config/mercados.yaml)" in texto
+    assert "auditar.peso.*" in texto
+    assert "sin hueco comprobado" not in texto

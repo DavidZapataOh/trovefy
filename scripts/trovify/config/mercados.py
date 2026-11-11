@@ -15,6 +15,7 @@ class Mercado:
     banda_eur: tuple[float, float]
     precio_referencia: str | None
     estado: str
+    fuente_banda: str | None = None
 
 
 def cargar(ruta: Path) -> dict[str, Mercado]:
@@ -30,5 +31,6 @@ def cargar(ruta: Path) -> dict[str, Mercado]:
             banda_eur=(float(banda[0]), float(banda[1])),
             precio_referencia=e.get("precio_referencia"),
             estado=e["estado"],
+            fuente_banda=e.get("fuente_banda"),
         )
     return mercados

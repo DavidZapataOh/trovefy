@@ -54,8 +54,12 @@ def _ejecutar_auditoria(args: argparse.Namespace) -> int:
                 print(f"Aviso: con una sola frase en {pais} el «sin competencia» no se puede confirmar "
                       "(hacen falta dos).", file=sys.stderr)
         r = orquestador.auditar(vault, args.oferta, args.pais or None, frases, hoy=hoy_negocio())
-    except (ValueError, FileNotFoundError, KeyError) as exc:  # CazaEnCurso es un ValueError
+    except (ValueError, FileNotFoundError) as exc:  # CazaEnCurso es un ValueError
         return _error(str(exc))
+    sobran = sorted(set(frases) - {p.pais for p in r.paises})
+    if sobran:
+        print(f"Aviso: hay frases para {', '.join(sobran)}, que no se auditó; revisa --pais o config/mercados.yaml.",
+              file=sys.stderr)
     print(f"Auditoría escrita: {r.ruta.relative_to(vault).as_posix()} (producto {r.p_id})")
     orden = sorted(r.paises, key=lambda p: (p.nota is None, -(p.nota or 0), p.pais))
     hueco = {True: "sí", False: "no", None: "no comprobado"}

@@ -20,12 +20,12 @@ from trovify.auditoria.precio import precio_soportable
 from trovify.auditoria.salida import escribir_auditoria, producto_para, slug_de_oferta
 from trovify.caza.hueco import (
     HuecoPais,
-    _original,
     hay_hueco,
     hueco_pais,
     motivo_hueco,
+    original_con_enlaces,
 )
-from trovify.caza.orquestador import _cerrojo_caza, _VigiaDeParada, hoy_negocio
+from trovify.caza.orquestador import VigiaDeParada, cerrojo_caza, hoy_negocio
 from trovify.caza.senales import Medida
 from trovify.config import mercados as cfg_mercados
 from trovify.config import umbrales as cfg_umbrales
@@ -43,7 +43,7 @@ class ResultadoAuditoria:
     tipo: str | None  # «meta» (PARADA, dura el día), «errores» (INTERRUMPIDA) o «cuota» (final normal)
 
 
-def _motivo_corte(vigia: _VigiaDeParada) -> str:
+def _motivo_corte(vigia: VigiaDeParada) -> str:
     if vigia.tipo == "cuota":
         return "no medido: cuota del día agotada"
     if vigia.tipo == "meta":
@@ -70,7 +70,7 @@ def precio_en_eur(oferta: dict, vault: Path, hoy: date, cambios: Cambios) -> Med
 
 def auditar(vault: Path, *args, **kw) -> ResultadoAuditoria:
     """:func:`_auditar` con el cerrojo del cerebro (``CazaEnCurso`` si otra caza está en marcha)."""
-    with _cerrojo_caza(Path(vault)):
+    with cerrojo_caza(Path(vault)):
         return _auditar(vault, *args, **kw)
 
 
@@ -114,7 +114,7 @@ def _auditar(
 
         cliente = ClienteBibliotecaPublica(Presupuesto.desde_umbrales(vault, hoy),
                                            cache=Cache(vault / "data" / "cache" / "biblioteca"))
-    vigia = _VigiaDeParada(cliente)
+    vigia = VigiaDeParada(cliente)
 
     auditados: list[PaisAuditado] = []
     for pais in paises:
@@ -126,11 +126,12 @@ def _auditar(
         else:
             comp = Medida(None, f"no medido: faltan las frases en el idioma local de {pais} "
                                 f"(--frases {pais}:\"f1|f2\")")
-            orig, enlaces = _original(vigia, page_ids, pais, mercado.idioma, hoy, u)
+            orig, enlaces = original_con_enlaces(vigia, page_ids, pais, mercado.idioma, hoy, u)
             h = HuecoPais(pais, comp, orig, hay_hueco(comp, orig, u), enlaces, motivo_hueco(comp, orig, u))
         precio_s = precio_soportable(precio_eur, mercado.banda_eur)
         nota, desglose = puntuar_pais(h, precio_s, u)
-        auditados.append(PaisAuditado(pais, h, precio_eur, precio_s, nota, desglose, no_tirar(h)))
+        auditados.append(PaisAuditado(pais, h, precio_eur, precio_s, nota, desglose, no_tirar(h),
+                                      mercado.banda_eur, mercado.fuente_banda))
 
     ruta = escribir_auditoria(vault, oferta_id, auditados, hoy)
     p_id = producto_para(vault, oferta_id, slug_de_oferta(oferta_id))

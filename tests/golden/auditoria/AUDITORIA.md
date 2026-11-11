@@ -33,23 +33,25 @@ Dónde lanzar esta oferta, país por país. Lo que no se pudo medir se dice como
 ## La oferta
 
 - Ficha: [[wiki/ofertas/o-ejemplo]]
-- Decisión de la caza: **B** — nota 62,4 < 70 para A; sin hueco comprobado
+- Decisión de la caza: **B** (la puso la caza antes de medir el hueco por país; el hueco medido está más abajo)
 - Precio del original: 13,90 EUR (landing: tienda.example)
 - Cifras de la caza por país:
   - ES: C8 15 · C7 16 · total 32 anuncios activos · el más antiguo lleva 40 días — https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=ES&media_type=all&search_type=page&view_all_page_id=100000000000001
 
 ## Ranking de países
 
+Pesos de la nota: config/umbrales.yaml (auditar.peso.*, [D-13]). Lo no medido no puntúa ni resta: la nota se calcula sobre los puntos medidos.
+
 | # | País | Nota (0 a 100) | Hueco | No tirar |
 |---|---|---|---|---|
-| 1 | RO | 100 | sí | — |
-| 2 | IT | 83 | sí | — |
-| 3 | FR | 33 | no | el original ya anuncia traducido |
+| 1 | RO | 100 (medida sobre 45 de 100 puntos) | sí | — |
+| 2 | IT | 83 (medida sobre 45 de 100 puntos) | sí | — |
+| 3 | FR | 33 (medida sobre 45 de 100 puntos) | no | el original ya anuncia traducido |
 
-### 1. RO — nota 100
+### 1. RO — nota 100 (medida sobre 45 de 100 puntos)
 
 - Hueco: **sí** — competencia local: 0 anunciantes en el idioma local · original: anuncia sin traducir (bonus)
-- Precio del original en EUR: 13,90 € · precio soportable: 1 (1 = dentro de la banda de precios del país; 0 = muy lejos)
+- Precio del original en EUR: 13,90 € · precio soportable: 1 (1 = dentro de la banda de precios del país; 0 = muy lejos) · banda de RO: 11,90–15,90 € (fuente: vídeos: 11,90–15,90 €, config/mercados.yaml)
 - Búsquedas en la Biblioteca que dan estas cifras:
   - https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=RO&media_type=all&q=fise+terapie&search_type=keyword_unordered
   - https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=RO&media_type=all&q=kit+terapie&search_type=keyword_unordered
@@ -65,10 +67,10 @@ Dónde lanzar esta oferta, país por país. Lo que no se pudo medir se dice como
 
 Cálculo: 100 × 45 ÷ 45 (solo los pesos medidos) = 100.
 
-### 2. IT — nota 83
+### 2. IT — nota 83 (medida sobre 45 de 100 puntos)
 
 - Hueco: **sí** — competencia local: 0 anunciantes en el idioma local · original: sin anuncios activos ahora en el país
-- Precio del original en EUR: 13,90 € · precio soportable: 0,5 (1 = dentro de la banda de precios del país; 0 = muy lejos)
+- Precio del original en EUR: 13,90 € · precio soportable: 0,5 (1 = dentro de la banda de precios del país; 0 = muy lejos) · banda de IT: 15,90–19,90 € (fuente: banda de ejemplo, config/mercados.yaml)
 - Búsquedas en la Biblioteca que dan estas cifras:
   - https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=IT&media_type=all&q=schede+terapia&search_type=keyword_unordered
   - https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=IT&media_type=all&q=kit+terapia&search_type=keyword_unordered
@@ -84,10 +86,10 @@ Cálculo: 100 × 45 ÷ 45 (solo los pesos medidos) = 100.
 
 Cálculo: 100 × 37,5 ÷ 45 (solo los pesos medidos) = 83,33.
 
-### 3. FR — nota 33
+### 3. FR — nota 33 (medida sobre 45 de 100 puntos)
 
 - Hueco: **no** — competencia local: 0 anunciantes en el idioma local · original: ya anuncia traducido al idioma local
-- Precio del original en EUR: 13,90 € · precio soportable: 1 (1 = dentro de la banda de precios del país; 0 = muy lejos)
+- Precio del original en EUR: 13,90 € · precio soportable: 1 (1 = dentro de la banda de precios del país; 0 = muy lejos) · banda de FR: 11,90–15,90 € (fuente: vídeos: 11,90–15,90 €, config/mercados.yaml)
 - No tirar: el original ya anuncia traducido
 - Búsquedas en la Biblioteca que dan estas cifras:
   - https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=FR&media_type=all&q=fiches+therapie&search_type=keyword_unordered

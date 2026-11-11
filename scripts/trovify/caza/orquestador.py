@@ -702,7 +702,7 @@ class CazaEnCurso(ValueError):
 
 
 @contextmanager
-def _cerrojo_caza(vault: Path):
+def cerrojo_caza(vault: Path):
     """Una sola caza a la vez por cerebro: dos procesos no consultan a Meta al mismo tiempo."""
     ruta = Path(vault) / "data/caza/.caza.lock"
     ruta.parent.mkdir(parents=True, exist_ok=True)
@@ -723,7 +723,7 @@ def _cerrojo_caza(vault: Path):
 def ejecutar(vault: Path, *args, **kw) -> Ejecucion:
     """Una ejecución de la caza con el cerrojo del cerebro (:func:`_ejecutar`; ``CazaEnCurso`` si
     otra caza está en marcha)."""
-    with _cerrojo_caza(Path(vault)):
+    with cerrojo_caza(Path(vault)):
         return _ejecutar(vault, *args, **kw)
 
 
@@ -1144,7 +1144,7 @@ def _medida_ficha(valor, suelo: bool, nombre: str) -> Medida:
     return Medida(None, f"no medido: sin {nombre} en la ficha")
 
 
-class _VigiaDeParada:
+class VigiaDeParada:
     """Cliente para el hueco: anota el primer corte (y su tipo) y, tras él, no vuelve a llamar a Meta."""
 
     def __init__(self, cliente):
@@ -1169,7 +1169,7 @@ class _VigiaDeParada:
 
 def medir_hueco(vault: Path, *args, **kw) -> tuple[HuecoPais, str | None, str | None]:
     """:func:`_medir_hueco` con el cerrojo del cerebro (``CazaEnCurso`` si otra caza está en marcha)."""
-    with _cerrojo_caza(Path(vault)):
+    with cerrojo_caza(Path(vault)):
         return _medir_hueco(vault, *args, **kw)
 
 
@@ -1213,7 +1213,7 @@ def _medir_hueco(
                                            cache=Cache(vault / "data" / "cache" / "biblioteca"))
     meta, cuerpo = frontmatter.leer(ruta)
     page_ids = [str(p) for p in meta.get("page_ids") or []]
-    vigia = _VigiaDeParada(cliente)
+    vigia = VigiaDeParada(cliente)
     h = hueco_pais(vigia, frases, page_ids, pais, idioma, set(page_ids), hoy, u)
 
     huecos = dict(meta.get("huecos") or {})

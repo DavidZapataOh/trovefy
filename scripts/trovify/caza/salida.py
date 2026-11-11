@@ -150,6 +150,11 @@ def _num(x: float, decimales: int | None = None) -> str:
     return f"{round(x, 3):g}".replace(".", ",")
 
 
+def formatear_numero(x: float, decimales: int | None = None) -> str:
+    """Número con coma decimal (forma pública de ``_num`` para otros módulos)."""
+    return _num(x, decimales)
+
+
 def _comas(texto: str) -> str:
     """Decimales con coma en textos que vienen de otros módulos («nota 67.1 < 70»)."""
     return re.sub(r"\b(nota|C7|C8) (\d+)\.(\d)", r"\1 \2,\3", texto)
@@ -963,7 +968,7 @@ def _anadir_csv(ruta: Path, cabecera: list[str], filas: list[list]) -> None:
     escribir_atomico(ruta, previo + buf.getvalue())
 
 
-def _anadir_al_indice(vault: Path, entradas: list[tuple[str, str, str]]) -> None:
+def anadir_al_indice(vault: Path, entradas: list[tuple[str, str, str]]) -> None:
     """``(sección, enlace, descripción)``: una línea por enlace; si ya está, se actualiza."""
     ruta = vault / "index.md"
     lineas = ruta.read_text(encoding="utf-8").splitlines() if ruta.exists() else ["# Índice del cerebro"]
@@ -1236,7 +1241,7 @@ def escribir(vault: Path, e: Ejecucion) -> list[Path]:
     )
     rutas += [datos / "historico.csv", datos / "tasas.csv", datos / "palabras.csv"]
 
-    _anadir_al_indice(vault, indice)
+    anadir_al_indice(vault, indice)
     rutas.append(vault / "index.md")
 
     anadir_log(

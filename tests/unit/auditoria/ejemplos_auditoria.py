@@ -63,12 +63,13 @@ def oferta_ejemplo() -> dict:
     }
 
 
-def _pais(pais, comp, original, hueco, precio_s, enlaces) -> PaisAuditado:
+def _pais(pais, comp, original, hueco, precio_s, enlaces, banda=(11.9, 15.9),
+          fuente="vídeos: 11,90–15,90 €") -> PaisAuditado:
     u = cargar(_UMBRALES)
     h = HuecoPais(pais, Medida(comp), original, hueco, enlaces)
     ps = Medida(precio_s)
     nota, desglose = puntuar_pais(h, ps, u)
-    return PaisAuditado(pais, h, Medida(13.9), ps, nota, desglose, no_tirar(h))
+    return PaisAuditado(pais, h, Medida(13.9), ps, nota, desglose, no_tirar(h), banda, fuente)
 
 
 def paises_ejemplo() -> list[PaisAuditado]:
@@ -76,7 +77,8 @@ def paises_ejemplo() -> list[PaisAuditado]:
         _pais("RO", 0, "sin_traducir", True, 1.0,
               [link_frase("RO", "fise terapie"), link_frase("RO", "kit terapie"), link_pagina("RO")]),
         _pais("IT", 0, "ausente", True, 0.5,
-              [link_frase("IT", "schede terapia"), link_frase("IT", "kit terapia"), link_pagina("IT")]),
+              [link_frase("IT", "schede terapia"), link_frase("IT", "kit terapia"), link_pagina("IT")],
+              banda=(15.9, 19.9), fuente="banda de ejemplo"),  # 13,90 € queda a media banda: 0,5
         _pais("FR", 0, "traducido", False, 1.0,
               [link_frase("FR", "fiches therapie"), link_frase("FR", "kit therapie"), link_pagina("FR")]),
     ]

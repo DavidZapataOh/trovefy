@@ -139,7 +139,7 @@ def competencia_local(
     return _competencia(cliente, frases, pais, idioma, excluir_page_ids, u, hoy)[0]
 
 
-def _original(cliente, page_ids, pais, idioma, hoy, u) -> tuple[Original, list[str]]:
+def original_con_enlaces(cliente, page_ids, pais, idioma, hoy, u) -> tuple[Original, list[str]]:
     if not page_ids:
         return "no_medido", []
     minimo = int(u["hueco.sin_traducir_min_dias"].valor)
@@ -180,7 +180,7 @@ def original_presente(
 ) -> Original:
     """Estado del original en ``pais``. Fuera de la UE solo hay anuncios activos: «ausente» significa
     «sin anuncio activo ahora», no «nunca existió». Un texto indetectable no cuenta como traducido."""
-    return _original(cliente, page_ids, pais, idioma, hoy, u)[0]
+    return original_con_enlaces(cliente, page_ids, pais, idioma, hoy, u)[0]
 
 
 def hay_hueco(comp: Medida, orig: str, u: dict[str, Umbral]) -> bool | None:
@@ -219,5 +219,5 @@ def hueco_pais(
     if parada:  # sesión bloqueada o presupuesto agotado: no se sigue buscando
         orig, e2 = "no_medido", []
     else:
-        orig, e2 = _original(cliente, page_ids, pais, idioma, hoy, u)
+        orig, e2 = original_con_enlaces(cliente, page_ids, pais, idioma, hoy, u)
     return HuecoPais(pais, comp, orig, hay_hueco(comp, orig, u), e1 + e2, motivo_hueco(comp, orig, u))

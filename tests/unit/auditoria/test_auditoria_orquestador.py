@@ -1,16 +1,11 @@
-import sys
 from datetime import date, datetime
 
-sys.modules.pop("ejemplos", None)  # la caza también tiene un ejemplos.py: que no se crucen
-from ejemplos import oferta_ejemplo
-
-sys.modules.pop("ejemplos", None)
-
 import pytest
+from ejemplos_auditoria import oferta_ejemplo
 from trovify.auditoria import orquestador
 from trovify.caza.cliente import SesionBloqueada
 from trovify.caza.modelo import ResultadoBusqueda
-from trovify.caza.orquestador import CazaEnCurso, _cerrojo_caza
+from trovify.caza.orquestador import CazaEnCurso, cerrojo_caza
 from trovify.caza.presupuesto import PresupuestoAgotado
 from trovify.vault.andamio import crear_vault
 from trovify.vault.frontmatter import escribir, leer
@@ -73,16 +68,15 @@ def test_audita_y_escribe(v):
 
 
 def test_paises_por_defecto_son_los_candidatos(v):
-    ruta = v / "config/mercados.yaml"
-    texto = ruta.read_text(encoding="utf-8").replace("estado: candidato", "estado: descartado")
-    texto = texto.replace("RO:\n  idioma: ro\n  moneda: RON\n  zona: Europe/Bucharest\n  banda_eur: [11.90, 15.90]\n"
-                          "  fuente_banda: \"vídeos: 11,90–15,90 €\"\n  precio_referencia: \"79 RON\"\n"
-                          "  estado: descartado", "RO:\n  idioma: ro\n  moneda: RON\n  zona: Europe/Bucharest\n"
-                          "  banda_eur: [11.90, 15.90]\n  fuente_banda: \"vídeos: 11,90–15,90 €\"\n"
-                          "  precio_referencia: \"79 RON\"\n  estado: candidato")
-    ruta.write_text(texto, encoding="utf-8")
+    mercado = ("{p}:\n  idioma: {i}\n  moneda: EUR\n  zona: Europe/Rome\n  banda_eur: [11.90, 15.90]\n"
+               "  fuente_banda: prueba\n  estado: {e}\n")
+    (v / "config/mercados.yaml").write_text(
+        mercado.format(p="RO", i="ro", e="candidato") + mercado.format(p="IT", i="it", e="descartado"),
+        encoding="utf-8")
     r = orquestador.auditar(v, "o-ejemplo", None, FRASES, cliente=ClienteFalso(), hoy=HOY, cambios=nunca)
     assert [p.pais for p in r.paises] == ["RO"]
+    assert r.paises[0].banda == (11.9, 15.9) and r.paises[0].fuente_banda == "prueba"
+    assert "banda de RO: 11,90–15,90 € (fuente: prueba, config/mercados.yaml)" in r.ruta.read_text()
 
 
 def test_pais_desconocido(v):
@@ -170,7 +164,7 @@ def test_sin_precio(v):
 
 
 def test_cerrojo_de_la_caza(v):
-    with _cerrojo_caza(v), pytest.raises(CazaEnCurso):
+    with cerrojo_caza(v), pytest.raises(CazaEnCurso):
         orquestador.auditar(v, "o-ejemplo", ["RO"], FRASES, cliente=ClienteFalso(), hoy=HOY, cambios=nunca)
 
 

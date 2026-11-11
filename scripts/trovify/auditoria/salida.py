@@ -15,7 +15,8 @@ from datetime import date
 from pathlib import Path
 
 from trovify.auditoria.paises import PaisAuditado, tres_senales
-from trovify.caza.salida import _anadir_al_indice, _num, formatear_medida
+from trovify.caza.salida import anadir_al_indice, formatear_medida
+from trovify.caza.salida import formatear_numero as _num
 from trovify.caza.senales import Medida
 from trovify.vault import frontmatter
 from trovify.vault.escritura import anadir_log, escribir_atomico
@@ -47,6 +48,9 @@ _PENDIENTE = {
     "se_puede_mejorar": "lo confirma la autopsia de /modelar",
 }
 _HUECO_CORTO = {True: "sí", False: "no", None: "no comprobado"}
+# Estados desde los que una elección lleva un país a «aprobado» (§4.13); ``aprobado`` se queda igual.
+APROBABLES = (None, "cazado", "auditado", "aprobado")
+_P_ID = re.compile(r"p-\d{4}-[a-z0-9-]+")
 # Las dos señales que se pueden medir hoy; ``se_puede_mejorar`` se exige en /modelar.
 MEDIBLES = ("ya_se_vende", "hueco_por_pais")
 
@@ -60,6 +64,17 @@ def _si_no(v: bool | None) -> str:
 
 def _nota(nota: float | None) -> str:
     return "no medida" if nota is None else f"{nota:.0f}"
+
+
+def _cobertura(p: PaisAuditado) -> str:
+    """«medida sobre 45 de 100 puntos»: cuánto peso se midió de verdad (lo demás no puntúa)."""
+    medidos = sum(peso for _, peso, s, _ in p.desglose if s is not None)
+    total = sum(peso for _, peso, _, _ in p.desglose)
+    return f"medida sobre {_num(medidos)} de {_num(total)} puntos"
+
+
+def _nota_con_cobertura(p: PaisAuditado) -> str:
+    return _nota(p.nota) if p.nota is None else f"{_nota(p.nota)} ({_cobertura(p)})"
 
 
 def _lista(paises: list[str]) -> str:
@@ -90,7 +105,12 @@ def _precio_pais(p: PaisAuditado) -> str:
     else:
         soportable = (f"{_num(p.precio_s.valor)} (1 = dentro de la banda de precios del país; "
                       "0 = muy lejos)")
-    return f"Precio del original en EUR: {eur} · precio soportable: {soportable}"
+    if p.banda is None:
+        banda = f"banda de {p.pais}: no medido: sin banda en config/mercados.yaml"
+    else:
+        fuente = f"{p.fuente_banda}, config/mercados.yaml" if p.fuente_banda else "config/mercados.yaml"
+        banda = f"banda de {p.pais}: {_num(p.banda[0], 2)}–{_num(p.banda[1], 2)} € (fuente: {fuente})"
+    return f"Precio del original en EUR: {eur} · precio soportable: {soportable} · {banda}"
 
 
 def precio_original(oferta: dict) -> str:
@@ -147,7 +167,7 @@ def _desglose(p: PaisAuditado) -> list[str]:
 
 def _seccion_pais(i: int, p: PaisAuditado) -> list[str]:
     lineas = [
-        f"### {i}. {p.pais} — nota {_nota(p.nota)}",
+        f"### {i}. {p.pais} — nota {_nota_con_cobertura(p)}",
         "",
         f"- Hueco: {_hueco(p)}",
         f"- {_precio_pais(p)}",
@@ -207,7 +227,8 @@ def render_auditoria(oferta: dict, paises: list[PaisAuditado], recomendacion, se
         "## La oferta",
         "",
         f"- Ficha: [[wiki/ofertas/{oferta_id}]]",
-        f"- Decisión de la caza: **{oferta.get('estado') or 'no medido'}** — {oferta.get('motivo') or 'sin motivo'}",
+        (f"- Decisión de la caza: **{oferta.get('estado') or 'no medido'}** (la puso la caza antes de medir el "
+         "hueco por país; el hueco medido está más abajo)"),
         f"- Precio del original: {precio_original(oferta)}{landing}",
         *_cifras_caza(oferta),
         "",
@@ -215,9 +236,15 @@ def render_auditoria(oferta: dict, paises: list[PaisAuditado], recomendacion, se
         "",
     ]
     if orden:
-        lineas += ["| # | País | Nota (0 a 100) | Hueco | No tirar |", "|---|---|---|---|---|"]
         lineas += [
-            f"| {i} | {p.pais} | {_nota(p.nota)} | {_HUECO_CORTO[p.hueco.hueco]} | {p.no_tirar or '—'} |"
+            ("Pesos de la nota: config/umbrales.yaml (auditar.peso.*, [D-13]). Lo no medido no puntúa ni "
+            "resta: la nota se calcula sobre los puntos medidos."),
+            "",
+            "| # | País | Nota (0 a 100) | Hueco | No tirar |",
+            "|---|---|---|---|---|",
+        ]
+        lineas += [
+            f"| {i} | {p.pais} | {_nota_con_cobertura(p)} | {_HUECO_CORTO[p.hueco.hueco]} | {p.no_tirar or '—'} |"
             for i, p in enumerate(orden, 1)
         ]
         lineas.append("")
@@ -335,7 +362,7 @@ def _archivar(ruta: Path) -> Path | None:
     while destino.exists():
         destino = ruta.with_name(f"AUDITORIA-{fecha}-{n}.md")
         n += 1
-    ruta.rename(destino)
+    escribir_atomico(destino, ruta.read_text(encoding="utf-8"))
     return destino
 
 
@@ -419,11 +446,11 @@ def escribir_auditoria(vault: Path, oferta_id: str, paises: list[PaisAuditado], 
     texto = render_auditoria(oferta, paises, recomendacion, senales3, historial, hoy)
 
     ruta = vault / "productos" / p_id / "AUDITORIA.md"
-    archivada = _archivar(ruta)
+    archivada = _archivar(ruta)  # copia: si la escritura nueva fallara, la anterior sigue en su sitio
     escribir_atomico(ruta, texto)
     producto = _actualizar_producto(vault, p_id, oferta_id, nombres, hoy)
     mercados = [_actualizar_mercado(vault, p, oferta_id, p_id, hoy) for p in paises]
-    _anadir_al_indice(vault, [
+    anadir_al_indice(vault, [
         ("Productos", f"[[productos/{p_id}/PRODUCTO]]", f"producto de {oferta_id}; última auditoría {hoy.isoformat()}"),
         ("Productos", f"[[productos/{p_id}/AUDITORIA]]", f"auditoría de {oferta_id} ({hoy.isoformat()})"),
         *[("Mercados", f"[[wiki/mercados/{p}]]", f"mercado {p}: auditorías por oferta") for p in nombres],
@@ -466,6 +493,8 @@ def registrar_eleccion(vault: Path, p_id: str, pais: str, reserva: str | None, c
     reserva = reserva.strip().upper() if reserva and reserva.strip() else None
     if not re.fullmatch(r"[A-Z]{2}", pais) or (reserva and not re.fullmatch(r"[A-Z]{2}", reserva)):
         raise ValueError("los países van con su código de dos letras (por ejemplo RO)")
+    if not _P_ID.fullmatch(p_id or ""):
+        raise ValueError(f"producto mal escrito: «{p_id}»; usa su p-id (por ejemplo p-0001-fise-terapie)")
     dir_producto = vault / "productos" / p_id
     producto = dir_producto / "PRODUCTO.md"
     auditoria = dir_producto / "AUDITORIA.md"
@@ -487,7 +516,18 @@ def registrar_eleccion(vault: Path, p_id: str, pais: str, reserva: str | None, c
         avisos.append("Advertencia: este país no tiene hueco comprobado")
     faltan = [k for k in MEDIBLES if senales3.get(k) is False]
     if faltan:
-        avisos.append(f"Excepción: faltan {', '.join(faltan)} (se elige con menos de las tres señales)")
+        nombres = dict(_SENALES)
+        avisos.append("Excepción: faltan " + ", ".join(f"{k} («{nombres[k]}»)" for k in faltan)
+                      + " (se elige con menos de las tres señales)")
+    pm, cuerpo_producto = frontmatter.leer(producto)
+    pm = dict(pm or {})
+    estados = {k: dict(v) for k, v in (pm.get("paises") or {}).items() if isinstance(v, dict)}
+    actual = estados.get(pais, {}).get("estado")
+    if actual not in APROBABLES:
+        avisos.append(f"Advertencia: este país ya está en {actual}; el estado no cambia")
+    for otro, d in sorted(estados.items()):
+        if otro != pais and d.get("estado") not in (*APROBABLES, "aprobado"):
+            avisos.append(f"Advertencia: {otro} ya está en {d.get('estado')} (1 producto × 1 país)")
 
     cita_md = "\n".join(f"> {x}" if x else ">" for x in cita.split("\n"))
     lineas = [
@@ -511,15 +551,14 @@ def registrar_eleccion(vault: Path, p_id: str, pais: str, reserva: str | None, c
     ruta = _ruta_eleccion(dir_decisiones, hoy)
     frontmatter.escribir(ruta, meta, "\n".join(lineas))
 
-    pm, cuerpo = frontmatter.leer(producto)
-    pm = dict(pm or {})
-    estados = {k: dict(v) for k, v in (pm.get("paises") or {}).items() if isinstance(v, dict)}
-    for otro, d in estados.items():
-        if otro != pais and d.get("estado") == "aprobado":
-            d["estado"] = "auditado"  # 1 producto × 1 país: la elección nueva sustituye a la anterior
-    estados.setdefault(pais, {})["estado"] = "aprobado"
+    if actual in APROBABLES:
+        for otro, d in estados.items():
+            if otro != pais and d.get("estado") == "aprobado":
+                d["estado"] = "auditado"  # 1 producto × 1 país: la elección nueva sustituye a la anterior
+        estados.setdefault(pais, {})["estado"] = "aprobado"
+    # Un país más allá de «aprobado» (test, en producción, MUERTO…) nunca se toca (§4.13).
     pm["paises"] = estados
-    frontmatter.escribir(producto, pm, cuerpo)
+    frontmatter.escribir(producto, pm, cuerpo_producto)
     anadir_log(vault, "auditar",
                f"elección de {p_id}: {pais}" + (f", reserva {reserva}" if reserva else "")
                + (f" ({'; '.join(avisos)})" if avisos else ""),

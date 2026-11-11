@@ -1,12 +1,7 @@
-import sys
 from datetime import date
 
-sys.modules.pop("ejemplos", None)  # la caza también tiene un ejemplos.py: que no se crucen
-from ejemplos import oferta_ejemplo, paises_ejemplo
-
-sys.modules.pop("ejemplos", None)
-
 import pytest
+from ejemplos_auditoria import oferta_ejemplo, paises_ejemplo
 from trovify import auditar_cli, cli
 from trovify.auditoria import orquestador
 from trovify.auditoria.salida import escribir_auditoria
@@ -50,7 +45,8 @@ def test_ejecutar(vault, monkeypatch, capsys):
                      "--frases", "RO:fise terapie|kit terapie"]) == 0
     assert vistas["paises"] == ["RO", "IT"] and vistas["frases"] == {"RO": ["fise terapie", "kit terapie"]}
     assert vistas["hoy"] is not None
-    out = capsys.readouterr().out
+    captura = capsys.readouterr()
+    out = captura.out
     assert "1. RO — nota 100" in out and "no tirar: el original ya anuncia traducido" in out
     assert "La elección es tuya: dímela y la registro." in out
 
@@ -90,3 +86,13 @@ def test_elegir(vault, monkeypatch, capsys):
     meta, _ = leer(vault / "productos" / p / "PRODUCTO.md")
     assert meta["paises"]["FR"]["estado"] == "aprobado"
     assert cli.main(["auditar", "elegir", "--producto", "p-0099-x", "--pais", "RO", "--cita", "x"]) == 2
+
+
+def test_frases_de_un_pais_no_auditado_avisa(vault, monkeypatch, capsys):
+    monkeypatch.setattr(orquestador, "auditar", falso({}))
+    assert cli.main(["auditar", "ejecutar", "--oferta", "o-ejemplo", "--frases", "PL:a b|c d"]) == 0
+    assert "PL" in capsys.readouterr().err
+
+
+def test_elegir_producto_mal_escrito(vault, capsys):
+    assert cli.main(["auditar", "elegir", "--producto", "../x", "--pais", "RO", "--cita", "x"]) == 2
