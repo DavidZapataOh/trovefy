@@ -246,3 +246,10 @@ def test_auditoria_cita_banda_y_pesos():
     assert "banda de RO: 11,90–15,90 € (fuente: vídeos: 11,90–15,90 €, config/mercados.yaml)" in texto
     assert "auditar.peso.*" in texto
     assert "sin hueco comprobado" not in texto
+
+
+def test_golden_conserva_la_nota_de_la_caza_y_la_cobertura_en_la_recomendacion():
+    texto = GOLD.read_text()
+    assert "Decisión de la caza: **B** — nota 62,4 < 70 para A" in texto
+    assert "sin hueco comprobado" not in texto
+    assert "(nota 100, medida sobre 45 de 100 puntos); reserva: IT (nota 83, medida sobre 45 de 100 puntos)" in texto

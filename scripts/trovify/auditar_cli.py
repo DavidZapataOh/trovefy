@@ -99,8 +99,16 @@ def _ejecutar_eleccion(args: argparse.Namespace) -> int:
     for linea in ruta.read_text(encoding="utf-8").splitlines():
         if linea.startswith(("Advertencia:", "Excepción:")):
             print(linea)
-    print(f"{args.pais.upper()} queda «aprobado» en productos/{args.producto}/PRODUCTO.md. La zona horaria de "
-          "la cuenta publicitaria (paso 06 de /arranque) será la de ese país.")
+    from trovify.vault import frontmatter
+
+    pais = args.pais.strip().upper()
+    meta, _ = frontmatter.leer(vault / "productos" / args.producto / "PRODUCTO.md")
+    estado = ((meta.get("paises") or {}).get(pais) or {}).get("estado")
+    if estado == "aprobado":
+        print(f"{pais} queda «aprobado» en productos/{args.producto}/PRODUCTO.md. La zona horaria de "
+              "la cuenta publicitaria (paso 06 de /arranque) será la de ese país.")
+    else:
+        print(f"Decisión registrada con tu cita; el estado de {pais} sigue siendo {estado or 'sin estado'}.")
     return 0
 
 

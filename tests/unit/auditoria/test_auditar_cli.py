@@ -96,3 +96,16 @@ def test_frases_de_un_pais_no_auditado_avisa(vault, monkeypatch, capsys):
 
 def test_elegir_producto_mal_escrito(vault, capsys):
     assert cli.main(["auditar", "elegir", "--producto", "../x", "--pais", "RO", "--cita", "x"]) == 2
+
+
+def test_elegir_un_pais_muerto_no_dice_aprobado(vault, monkeypatch, capsys):
+    monkeypatch.setattr(caza_orq, "hoy_negocio", lambda: date(2026, 11, 10))
+    p = escribir_auditoria(vault, "o-ejemplo", paises_ejemplo(), date(2026, 11, 10)).parent.name
+    meta, cuerpo = leer(vault / "productos" / p / "PRODUCTO.md")
+    meta["paises"]["RO"]["estado"] = "MUERTO"
+    escribir(vault / "productos" / p / "PRODUCTO.md", meta, cuerpo)
+    assert cli.main(["auditar", "elegir", "--producto", p, "--pais", "RO", "--cita", "Rumanía otra vez"]) == 0
+    out = capsys.readouterr().out
+    assert "queda «aprobado»" not in out and "zona horaria" not in out
+    assert "Decisión registrada" in out or "Elección registrada" in out
+    assert "el estado de RO sigue siendo MUERTO" in out

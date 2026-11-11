@@ -78,6 +78,24 @@ def tres_senales(decision_caza: str, paises: list[PaisAuditado]) -> dict[str, bo
     }
 
 
+def cobertura(p: PaisAuditado) -> str | None:
+    """«medida sobre 45 de 100 puntos»: cuánto peso se midió (lo demás no puntúa); None sin desglose."""
+    if not p.desglose:
+        return None
+    medidos = sum(peso for _, peso, s, _ in p.desglose if s is not None)
+    total = sum(peso for _, peso, _, _ in p.desglose)
+
+    def n(x: float) -> str:
+        return str(int(x)) if float(x).is_integer() else f"{x:g}".replace(".", ",")
+
+    return f"medida sobre {n(medidos)} de {n(total)} puntos"
+
+
+def _nota_txt(p: PaisAuditado) -> str:
+    c = cobertura(p)
+    return f"nota {p.nota:.0f}" + (f", {c}" if c else "")
+
+
 def recomendar(paises: list[PaisAuditado]) -> tuple[str | None, str | None, str]:
     candidatos = [
         p for p in paises if p.hueco.hueco is True and p.no_tirar is None and p.nota is not None
@@ -91,7 +109,7 @@ def recomendar(paises: list[PaisAuditado]) -> tuple[str | None, str | None, str]
         )
     principal = candidatos[0]
     reserva = candidatos[1] if len(candidatos) > 1 else None
-    texto = f"{principal.pais} es el mejor país con hueco comprobado (nota {principal.nota:.0f})"
+    texto = f"{principal.pais} es el mejor país con hueco comprobado ({_nota_txt(principal)})"
     if reserva:
-        texto += f"; reserva: {reserva.pais} (nota {reserva.nota:.0f})"
+        texto += f"; reserva: {reserva.pais} ({_nota_txt(reserva)})"
     return principal.pais, reserva.pais if reserva else None, texto + "."

@@ -33,7 +33,7 @@ Dónde lanzar esta oferta, país por país. Lo que no se pudo medir se dice como
 ## La oferta
 
 - Ficha: [[wiki/ofertas/o-ejemplo]]
-- Decisión de la caza: **B** (la puso la caza antes de medir el hueco por país; el hueco medido está más abajo)
+- Decisión de la caza: **B** — nota 62,4 < 70 para A (el hueco por país lo mide esta auditoría, más abajo)
 - Precio del original: 13,90 EUR (landing: tienda.example)
 - Cifras de la caza por país:
   - ES: C8 15 · C7 16 · total 32 anuncios activos · el más antiguo lleva 40 días — https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=ES&media_type=all&search_type=page&view_all_page_id=100000000000001
@@ -124,7 +124,7 @@ Si eliges con «ya se vende» o «hay hueco» en «no», la elección queda escr
 
 ## Recomendación
 
-RO es el mejor país con hueco comprobado (nota 100); reserva: IT (nota 83).
+RO es el mejor país con hueco comprobado (nota 100, medida sobre 45 de 100 puntos); reserva: IT (nota 83, medida sobre 45 de 100 puntos).
 
 Primer test: 1 producto × 1 país (el capital no da para dos a la vez); la reserva es el país al que pasar si el primero no funciona.
 

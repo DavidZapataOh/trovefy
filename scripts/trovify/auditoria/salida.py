@@ -14,7 +14,7 @@ import re
 from datetime import date
 from pathlib import Path
 
-from trovify.auditoria.paises import PaisAuditado, tres_senales
+from trovify.auditoria.paises import PaisAuditado, cobertura, tres_senales
 from trovify.caza.salida import anadir_al_indice, formatear_medida
 from trovify.caza.salida import formatear_numero as _num
 from trovify.caza.senales import Medida
@@ -66,15 +66,9 @@ def _nota(nota: float | None) -> str:
     return "no medida" if nota is None else f"{nota:.0f}"
 
 
-def _cobertura(p: PaisAuditado) -> str:
-    """«medida sobre 45 de 100 puntos»: cuánto peso se midió de verdad (lo demás no puntúa)."""
-    medidos = sum(peso for _, peso, s, _ in p.desglose if s is not None)
-    total = sum(peso for _, peso, _, _ in p.desglose)
-    return f"medida sobre {_num(medidos)} de {_num(total)} puntos"
-
-
 def _nota_con_cobertura(p: PaisAuditado) -> str:
-    return _nota(p.nota) if p.nota is None else f"{_nota(p.nota)} ({_cobertura(p)})"
+    c = cobertura(p)
+    return _nota(p.nota) if p.nota is None or c is None else f"{_nota(p.nota)} ({c})"
 
 
 def _lista(paises: list[str]) -> str:
@@ -111,6 +105,14 @@ def _precio_pais(p: PaisAuditado) -> str:
         fuente = f"{p.fuente_banda}, config/mercados.yaml" if p.fuente_banda else "config/mercados.yaml"
         banda = f"banda de {p.pais}: {_num(p.banda[0], 2)}–{_num(p.banda[1], 2)} € (fuente: {fuente})"
     return f"Precio del original en EUR: {eur} · precio soportable: {soportable} · {banda}"
+
+
+def _motivo_caza(oferta: dict) -> str:
+    """El motivo de la caza sin lo que dijo del hueco (lo mide esta auditoría, más abajo)."""
+    partes = [x.strip() for x in str(oferta.get("motivo") or "").split(";")]
+    partes = [x for x in partes if x and "hueco" not in x.lower()]
+    motivo = f" — {'; '.join(partes)}" if partes else ""
+    return f"{motivo} (el hueco por país lo mide esta auditoría, más abajo)"
 
 
 def precio_original(oferta: dict) -> str:
@@ -227,8 +229,7 @@ def render_auditoria(oferta: dict, paises: list[PaisAuditado], recomendacion, se
         "## La oferta",
         "",
         f"- Ficha: [[wiki/ofertas/{oferta_id}]]",
-        (f"- Decisión de la caza: **{oferta.get('estado') or 'no medido'}** (la puso la caza antes de medir el "
-         "hueco por país; el hueco medido está más abajo)"),
+        f"- Decisión de la caza: **{oferta.get('estado') or 'no medido'}**{_motivo_caza(oferta)}",
         f"- Precio del original: {precio_original(oferta)}{landing}",
         *_cifras_caza(oferta),
         "",
@@ -526,7 +527,7 @@ def registrar_eleccion(vault: Path, p_id: str, pais: str, reserva: str | None, c
     if actual not in APROBABLES:
         avisos.append(f"Advertencia: este país ya está en {actual}; el estado no cambia")
     for otro, d in sorted(estados.items()):
-        if otro != pais and d.get("estado") not in (*APROBABLES, "aprobado"):
+        if otro != pais and d.get("estado") not in APROBABLES:
             avisos.append(f"Advertencia: {otro} ya está en {d.get('estado')} (1 producto × 1 país)")
 
     cita_md = "\n".join(f"> {x}" if x else ">" for x in cita.split("\n"))
