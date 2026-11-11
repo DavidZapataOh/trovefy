@@ -359,7 +359,7 @@ def _limite_plantilla() -> float:
 def aplicar_strikes(
     fichas: dict[str, dict], resultados: dict[str, tuple[str, str]], limite: float | None = None
 ) -> dict[str, dict]:
-    """Strikes de ``vigilar`` (idea de un repo de referencia, reescrita). Pura: devuelve copias.
+    """Strikes de ``vigilar``. Pura: devuelve copias.
 
     - ``resultados``: ``oferta_id`` → ``(estado, motivo)`` de esta ejecución; las vigiladas sin
       resultado (no medidas) no cambian.

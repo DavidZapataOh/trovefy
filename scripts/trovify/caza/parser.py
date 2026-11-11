@@ -5,11 +5,6 @@ Los anuncios llegan por dos vías (ver tests/fixtures/biblioteca/README.md): la 
 en respuestas de ``/api/graphql/``. En ambos casos cuelgan de
 ``...search_results_connection.edges[].node.collated_results[]``.
 
-Ideas tomadas (reescritas, sin copiar código) de un repo de referencia (leer también los
-bloques JSON del HTML) y un repo de referencia (estructura
-``search_results_connection`` y campos del anuncio), ambos MIT, y un repo de referencia
-(JSON incrustado en el HTML; sin licencia, solo la idea); ver avisos privados.
-
 Regla: si el formato no es el esperado se lanza ``FormatoDesconocido``; nunca se devuelve un
 número o un anuncio a medias.
 """

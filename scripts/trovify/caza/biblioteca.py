@@ -16,8 +16,7 @@ def url_biblioteca(
 ) -> str:
     """Enlace reproducible; parámetros siempre en orden alfabético.
 
-    Con ``q`` y ``page_id`` busca la frase dentro de la página (recuento por oferta; idea de
-    un repo de referencia, solo la idea; ver avisos privados).
+    Con ``q`` y ``page_id`` busca la frase dentro de la página (recuento por oferta).
     """
     if pais != "ALL" and not re.fullmatch(r"[A-Z]{2}", pais):
         raise ValueError(f"País inválido: {pais!r}; usa «ALL» o un código ISO-2 en mayúsculas.")

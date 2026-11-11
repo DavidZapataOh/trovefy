@@ -1,8 +1,4 @@
-"""Traspasos de sesión: el contexto de una sesión no se pierde si se corta.
-
-Idea adaptada de las skills ``cerrar``/``retomar`` de un repo de referencia/
-un repo de referencia (MIT; ver avisos privados).
-"""
+"""Traspasos de sesión: el contexto de una sesión no se pierde si se corta."""
 
 import re
 from datetime import datetime

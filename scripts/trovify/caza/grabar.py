@@ -6,9 +6,8 @@ y nada más: ni cabeceras ni cookies. Antes de escribir, redacta los tokens de s
 anti-CSRF y sustituye las URLs de medios por ``<media>``; si después de redactar el texto aún
 tiene algo con forma de secreto, no escribe nada.
 
-Idea tomada (reescrita, no copiada) de un repo de referencia y de
-un repo de referencia (MIT; ver avisos privados): escuchar las
-respuestas de ``/api/graphql/`` que traen ``ad_archive_id`` y leer además los bloques
+Cómo lee: escucha las respuestas de ``/api/graphql/`` que traen ``ad_archive_id`` y lee
+además los bloques
 ``<script type="application/json">`` del HTML, donde llega la primera página de resultados.
 
 Uso::

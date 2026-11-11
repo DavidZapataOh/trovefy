@@ -1,8 +1,4 @@
-"""Lint del vault: enlaces rotos, páginas huérfanas y frontmatter obligatorio.
-
-Idea adaptada de ``wiki-lint`` de un repo de referencia
-(MIT; ver avisos privados).
-"""
+"""Lint del vault: enlaces rotos, páginas huérfanas y frontmatter obligatorio."""
 
 import re
 from dataclasses import dataclass

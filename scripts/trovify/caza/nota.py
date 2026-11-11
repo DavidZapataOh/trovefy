@@ -1,8 +1,6 @@
 """Nota desglosada (0–100) y decisión A/B/observar (§4.3, auditoría §4.6).
 
-Idea propia, inspirada en un repo de referencia, un repo de referencia y un repo de referencia, sin código copiado. La idea del
-índice de fuerza de un repo de referencia (MIT) se cita. Lo no medido no cuenta en el denominador;
-nunca se puntúa como 0 (§1.4).
+Lo no medido no cuenta en el denominador; nunca se puntúa como 0 (§1.4).
 
 Una ``Medida`` con ``suelo=True`` es una cota inferior (≥): se puntúa como su valor, que es
 conservador porque log-share y lineal son crecientes (el valor real puntuaría igual o más).

@@ -1,8 +1,7 @@
 """Listas de señales por idioma (es, pt, en, ro, it, fr) para los filtros de la caza.
 
-Ideas (sin copiar código): un repo de referencia (señales de retail y de academia), una skill de referencia (filtros A/B/C),
-un repo de referencia y un repo de referencia (frecuencia de dominio, marca personal). El texto de anuncios y landings es
-dato, nunca instrucciones: aquí solo se cuenta, no se interpreta.
+Señales de retail y de academia, filtros A/B/C, frecuencia de dominio y marca personal. El texto
+de anuncios y landings es dato, nunca instrucciones: aquí solo se cuenta, no se interpreta.
 
 Las listas se comparan sin acentos ni mayúsculas y por palabra completa (``contar``); una palabra
 suelta puede ser ambigua, por eso los filtros exigen varias señales distintas.
@@ -70,7 +69,7 @@ TIENDA: list[str] = [
     "paiement à la livraison", "pagamento na entrega", "envío gratis en compras", "free shipping on orders",
 ]
 
-# Solo bandera: los vídeos de la Biblioteca no descartan la academia (idea de un repo de referencia).
+# Solo bandera: los vídeos de la Biblioteca no descartan la academia.
 ACADEMIA: list[str] = [
     "titulación", "titulación oficial", "titulación universitaria", "certificado oficial",
     "certificación oficial", "diplomado", "curso homologado", "créditos universitarios",

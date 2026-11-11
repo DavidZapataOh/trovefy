@@ -3,7 +3,7 @@ tipo: regla
 id: R-003
 titulo: Nota y decisión de caza
 fecha: 2026-11-09
-fuente: "Auditoría de caza §4.4–§4.6; diseño §4.3; un repo de referencia (ideas); verificación de la Biblioteca 2026-11-09"
+fuente: "Auditoría de caza §4.4–§4.6; diseño §4.3; verificación de la Biblioteca 2026-11-09"
 umbrales: [caza.nota.a_min, caza.nota.b_min, caza.supervivencia.min, caza.vida_mediana.min_dias, caza.crecimiento.acelerando, caza.crecimiento.cayendo, caza.filtro.fisico_min_senales, caza.filtro.tienda_min_senales, caza.peso.c8, caza.peso.longevidad, caza.peso.crecimiento, caza.peso.expansion, caza.peso.duplicacion, caza.peso.alcance_ue, caza.peso.supervivencia, caza.tope.c8, caza.tope.edad_dias, caza.tope.semanas, caza.tope.expansion, caza.tope.duplicacion, caza.tope.supervivencia, caza.mult.supervivencia_baja, caza.mult.cayendo, caza.mult.vida_corta]
 estado: vigente
 ---
@@ -24,4 +24,4 @@ Una nota con pesos fijos y fechados permite comparar cazas entre días y ver qu�
 
 ## Fuente
 
-Auditoría de caza §4.4–§4.6 y diseño §4.3. Verificación de la Biblioteca 2026-11-09. Ideas de un repo de referencia, reescritas.
+Auditoría de caza §4.4–§4.6 y diseño §4.3. Verificación de la Biblioteca 2026-11-09.

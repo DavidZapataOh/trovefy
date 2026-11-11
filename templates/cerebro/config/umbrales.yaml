@@ -43,7 +43,7 @@ caza.nota.b_min:
 
 caza.supervivencia.min:
   valor: 0.3
-  fuente: "un repo de referencia, una skill de referencia (ideas); auditoría §4.4"
+  fuente: "auditoría de repos de caza (ideas); auditoría §4.4"
   fecha: "2026-11-09"
   gana_sobre: "—"
   regla: R-003
@@ -106,14 +106,14 @@ caza.max_destinos_por_ejecucion:
 
 caza.filtro.fisico_min_senales:
   valor: 2
-  fuente: "un repo de referencia (idea); auditoría §4.5 punto 2"
+  fuente: "auditoría de repos de caza (idea); auditoría §4.5 punto 2"
   fecha: "2026-11-09"
   gana_sobre: "—"
   regla: R-003
 
 caza.filtro.tienda_min_senales:
   valor: 3
-  fuente: "un repo de referencia (idea); auditoría §4.5 punto 2"
+  fuente: "auditoría de repos de caza (idea); auditoría §4.5 punto 2"
   fecha: "2026-11-09"
   gana_sobre: "—"
   regla: R-003
@@ -239,14 +239,14 @@ hueco.sin_traducir_min_dias:
 
 caza.palabra.min_resultados:
   valor: 20
-  fuente: "un repo de referencia y Radar (ideas); auditoría §4.2"
+  fuente: "auditoría de repos de caza (ideas); auditoría §4.2"
   fecha: "2026-11-09"
   gana_sobre: "—"
   regla: R-012
 
 caza.poda.strikes:
   valor: 3
-  fuente: "Radar (idea); auditoría §4.8"
+  fuente: "auditoría de repos de caza (idea); auditoría §4.8"
   fecha: "2026-11-09"
   gana_sobre: "—"
   regla: R-012

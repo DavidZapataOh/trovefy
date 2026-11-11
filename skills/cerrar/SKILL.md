@@ -6,7 +6,7 @@ allowed-tools: Read, Bash(trovify cerebro *)
 
 # /cerrar: que mañana arranques en 15 segundos
 
-Responde siempre en español. Idea adaptada de `/cerrar` de un repo de referencia (MIT, ver `avisos privados`). Es una nota para el usuario de mañana: corta y concreta.
+Responde siempre en español. Es una nota para el usuario de mañana: corta y concreta.
 
 1. **Reúne cuatro listas** de lo que pasó en esta sesión:
    - `hecho`: lo que quedó terminado, cada punto con su archivo.

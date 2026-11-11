@@ -1,7 +1,6 @@
 """Hook PreToolUse: Claude nunca escribe en Meta Ads (§5.3 punto 3).
 
-La idea del clasificador viene de ``refine_action`` de
-un repo de referencia (MIT); aquí está reimplementada y sin la
+Clasifica cada llamada en lectura o escritura y deniega toda escritura, sin
 vía «allow con ticket». Solo biblioteca estándar; falla cerrado.
 """
 from __future__ import annotations
