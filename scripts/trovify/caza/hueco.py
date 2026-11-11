@@ -111,7 +111,8 @@ def _competencia(cliente, frases, pais, idioma, excluir_page_ids, u, hoy) -> tup
         return _nm("; ".join(fallos)), enlaces, parada
     if hechas < intentos:
         return (
-            _nm(f"hacen falta {intentos} intentos con frases distintas para dar un 0 (hubo {hechas})"),
+            _nm(f"solo hubo {hechas} de los {intentos} intentos con frases distintas que hacen falta "
+                f"para confirmar que no hay competencia"),
             enlaces,
             parada,
         )

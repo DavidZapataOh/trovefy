@@ -55,7 +55,7 @@ def test_ficha_contrato_frontmatter():
         assert clave in meta, clave
     assert meta["tipo"] == "oferta" and meta["estado"] == "B" and meta["oferta_id"] == "o-ejemplo"
     ro = meta["paises"]["RO"]
-    assert ro["c8"] == 15 and ro["total"] == 32 and ro["edad_max"] is None  # no medido = null
+    assert ro["c8"] == 15 and ro["total"] == 32 and ro["edad_max"] == 40
     assert meta["fuente"] == ro["link_biblioteca"]
 
 
@@ -175,3 +175,131 @@ def test_lint_sin_problemas_nuevos(tmp_path):
     escribir(v, ejecucion_ejemplo())
     nuevos = [p for p in lint(v) if (p.tipo, p.ruta) not in antes]
     assert nuevos == []
+
+
+# ------------------------------------------------------------ ronda 1 de revisión
+
+
+def _sin_digitos_fuera_de_url(linea: str) -> bool:
+    return not re.search(r"\d", re.sub(r"https://\S+", "", linea))
+
+
+def test_palabra_no_medida_nunca_es_cero(tmp_path):
+    texto = render_informe(ejecucion_fuente_caida())
+    fila = next(linea for linea in texto.splitlines() if linea.startswith("| caiet de exercitii"))
+    assert "no medido" in fila and _sin_digitos_fuera_de_url(fila)
+    v = tmp_path / "v"
+    crear_vault(v)
+    escribir(v, ejecucion_fuente_caida())
+    fila_csv = next(csv.DictReader((v / "data/caza/palabras.csv").open()))
+    assert fila_csv["resultados"] == fila_csv["candidatos"] == fila_csv["modelables"] == ""
+
+
+def test_informe_del_mismo_dia_no_se_pisa(tmp_path):
+    v = tmp_path / "v"
+    crear_vault(v)
+    escribir(v, ejecucion_ejemplo())
+    primero = (v / "wiki/caza/2026-11-10/europa.md").read_text()
+    escribir(v, ejecucion_fuente_caida())
+    escribir(v, ejecucion_fuente_caida())
+    assert (v / "wiki/caza/2026-11-10/europa.md").read_text() == primero
+    assert "o-caida-ejemplo" in (v / "wiki/caza/2026-11-10/europa-2.md").read_text()
+    assert (v / "wiki/caza/2026-11-10/europa-3.md").exists()
+    index = (v / "index.md").read_text()
+    for n in ("europa", "europa-2", "europa-3"):
+        assert index.count(f"[[wiki/caza/2026-11-10/{n}]]") == 1
+
+
+def _como(r, oferta_id=None, descarte=None):
+    import dataclasses
+    o = dataclasses.replace(r.oferta, oferta_id=oferta_id or r.oferta.oferta_id)
+    return dataclasses.replace(r, oferta=o, descarte=descarte)
+
+
+def test_snapshot_no_pierde_lo_medido_el_mismo_dia(tmp_path):
+    import dataclasses
+    v = tmp_path / "v"
+    crear_vault(v)
+    escribir(v, ejecucion_ejemplo())
+    caida = ejecucion_fuente_caida()
+    caida = dataclasses.replace(caida, resultados=[_como(caida.resultados[0], "o-ejemplo")])
+    escribir(v, caida)
+    con = sqlite3.connect(v / "data/caza/snapshots.sqlite")
+    fila = con.execute("SELECT total, activos, c7, c8, fuente FROM snapshots WHERE oferta_id='o-ejemplo'").fetchall()
+    assert len(fila) == 1 and fila[0][:4] == (32, 32, 16, 15)
+    assert "view_all_page_id=100000000000001" in fila[0][4]
+
+
+def test_snapshot_ultima_medida_gana_por_campo(tmp_path):
+    import dataclasses
+    v = tmp_path / "v"
+    crear_vault(v)
+    escribir(v, ejecucion_ejemplo())
+    e = ejecucion_ejemplo()
+    r = e.resultados[0]
+    r = dataclasses.replace(r, total_meta=40, senales=dataclasses.replace(r.senales, c8=Medida(None, "no medido: x")))
+    escribir(v, dataclasses.replace(e, resultados=[r]))
+    con = sqlite3.connect(v / "data/caza/snapshots.sqlite")
+    total, c8 = con.execute("SELECT total, c8 FROM snapshots WHERE oferta_id='o-ejemplo'").fetchone()
+    assert (total, c8) == (40, 15)
+
+
+def test_ya_visto_no_toca_ficha_ni_snapshot_ni_indice(tmp_path):
+    import dataclasses
+
+    from trovify.caza.filtros import Descarte
+    v = tmp_path / "v"
+    crear_vault(v)
+    ficha = v / "wiki/ofertas/o-caida-ejemplo.md"
+    ficha.write_text("---\ntipo: oferta\nfecha: '2026-11-01'\nfuente: x\n---\nmía\n", encoding="utf-8")
+    antes = ficha.read_bytes()
+    e = ejecucion_fuente_caida()
+    r = _como(e.resultados[0], descarte=Descarte("ya_visto", "ya visto, excluida o propia"))
+    r = dataclasses.replace(r, decision="descartada", explicacion="ya_visto: ya visto, excluida o propia")
+    escribir(v, dataclasses.replace(e, resultados=[r]))
+    assert ficha.read_bytes() == antes
+    assert "[[wiki/ofertas/o-caida-ejemplo]]" not in (v / "index.md").read_text()
+    con = sqlite3.connect(v / "data/caza/snapshots.sqlite")
+    assert con.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0] == 0
+
+
+def test_snapshot_sin_lectura_completa_no_guarda_nuevos_parados(tmp_path):
+    import dataclasses
+    v = tmp_path / "v"
+    crear_vault(v)
+    e = ejecucion_ejemplo()
+    r = e.resultados[0]
+    s = dataclasses.replace(r.senales, nuevos=Medida(3), parados=Medida(1))
+    r = dataclasses.replace(r, senales=s, completo=False)
+    escribir(v, dataclasses.replace(e, resultados=[r]))
+    con = sqlite3.connect(v / "data/caza/snapshots.sqlite")
+    assert con.execute("SELECT activos, nuevos, parados FROM snapshots").fetchone() == (None, None, None)
+
+
+def test_oferta_de_varias_paginas_es_reproducible():
+    from trovify.caza.biblioteca import url_biblioteca
+    r = ejecucion_ejemplo().resultados[0]
+    meta, cuerpo = render_ficha(r, None)
+    original = url_biblioteca("RO", page_id="100000000000001")
+    assert meta["paises"]["RO"]["link_biblioteca"] == original == meta["fuente"]
+    assert "suma de 2 páginas" in cuerpo
+    for pid, n in (("100000000000001", 20), ("100000000000002", 12)):
+        linea = next(x for x in cuerpo.splitlines() if pid in x and "anuncios activos" in x)
+        assert f"{n} anuncios activos" in linea
+    informe = render_informe(ejecucion_ejemplo())
+    assert "suma de 2 páginas" in informe and "20 anuncios activos" in informe
+
+
+def test_ficha_exige_dia():
+    import dataclasses
+
+    import pytest
+    r = dataclasses.replace(ejecucion_ejemplo().resultados[0], dia=None)
+    with pytest.raises(ValueError):
+        render_ficha(r, None)
+
+
+def test_raw_en_espanol():
+    from trovify.caza.salida import _render_raw
+    texto = _render_raw(ejecucion_fuente_caida())
+    assert "None" not in texto and "True" not in texto and "no_medido" not in texto

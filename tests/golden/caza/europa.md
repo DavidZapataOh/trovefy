@@ -22,46 +22,53 @@ Ninguna.
 
 ## Ofertas B
 
-### o-ejemplo · RO · nota 67,10
+### o-ejemplo · RO · nota 62,40
 
-Decisión: **B** — nota 67,1 < 70 para A; sin hueco comprobado
+Decisión: **B** — nota 62,4 < 70 para A; sin hueco comprobado
 
 Ficha: [[wiki/ofertas/o-ejemplo]]
 
-Cifras de RO (enlace reproducible): https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=RO&media_type=all&q=caiet+de+exercitii&search_type=keyword_unordered
+Cifras de RO: suma de 2 páginas; cada enlace reproduce su parte:
+
+- 100000000000001 (original): 20 anuncios activos — https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=RO&media_type=all&search_type=page&view_all_page_id=100000000000001
+- 100000000000002 (copia): 12 anuncios activos — https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=RO&media_type=all&search_type=page&view_all_page_id=100000000000002
+
+Búsqueda donde apareció la oferta: https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=RO&media_type=all&q=caiet+de+exercitii&search_type=keyword_unordered
 
 | Señal | Valor | Qué significa |
 |---|---|---|
 | C8 | 15 | anuncios activos con 8 días o más: la oferta se sostiene |
 | C7 | 16 | anuncios activos con 7 días o más |
-| Total | 32 | anuncios activos de la oferta en el país |
+| Total | 32 (suma de 2 páginas) | anuncios activos de la oferta en el país |
 | Supervivencia | 0,5 | parte de los anuncios que llega a 7 días (de 0 a 1) |
-| Semanas escalonadas | no medido: fechas de inicio sin leer en esta búsqueda | semanas distintas en que arrancaron anuncios que siguen vivos |
-| Edad máxima (días) | no medido: fechas de inicio sin leer en esta búsqueda | días que lleva el anuncio activo más antiguo |
+| Semanas escalonadas | 3 | semanas distintas en que arrancaron anuncios que siguen vivos |
+| Edad máxima (días) | 40 | días que lleva el anuncio activo más antiguo |
 | Vida mediana (días) | no medido: sin búsqueda de inactivos | cuánto duraron los anuncios que ya pararon |
 | Crecimiento en 7 días | no medido: primera caza | cambio de anuncios activos frente a hace una semana |
-| Expansión | no medido: idiomas sin detectar | países, idiomas y páginas que llevan la oferta |
+| Expansión | 4 | países, idiomas y páginas que llevan la oferta |
 | Duplicación | no medido: la Biblioteca no informa collation_count | copias extra del mismo anuncio que agrupa Meta |
 | Alcance UE | no medido: requiere /ads_archive (paso 15) | alcance declarado en la Unión Europea |
 | Nuevos | no medido: primera caza | anuncios que aparecieron desde la corrida completa anterior |
 | Parados | no medido: primera caza | anuncios que desaparecieron desde la corrida completa anterior |
 
-Nota 67,10 de 100, parte por parte:
+Nota 62,40 de 100, parte por parte:
 
 | Parte | Peso | Puntuación (0 a 1) | Aporte |
 |---|---|---|---|
 | C8 | 25 | 0,71 | 17,63 |
+| Longevidad | 20 | 0,47 | 9,44 |
+| Expansión | 15 | 0,73 | 10,99 |
 | Supervivencia | 5 | 0,50 | 2,50 |
 
-Cálculo: 100 × 20,13 ÷ 30 (pesos medidos) = 67,10.
+Cálculo: 100 × 40,56 ÷ 65 (pesos medidos) = 62,40.
 
-Sin medir (no cuentan en la nota ni restan): Longevidad, Crecimiento en 7 días, Expansión, Duplicación, Alcance UE.
+Sin medir (no cuentan en la nota ni restan): Crecimiento en 7 días, Duplicación, Alcance UE.
 
 Hueco por país:
 
 | País | Competencia local | Original | Hueco | Por qué |
 |---|---|---|---|---|
-| RO | no medido: hacen falta 2 intentos con frases distintas para dar un 0 (hubo 1) | no medido | no comprobado | falta medir la competencia local |
+| RO | no medido: solo hubo 1 de los 2 intentos con frases distintas que hacen falta para confirmar que no hay competencia | no medido | no comprobado | falta medir la competencia local |
 
 Búsquedas del hueco en RO:
 - https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=RO&media_type=all&q=caiet+de+lucru&search_type=keyword_unordered
@@ -93,7 +100,7 @@ Para modelar una oferta hacen falta tres señales: ya se vende, hay hueco por pa
 ### o-ejemplo · RO
 
 1. Ya se vende: sí (C8 15, mínimo 15 del perfil tomi)
-2. Hay hueco por país: no comprobado (RO: no medido: hacen falta 2 intentos con frases distintas para dar un 0 (hubo 1))
+2. Hay hueco por país: no comprobado. En RO: solo hubo 1 de los 2 intentos con frases distintas que hacen falta para confirmar que no hay competencia.
 3. La oferta se puede mejorar: pendiente: la confirma /modelar
 
 La decisión de modelar es tuya: escríbela en veredicto.md

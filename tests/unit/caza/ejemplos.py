@@ -4,6 +4,7 @@ Se importan sin paquete de tests: ``from ejemplos import ejecucion_ejemplo``.
 """
 
 import pathlib
+from dataclasses import replace
 from datetime import date, timedelta
 
 from ayudas import anuncio, destino_impultienda
@@ -14,10 +15,14 @@ from trovify.caza.hueco import HuecoPais
 from trovify.caza.nota import calcular_nota, decidir
 from trovify.caza.oferta import Oferta
 from trovify.caza.salida import Consulta, Ejecucion, ResultadoOferta
-from trovify.caza.senales import Medida, Senales
+from trovify.caza.senales import Medida, Senales, calcular_senales
+from trovify.config.mercados import cargar as cargar_mercados
 from trovify.config.umbrales import cargar
 
-U = cargar(pathlib.Path(__file__).resolve().parents[3] / "templates/cerebro/config/umbrales.yaml")
+_CONFIG = pathlib.Path(__file__).resolve().parents[3] / "templates/cerebro/config"
+U = cargar(_CONFIG / "umbrales.yaml")
+MERCADOS = cargar_mercados(_CONFIG / "mercados.yaml")
+TEXTO_RO = "Caiet de exerciții pentru copii: descarcă fișele în format PDF și învață acasă cu ei în fiecare zi."
 HOY = date(2026, 11, 10)
 P_ORIGINAL, P_COPIA, P_TIENDA, P_CAIDA = (
     "100000000000001", "100000000000002", "100000000000003", "100000000000004",
@@ -30,7 +35,8 @@ def _nm(motivo: str) -> Medida:
 
 
 def _anuncios(page: str, n: int, dias: int, inicio_id: int):
-    return [anuncio(str(inicio_id + i), page, HOY - timedelta(days=dias)) for i in range(n)]
+    return [replace(anuncio(str(inicio_id + i), page, HOY - timedelta(days=dias)), texto=TEXTO_RO)
+            for i in range(n)]
 
 
 def _resultado_b() -> ResultadoOferta:
@@ -45,19 +51,10 @@ def _resultado_b() -> ResultadoOferta:
         origen="original", original_page_id=P_ORIGINAL, copias=[P_COPIA],
     )
     oferta.destinos = [oferta.destino]
-    sin_fechas = _nm("fechas de inicio sin leer en esta búsqueda")
-    s = Senales(
-        c8=Medida(15), c7=Medida(16), total=Medida(32), supervivencia=Medida(0.5),
-        escalonado_semanas=sin_fechas, edad_max_dias=sin_fechas,
-        vida_mediana_dias=_nm("sin búsqueda de inactivos"),
-        crecimiento_7d=_nm("primera caza"),
-        expansion=_nm("idiomas sin detectar"),
-        duplicacion=_nm("la Biblioteca no informa collation_count"),
-        alcance_ue=_nm("requiere /ads_archive (paso 15)"),
-        idiomas=["ro"],
-    )
+    # Lectura completa con el total exacto de Meta: todas las señales salen de los anuncios de arriba.
+    s = calcular_senales(oferta, "RO", HOY, [], None, 32, True, total_meta=32, umbrales=U, mercados=MERCADOS)
     nota = calcular_nota(s, U)
-    comp = _nm("hacen falta 2 intentos con frases distintas para dar un 0 (hubo 1)")
+    comp = _nm("solo hubo 1 de los 2 intentos con frases distintas que hacen falta para confirmar que no hay competencia")
     huecos = [HuecoPais("RO", comp, "no_medido", None,
                         [url_biblioteca("RO", q="caiet de lucru")], comp.motivo)]
     decision, motivo = decidir(nota, s.c8, "tomi", None, None, U, c7=s.c7)

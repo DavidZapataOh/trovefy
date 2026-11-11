@@ -69,7 +69,7 @@ Ninguna.
 
 | Palabra | País | Anuncios | Candidatas | Modelables | Enlace |
 |---|---|---|---|---|---|
-| caiet de exercitii | RO | no medido: búsqueda sin respuesta | 0 | 0 | https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=RO&media_type=all&q=caiet+de+exercitii&search_type=keyword_unordered |
+| caiet de exercitii | RO | no medido: búsqueda sin respuesta | no medido: búsqueda sin respuesta | no medido: búsqueda sin respuesta | https://www.facebook.com/ads/library/?active_status=active&ad_type=all&country=RO&media_type=all&q=caiet+de+exercitii&search_type=keyword_unordered |
 
 ## Tasas
 
@@ -83,7 +83,7 @@ Para modelar una oferta hacen falta tres señales: ya se vende, hay hueco por pa
 ### o-caida-ejemplo · RO
 
 1. Ya se vende: no medido: búsqueda bloqueada (captcha)
-2. Hay hueco por país: no comprobado (RO: no medido: búsqueda bloqueada (captcha))
+2. Hay hueco por país: no comprobado. En RO: búsqueda bloqueada (captcha).
 3. La oferta se puede mejorar: pendiente: la confirma /modelar
 
 ## Errores
