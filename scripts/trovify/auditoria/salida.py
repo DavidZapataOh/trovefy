@@ -173,8 +173,23 @@ def _cifras_caza(oferta: dict) -> list[str]:
     return lineas
 
 
-def _orden(paises: list[PaisAuditado]) -> list[PaisAuditado]:
-    return sorted(paises, key=lambda p: (p.nota is None, -(p.nota or 0), p.pais))
+def orden_ranking(paises: list[PaisAuditado]) -> list[PaisAuditado]:
+    """Primero los países con hueco comprobado y sin «no tirar»; luego los de hueco sin comprobar
+    (su nota se midió sobre menos puntos y no se compara con la de arriba); al final los demás.
+    Dentro de cada grupo, por nota y por puntos medidos (con empate, el texto de la recomendación manda)."""
+
+    def grupo(p: PaisAuditado) -> int:
+        if p.hueco.hueco is True and not p.no_tirar:
+            return 0
+        return 1 if p.hueco.hueco is None and not p.no_tirar else 2
+
+    def medidos(p: PaisAuditado) -> float:
+        return sum(peso for _, peso, s, _ in p.desglose if s is not None)
+
+    return sorted(paises, key=lambda p: (grupo(p), p.nota is None, -(p.nota or 0), -medidos(p), p.pais))
+
+
+_orden = orden_ranking
 
 
 def _desglose(p: PaisAuditado) -> list[str]:

@@ -14,7 +14,8 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     e = sub.add_parser("ejecutar", help="audita la oferta en cada país y escribe productos/<p-id>/AUDITORIA.md")
     e.add_argument("--oferta", required=True, metavar="ID", help="oferta_id de wiki/ofertas/<ID>.md")
     e.add_argument("--pais", action="append", default=[], metavar="XX",
-                   help="país a auditar (se repite; por defecto, los «candidato» de config/mercados.yaml)")
+                   help="país a auditar (se repite; por defecto, los «candidato» de config/mercados.yaml que caben "
+                        "en las búsquedas que quedan hoy, empezando por los de la ficha)")
     e.add_argument("--frases", action="append", default=[], metavar='XX:"f1|f2"',
                    help="frases cortas en el idioma local del país, separadas por | (se repite por país)")
     el = sub.add_parser("elegir", help="registra el país que elige el usuario, con su cita literal")
@@ -43,6 +44,7 @@ def frases_de(valores: list[str]) -> dict[str, list[str]]:
 def _ejecutar_auditoria(args: argparse.Namespace) -> int:
     from trovify.auditoria import orquestador
     from trovify.auditoria.paises import que_medir, recomendar
+    from trovify.auditoria.salida import orden_ranking
     from trovify.caza.orquestador import hoy_negocio
     from trovify.vault.rutas import vault_root
 
@@ -61,7 +63,7 @@ def _ejecutar_auditoria(args: argparse.Namespace) -> int:
         print(f"Aviso: hay frases para {', '.join(sobran)}, que no se auditó; revisa --pais o config/mercados.yaml.",
               file=sys.stderr)
     print(f"Auditoría escrita: {r.ruta.relative_to(vault).as_posix()} (producto {r.p_id})")
-    orden = sorted(r.paises, key=lambda p: (p.nota is None, -(p.nota or 0), p.pais))
+    orden = orden_ranking(r.paises)
     hueco = {True: "sí", False: "no", None: "no comprobado"}
     for i, p in enumerate(orden, 1):
         nota = "no medida" if p.nota is None else f"{p.nota:.0f}"

@@ -187,7 +187,7 @@ def _sugerencia(pais: str, motivo: str) -> str:
     if "paradadeldia" in m or "meta bloqueó" in m or "sesionbloqueada" in m or "bloqueo de meta" in m:
         return "Meta bloqueó: hoy no se busca más; se retoma mañana"
     if "cuota del día" in m or "presupuesto" in m:
-        return f"cuota del día agotada: se retoma mañana (vuelve a auditar con --pais {pais})"
+        return "vuelve a auditar mañana con la misma orden: sigue por aquí y lo ya medido no se repite"
     if "interrumpid" in m or "errores" in m or "navegador" in m:
         return f"fallo de red o del navegador: vuelve a intentarlo más tarde con --pais {pais}"
     if "intentos con frases distintas" in m:
