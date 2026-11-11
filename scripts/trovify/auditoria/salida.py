@@ -192,6 +192,33 @@ def orden_ranking(paises: list[PaisAuditado]) -> list[PaisAuditado]:
 _orden = orden_ranking
 
 
+def _clave_empate(p: PaisAuditado) -> tuple:
+    grupo = 0 if p.hueco.hueco is True and not p.no_tirar else (1 if p.hueco.hueco is None and not p.no_tirar else 2)
+    medidos = sum(peso for _, peso, s, _ in p.desglose if s is not None)
+    return grupo, None if p.nota is None else round(p.nota, 6), medidos
+
+
+def puestos(orden: list[PaisAuditado]) -> list[tuple[int, str]]:
+    """Puesto de cada país del ranking ya ordenado: los empatados (mismo grupo, nota y puntos medidos)
+    comparten número («2=»); el siguiente salta («4»)."""
+    out: list[tuple[int, str]] = []
+    for i, p in enumerate(orden):
+        if i and _clave_empate(p) == _clave_empate(orden[i - 1]):
+            n = out[-1][0]
+        else:
+            n = i + 1
+        out.append((n, str(n)))
+    claves = [_clave_empate(p) for p in orden]
+    return [(n, f"{n}=" if claves.count(claves[i]) > 1 else txt) for i, (n, txt) in enumerate(out)]
+
+
+def nota_ranking(p: PaisAuditado) -> str:
+    """La nota tal como se lee en el ranking: sin hueco comprobado, es una nota parcial."""
+    if p.hueco.hueco is None and p.nota is not None:
+        return f"sin hueco comprobado (nota parcial {_nota(p.nota)}, {cobertura(p)})"
+    return _nota_con_cobertura(p)
+
+
 def _desglose(p: PaisAuditado) -> list[str]:
     lineas = ["| Parte | Peso | Valor (0 a 1) |", "|---|---|---|"]
     for nombre, peso, s, motivo in p.desglose:
@@ -209,9 +236,10 @@ def _desglose(p: PaisAuditado) -> list[str]:
     return lineas
 
 
-def _seccion_pais(i: int, p: PaisAuditado) -> list[str]:
+def _seccion_pais(i: str, p: PaisAuditado) -> list[str]:
+    nota = nota_ranking(p)
     lineas = [
-        f"### {i}. {p.pais} — nota {_nota_con_cobertura(p)}",
+        f"### {i}. {p.pais} — {nota if nota.startswith('sin hueco') else f'nota {nota}'}",
         "",
         f"- Hueco: {_hueco(p)}",
         *([f"- Hueco reutilizado: {p.hueco_medido}"] if p.hueco_medido else []),
@@ -247,12 +275,12 @@ def _frontmatter_auditoria(oferta: dict, orden: list[PaisAuditado], recomendacio
         "senales": {k: senales3.get(k) for k, _ in _SENALES},
         "paises": {
             p.pais: {
-                "puesto": i,
+                "puesto": n,
                 "nota": None if p.nota is None else round(p.nota, 2),
                 "hueco": p.hueco.hueco,
                 "no_tirar": p.no_tirar,
             }
-            for i, p in enumerate(orden, 1)
+            for (n, _), p in zip(puestos(orden), orden, strict=True)
         },
     }
 
@@ -292,12 +320,13 @@ def render_auditoria(oferta: dict, paises: list[PaisAuditado], recomendacion, se
             "| # | País | Nota (0 a 100) | Hueco | No tirar |",
             "|---|---|---|---|---|",
         ]
+        rangos = [txt for _, txt in puestos(orden)]
         lineas += [
-            f"| {i} | {p.pais} | {_nota_con_cobertura(p)} | {_HUECO_CORTO[p.hueco.hueco]} | {p.no_tirar or '—'} |"
-            for i, p in enumerate(orden, 1)
+            f"| {i} | {p.pais} | {nota_ranking(p)} | {_HUECO_CORTO[p.hueco.hueco]} | {p.no_tirar or '—'} |"
+            for i, p in zip(rangos, orden, strict=True)
         ]
         lineas.append("")
-        for i, p in enumerate(orden, 1):
+        for i, p in zip(rangos, orden, strict=True):
             lineas += _seccion_pais(i, p)
     else:
         lineas += ["no medido: no se auditó ningún país", ""]
@@ -624,7 +653,7 @@ def registrar_eleccion(vault: Path, p_id: str, pais: str, reserva: str | None, c
     lineas.append(f"Auditoría: [[productos/{p_id}/AUDITORIA]] ({am.get('fecha') or 'sin fecha'})")
     lineas.append("")
     meta = {"tipo": "decision", "fecha": hoy.isoformat(), "fuente": "usuario", "pais": pais,
-            "reserva": reserva, "producto": p_id}
+            "reserva": reserva, "producto": p_id, "fuera_de_mercados": fuera_de_mercados}
     dir_decisiones = dir_producto / "decisiones"
     dir_decisiones.mkdir(parents=True, exist_ok=True)
     ruta = _ruta_eleccion(dir_decisiones, hoy)

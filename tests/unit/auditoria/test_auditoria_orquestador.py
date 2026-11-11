@@ -302,3 +302,13 @@ def test_con_pais_explicito_no_se_planifica_la_cuota(v):
     c = ClienteConPresupuesto(v, usadas=27)  # quedan 3: un país; con --pais se intenta y la cuota corta
     r = orquestador.auditar(v, "o-ejemplo", ["RO", "IT"], FRASES, cliente=c, hoy=HOY, cambios=nunca)
     assert paises_llamados(c) == ["RO"] and r.tipo == "cuota"
+
+
+def test_paises_de_la_ficha_sin_frases_cuentan_su_coste_real(v):
+    """N-4: ES (de la ficha) sin frases solo mide el original: 1 búsqueda, no un hueco de 3."""
+    (v / "config/mercados.yaml").write_text(CUATRO, encoding="utf-8")
+    frases = {p: FRASES4[p] for p in ("RO", "IT", "FR")}
+    c = ClienteConPresupuesto(v, usadas=23)  # quedan 7: ES (1) + RO (3) + IT (3)
+    r = orquestador.auditar(v, "o-ejemplo", None, frases, cliente=c, hoy=HOY, cambios=nunca)
+    assert paises_llamados(c) == ["ES", "RO", "IT"]
+    assert por_pais(r)["FR"].hueco.motivo == "no medido: cuota del día agotada — se retoma mañana"

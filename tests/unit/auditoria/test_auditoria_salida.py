@@ -308,3 +308,59 @@ def test_ranking_pone_primero_los_de_hueco_comprobado():
 
     ps = [pais("BG", None), pais("RO", True), pais("CZ", None), pais("ES", True)]
     assert [p.pais for p in orden_ranking(ps)] == ["ES", "RO", "BG", "CZ"]
+
+
+# ------------------------------------------------------------------ re-review (N-1..N-3)
+
+
+def _pais_n1(codigo, hueco, precio=1.0):
+    from trovify.auditoria.paises import PaisAuditado, puntuar_pais
+    from trovify.caza.hueco import HuecoPais
+    from trovify.caza.senales import Medida
+    from trovify.config.umbrales import cargar
+
+    u = cargar(pathlib.Path(__file__).resolve().parents[3] / "templates/cerebro/config/umbrales.yaml")
+    h = HuecoPais(codigo, Medida(0 if hueco else None, None if hueco else "no medido: x"),
+                  "ausente" if hueco is not None else "no_medido", hueco, [], None if hueco else "no medido: x")
+    nota, desglose = puntuar_pais(h, Medida(precio), u)
+    return PaisAuditado(codigo, h, Medida(13.9), Medida(precio), nota, desglose, None)
+
+
+def test_ranking_nota_parcial_y_puestos_compartidos():
+    ps = [_pais_n1("RO", True), _pais_n1("MD", True), _pais_n1("IT", True, 0.5), _pais_n1("BG", None),
+          _pais_n1("CZ", None)]
+    texto = render_auditoria(oferta_ejemplo(), ps, recomendar(ps), tres_senales("B", ps), [], HOY)
+    assert "| 1= | MD | 100 (medida sobre 45 de 100 puntos) | sí | — |" in texto
+    assert "| 1= | RO | 100 (medida sobre 45 de 100 puntos) | sí | — |" in texto
+    assert "| 3 | IT |" in texto
+    assert ("| 4= | BG | sin hueco comprobado (nota parcial 100, medida sobre 15 de 100 puntos) | no comprobado | — |"
+            in texto)
+    assert "### 4= . BG" not in texto and "### 4=. BG — sin hueco comprobado (nota parcial 100" in texto
+    meta, _ = leer_texto(texto)
+    assert meta["paises"]["RO"]["puesto"] == 1 and meta["paises"]["CZ"]["puesto"] == 4
+
+
+def leer_texto(texto):
+    import yaml
+
+    _, fm, cuerpo = texto.split("---\n", 2)
+    return yaml.safe_load(fm), cuerpo
+
+
+def test_eleccion_fuera_de_mercados_no_tapa_la_eleccion_valida_anterior(tmp_path):
+    v = vault(tmp_path)
+    p = escribir_auditoria(v, "o-ejemplo", paises_ejemplo(), HOY).parent.name
+    registrar_eleccion(v, p, "RO", None, "Rumanía", HOY)
+    assert mercado_elegido(v) == "Europe/Bucharest"
+    d = registrar_eleccion(v, p, "RU", None, "no está en tus mercados, ya lo sé", HOY)
+    meta, _ = leer(d)
+    assert meta["fuera_de_mercados"] is True
+    assert mercado_elegido(v) == "Europe/Bucharest"  # la errata no tapa la elección válida
+
+
+def test_cita_con_el_texto_del_aviso_no_marca_fuera_de_mercados(tmp_path):
+    v = vault(tmp_path)
+    p = escribir_auditoria(v, "o-ejemplo", paises_ejemplo(), HOY).parent.name
+    d = registrar_eleccion(v, p, "RO", None, "RO, aunque diga que no está en tus mercados", HOY)
+    meta, _ = leer(d)
+    assert meta["fuera_de_mercados"] is False

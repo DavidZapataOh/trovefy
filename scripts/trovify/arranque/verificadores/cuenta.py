@@ -111,7 +111,10 @@ def leer_ajustes_cuenta(texto: str) -> dict[str, str | None]:
 
 
 def mercado_elegido(vault: Path) -> str | None:
-    """Zona horaria del mercado del `*-eleccion.md` más reciente (lo crea /auditar); None si no hay."""
+    """Zona horaria del mercado del `*-eleccion.md` válido más reciente (lo crea /auditar); None si no hay.
+
+    Se saltan las decisiones de un país que no está en config/mercados.yaml (una errata como «RU»,
+    marcada ``fuera_de_mercados``): nunca tapan una elección válida anterior."""
     archivos = sorted(
         Path(vault).glob("productos/*/decisiones/*-eleccion.md"),
         key=lambda p: (p.name, p.stat().st_mtime),
@@ -119,13 +122,21 @@ def mercado_elegido(vault: Path) -> str | None:
     if not archivos:
         return None
     try:
-        meta, _ = frontmatter.leer(archivos[-1])
         todos = mercados.cargar(Path(vault) / "config" / "mercados.yaml")
     except (OSError, ValueError):
         return None
-    pais = meta.get("pais") if isinstance(meta, dict) else None
-    mercado = todos.get(pais) if isinstance(pais, str) else None
-    return mercado.zona if mercado else None
+    for archivo in reversed(archivos):
+        try:
+            meta, _ = frontmatter.leer(archivo)
+        except (OSError, ValueError):
+            continue
+        if not isinstance(meta, dict) or meta.get("fuera_de_mercados") is True:
+            continue
+        pais = meta.get("pais")
+        mercado = todos.get(pais) if isinstance(pais, str) else None
+        if mercado:
+            return mercado.zona
+    return None
 
 
 def evaluar_cuenta(ajustes: dict, zona_esperada: str | None, limite_max: float) -> ResultadoVerificacion:

@@ -197,6 +197,12 @@ def _orden_por_defecto(candidatos: list[str], oferta: dict, previos: dict) -> li
     return list(dict.fromkeys(orden))
 
 
+def _coste(pais: str, frases: dict[str, list[str]], page_ids: list[str]) -> int:
+    """Búsquedas que se planifican para un país: ≈``BUSQUEDAS_POR_PAIS`` con frases; sin frases solo se
+    mide el original (1 por página del original), así que ese es su coste real."""
+    return BUSQUEDAS_POR_PAIS if frases.get(pais) else len(page_ids)
+
+
 def _presupuesto(cliente):
     pres = getattr(cliente, "presupuesto", None)
     return pres if pres is not None and getattr(pres, "contador", None) is not None else None
@@ -228,7 +234,7 @@ def _auditar(
 
     Un hueco ya medido hace ``REUTILIZAR_DIAS`` días o menos (en la ficha o en una auditoría anterior)
     se reutiliza sin buscar. Sin ``paises`` se auditan los «candidato» de ``mercados.yaml``: primero
-    los de la ficha, y solo los que caben en las búsquedas que quedan hoy (``BUSQUEDAS_POR_PAIS`` cada
+    los de la ficha, y solo los que caben en las búsquedas que quedan hoy (:func:`_coste` cada
     uno); el resto queda «no medido: cuota del día agotada — se retoma mañana»."""
     vault = Path(vault)
     ficha = vault / "wiki" / "ofertas" / f"{oferta_id}.md"
@@ -266,11 +272,10 @@ def _auditar(
     pres = _presupuesto(cliente)
     usadas_antes = getattr(pres, "usadas", 0) if pres is not None else None
     restantes = _restantes(pres) if planificar else None
-    caben = None if restantes is None else restantes // BUSQUEDAS_POR_PAIS
+    plan = restantes  # búsquedas del día que aún se pueden planificar (None: sin planificar)
 
     auditados: list[PaisAuditado] = []
     nuevos: dict[str, HuecoPais] = {}
-    medidos = 0
     sin_cuota = False
     for pais in paises:
         mercado = mercados[pais]
@@ -280,11 +285,12 @@ def _auditar(
             medido_antes = f"medido el {fecha.isoformat()} ({fuente}); hoy no se volvió a buscar en {pais}"
         elif vigia.parada is not None:
             h = _sin_medir(pais, _motivo_corte(vigia))  # tras el corte no se vuelve a llamar a Meta
-        elif caben is not None and medidos >= caben:
+        elif plan is not None and _coste(pais, frases, page_ids) > plan:
             h = _sin_medir(pais, MOTIVO_SIN_CUOTA)  # no se empieza un país que no cabe entero
             sin_cuota = True
         else:
-            medidos += 1
+            if plan is not None:
+                plan -= _coste(pais, frases, page_ids)
             if frases.get(pais):
                 h = hueco_pais(vigia, frases[pais], page_ids, pais, mercado.idioma, set(page_ids), hoy, u)
             else:
@@ -311,7 +317,8 @@ def _auditar(
         hechas = pres.usadas - usadas_antes
     parada, tipo = vigia.parada, vigia.tipo
     if parada is None and sin_cuota:
-        parada, tipo = f"cuota del día: quedaban {restantes} búsquedas y cada país necesita {BUSQUEDAS_POR_PAIS}", "cuota"
+        parada, tipo = (f"cuota del día: quedaban {restantes} búsquedas; cada país con frases necesita "
+                        f"≈{BUSQUEDAS_POR_PAIS} y uno sin frases, 1 por página del original"), "cuota"
 
     ruta = escribir_auditoria(vault, oferta_id, auditados, hoy, calculo_eur=calculo_eur,
                               cambio=fuente_del_cambio(cambio),
@@ -328,6 +335,7 @@ def lineas_busquedas(usadas_hoy: int | None, max_hoy: int | None, hechas: int | 
     hoy_txt = (f"Búsquedas de hoy: {usadas_hoy} de {max_hoy} usadas (quedan {max(max_hoy - usadas_hoy, 0)}); "
                f"esta auditoría hizo {hechas or 0}. El tope del día lo comparten tu sesión, la caza y la rutina.")
     coste = (f"Búsquedas por país: ≈{BUSQUEDAS_POR_PAIS} por país (2 frases locales y 1 por la página del "
-             "original; las repetidas del día salen de la caché). Un hueco medido hace "
+             "original; sin frases, solo 1 por la página del original; las repetidas del día salen de la caché). "
+             "Un hueco medido hace "
              f"{REUTILIZAR_DIAS} días o menos se reutiliza sin buscar.")
     return [hoy_txt, coste]

@@ -127,7 +127,7 @@ Si eliges con «ya se vende» o «hay hueco» en «no», la elección queda escr
 ## Búsquedas de hoy
 
 - Búsquedas de hoy: 21 de 30 usadas (quedan 9); esta auditoría hizo 9. El tope del día lo comparten tu sesión, la caza y la rutina.
-- Búsquedas por país: ≈3 por país (2 frases locales y 1 por la página del original; las repetidas del día salen de la caché). Un hueco medido hace 7 días o menos se reutiliza sin buscar.
+- Búsquedas por país: ≈3 por país (2 frases locales y 1 por la página del original; sin frases, solo 1 por la página del original; las repetidas del día salen de la caché). Un hueco medido hace 7 días o menos se reutiliza sin buscar.
 
 ## Qué medir
 

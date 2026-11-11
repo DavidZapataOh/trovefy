@@ -151,3 +151,15 @@ def test_elegir_un_pais_fuera_de_mercados_sale_con_0_y_lo_explica(vault, monkeyp
     out = capsys.readouterr().out
     assert "Advertencia: RU no está en tus mercados" in out
     assert "no pasa a «aprobado»" in out and "queda «aprobado»" not in out
+
+
+def test_elegir_con_cita_que_menciona_el_aviso_no_se_confunde(vault, monkeypatch, capsys):
+    monkeypatch.setattr(caza_orq, "hoy_negocio", lambda: date(2026, 11, 10))
+    p = escribir_auditoria(vault, "o-ejemplo", paises_ejemplo(), date(2026, 11, 10)).parent.name
+    meta, cuerpo = leer(vault / "productos" / p / "PRODUCTO.md")
+    meta["paises"]["RO"]["estado"] = "MUERTO"  # no pasa a aprobado por otro motivo
+    escribir(vault / "productos" / p / "PRODUCTO.md", meta, cuerpo)
+    assert cli.main(["auditar", "elegir", "--producto", p, "--pais", "RO", "--cita",
+                     "RO no está en tus mercados, dice el bot"]) == 0
+    out = capsys.readouterr().out
+    assert "no pasa a «aprobado»" not in out and "el estado de RO sigue siendo MUERTO" in out

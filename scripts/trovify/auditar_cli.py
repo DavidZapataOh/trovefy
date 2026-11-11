@@ -44,7 +44,7 @@ def frases_de(valores: list[str]) -> dict[str, list[str]]:
 def _ejecutar_auditoria(args: argparse.Namespace) -> int:
     from trovify.auditoria import orquestador
     from trovify.auditoria.paises import que_medir, recomendar
-    from trovify.auditoria.salida import orden_ranking
+    from trovify.auditoria.salida import orden_ranking, puestos
     from trovify.caza.orquestador import hoy_negocio
     from trovify.vault.rutas import vault_root
 
@@ -65,8 +65,9 @@ def _ejecutar_auditoria(args: argparse.Namespace) -> int:
     print(f"Auditoría escrita: {r.ruta.relative_to(vault).as_posix()} (producto {r.p_id})")
     orden = orden_ranking(r.paises)
     hueco = {True: "sí", False: "no", None: "no comprobado"}
-    for i, p in enumerate(orden, 1):
-        nota = "no medida" if p.nota is None else f"{p.nota:.0f}"
+    for (_, i), p in zip(puestos(orden), orden, strict=True):
+        nota = "no medida" if p.nota is None else (f"{p.nota:.0f}" if p.hueco.hueco is not None
+                                                   else f"parcial {p.nota:.0f} (sin hueco comprobado)")
         extra = f" · no tirar: {p.no_tirar}" if p.no_tirar else ""
         motivo = f" ({p.hueco.motivo})" if p.hueco.hueco is None and p.hueco.motivo else ""
         print(f"{i}. {p.pais} — nota {nota} · hueco {hueco[p.hueco.hueco]}{motivo}{extra}")
@@ -120,7 +121,8 @@ def _ejecutar_eleccion(args: argparse.Namespace) -> int:
     pais = args.pais.strip().upper()
     meta, _ = frontmatter.leer(vault / "productos" / args.producto / "PRODUCTO.md")
     estado = ((meta.get("paises") or {}).get(pais) or {}).get("estado")
-    if estado != "aprobado" and "no está en tus mercados" in ruta.read_text(encoding="utf-8"):
+    decision, _ = frontmatter.leer(ruta)
+    if (decision or {}).get("fuera_de_mercados") is True:
         print(f"{pais} no está en config/mercados.yaml: tu decisión queda escrita con tu cita, pero {pais} "
               "no pasa a «aprobado». Si es una errata, vuelve a elegir con el código bueno; si no, añade "
               "el país a config/mercados.yaml y vuelve a elegir.")
