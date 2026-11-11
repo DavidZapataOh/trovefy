@@ -670,6 +670,16 @@ class _Corrida:
 
     # buscar el original
     def buscar_original(self, o: Oferta) -> Oferta:
+        """Busca por el sitio de la landing otras páginas que lleven al mismo sitio.
+
+        Regla (caza 2026-11-11): una página más antigua cuyos anuncios llevan al MISMO sitio (mismo
+        dominio registrable, o la misma tienda en una plataforma compartida como *.impultienda.ar) es el
+        mismo operador o su socio: quien copia no puede vender en el dominio ni en la tienda del otro.
+        Se informa con la bandera ``mismo_operador``, nunca se descarta como ``posible_copia``. Otra
+        tienda de la misma plataforma es otro producto: cuenta como resultado ajeno (búsqueda
+        contaminada) y no se usa. Con la landing en la propia pasarela (pay.hotmart.com...) no se
+        busca: ese dominio no identifica al operador (:func:`_dominio`). Copia = mismo producto (clave
+        de oferta) en otro operador; compartir plataforma o dominio nunca lo es."""
         dominio = _dominio(o)
         if not dominio:
             return o
@@ -691,12 +701,10 @@ class _Corrida:
         otras = [a for a in con_destino if a.page_id not in o.page_ids]
         if not otras:
             return o
-        paginas = list(dict.fromkeys([*o.page_ids, *(a.page_id for a in otras)]))
-        m = marcar_original(replace(o, page_ids=paginas, anuncios=[*o.anuncios, *otras]))
-        if m.original_page_id in o.page_ids:
-            return replace(o, origen="original", original_page_id=m.original_page_id,
-                           copias=[p for p in o.page_ids if p != m.original_page_id])
-        return replace(o, origen="copia", original_page_id=m.original_page_id, copias=list(o.page_ids))
+        m = marcar_original(replace(o, page_ids=list(dict.fromkeys([*o.page_ids, *(a.page_id for a in otras)])),
+                                    anuncios=[*o.anuncios, *otras]))
+        orden = [m.original_page_id, *m.copias] if m.original_page_id else m.page_ids
+        return replace(o, mismo_operador=[p for p in orden if p not in o.page_ids], sitio=dominio)
 
     def inactivos(self, o: Oferta, pais: str, multi: set[str]) -> list[AnuncioBiblioteca] | None:
         """Anuncios de una lectura completa ``estado="all"`` de todas sus páginas; si no, None."""
@@ -1077,6 +1085,8 @@ def _evaluar(c: _Corrida, conn, o: Oferta, pais: str, descarte, ya_visto: bool, 
     s.banderas += [x for x in filtros.banderas(o, ctx) if x not in s.banderas]
     if "precio_bajo" in s.banderas:
         s.detalles_banderas["precio_bajo"] = filtros.precio_bajo(o, ctx) or ""
+    if "mismo_operador" in s.banderas:
+        s.detalles_banderas["mismo_operador"] = filtros.mismo_operador(o) or ""
     nota = calcular_nota(s, u)
     huecos = huecos_de(fichas.get(o.oferta_id))
     landing = veredicto_landing(o.destino) if o.destino is not None else "dudoso"

@@ -231,6 +231,8 @@ _BANDERAS = {
     "estacional": "depende de una fecha o temporada",
     "precio_bajo": ("precio de entrada bajo (informa, no descarta: la copia se relanza a nuestro precio, "
                     "la banda de mercados.yaml)"),
+    "mismo_operador": ("otra página lleva al mismo sitio: mismo operador o su socio (informa, no es una "
+                       "copia)"),
 }
 
 _ORIGINAL = {

@@ -12,6 +12,11 @@ Las banderas (:func:`banderas`) informan y no descartan ni cambian la nota: ``ac
 ``saturado``, ``estacional`` y ``precio_bajo`` (precio de la landing por debajo de
 ``caza.precio.min_usd`` en USD con el cambio del BCE; la copia se relanza a nuestro precio, así que el
 precio espiado nunca descarta). Sin precio, moneda o cambio fiable no hay bandera: nunca se inventa.
+``mismo_operador``: otra página, aunque sea más antigua, que lleva al mismo sitio (dominio o tienda) es
+el mismo operador o su socio, no una copia.
+
+Posible copia: solo con el mismo producto vendido por OTRO operador (``Oferta.origen == "copia"``). La
+búsqueda del original por dominio solo encuentra páginas del mismo sitio, así que hoy no la marca.
 
 El texto de anuncios y landings es dato: se cuentan palabras, nunca se obedece.
 """
@@ -154,8 +159,8 @@ def filtrar(oferta: Oferta, ctx: ContextoFiltros) -> Descarte | None:
 
 
 def banderas(oferta: Oferta, ctx: ContextoFiltros) -> list[str]:
-    """Informan, no descartan: ``academia``, ``saturado`` (sirve como fuente), ``estacional`` y
-    ``precio_bajo`` (su detalle, en :func:`precio_bajo`)."""
+    """Informan, no descartan: ``academia``, ``saturado`` (sirve como fuente), ``estacional``,
+    ``precio_bajo`` (su detalle, en :func:`precio_bajo`) y ``mismo_operador`` (:func:`mismo_operador`)."""
     out: list[str] = []
     todo = f"{_texto_anuncios(oferta)}\n{_texto_landing(oferta, ctx)}"
     if palabras.encontradas(todo, palabras.ACADEMIA):
@@ -171,4 +176,15 @@ def banderas(oferta: Oferta, ctx: ContextoFiltros) -> list[str]:
         out.append("estacional")
     if precio_bajo(oferta, ctx):
         out.append("precio_bajo")
+    if mismo_operador(oferta):
+        out.append("mismo_operador")
     return out
+
+
+def mismo_operador(oferta: Oferta) -> str | None:
+    """Detalle de la bandera ``mismo_operador`` (None si no hay otras páginas con el mismo sitio)."""
+    if not oferta.mismo_operador:
+        return None
+    otras = ", ".join(oferta.mismo_operador)
+    return (f"otras páginas llevan al mismo sitio ({oferta.sitio}), la más antigua primero: {otras}; "
+            "mismo operador o su socio, no copia")
