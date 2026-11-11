@@ -5,7 +5,7 @@ from datetime import date
 from trovefy.auditoria.precio import precio_local, precio_soportable
 from trovefy.caza.senales import Medida
 from trovefy.config.mercados import cargar
-from trovefy.fx import a_eur, cambios
+from trovefy.fx import a_eur, a_usd, cambios
 
 XML = (pathlib.Path(__file__).resolve().parents[2] / "fixtures/fx/eurofxref-daily.xml").read_bytes()
 M = cargar(pathlib.Path(__file__).resolve().parents[3] / "templates/cerebro/config/mercados.yaml")
@@ -34,6 +34,16 @@ def test_moneda_sin_cambio_no_medido(tmp_path):
 
 def test_eur_con_tasas():
     assert a_eur(13.9, "EUR", {"EUR": 1.0}).valor == 13.9
+
+
+def test_a_usd_pasa_por_el_euro():
+    t = {"EUR": 1.0, "USD": 1.08, "BRL": 6.2}
+    assert round(a_usd(6.2, "BRL", t).valor, 4) == 1.08
+    assert a_usd(5, "usd", t).valor == 5
+    m = a_usd(5, "COP", t)
+    assert m.valor is None and "sin cambio de referencia para COP" in m.motivo
+    assert a_usd(5, "BRL", {"EUR": 1.0, "BRL": 6.2}).valor is None  # sin USD no se inventa
+    assert a_usd(5, "BRL", None).valor is None
 
 
 def test_bulgaria_en_euros():

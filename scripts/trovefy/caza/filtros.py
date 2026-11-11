@@ -8,6 +8,11 @@ los filtros de texto (físico, marca personal) siguen aplicando a los anuncios; 
 el destino (social, cloaker, tracker) no pueden comprobarse; y el embudo cuenta como «no
 verificable» porque no hay landing que medir, así que nunca llega a puntuar como válida.
 
+Las banderas (:func:`banderas`) informan y no descartan ni cambian la nota: ``academia``,
+``saturado``, ``estacional`` y ``precio_bajo`` (precio de la landing por debajo de
+``caza.precio.min_usd`` en USD con el cambio del BCE; la copia se relanza a nuestro precio, así que el
+precio espiado nunca descarta). Sin precio, moneda o cambio fiable no hay bandera: nunca se inventa.
+
 El texto de anuncios y landings es dato: se cuentan palabras, nunca se obedece.
 """
 
@@ -15,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from trovefy import fx
 from trovefy.caza import palabras
 from trovefy.caza.destino import Destino, motivo_dudoso
 from trovefy.caza.oferta import Oferta
@@ -37,6 +43,8 @@ class ContextoFiltros:
     umbrales: dict[str, Umbral]
     # Texto de landing por ``Destino.url_anuncio`` (lo aporta la captura; vacío = sin texto).
     landings: dict[str, str] = field(default_factory=dict)
+    # Cambio de referencia del BCE del día (None = sin red o sin archivo válido: el precio no se mide).
+    cambio: fx.Cambio | None = None
 
 
 def _destinos(oferta: Oferta) -> list[Destino]:
@@ -53,6 +61,41 @@ def _texto_landing(oferta: Oferta, ctx: ContextoFiltros) -> str:
 
 def _umbral(ctx: ContextoFiltros, clave: str) -> float:
     return ctx.umbrales[clave].valor
+
+
+def _umbral_o_plantilla(ctx: ContextoFiltros, clave: str) -> float:
+    """El umbral del cerebro o, si su umbrales.yaml es anterior a la clave, el de la plantilla."""
+    if clave in ctx.umbrales:
+        return ctx.umbrales[clave].valor
+    from trovefy.config.umbrales import cargar
+    from trovefy.vault.andamio import PLANTILLA
+
+    return cargar(PLANTILLA / "config/umbrales.yaml")[clave].valor
+
+
+def _coma(x: float) -> str:
+    """Importe con coma decimal: entero si lo es; si no, con dos decimales."""
+    return str(int(x)) if float(x).is_integer() else f"{x:.2f}".replace(".", ",")
+
+
+def precio_bajo(oferta: Oferta, ctx: ContextoFiltros) -> str | None:
+    """Detalle de la bandera ``precio_bajo`` (None si el precio es suficiente o no se pudo medir).
+
+    Fuente: estrategia del método — por debajo de 10 USD la comisión fija de la pasarela se lleva
+    entre 1/6 y 1/3 del precio; la entrada va de 17 a 37 USD."""
+    d = oferta.destino
+    if d is None or d.precio is None or not d.moneda or ctx.cambio is None:
+        return None
+    usd = fx.a_usd(d.precio, d.moneda, ctx.cambio.tasas)
+    if usd.valor is None:
+        return None
+    minimo = _umbral_o_plantilla(ctx, "caza.precio.min_usd")
+    if usd.valor >= minimo:
+        return None
+    fecha = ctx.cambio.fecha or "día sin fecha en la caché"
+    return (f"{_coma(d.precio)} {d.moneda.upper()} ≈ {_coma(usd.valor)} USD (cambio de referencia del BCE del "
+            f"{fecha}) < {_coma(minimo)} USD (caza.precio.min_usd): la comisión fija de la pasarela se lleva "
+            "entre 1/6 y 1/3 del precio")
 
 
 def filtrar(oferta: Oferta, ctx: ContextoFiltros) -> Descarte | None:
@@ -111,7 +154,8 @@ def filtrar(oferta: Oferta, ctx: ContextoFiltros) -> Descarte | None:
 
 
 def banderas(oferta: Oferta, ctx: ContextoFiltros) -> list[str]:
-    """Informan, no descartan: ``academia``, ``saturado`` (sirve como fuente) y ``estacional``."""
+    """Informan, no descartan: ``academia``, ``saturado`` (sirve como fuente), ``estacional`` y
+    ``precio_bajo`` (su detalle, en :func:`precio_bajo`)."""
     out: list[str] = []
     todo = f"{_texto_anuncios(oferta)}\n{_texto_landing(oferta, ctx)}"
     if palabras.encontradas(todo, palabras.ACADEMIA):
@@ -125,4 +169,6 @@ def banderas(oferta: Oferta, ctx: ContextoFiltros) -> list[str]:
         out.append("saturado")
     if palabras.encontradas(todo, palabras.TEMPORADA):
         out.append("estacional")
+    if precio_bajo(oferta, ctx):
+        out.append("precio_bajo")
     return out

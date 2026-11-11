@@ -47,6 +47,18 @@ def test_informe_cierra_con_la_decision_del_usuario():
         assert "Tres señales" in texto
 
 
+def test_ficha_muestra_precio_bajo_con_su_detalle():
+    r = ejecucion_ejemplo().resultados[0]
+    detalle = "5,99 BRL ≈ 1,04 USD (cambio de referencia del BCE del 2026-11-10) < 10 USD (caza.precio.min_usd)"
+    r.senales.banderas.append("precio_bajo")
+    r.senales.detalles_banderas["precio_bajo"] = detalle
+    meta, cuerpo = render_ficha(r, None)
+    assert "precio_bajo" in meta["banderas"]
+    linea = next(x for x in cuerpo.splitlines() if x.startswith("- precio_bajo:"))
+    assert "precio de entrada bajo" in linea and detalle in linea
+    assert meta["estado"] == "B"  # informa: no cambia la decisión
+
+
 def test_ficha_contrato_frontmatter():
     meta, _ = render_ficha(ejecucion_ejemplo().resultados[0], None)
     for clave in ("tipo", "fecha", "fuente", "oferta_id", "page_ids", "original_page_id", "origen", "checkout",

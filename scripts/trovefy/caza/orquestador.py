@@ -23,6 +23,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Literal
 
+from trovefy import fx
 from trovefy.caza import filtros, snapshots
 from trovefy.caza.biblioteca import url_biblioteca
 from trovefy.caza.cliente import SesionBloqueada
@@ -72,6 +73,14 @@ MODOS: tuple[str, ...] = ("nicho", "barrido", "vigilar", "oferta")
 Resolver = Callable[[str], "Destino | tuple[Destino, str] | None"]
 
 _PARADAS = (SesionBloqueada, ParadaPorErrores, PresupuestoAgotado)
+# Cambio del BCE del día para la bandera ``precio_bajo``: (vault, hoy) → Cambio o None.
+Cambios = Callable[[Path, date], "fx.Cambio | None"]
+
+
+def _cambio_del_dia(vault: Path, hoy: date) -> fx.Cambio | None:
+    """Cambio de referencia del BCE (caché del día en el cerebro); None sin red o sin archivo válido."""
+    return fx.cambio_del_dia(vault, hoy)
+
 _MAX_ANUNCIOS = 60  # anuncios por lectura (lo que trae una página de la Biblioteca y su desplazamiento)
 _VIGILADAS = ("A", "B", "observar")
 _FALLOS = ("observar", "descartada")
@@ -742,6 +751,7 @@ def _ejecutar(
     paises: list[str] | None = None,
     max_vigiladas: int | None = None,
     max_busquedas_rutina: int | None = None,
+    cambios: Cambios | None = None,
 ) -> Ejecucion:
     """Una ejecución de la caza; escribe con ``salida.escribir`` y devuelve la :class:`Ejecucion`.
 
@@ -755,6 +765,8 @@ def _ejecutar(
     - ``max_vigiladas``: tope del día de fichas vigiladas (``rutina.max_vigiladas_por_dia``); se
       miden las que hace más tiempo que no se miden.
     - ``max_busquedas_rutina``: cuota del día de la rutina (``rutina.max_busquedas``).
+    - ``cambios``: de dónde sale el cambio del BCE para la bandera ``precio_bajo`` (por defecto, el
+      del día con su caché); sin cambio, el precio no se compara y no hay bandera.
     """
     vault = Path(vault)
     if modo not in MODOS:
@@ -780,7 +792,8 @@ def _ejecutar(
     excluidas = _exclusiones(vault)
     if modo in ("nicho", "barrido"):
         excluidas |= set(fichas)  # ya vistas: se informan, no se vuelven a juzgar
-    ctx = filtros.ContextoFiltros(excluidas, _propias(vault), u, c.landings)
+    cambio = (cambios or _cambio_del_dia)(vault, hoy)
+    ctx = filtros.ContextoFiltros(excluidas, _propias(vault), u, c.landings, cambio)
 
     # 2) búsquedas por palabra
     salida_consultas, de_palabras, ids_consulta = c.consultas(list(consultas))
@@ -908,6 +921,10 @@ def _ejecutar(
         if oid not in {o.oferta_id for o, _, _ in evaluar}:
             motivo = c.b.corte or "no apareció en la relectura de sus páginas"
             c.errores.append(f"no medido: {oid}: {motivo}; no cuenta como strike")
+    if cambio is None and any(d is None and o.destino is not None and o.destino.precio is not None
+                              and o.destino.moneda for o, d, _ in evaluar):
+        c.errores.append("no medido: sin cambio de referencia del BCE (sin red o archivo no válido): el precio "
+                         "mínimo de entrada (caza.precio.min_usd) no se comprobó; sin bandera precio_bajo")
 
     # 6–8) señales, nota y decisión
     resultados: list[ResultadoOferta] = []
@@ -1050,6 +1067,8 @@ def _evaluar(c: _Corrida, conn, o: Oferta, pais: str, descarte, ya_visto: bool, 
     if de_otro_dia and completo:
         s.nuevos = s.parados = Medida(None, "no medido: lectura de otro día (caché)")
     s.banderas += [x for x in filtros.banderas(o, ctx) if x not in s.banderas]
+    if "precio_bajo" in s.banderas:
+        s.detalles_banderas["precio_bajo"] = filtros.precio_bajo(o, ctx) or ""
     nota = calcular_nota(s, u)
     huecos = huecos_de(fichas.get(o.oferta_id))
     landing = veredicto_landing(o.destino) if o.destino is not None else "dudoso"

@@ -4,8 +4,9 @@ from datetime import date
 
 import pytest
 from ayudas import anuncio, destino_impultienda
+from trovefy import fx
 from trovefy.caza import palabras
-from trovefy.caza.filtros import ContextoFiltros, banderas, filtrar
+from trovefy.caza.filtros import ContextoFiltros, banderas, filtrar, precio_bajo
 from trovefy.caza.oferta import agrupar, marcar_original
 from trovefy.config.umbrales import cargar
 
@@ -232,3 +233,58 @@ def test_moldes_digitales_y_frases_ambiguas_pasan(texto):
 
 def test_una_prenda_sola_no_descarta():
     assert filtrar(oferta("Leggings de regalo para tus alumnas"), CTX) is None
+
+
+# --- precio de entrada bajo: bandera, nunca descarte (figurinhaspro.online a R$ 5,99) -----------
+# La copia se relanza a nuestro precio (banda de mercados.yaml): el precio espiado solo informa.
+
+CAMBIO = fx.Cambio({"EUR": 1.0, "USD": 1.08, "BRL": 6.2}, "2026-11-10")
+CTX_FX = ContextoFiltros(set(), set(), U, cambio=CAMBIO)
+
+
+def _con_precio(precio, moneda, texto="Pacote de figurinhas em PDF para imprimir"):
+    return oferta(texto, destino=dataclasses.replace(D, precio=precio, moneda=moneda))
+
+
+def test_precio_bajo_es_bandera_con_detalle():
+    o = _con_precio(5.99, "BRL")
+    assert filtrar(o, CTX_FX) is None
+    assert "precio_bajo" in banderas(o, CTX_FX)
+    assert precio_bajo(o, CTX_FX) == (
+        "5,99 BRL ≈ 1,04 USD (cambio de referencia del BCE del 2026-11-10) < 10 USD "
+        "(caza.precio.min_usd): la comisión fija de la pasarela se lleva entre 1/6 y 1/3 del precio"
+    )
+
+
+def test_precio_suficiente_sin_bandera():
+    assert "precio_bajo" not in banderas(_con_precio(13.9, "EUR"), CTX_FX)  # ≈ 15,01 USD
+    assert "precio_bajo" not in banderas(_con_precio(10, "USD"), CTX_FX)  # justo el umbral no es bajo
+
+
+@pytest.mark.parametrize("precio,moneda,ctx", [
+    (5.99, None, CTX_FX),  # «$» ambiguo: moneda desconocida
+    (None, None, CTX_FX),  # sin precio visible
+    (9000, "COP", CTX_FX),  # el BCE no publica COP: no se inventa un cambio
+    (5.99, "BRL", CTX),  # sin cambio del BCE (sin red)
+])
+def test_precio_no_medido_sin_bandera(precio, moneda, ctx):
+    o = _con_precio(precio, moneda)
+    assert precio_bajo(o, ctx) is None and "precio_bajo" not in banderas(o, ctx)
+
+
+def test_precio_bajo_sin_destino_sin_bandera():
+    assert "precio_bajo" not in banderas(oferta(destino=None), CTX_FX)
+
+
+def test_umbral_de_precio_ausente_usa_el_de_la_plantilla():
+    # Los cerebros creados antes del 2026-11-11 no tienen caza.precio.min_usd: no rompe y vale 10.
+    viejo = {k: v for k, v in U.items() if k != "caza.precio.min_usd"}
+    ctx = ContextoFiltros(set(), set(), viejo, cambio=CAMBIO)
+    assert "precio_bajo" in banderas(_con_precio(5.99, "BRL"), ctx)
+    assert "precio_bajo" not in banderas(_con_precio(9.5, "EUR"), ctx)  # ≈ 10,26 USD
+
+
+def test_umbral_de_precio_del_cerebro_manda():
+    otro = {**U, "caza.precio.min_usd": dataclasses.replace(U["caza.precio.min_usd"], valor=20)}
+    ctx = ContextoFiltros(set(), set(), otro, cambio=CAMBIO)
+    assert "precio_bajo" in banderas(_con_precio(13.9, "EUR"), ctx)

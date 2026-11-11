@@ -39,7 +39,7 @@ flowchart LR
 
 1. **Biblioteca.** Búsquedas por frase y país en la Biblioteca pública (vía Firecrawl si hay clave, o Chromium de Playwright sin sesión), con caché, un presupuesto diario de búsquedas y parada inmediata si Meta bloquea.
 2. **Ofertas.** Los anuncios se agrupan por destino (landing, pasarela de pago, precio) y se detecta la página original.
-3. **Filtros.** Descartes con motivo: ya visto, destino social, producto físico, marca personal, cebo de back-end, embudo no verificable, cloaker, tracker o posible copia.
+3. **Filtros.** Descartes con motivo: ya visto, destino social, producto físico, marca personal, cebo de back-end, embudo no verificable, cloaker, tracker o posible copia. Banderas que solo informan: academia, saturado, estacional y precio bajo (por debajo de `caza.precio.min_usd` con el cambio del BCE; la copia se relanza a nuestro precio).
 4. **Señales.** Por oferta y país: anuncios activos, supervivencia, escalonado, edad, expansión, duplicación, alcance en la UE e idiomas, comparadas con las fotos diarias guardadas en SQLite.
 5. **Nota.** Nota desglosada de 0 a 100 y decisión A / B / observar.
 6. **Hueco por país.** Competencia local medida con frases en el idioma del país; una A exige hueco en al menos un país.

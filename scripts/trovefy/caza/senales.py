@@ -52,6 +52,8 @@ class Senales:
     # Últimos y con valor por defecto: se rellenan solo desde lecturas completas con corrida previa.
     nuevos: Medida = field(default_factory=lambda: _nm("primera caza"))
     parados: Medida = field(default_factory=lambda: _nm("primera caza"))
+    # Detalle de las banderas que lo llevan (``precio_bajo``: precio, USD, fecha del BCE y umbral).
+    detalles_banderas: dict[str, str] = field(default_factory=dict)
 
 
 def _edad(a: AnuncioBiblioteca, hoy: date) -> int:

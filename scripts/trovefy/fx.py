@@ -134,3 +134,13 @@ def a_eur(importe: float, moneda: str, tasas: dict[str, float] | None) -> Medida
     if tasas is None or moneda not in tasas:
         return Medida(None, f"no medido: sin cambio de referencia para {moneda or 'moneda desconocida'}")
     return Medida(importe / tasas[moneda])
+
+
+def a_usd(importe: float, moneda: str, tasas: dict[str, float] | None) -> Medida:
+    """El importe en USD pasando por el euro (el BCE da unidades por 1 EUR, también de USD)."""
+    if tasas is None or "USD" not in tasas:
+        return Medida(None, "no medido: sin cambio de referencia para USD")
+    if (moneda or "").upper() == "USD":
+        return Medida(importe)
+    eur = a_eur(importe, moneda, tasas)
+    return eur if eur.valor is None else Medida(eur.valor * tasas["USD"])

@@ -282,6 +282,36 @@ def test_landings_sin_pie_llegan_a_los_filtros(tmp_path):
     assert e.resultados[0].descarte.codigo == "cebo_backend"
 
 
+def test_precio_bajo_es_bandera_y_no_cambia_nota_ni_decision(tmp_path):
+    from trovefy import fx
+
+    P = "100000000000023"
+    url = "https://kit.example/ro/"
+
+    def cazar(v, cambios):
+        c = ClientePorUrl({url_biblioteca("RO", page_id=P): ok(viejos(P, 9, 20, 7100))})
+        return ejecutar(v, "oferta", [], "tomi", 3, page_ids=[P], paises=["RO"], cliente=c,
+                        resolver=resolver_fijo({url: (destino_ok(url, precio=5.0), "Fișe PDF pentru copii")}),
+                        hoy=HOY, cambios=cambios)
+
+    vistos: list = []
+    cambio = fx.Cambio({"EUR": 1.0, "USD": 1.08, "RON": 5.0}, "2026-11-10")
+    con = cazar(_vault(tmp_path / "a"), lambda v, hoy: vistos.append(hoy) or cambio).resultados[0]
+    sin = cazar(_vault(tmp_path / "b"), lambda v, hoy: None)
+    assert vistos == [HOY]
+    assert con.descarte is None and "precio_bajo" in con.senales.banderas
+    assert "5 RON ≈ 1,08 USD" in con.senales.detalles_banderas["precio_bajo"]
+    r = sin.resultados[0]
+    assert "precio_bajo" not in r.senales.banderas  # sin cambio del BCE: no se mide, no se inventa
+    assert (con.nota.valor, con.decision) == (r.nota.valor, r.decision)
+    assert any("caza.precio.min_usd" in x for x in sin.errores)
+
+
+def test_sin_cambios_la_caza_no_sale_a_la_red(tmp_path):
+    # El fixture automático de tests/unit/caza deja el cambio del BCE en None: nunca sale a la red.
+    assert orquestador._cambio_del_dia(tmp_path, HOY) is None
+
+
 def test_texto_sin_pie():
     t = ("Fișe PDF pentru copii\nCumpără acum\nPolitica de confidențialitate\nTermeni și condiții\n"
          "© 2026 Kit SRL. Toate drepturile rezervate.\nThis site is not part of the Facebook website or Meta Platforms\n"

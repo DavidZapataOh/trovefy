@@ -229,6 +229,8 @@ _BANDERAS = {
     "academia": "parece una academia o curso grande",
     "saturado": "un mismo jugador tiene muchísimos anuncios: sirve como fuente, no como rival de frente",
     "estacional": "depende de una fecha o temporada",
+    "precio_bajo": ("precio de entrada bajo (informa, no descarta: la copia se relanza a nuestro precio, "
+                    "la banda de mercados.yaml)"),
 }
 
 _ORIGINAL = {
@@ -815,9 +817,12 @@ def render_ficha(rs: ResultadoOferta | list[ResultadoOferta], previa: dict | Non
     m = paises[mejor]
     idiomas = list(previa.get("idiomas") or [])
     banderas: list[str] = []
+    detalles: dict[str, str] = {}
     for r in rs:
         idiomas += [i for i in r.senales.idiomas if i not in idiomas]
         banderas += [b for b in r.senales.banderas if b not in banderas]
+        for b, det in r.senales.detalles_banderas.items():
+            detalles.setdefault(b, det)
     page_ids = [str(p) for p in previa.get("page_ids") or []]
     page_ids += [p for p in o.page_ids if p not in page_ids]
     podada = previa.get("estado") == "podada"
@@ -890,7 +895,8 @@ def render_ficha(rs: ResultadoOferta | list[ResultadoOferta], previa: dict | Non
         "## Banderas",
         "",
     ]
-    lineas += [f"- {b}: {_BANDERAS[b]}" if b in _BANDERAS else f"- {b}" for b in banderas] or ["ninguna"]
+    lineas += [(f"- {b}: {_BANDERAS[b]}" if b in _BANDERAS else f"- {b}") + (f" — {detalles[b]}" if b in detalles else "")
+               for b in banderas] or ["ninguna"]
     lineas.append("")
     return meta, "\n".join(lineas)
 
