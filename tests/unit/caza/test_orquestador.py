@@ -22,6 +22,8 @@ from trovify.vault import frontmatter
 from trovify.vault.andamio import crear_vault
 
 HOY = date(2026, 11, 10)
+# Hora de captura fija en HOY (Bogotá): las lecturas de otro día de negocio no registran vistos.
+CAPTURA = datetime(2026, 11, 10, 15, 0, tzinfo=UTC)
 
 
 # --- pruebas del plan ---------------------------------------------------------------------
@@ -80,7 +82,7 @@ class ClientePorUrl:
         self.presupuesto.usadas += 1
         r = self.respuestas.get(url)
         if r is None:
-            return ResultadoBusqueda("vacio", url, 0, [], None, datetime.now(UTC), True, "firecrawl", 1,
+            return ResultadoBusqueda("vacio", url, 0, [], None, CAPTURA, True, "firecrawl", 1,
                                      total_exacto=True)
         if r.estado == "bloqueado":
             self.presupuesto.bloqueos += 1
@@ -89,7 +91,7 @@ class ClientePorUrl:
 
 def ok(anuncios, total=None, completo=True, exacto=True, via="firecrawl", creditos=1):
     total = len(anuncios) if total is None else total
-    return ResultadoBusqueda("ok", "", total, list(anuncios), None, datetime.now(UTC), completo,
+    return ResultadoBusqueda("ok", "", total, list(anuncios), None, CAPTURA, completo,
                              via, creditos, None, total_exacto=exacto)
 
 
@@ -740,3 +742,22 @@ def test_navegador_no_disponible_es_parada_controlada(tmp_path):
     assert e.parada and "navegador no disponible" in e.parada and len(c.llamadas) == 1
     texto = (v / "wiki/caza/2026-11-10/europa.md").read_text()
     assert "no medido" in texto and "navegador no disponible" in texto
+
+
+# --- ola final: C1 lecturas de otro día ------------------------------------------------------
+
+
+def test_lectura_de_otro_dia_no_registra_vistos(tmp_path):
+    import sqlite3
+    v = _vault(tmp_path)
+    P = "100000000000501"
+    url = "https://kit.example/ro/"
+    ads = viejos(P, 9, 20, 50000)
+    ayer = replace(ok(ads), capturado_en=datetime(2026, 11, 10, 1, 0, tzinfo=UTC))  # 2026-11-09 20:00 COT
+    c = ClientePorUrl({url_biblioteca("RO", page_id=P): ayer})
+    e = ejecutar(v, "oferta", [], "tomi", 3, page_ids=[P], paises=["RO"], cliente=c,
+                 resolver=resolver_fijo({url: destino_ok(url)}), hoy=HOY)
+    r = e.resultados[0]
+    assert r.senales.nuevos.valor is None and r.senales.parados.valor is None
+    conn = sqlite3.connect(v / "data/caza/snapshots.sqlite")
+    assert conn.execute("SELECT COUNT(*) FROM corridas").fetchone()[0] == 0

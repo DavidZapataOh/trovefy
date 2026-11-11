@@ -622,3 +622,17 @@ def test_total_exacto_solo_con_count_de_meta(tmp_path):
     cache = Cache(tmp_path / "c")
     cliente([_pagina_con_total(120)], cache=cache).buscar("RO", q="x")
     assert cliente([], cache=cache).buscar("RO", q="x").total_exacto is True
+
+
+def test_cache_no_cruza_el_dia_de_negocio(tmp_path):
+    # C1: guardado a las 20:00 COT del día D, leído a las 06:30 COT del día D+1 (10,5 h después,
+    # dentro del TTL): es otro día de negocio, así que es un fallo de caché.
+    url = "https://www.facebook.com/ads/library/?q=x"
+    captura = datetime(2026, 11, 11, 1, 0, tzinfo=UTC)  # 2026-11-10 20:00 COT
+    r = ResultadoBusqueda("vacio", url, 0, [], None, captura, True)
+    ahora = [captura + timedelta(hours=2)]  # 22:00 COT del mismo día: vale
+    cache = Cache(tmp_path, ttl_h=12, ahora=lambda: ahora[0])
+    cache.guardar(url, r)
+    assert cache.leer(url) is not None
+    ahora[0] = datetime(2026, 11, 11, 11, 30, tzinfo=UTC)  # 2026-11-11 06:30 COT
+    assert cache.leer(url) is None

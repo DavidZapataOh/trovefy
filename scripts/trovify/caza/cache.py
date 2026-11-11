@@ -1,6 +1,7 @@
 """Caché de búsquedas de la Biblioteca en ``<vault>/data/cache/biblioteca/``.
 
-Clave: sha256 de la URL reproducible. Caduca a las 12 h. Solo se guardan resultados ``ok`` y
+Clave: sha256 de la URL reproducible. Caduca a las 12 h y, además, al cambiar el día de negocio
+(America/Bogota): una lectura de ayer nunca pasa por una de hoy. Solo se guardan resultados ``ok`` y
 ``vacio`` (nunca bloqueos ni errores) y nunca medios: el anuncio no los lleva, solo texto y enlaces.
 """
 
@@ -13,7 +14,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from trovify.caza.modelo import AnuncioBiblioteca, ResultadoBusqueda
-from trovify.vault.escritura import escribir_atomico
+from trovify.vault.escritura import ZONA_NEGOCIO, escribir_atomico
 from trovify.vault.rutas import vault_root
 
 _GUARDABLES = ("ok", "vacio")
@@ -57,7 +58,8 @@ class Cache:
         return self.dir / (hashlib.sha256(clave.encode("utf-8")).hexdigest() + ".json")
 
     def leer(self, url: str, max_anuncios: int = 60, primera: bool = False) -> ResultadoBusqueda | None:
-        """El resultado guardado si existe, es de la misma URL y petición, no ha caducado y está completo.
+        """El resultado guardado si existe, es de la misma URL y petición, no ha caducado, es del mismo
+        día de negocio (America/Bogota) que ahora y está completo.
 
         Con ``primera=True`` (petición no completa) vale la primera página guardada aunque traiga
         menos anuncios que ``max_anuncios``.
@@ -71,8 +73,11 @@ class Cache:
             if not primera and d["estado"] == "ok" and len(d["anuncios"]) < max_anuncios and not completo:
                 return None
             capturado = datetime.fromisoformat(d["capturado_en"])
-            if self._ahora() - capturado > self.ttl:
+            ahora = self._ahora()
+            if ahora - capturado > self.ttl:
                 return None
+            if capturado.astimezone(ZONA_NEGOCIO).date() != ahora.astimezone(ZONA_NEGOCIO).date():
+                return None  # otro día de negocio: sus cifras no son las de hoy
             return ResultadoBusqueda(
                 d["estado"], d["url"], d["total_aprox"],
                 [_anuncio_de_dict(a) for a in d["anuncios"]], d["motivo"], capturado, completo,

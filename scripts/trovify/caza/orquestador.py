@@ -75,6 +75,11 @@ def _ahora() -> datetime:
     return datetime.now(UTC)
 
 
+def _dia_de(t: datetime) -> date:
+    """Día de negocio (America/Bogota) de un instante; uno sin zona se toma como UTC."""
+    return (t if t.tzinfo else t.replace(tzinfo=UTC)).astimezone(ZONA_NEGOCIO).date()
+
+
 def hoy_negocio() -> date:
     """Día de negocio: el corte de día es el de America/Bogota."""
     return _ahora().astimezone(ZONA_NEGOCIO).date()
@@ -885,7 +890,9 @@ def _evaluar(c: _Corrida, conn, o: Oferta, pais: str, descarte, ya_visto: bool, 
     por_pagina = [_total_de_pagina(c, o, p, pais, alcance) for p in o.page_ids]
     total_meta = sum(por_pagina) if all(x is not None for x in por_pagina) else None
     vistos = None
-    if completo and not ya_visto:
+    # Una lectura capturada otro día de negocio (caché vieja) nunca se registra como la de hoy.
+    de_otro_dia = any(r is not None and _dia_de(r.capturado_en) != hoy for r in lecturas)
+    if completo and not ya_visto and not de_otro_dia:
         activos = {a.library_id for a in o.anuncios if a.activo and a.pais == pais}
         n, par = snapshots.registrar_vistos(conn, o.oferta_id, pais, activos, hoy, completo=True)
         vistos = (n, par, snapshots.dia_anterior(conn, o.oferta_id, pais, hoy))
@@ -895,6 +902,8 @@ def _evaluar(c: _Corrida, conn, o: Oferta, pais: str, descarte, ya_visto: bool, 
         o, pais, hoy, historial, inactivos.get((o.oferta_id, pais)), total_meta, completo,
         total_meta=total_meta, umbrales=u, vistos=vistos, mercados=c.mercados,
     )
+    if de_otro_dia and completo:
+        s.nuevos = s.parados = Medida(None, "no medido: lectura de otro día (caché)")
     s.banderas += [x for x in filtros.banderas(o, ctx) if x not in s.banderas]
     nota = calcular_nota(s, u)
     huecos = huecos_de(fichas.get(o.oferta_id))
