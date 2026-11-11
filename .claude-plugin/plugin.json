@@ -1,7 +1,10 @@
 {
   "name": "trovify",
   "version": "0.1.0",
-  "description": "Trovify: sistema de trabajo con Claude Code para tiendas Shopify, con memoria en un vault de Obsidian.",
+  "description": "Trovify: plugin de Claude Code para un negocio de productos digitales de bajo precio: caza de ofertas en la Biblioteca de anuncios de Meta, auditoría por país, puesta en marcha guiada y memoria en un vault de Obsidian.",
   "author": { "name": "Trovify" },
-  "license": "MIT"
+  "homepage": "https://github.com/DavidZapataOh/trovify",
+  "repository": "https://github.com/DavidZapataOh/trovify",
+  "license": "MIT",
+  "keywords": ["meta-ads", "ad-library", "obsidian", "productos-digitales"]
 }

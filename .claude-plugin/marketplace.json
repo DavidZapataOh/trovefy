@@ -1,12 +1,15 @@
 {
   "name": "trovify",
   "owner": { "name": "Trovify" },
-  "description": "Marketplace local de Trovify.",
+  "description": "Marketplace de Trovify.",
   "plugins": [
     {
       "name": "trovify",
       "source": "./",
-      "description": "Trovify: sistema de trabajo con Claude Code para tiendas Shopify."
+      "description": "Trovify: caza de ofertas en la Biblioteca de anuncios de Meta, auditoría por país y cerebro en Obsidian para un negocio de productos digitales.",
+      "homepage": "https://github.com/DavidZapataOh/trovify",
+      "repository": "https://github.com/DavidZapataOh/trovify",
+      "license": "MIT"
     }
   ]
 }

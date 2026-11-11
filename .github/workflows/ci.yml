@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pruebas:
+    name: ruff + pytest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Instalar Python 3.12 y dependencias
+        run: uv sync --locked
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Pruebas (sin integracion ni vivo)
+        run: uv run pytest -q

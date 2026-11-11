@@ -5,11 +5,27 @@ description = "Trovify: plugin de Claude Code y paquete Python para un negocio d
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.12,<3.13"
+keywords = ["claude-code", "claude-code-plugin", "meta-ads", "ad-library", "obsidian", "digital-products"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: Spanish",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business",
+]
 dependencies = [
     "lingua-language-detector==2.2.0",
     "playwright==1.65.0",
     "pyyaml==6.0.3",
 ]
+
+[project.urls]
+Repository = "https://github.com/DavidZapataOh/trovify"
+Issues = "https://github.com/DavidZapataOh/trovify/issues"
 
 [project.scripts]
 trovify = "trovify.cli:main"
