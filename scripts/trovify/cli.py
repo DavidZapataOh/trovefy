@@ -14,17 +14,19 @@ from trovify import __version__
 Configurar = Callable[[argparse.ArgumentParser], None]
 Ejecutar = Callable[[argparse.Namespace], int]
 
-_REGISTRO: dict[str, tuple[Configurar, Ejecutar]] = {}
+_REGISTRO: dict[str, tuple[Configurar, Ejecutar, str]] = {}
 
 
-def registrar(nombre: str, configurar: Configurar, ejecutar: Ejecutar) -> None:
+def registrar(nombre: str, configurar: Configurar, ejecutar: Ejecutar, ayuda: str = "") -> None:
     """Registra un subcomando; `main` lo añade al construir el parser.
+
+    `ayuda` es la línea que muestra `trovify --help` junto al subcomando.
 
     Lanza ValueError si el nombre ya existe o es el reservado `version`.
     """
     if nombre == "version" or nombre in _REGISTRO:
         raise ValueError(f"el subcomando «{nombre}» ya está registrado")
-    _REGISTRO[nombre] = (configurar, ejecutar)
+    _REGISTRO[nombre] = (configurar, ejecutar, ayuda)
 
 
 def _ejecutar_version(_args: argparse.Namespace) -> int:
@@ -46,8 +48,8 @@ def _construir_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="trovify", description="Trovify: CLI del negocio.")
     sub = parser.add_subparsers(dest="comando", metavar="<comando>")
     sub.add_parser("version", help="muestra la versión")
-    for nombre, (configurar, _) in _REGISTRO.items():
-        configurar(sub.add_parser(nombre))
+    for nombre, (configurar, _, ayuda) in _REGISTRO.items():
+        configurar(sub.add_parser(nombre, help=ayuda, description=ayuda or None))
     return parser
 
 

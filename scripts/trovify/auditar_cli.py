@@ -20,7 +20,7 @@ def _configurar(p: argparse.ArgumentParser) -> None:
                    help="frases cortas en el idioma local del país, separadas por | (se repite por país)")
     el = sub.add_parser("elegir", help="registra el país que elige el usuario, con su cita literal")
     el.add_argument("--producto", required=True, metavar="P", help="p-id del producto (p-0001-…)")
-    el.add_argument("--pais", required=True, metavar="XX")
+    el.add_argument("--pais", required=True, metavar="XX", help="país elegido (código ISO)")
     el.add_argument("--reserva", metavar="YY", help="país de reserva")
     el.add_argument("--cita", required=True, help="las palabras del usuario, literales")
 
@@ -140,4 +140,4 @@ def _ejecutar(args: argparse.Namespace) -> int:
     return _ejecutar_eleccion(args)
 
 
-registrar("auditar", _configurar, _ejecutar)
+registrar("auditar", _configurar, _ejecutar, ayuda="audita una oferta cazada por país y registra el país elegido")

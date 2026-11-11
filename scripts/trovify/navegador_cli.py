@@ -12,11 +12,11 @@ from trovify.cli import registrar
 def _configurar(p: argparse.ArgumentParser) -> None:
     sub = p.add_subparsers(dest="accion", metavar="<accion>", required=True)
     a = sub.add_parser("abrir", help="abre una ventana con el perfil del servicio para que inicies sesión")
-    a.add_argument("servicio", metavar="SERVICIO")
-    a.add_argument("url", metavar="URL")
+    a.add_argument("servicio", metavar="SERVICIO", help="nombre del perfil (p. ej. impultienda)")
+    a.add_argument("url", metavar="URL", help="página que se abre")
     c = sub.add_parser("capturar", help="abre la URL con el perfil y guarda una captura de pantalla")
-    c.add_argument("servicio", metavar="SERVICIO")
-    c.add_argument("url", metavar="URL")
+    c.add_argument("servicio", metavar="SERVICIO", help="nombre del perfil (p. ej. impultienda)")
+    c.add_argument("url", metavar="URL", help="página que se captura")
     c.add_argument("--png", required=True, metavar="RUTA",
                    help="dónde guardar la captura; si está en config/evidencia/provisional/ del vault, el texto de la página se guarda "
                    "al lado (.txt) salvo si parece llevar un secreto")
@@ -92,4 +92,4 @@ def _ejecutar(args: argparse.Namespace) -> int:
     return 0
 
 
-registrar("navegador", _configurar, _ejecutar)
+registrar("navegador", _configurar, _ejecutar, ayuda="abre o captura páginas con un perfil de Chromium por servicio")

@@ -36,4 +36,4 @@ def _ejecutar(args: argparse.Namespace) -> int:
     return 0
 
 
-registrar("rutinas", _configurar, _ejecutar)
+registrar("rutinas", _configurar, _ejecutar, ayuda="instala rutinas programadas (timers de systemd de usuario)")

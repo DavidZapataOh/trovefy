@@ -41,16 +41,16 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     sub.add_parser("estado", help="tabla de pasos y avance de la fase 0").add_argument("--vault", help=_VAULT_AYUDA)
     sub.add_parser("siguiente", help="el próximo paso de la fase 0").add_argument("--vault", help=_VAULT_AYUDA)
     h = sub.add_parser("hecho", help="marca un paso como hecho (no verificado)")
-    h.add_argument("id", metavar="ID")
+    h.add_argument("id", metavar="ID", help="id del paso (p. ej. 05)")
     h.add_argument("--nota", help="nota breve")
     h.add_argument("--dato", action="append", default=[], metavar="CLAVE=VALOR",
                    help="dato del paso (repetible), p. ej. url=https://www.facebook.com/tu-pagina; nunca un secreto")
     h.add_argument("--vault", help=_VAULT_AYUDA)
     v = sub.add_parser("verificar", help="ejecuta el verificador de un paso")
-    v.add_argument("id", metavar="ID")
+    v.add_argument("id", metavar="ID", help="id del paso (p. ej. 05)")
     v.add_argument("--vault", help=_VAULT_AYUDA)
     c = sub.add_parser("checklist", help="verifica un paso con una lista de comprobaciones (paso 03)")
-    c.add_argument("id", metavar="ID")
+    c.add_argument("id", metavar="ID", help="id del paso (p. ej. 05)")
     c.add_argument("--respuesta", action="append", default=[], metavar="CLAVE=si|no", help="respuesta a una comprobación (repetible)")
     c.add_argument("--vault", help=_VAULT_AYUDA)
     cf = sub.add_parser("confirmar", help="muestra lo leído de tu pantalla real y, con tu sí, confirma el patrón del paso")
@@ -58,7 +58,7 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     cf.add_argument("--respuesta", metavar="si|no", help="tu respuesta: ¿coincide con lo que ves en tu pantalla?")
     cf.add_argument("--vault", help=_VAULT_AYUDA)
     b = sub.add_parser("bloqueado", help="marca un paso como bloqueado")
-    b.add_argument("id", metavar="ID")
+    b.add_argument("id", metavar="ID", help="id del paso (p. ej. 05)")
     b.add_argument("--motivo", required=True, help="por qué está bloqueado")
     b.add_argument("--vault", help=_VAULT_AYUDA)
 
@@ -264,4 +264,4 @@ def _ejecutar(args: argparse.Namespace) -> int:
     return 0
 
 
-registrar("arranque", _configurar, _ejecutar)
+registrar("arranque", _configurar, _ejecutar, ayuda="puesta en marcha guiada (fase 0): estado, pasos y verificadores")

@@ -52,3 +52,31 @@ def test_modulo_roto_no_impide_el_resto(registro_aislado, tmp_path, monkeypatch,
     assert cli.main(["version"]) == 0
     err = capsys.readouterr().err
     assert "aviso: no se pudo cargar trovify.zz_roto_cli: ModuleNotFoundError" in err
+
+
+def test_registrar_sin_ayuda_sigue_funcionando(registro_aislado):
+    cli.registrar("sin-ayuda", lambda p: None, lambda a: 3)
+    assert cli.main(["sin-ayuda"]) == 3
+
+
+def test_ayuda_del_subcomando_sale_en_help(registro_aislado, capsys):
+    cli.registrar("zz-ayuda", lambda p: None, lambda a: 0, ayuda="hace algo útil")
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    out = capsys.readouterr().out
+    assert "zz-ayuda" in out
+    assert "hace algo útil" in out
+
+
+def test_todos_los_subcomandos_reales_tienen_ayuda(registro_aislado, monkeypatch, capsys):
+    # Se reimportan los *_cli reales para que se registren en el registro aislado.
+    for nombre in [m for m in sys.modules if m.startswith("trovify.") and m.endswith("_cli")]:
+        monkeypatch.delitem(sys.modules, nombre)
+    with pytest.raises(SystemExit):
+        cli.main(["--help"])
+    out = capsys.readouterr().out
+    for nombre in ("arranque", "auditar", "caza", "cerebro", "navegador", "rutinas"):
+        assert nombre in out
+    assert "==SUPPRESS==" not in out
+    for nombre, (configurar, _ejecutar, ayuda) in cli._REGISTRO.items():
+        assert ayuda.strip(), f"el subcomando «{nombre}» no tiene ayuda"

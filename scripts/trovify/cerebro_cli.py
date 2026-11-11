@@ -283,4 +283,4 @@ def _ejecutar(args: argparse.Namespace) -> int:
     return 0
 
 
-registrar("cerebro", _configurar, _ejecutar)
+registrar("cerebro", _configurar, _ejecutar, ayuda="gestiona el vault (cerebro): crear, lint, ingesta, reglas, traspasos y log")

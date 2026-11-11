@@ -14,7 +14,8 @@ _PAIS = re.compile(r"^(ALL|[A-Z]{2}):(.+)$")
 def _configurar(p: argparse.ArgumentParser) -> None:
     sub = p.add_subparsers(dest="accion", metavar="<accion>", required=True)
     e = sub.add_parser("ejecutar", help="caza en la Biblioteca de anuncios y escribe informe y fichas")
-    e.add_argument("--modo", required=True, choices=["nicho", "barrido", "vigilar", "oferta"])
+    e.add_argument("--modo", required=True, choices=["nicho", "barrido", "vigilar", "oferta"],
+                   help="nicho o barrido (por palabras), vigilar (fichas guardadas) u oferta (páginas concretas)")
     e.add_argument("--region", help="región de config/caza.yaml (eeuu_gb, br, latam_es, europa); en vigilar no "
                                      "hace falta: su informe se llama siempre «vigilancia»")
     e.add_argument("--consulta", action="append", default=[], metavar="PAIS:FRASE",
@@ -29,8 +30,8 @@ def _configurar(p: argparse.ArgumentParser) -> None:
                    help="deja el resumen en rutinas/log/<día>/caza.md y el archivo ok si terminó bien; usa la "
                         "cuota de la rutina y, en vigilar, su tope de fichas del día")
     h = sub.add_parser("hueco", help="mide el hueco de una oferta en un país y recalcula la decisión")
-    h.add_argument("--oferta", required=True, metavar="ID")
-    h.add_argument("--pais", required=True, metavar="XX")
+    h.add_argument("--oferta", required=True, metavar="ID", help="oferta_id de wiki/ofertas/<ID>.md")
+    h.add_argument("--pais", required=True, metavar="XX", help="código ISO del país (p. ej. RO)")
     h.add_argument("--frase", action="append", required=True, metavar="FRASE",
                    help="frase corta en el idioma local (se repite; hacen falta al menos dos)")
     h.add_argument("--idioma", help="idioma local si el país no está en config/mercados.yaml")
@@ -185,4 +186,4 @@ def _ejecutar(args: argparse.Namespace) -> int:
     return _ejecutar_hueco(args)
 
 
-registrar("caza", _configurar, _ejecutar)
+registrar("caza", _configurar, _ejecutar, ayuda="caza ofertas en la Biblioteca de anuncios de Meta y mide el hueco por país")
