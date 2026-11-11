@@ -76,6 +76,15 @@ def _crecimiento(
     return Medida((n_hoy - n_foto) / n_foto)
 
 
+def crecimiento(n_hoy: int | None, fotos: list, hoy: date) -> Medida:
+    """Crecimiento contra la foto de hace 6–8 días (la más cercana a 7). ``fotos`` tienen ``dia`` y
+    ``total`` exacto. Lo usa también el crecimiento de una página (todas sus ofertas)."""
+    return _crecimiento(n_hoy, fotos, hoy)
+
+
+VENTANA_FOTO = _VENTANA_FOTO
+
+
 def calcular_senales(
     oferta: Oferta,
     pais: str,

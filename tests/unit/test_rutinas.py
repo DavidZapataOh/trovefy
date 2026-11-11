@@ -19,8 +19,21 @@ def test_unidad_lista_de_herramientas():
     servicio, timer = unidad_caza(Path("/home/u/trovify-cerebro"), "/usr/local/bin/claude")
     assert ('ExecStart=/usr/local/bin/claude -p "/trovify:cazar --rutina" '
             '--allowedTools "Read,Bash(trovify caza *),Bash(trovify cerebro *)"') in servicio
-    assert "Environment=TROVIFY_VAULT=/home/u/trovify-cerebro" in servicio
+    assert 'Environment="TROVIFY_VAULT=/home/u/trovify-cerebro"' in servicio
     assert "Unit=trovify-caza.service" in timer and "WantedBy=timers.target" in timer
+
+
+def test_unidad_con_espacios_y_porcentaje():
+    servicio, _ = unidad_caza(Path("/home/u/mi cerebro 100%"), "/usr/local/bin/claude")
+    assert "WorkingDirectory=/home/u/mi cerebro 100%%" in servicio
+    assert 'Environment="TROVIFY_VAULT=/home/u/mi cerebro 100%%"' in servicio
+    with pytest.raises(ValueError):
+        unidad_caza(Path('/home/u/raro"'), "/usr/local/bin/claude")
+
+
+def test_timer_persistente_documentado():
+    _, timer = unidad_caza(Path("/v"), "/usr/bin/claude")
+    assert "Persistent=true" in timer and "#" in timer
 
 
 def test_instalar_escribe_en_home_y_activa_el_timer(tmp_path, monkeypatch):
@@ -52,6 +65,7 @@ def test_plantilla_caza_yaml_se_copia():
     assert datos["perfil"] == "tomi" and datos["nichos"] == [] and isinstance(datos["palabras"], dict)
     assert set(datos["regiones"]) == {"eeuu_gb", "br", "latam_es", "europa"}
     assert {"US", "GB"} <= set(datos["regiones"]["eeuu_gb"]) and datos["regiones"]["br"] == ["BR"]
+    assert datos["rutina"] == {"max_busquedas": 20, "max_vigiladas_por_dia": 6}
 
 
 def test_crear_vault_copia_caza_yaml(tmp_path):

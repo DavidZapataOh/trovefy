@@ -47,9 +47,10 @@ from trovify.caza.salida import (
     escribir,
     formatear_medida,
 )
-from trovify.caza.senales import _VENTANA_FOTO, Medida, calcular_senales
+from trovify.caza.senales import VENTANA_FOTO, Medida, calcular_senales, crecimiento
 from trovify.config import mercados as cfg_mercados
 from trovify.config import umbrales as cfg_umbrales
+from trovify.navegador import NavegadorError
 from trovify.vault import frontmatter
 from trovify.vault.escritura import ZONA_NEGOCIO, anadir_log
 
@@ -65,6 +66,9 @@ _VIGILADAS = ("A", "B", "observar")
 _FALLOS = ("observar", "descartada")
 _ORDEN = {"A": 0, "B": 1, "observar": 2, "descartada": 3}
 _DIAS_C8 = 8  # definición de la cohorte C8 (igual que en senales.py)
+# Búsquedas extra que puede necesitar una oferta nueva (original, parados, recuento con frase).
+# Ronda 1, decisión del controlador (I3): con menos restantes, la oferta queda pendiente.
+_BUSQUEDAS_POR_NUEVA = 3
 
 
 def _ahora() -> datetime:
@@ -163,6 +167,9 @@ class _Buscador:
         except _PARADAS as exc:
             self.parada = f"{type(exc).__name__}: {exc}"
             return None
+        except NavegadorError as exc:  # Chromium no arranca: parada controlada, nunca un fallo
+            self.parada = f"navegador no disponible: {exc}"
+            return None
         navego = p is None or p.usadas > antes
         if navego:
             self.navegadas += 1
@@ -178,6 +185,13 @@ class _Buscador:
             self.bloqueos += 1
             self.parada = f"bloqueo de Meta: {r.motivo or 'acceso bloqueado'}"
         return r
+
+    def restantes(self) -> int | None:
+        """Búsquedas que quedan hoy a este proceso; None si el cliente no lo sabe."""
+        if self.parada is not None:
+            return 0
+        f = getattr(self._presupuesto(), "restantes", None)
+        return f() if callable(f) else None
 
     def cuentas(self) -> tuple[int, int, int]:
         p = self._presupuesto()
@@ -290,6 +304,9 @@ def _hay_hueco(huecos: list[HuecoPais]) -> bool | None:
 # --- strikes -------------------------------------------------------------------------------
 
 
+_NADA_MEDIDO = "nada medido"
+
+
 def _limite_plantilla() -> float:
     from trovify.vault.andamio import PLANTILLA
 
@@ -311,7 +328,8 @@ def aplicar_strikes(
     """
     limite = _limite_plantilla() if limite is None else limite
     out = {k: dict(v) for k, v in fichas.items()}
-    medidas = {k: v for k, v in resultados.items() if k in out}
+    # «nada medido» es un fallo de medición, nunca de la oferta: no cuenta.
+    medidas = {k: v for k, v in resultados.items() if k in out and v[1] != _NADA_MEDIDO}
     fallan = [k for k, (estado, _) in medidas.items() if estado in _FALLOS]
     if len(medidas) >= 2 and 2 * len(fallan) > len(medidas):
         return out
@@ -333,11 +351,12 @@ def aplicar_strikes(
 
 
 def _motivo_strike(r: ResultadoOferta) -> str:
+    """Motivo corto de la caída. Una nota sin medir nunca llega aquí (no es un strike)."""
     if r.descarte is not None:
         return r.descarte.codigo
     if "cayendo" in r.senales.banderas:
         return "cayendo"
-    return "nada medido" if r.nota.valor is None else "nota baja"
+    return "nota baja"
 
 
 # --- palabras y resumen ---------------------------------------------------------------------
@@ -364,7 +383,7 @@ def resumen(e: Ejecucion, minimo_palabra: float, usadas_hoy: tuple[int, int] | N
     else:
         lineas.append("Descartadas: ninguna")
     if e.pendientes:
-        lineas.append(f"Sin evaluar por el tope de nuevas (R14): {e.pendientes}")
+        lineas.append(f"Sin evaluar (tope de nuevas de R14 o pocas búsquedas restantes hoy): {e.pendientes}")
     paises: dict[str, list[float]] = {}
     for r in e.resultados:
         if r.decision in ("A", "B", "observar"):
@@ -447,6 +466,9 @@ class _Corrida:
     lecturas: dict[tuple[str, str], ResultadoBusqueda] = field(default_factory=dict)
     destinos: dict[str, Destino] = field(default_factory=dict)
     landings: dict[str, str] = field(default_factory=dict)
+    # (oferta_id, page_id, pais) → anuncios de la oferta en la página según un recuento con frase
+    # completo, con count exacto y sin ningún anuncio ajeno (vale como total exacto de la oferta).
+    recuentos: dict[tuple[str, str, str], int] = field(default_factory=dict)
 
     def sin_medir(self, que: str) -> None:
         self.errores.append(f"no medido: {self.b.parada}: {que}")
@@ -544,12 +566,21 @@ class _Corrida:
                 if r is None:
                     self.sin_medir(f"recuento de {o.oferta_id} dentro de la página {page_id} ({pais})")
                     return replace(o, anuncios=list(nuevos.values()))
-                if r.estado != "ok":
+                if r.estado not in ("ok", "vacio"):
                     continue
+                todos_propios = True
                 for a in r.anuncios:
                     # solo los anuncios cuyo destino es el de esta oferta: lo demás no se atribuye
                     if a.page_id == page_id and a.enlace_destino in propios:
                         nuevos.setdefault((a.library_id, a.pais), a)
+                    else:
+                        todos_propios = False
+                leidos = {a.library_id for a in r.anuncios}
+                conocidos = {a.library_id for a in o.anuncios if a.page_id == page_id and a.pais == pais}
+                # además debe traer todos los anuncios que ya se sabían de la oferta en la página
+                if (r.completo and r.total_exacto and r.total_aprox is not None and todos_propios
+                        and conocidos <= leidos):
+                    self.recuentos[(o.oferta_id, page_id, pais)] = r.total_aprox
         return replace(o, anuncios=list(nuevos.values()))
 
     # buscar el original
@@ -611,6 +642,8 @@ def ejecutar(
     *,
     region: str | None = None,
     paises: list[str] | None = None,
+    max_vigiladas: int | None = None,
+    max_busquedas_rutina: int | None = None,
 ) -> Ejecucion:
     """Una ejecución de la caza; escribe con ``salida.escribir`` y devuelve la :class:`Ejecucion`.
 
@@ -619,7 +652,11 @@ def ejecutar(
       ``page_id`` y país.
     - ``cliente`` por defecto: ``ClienteBibliotecaPublica`` con el presupuesto del día del vault y
       la caché de ``data/cache/biblioteca`` (Firecrawl si hay clave [D-11b], si no Playwright).
-    - Como mucho ``max_nuevas`` ofertas nuevas pasan los filtros; el resto cuenta como ``pendientes``.
+    - Como mucho ``max_nuevas`` ofertas nuevas pasan los filtros; el resto cuenta como ``pendientes``
+      (también si quedan menos de ``_BUSQUEDAS_POR_NUEVA`` búsquedas hoy: nunca se mide a medias).
+    - ``max_vigiladas``: tope del día de fichas vigiladas (``rutina.max_vigiladas_por_dia``); se
+      miden las que hace más tiempo que no se miden.
+    - ``max_busquedas_rutina``: cuota del día de la rutina (``rutina.max_busquedas``).
     """
     vault = Path(vault)
     if modo not in MODOS:
@@ -634,7 +671,7 @@ def ejecutar(
         from trovify.caza.presupuesto import Presupuesto
 
         # = Cache.por_defecto() con el vault de TROVIFY_VAULT; aquí sale del vault recibido.
-        cliente = ClienteBibliotecaPublica(Presupuesto.desde_umbrales(vault, hoy),
+        cliente = ClienteBibliotecaPublica(Presupuesto.desde_umbrales(vault, hoy, max_rutina=max_busquedas_rutina),
                                            cache=Cache(vault / "data" / "cache" / "biblioteca"))
     c = _Corrida(vault, modo, perfil, hoy, u, _mercados(vault), _Buscador(cliente),
                  resolver or resolver_por_defecto())
@@ -652,13 +689,16 @@ def ejecutar(
     # 3) recuento por página y país
     pares: list[tuple[str, str]] = []
     vigiladas: dict[str, dict] = {}
+    pares_de: dict[str, list[tuple[str, str]]] = {}
     if modo == "vigilar":
-        vigiladas = {k: m for k, m in fichas.items() if m.get("estado") in _VIGILADAS}
-        for meta in vigiladas.values():
+        vigiladas = _turno_de_vigilancia(c, fichas, hoy, max_vigiladas)
+        for oid, meta in vigiladas.items():
+            pares_de[oid] = []
             for pais in (meta.get("paises") or {}):
                 if paises and pais not in paises:
                     continue
-                pares += [(str(p), str(pais)) for p in meta.get("page_ids") or []]
+                pares_de[oid] += [(str(p), str(pais)) for p in meta.get("page_ids") or []]
+            pares += pares_de[oid]
     for p in page_ids or []:
         pares += [(p, pais) for pais in (paises or ["ALL"])]
     if de_palabras:
@@ -686,9 +726,13 @@ def ejecutar(
     c.resolver_destinos(anuncios)
     ofertas = [marcar_original(o) for o in agrupar(anuncios, c.destinos)]
     claves_por_pagina: dict[str, set[str]] = {}
+    sin_atribuir: dict[tuple[str, str], set[str]] = {}  # (página, país) → grupos sin destino resuelto
     for o in ofertas:
         for p in o.page_ids:
             claves_por_pagina.setdefault(p, set()).add(o.clave)
+        if o.clave.startswith("pagina:"):
+            for a in o.anuncios:
+                sin_atribuir.setdefault((a.page_id, a.pais), set()).add(o.clave)
     multi = {p for p, cl in claves_por_pagina.items() if len(cl) > 1}
 
     # 5) filtros, tope de nuevas, recuento dentro de la página y búsqueda del original
@@ -703,6 +747,10 @@ def ejecutar(
         if descarte is None:
             if es_nueva and nuevas >= max_nuevas:
                 pendientes += 1
+                continue
+            quedan = c.b.restantes()
+            if es_nueva and quedan is not None and quedan < _BUSQUEDAS_POR_NUEVA:
+                pendientes += 1  # no se mide a medias: sale en la próxima caza
                 continue
             o = c.ampliar(o, multi)
             if es_nueva:
@@ -724,11 +772,15 @@ def ejecutar(
     resultados: list[ResultadoOferta] = []
     conn = snapshots.abrir(vault / "data/caza/snapshots.sqlite")
     try:
+        for (p, pais), r in c.lecturas.items():  # total de cada página: un hecho de la página
+            if r.total_exacto and r.total_aprox is not None:
+                snapshots.guardar_pagina(conn, p, pais, hoy, r.total_aprox, r.url)
+        alcance = _Alcance(claves_por_pagina, sin_atribuir)
         for o, descarte, _ in evaluar:
             ya_visto = descarte is not None and descarte.codigo == "ya_visto"
             for pais in sorted({a.pais for a in o.anuncios}):
                 resultados.append(_evaluar(c, conn, o, pais, descarte, ya_visto, ctx, fichas, inactivos,
-                                           multi, salida_consultas, ids_consulta))
+                                           alcance, salida_consultas, ids_consulta))
     finally:
         conn.close()
 
@@ -752,27 +804,92 @@ def ejecutar(
 
     # strikes de vigilar
     if modo == "vigilar":
-        _strikes(vault, e, vigiladas, u)
+        enteras = {oid for oid, pares_oid in pares_de.items()
+                   if e.parada is None and pares_oid and all(x in c.lecturas for x in pares_oid)}
+        _strikes(vault, e, vigiladas, u, enteras)
     return e
 
 
+def _turno_de_vigilancia(c: _Corrida, fichas: dict[str, dict], hoy: date, maximo: int | None) -> dict[str, dict]:
+    """Fichas A, B y observar que toca medir hoy: las que hace más tiempo que no se miden, hasta
+    ``maximo`` en el día (las ya medidas hoy cuentan). Sin ``maximo``, todas."""
+    todas = {k: m for k, m in fichas.items() if m.get("estado") in _VIGILADAS}
+    if maximo is None:
+        return todas
+    hoy_txt = hoy.isoformat()
+    hechas = sorted(k for k, m in todas.items() if str(m.get("ultima_vez") or "") == hoy_txt)
+    resto = sorted((k for k in todas if k not in hechas), key=lambda k: (str(todas[k].get("ultima_vez") or ""), k))
+    turno = max(int(maximo) - len(hechas), 0)
+    if resto[turno:]:
+        c.errores.append(
+            f"no medido: turno de vigilancia: {', '.join(resto[turno:])} se miden otro día (tope del día "
+            f"rutina.max_vigiladas_por_dia: {int(maximo)}; ya medidas hoy: {', '.join(hechas) or 'ninguna'})"
+        )
+    return {k: todas[k] for k in resto[:turno]}
+
+
+@dataclass
+class _Alcance:
+    """Qué ofertas lleva cada página según lo leído (para no tomar cifras de página por cifras de oferta)."""
+
+    claves_por_pagina: dict[str, set[str]]
+    sin_atribuir: dict[tuple[str, str], set[str]]
+
+    def solo_esta(self, o: Oferta, page_id: str) -> bool:
+        return self.claves_por_pagina.get(page_id, set()) == {o.clave}
+
+    def atribuida(self, o: Oferta, page_id: str, pais: str) -> bool:
+        """Ningún anuncio de la página en ``pais`` quedó sin oferta (landing sin abrir o sin destino)."""
+        return not (self.sin_atribuir.get((page_id, pais), set()) - {o.clave})
+
+
+def _total_de_pagina(c: _Corrida, o: Oferta, page_id: str, pais: str, alcance: _Alcance) -> int | None:
+    """Anuncios EXACTOS de la oferta en una página, o None.
+
+    Vale (a) la lectura de la página si es completa, con count exacto, y la página no lleva otra
+    oferta ni anuncios sin atribuir; o (b) un recuento con frase completo, exacto y sin ajenos."""
+    r = c.lecturas.get((page_id, pais))
+    if (r is not None and r.completo and r.total_exacto and r.total_aprox is not None
+            and alcance.solo_esta(o, page_id) and alcance.atribuida(o, page_id, pais)):
+        return r.total_aprox
+    return c.recuentos.get((o.oferta_id, page_id, pais))
+
+
+def _crecimiento_paginas(c: _Corrida, conn, o: Oferta, pais: str, alcance: _Alcance) -> list[tuple[str, Medida, str]]:
+    """Crecimiento de cada página con el total exacto de Meta de la PÁGINA (todas sus ofertas), solo
+    si todo lo leído de la página va a esta oferta. Es un dato de la página, nunca el de la oferta."""
+    out: list[tuple[str, Medida, str]] = []
+    for p in o.page_ids:
+        r = c.lecturas.get((p, pais))
+        if r is None or not r.total_exacto or r.total_aprox is None:
+            continue
+        if not (alcance.solo_esta(o, p) and alcance.atribuida(o, p, pais)):
+            continue
+        fotos = [f for f in snapshots.historial_pagina(conn, p, pais, c.hoy - timedelta(days=VENTANA_FOTO[1]))
+                 if f.dia < c.hoy]
+        m = crecimiento(r.total_aprox, fotos, c.hoy)
+        if m.valor is not None:
+            out.append((p, m, url_biblioteca(pais, page_id=p)))
+    return out
+
+
 def _evaluar(c: _Corrida, conn, o: Oferta, pais: str, descarte, ya_visto: bool, ctx, fichas, inactivos,
-             multi: set[str], consultas: list[Consulta], ids_consulta) -> ResultadoOferta:
+             alcance: _Alcance, consultas: list[Consulta], ids_consulta) -> ResultadoOferta:
     hoy, u = c.hoy, c.u
     lecturas = [c.lecturas.get((p, pais)) for p in o.page_ids]
-    completo = all(r is not None and r.completo for r in lecturas)
-    # Total exacto de Meta: la suma de las páginas, solo si cada búsqueda dio el count exacto y
-    # ninguna página lleva otra oferta (entonces su total no sería el de esta oferta).
-    total_meta = None
-    if all(r is not None and r.total_exacto and r.total_aprox is not None for r in lecturas) and not (
-            set(o.page_ids) & multi):
-        total_meta = sum(r.total_aprox for r in lecturas)
+    # Completa: cada página se leyó entera y ningún anuncio suyo quedó sin atribuir a una oferta.
+    # Un grupo «pagina:<id>» son justo los anuncios sin atribuir: nunca es una lectura completa.
+    completo = not o.clave.startswith("pagina:") and all(r is not None and r.completo for r in lecturas) and all(
+        alcance.atribuida(o, p, pais) for p in o.page_ids)
+    # Total exacto de la OFERTA (Snapshot.total, crecimiento): solo de recuentos de la oferta.
+    por_pagina = [_total_de_pagina(c, o, p, pais, alcance) for p in o.page_ids]
+    total_meta = sum(por_pagina) if all(x is not None for x in por_pagina) else None
     vistos = None
     if completo and not ya_visto:
         activos = {a.library_id for a in o.anuncios if a.activo and a.pais == pais}
         n, par = snapshots.registrar_vistos(conn, o.oferta_id, pais, activos, hoy, completo=True)
         vistos = (n, par, snapshots.dia_anterior(conn, o.oferta_id, pais, hoy))
-    historial = [s for s in snapshots.historial(conn, o.oferta_id, pais, hoy - timedelta(days=_VENTANA_FOTO[1]))
+    historial = [s for s in snapshots.historial(conn, o.oferta_id, pais, hoy - timedelta(days=VENTANA_FOTO[1]))
                  if s.dia < hoy]
     s = calcular_senales(
         o, pais, hoy, historial, inactivos.get((o.oferta_id, pais)), total_meta, completo,
@@ -785,7 +902,7 @@ def _evaluar(c: _Corrida, conn, o: Oferta, pais: str, descarte, ya_visto: bool, 
     decision, motivo = decidir(nota, s.c8, c.perfil, _hay_hueco(huecos), descarte, u, landing, c7=s.c7)
     return ResultadoOferta(o, pais, s, nota, decision, motivo, descarte, huecos,
                            _enlace(c, o, pais, consultas, ids_consulta), dia=hoy, total_meta=total_meta,
-                           completo=completo)
+                           completo=completo, crecimiento_pagina=_crecimiento_paginas(c, conn, o, pais, alcance))
 
 
 def _enlace(c: _Corrida, o: Oferta, pais: str, consultas: list[Consulta], ids_consulta) -> str:
@@ -800,11 +917,16 @@ def _enlace(c: _Corrida, o: Oferta, pais: str, consultas: list[Consulta], ids_co
     return url_biblioteca(pais, page_id=o.original_page_id or o.page_ids[0])
 
 
-def _strikes(vault: Path, e: Ejecucion, vigiladas: dict[str, dict], u) -> None:
+def _strikes(vault: Path, e: Ejecucion, vigiladas: dict[str, dict], u, enteras: set[str]) -> None:
+    """Solo cuentan las vigiladas medidas enteras: sin parada, todas sus páginas y países releídos y
+    la nota medida en cada país. Lo demás no suma ni resta strikes."""
     por_oferta: dict[str, ResultadoOferta] = {}
+    sin_nota = {r.oferta.oferta_id for r in e.resultados if r.nota.valor is None}
     for r in e.resultados:
         oid = r.oferta.oferta_id
-        if oid in vigiladas and (oid not in por_oferta or _ORDEN[r.decision] < _ORDEN[por_oferta[oid].decision]):
+        if oid not in vigiladas or oid not in enteras or oid in sin_nota:
+            continue
+        if oid not in por_oferta or _ORDEN[r.decision] < _ORDEN[por_oferta[oid].decision]:
             por_oferta[oid] = r
     if not por_oferta:
         return
@@ -838,6 +960,29 @@ def _medida_ficha(valor, suelo: bool, nombre: str) -> Medida:
     return Medida(None, f"no medido: sin {nombre} en la ficha")
 
 
+class _VigiaDeParada:
+    """Cliente para el hueco: anota la primera parada y, tras ella, no vuelve a llamar a Meta."""
+
+    def __init__(self, cliente):
+        self.cliente = cliente
+        self.parada: str | None = None
+
+    def buscar(self, pais: str, **kw) -> ResultadoBusqueda:
+        if self.parada is not None:
+            raise SesionBloqueada(self.parada)
+        try:
+            r = self.cliente.buscar(pais, **kw)
+        except _PARADAS as exc:
+            self.parada = f"{type(exc).__name__}: {exc}"
+            raise
+        except NavegadorError as exc:
+            self.parada = f"navegador no disponible: {exc}"
+            raise
+        if r.estado == "bloqueado":
+            self.parada = f"bloqueo de Meta: {r.motivo or 'acceso bloqueado'}"
+        return r
+
+
 def medir_hueco(
     vault: Path,
     oferta_id: str,
@@ -847,9 +992,12 @@ def medir_hueco(
     hoy: date | None = None,
     idioma: str | None = None,
     perfil: str | None = None,
-) -> HuecoPais:
+) -> tuple[HuecoPais, str | None]:
     """Mide el hueco de la oferta en ``pais`` con ``frases`` en el idioma local, lo guarda en la
-    ficha (``huecos.<pais>``) y recalcula la decisión de cada país medido de la ficha."""
+    ficha (``huecos.<pais>``) y recalcula la decisión de cada país medido de la ficha.
+
+    Devuelve ``(hueco, parada)``: ``parada`` es el motivo si Meta bloqueó o la búsqueda se detuvo
+    (lo no medido queda «no medido» en la ficha); None si no hubo parada."""
     vault = Path(vault)
     ruta = vault / "wiki/ofertas" / f"{oferta_id}.md"
     if not ruta.exists():
@@ -873,7 +1021,8 @@ def medir_hueco(
                                            cache=Cache(vault / "data" / "cache" / "biblioteca"))
     meta, cuerpo = frontmatter.leer(ruta)
     page_ids = [str(p) for p in meta.get("page_ids") or []]
-    h = hueco_pais(cliente, frases, page_ids, pais, idioma, set(page_ids), hoy, u)
+    vigia = _VigiaDeParada(cliente)
+    h = hueco_pais(vigia, frases, page_ids, pais, idioma, set(page_ids), hoy, u)
 
     huecos = dict(meta.get("huecos") or {})
     huecos[pais] = hueco_a_dict(h, hoy)
@@ -907,8 +1056,9 @@ def medir_hueco(
     texto = {True: "sí", False: "no", None: "no comprobado"}[h.hueco]
     anadir_log(vault, "cazar",
                f"hueco de {oferta_id} en {pais}: {texto} (competencia {formatear_medida(h.competencia)}); "
-               f"estado {meta.get('estado')}", [ruta.relative_to(vault).as_posix()])
-    return h
+               f"estado {meta.get('estado')}" + (f"; parada: {vigia.parada}" if vigia.parada else ""),
+               [ruta.relative_to(vault).as_posix()])
+    return h, vigia.parada
 
 
 def _perfil_config(vault: Path) -> str:

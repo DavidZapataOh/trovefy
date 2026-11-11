@@ -47,6 +47,11 @@ def abrir(ruta: Path) -> sqlite3.Connection:
             oferta_id TEXT NOT NULL, pais TEXT NOT NULL, dia TEXT NOT NULL,
             PRIMARY KEY (oferta_id, pais, dia)
         );
+        CREATE TABLE IF NOT EXISTS paginas (
+            page_id TEXT NOT NULL, pais TEXT NOT NULL, dia TEXT NOT NULL,
+            total INTEGER NOT NULL, fuente TEXT NOT NULL,
+            PRIMARY KEY (page_id, pais, dia)
+        );
         CREATE TABLE IF NOT EXISTS vistos_dia (
             oferta_id TEXT NOT NULL, pais TEXT NOT NULL, dia TEXT NOT NULL,
             library_id TEXT NOT NULL,
@@ -65,6 +70,35 @@ def guardar(conn: sqlite3.Connection, s: Snapshot) -> None:
         vals,
     )
     conn.commit()
+
+
+@dataclass
+class FotoPagina:
+    """Total exacto de Meta de una PÁGINA (todas sus ofertas) en un país y día; nunca de una oferta."""
+
+    page_id: str
+    pais: str
+    dia: date
+    total: int
+    fuente: str
+
+
+def guardar_pagina(conn: sqlite3.Connection, page_id: str, pais: str, dia: date, total: int, fuente: str) -> None:
+    """Solo con el ``count`` exacto de Meta (``ResultadoBusqueda.total_exacto``)."""
+    conn.execute(
+        "INSERT OR REPLACE INTO paginas (page_id, pais, dia, total, fuente) VALUES (?, ?, ?, ?, ?)",
+        (page_id, pais, dia.isoformat(), int(total), fuente),
+    )
+    conn.commit()
+
+
+def historial_pagina(conn: sqlite3.Connection, page_id: str, pais: str, desde: date) -> list[FotoPagina]:
+    filas = conn.execute(
+        "SELECT page_id, pais, dia, total, fuente FROM paginas WHERE page_id = ? AND pais = ? AND dia >= ? "
+        "ORDER BY dia",
+        (page_id, pais, desde.isoformat()),
+    ).fetchall()
+    return [FotoPagina(f[0], f[1], date.fromisoformat(f[2]), f[3], f[4]) for f in filas]
 
 
 def historial(conn: sqlite3.Connection, oferta_id: str, pais: str, desde: date) -> list[Snapshot]:

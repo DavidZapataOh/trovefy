@@ -389,6 +389,7 @@ class ClienteBibliotecaPublica:
                 pagina = self._abrir_con_reintentos(url, max_anuncios)
         except ParadaPorErrores as exc:
             self._parada = str(exc)  # parada persistente: la siguiente búsqueda no vuelve a tocar Meta
+            self._guardar_parada(f"parada por errores: {exc}")
             raise
         try:
             if pagina is None:
@@ -405,6 +406,7 @@ class ClienteBibliotecaPublica:
         if r.estado == "bloqueado":
             self.presupuesto.bloqueos += 1
             self._bloqueada = True
+            self._guardar_parada(f"bloqueo de Meta: {r.motivo or 'acceso bloqueado'}")
         else:
             if r.estado == "vacio":
                 self.presupuesto.vacios += 1
@@ -419,10 +421,17 @@ class ClienteBibliotecaPublica:
                 self._errores_seguidos += 1
                 if self._errores_seguidos >= _MAX_ERRORES_SEGUIDOS:
                     self._parada = f"{_MOTIVO_ERRORES} (última: {r.motivo})" if r.motivo else _MOTIVO_ERRORES
+                    self._guardar_parada(f"parada por errores: {self._parada}")
                     raise ParadaPorErrores(self._parada)
         if aviso:
             r.motivo = f"{r.motivo}; {aviso}" if r.motivo else aviso
         return r
+
+    def _guardar_parada(self, motivo: str) -> None:
+        """La parada vale para el día entero y para todos los procesos (archivo del presupuesto)."""
+        guardar = getattr(self.presupuesto, "registrar_parada", None)
+        if guardar is not None:
+            guardar(motivo)
 
     def _abrir_con_reintentos(self, url: str, max_anuncios: int, navegador: Navegador | None = None) -> PaginaCapturada:
         navegador = navegador or self.navegador

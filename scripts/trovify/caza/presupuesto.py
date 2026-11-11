@@ -28,6 +28,12 @@ class ParadaPorErrores(RuntimeError):
     pass
 
 
+class ParadaDelDia(PresupuestoAgotado):
+    """Hoy ya hubo una parada (bloqueo de Meta o errores seguidos): nadie busca hasta mañana.
+
+    Hereda de :class:`PresupuestoAgotado` para que todo lo que para por presupuesto pare también."""
+
+
 class Presupuesto:
     def __init__(
         self,
@@ -37,8 +43,11 @@ class Presupuesto:
         dormir: Callable[[float], None] = time.sleep,
         azar: random.Random | None = None,
         contador: Path | None = None,
+        max_rutina: int | None = None,
     ):
-        """``contador``: archivo del día compartido entre procesos; sin él, el tope es de esta sesión."""
+        """``contador``: archivo del día compartido entre procesos; sin él, el tope es de esta sesión.
+        ``max_rutina``: cuota del día de la rutina (``rutina.max_busquedas`` de config/caza.yaml); el
+        resto del tope diario queda para la sesión del usuario."""
         self.max_busquedas = max_busquedas
         self.pausa_min_s = pausa_min_s
         self.pausa_max_s = pausa_max_s
@@ -46,6 +55,7 @@ class Presupuesto:
         self._azar = azar or random.Random()
         self.usadas = 0  # búsquedas de esta sesión (el total del día está en ``contador``)
         self.contador = Path(contador) if contador is not None else None
+        self.max_rutina = max_rutina
         self.bloqueos = 0
         self.vacios = 0
         self._errores = 0
@@ -59,21 +69,70 @@ class Presupuesto:
             self.usadas += 1
             return
         with self._bloqueo():
-            hechas = self._leer()
+            datos = self._leer()
+            if datos.get("parada"):
+                raise ParadaDelDia(
+                    f"Hoy ya hubo una parada ({datos['parada']}); no se busca hasta mañana (hora de Colombia)."
+                )
+            hechas = datos["usadas"]
             if hechas >= self.max_busquedas:
                 raise PresupuestoAgotado(
                     f"Presupuesto del día agotado: {hechas} de {self.max_busquedas} búsquedas "
                     "(compartido entre tu sesión y la rutina; se renueva mañana)."
                 )
-            escribir_atomico(self.contador, json.dumps({"usadas": hechas + 1}) + "\n")
+            if self.max_rutina is not None:
+                if datos["rutina"] >= self.max_rutina:
+                    raise PresupuestoAgotado(
+                        f"Cuota de la rutina agotada: {datos['rutina']} de {self.max_rutina} búsquedas; "
+                        "el resto del día queda para tu sesión."
+                    )
+                datos["rutina"] += 1
+            datos["usadas"] = hechas + 1
+            self._guardar(datos)
         self.usadas += 1
+
+    def registrar_parada(self, motivo: str) -> None:
+        """Guarda la parada en el archivo del día: ningún proceso vuelve a buscar hasta mañana."""
+        if self.contador is None:
+            return
+        with self._bloqueo():
+            try:
+                datos = self._leer()
+            except PresupuestoAgotado:
+                datos = {"usadas": self.max_busquedas, "rutina": 0}
+            if not datos.get("parada"):
+                datos["parada"] = motivo
+                self._guardar(datos)
+
+    def parada_del_dia(self) -> str | None:
+        if self.contador is None:
+            return None
+        with self._bloqueo():
+            return self._leer().get("parada")
 
     def usadas_hoy(self) -> int | None:
         """Búsquedas del día según el contador compartido; None si no hay contador."""
         if self.contador is None:
             return None
         with self._bloqueo():
-            return self._leer()
+            return self._leer()["usadas"]
+
+    def restantes(self) -> int | None:
+        """Búsquedas que este proceso aún puede hacer hoy (0 tras una parada); None sin contador."""
+        if self.contador is None:
+            return None
+        with self._bloqueo():
+            datos = self._leer()
+        if datos.get("parada"):
+            return 0
+        quedan = self.max_busquedas - datos["usadas"]
+        if self.max_rutina is not None:
+            quedan = min(quedan, self.max_rutina - datos["rutina"])
+        return max(quedan, 0)
+
+    def _guardar(self, datos: dict) -> None:
+        limpio = {k: v for k, v in datos.items() if v is not None}
+        escribir_atomico(self.contador, json.dumps(limpio, ensure_ascii=False) + "\n")
 
     @contextmanager
     def _bloqueo(self):
@@ -86,20 +145,22 @@ class Presupuesto:
             finally:
                 fcntl.flock(f, fcntl.LOCK_UN)
 
-    def _leer(self) -> int:
+    def _leer(self) -> dict:
         if not self.contador.exists():
-            return 0
+            return {"usadas": 0, "rutina": 0}
         try:
-            n = json.loads(self.contador.read_text(encoding="utf-8"))["usadas"]
-        except (OSError, ValueError, KeyError, TypeError):
-            n = None
-        if isinstance(n, bool) or not isinstance(n, int) or n < 0:
+            datos = json.loads(self.contador.read_text(encoding="utf-8"))
+            n, r = datos["usadas"], datos.get("rutina", 0)
+        except (OSError, ValueError, KeyError, TypeError, AttributeError):
+            datos, n, r = {}, None, None
+        if any(isinstance(x, bool) or not isinstance(x, int) or x < 0 for x in (n, r)):
             # Sin saber cuántas se hicieron hoy no se arriesga a Meta.
             raise PresupuestoAgotado(
                 f"El contador de búsquedas del día ({self.contador.name}) no se puede leer; "
                 "no se busca para no pasar el tope. Revísalo o bórralo si sabes que hoy no se buscó."
             )
-        return n
+        parada = datos.get("parada")
+        return {"usadas": n, "rutina": r, "parada": parada if isinstance(parada, str) and parada else None}
 
     def exito(self) -> None:
         """El cliente la llama tras una búsqueda correcta: reinicia los errores seguidos."""
@@ -118,7 +179,7 @@ class Presupuesto:
         self._dormir(espera)
 
     @classmethod
-    def desde_umbrales(cls, vault: Path, hoy: date | None = None) -> "Presupuesto":
+    def desde_umbrales(cls, vault: Path, hoy: date | None = None, max_rutina: int | None = None) -> "Presupuesto":
         """Tope diario ``caza.max_busquedas_sesion`` contado en ``data/caza/presupuesto/<hoy>.json``.
 
         ``hoy`` por defecto es el día de negocio (America/Bogota)."""
@@ -133,4 +194,4 @@ class Presupuesto:
         if pmin > pmax:
             raise ValueError("caza.pausa_min_s no puede ser mayor que caza.pausa_max_s.")
         contador = Path(vault) / "data" / "caza" / "presupuesto" / f"{hoy.isoformat()}.json"
-        return cls(maximo, pmin, pmax, contador=contador)
+        return cls(maximo, pmin, pmax, contador=contador, max_rutina=max_rutina)

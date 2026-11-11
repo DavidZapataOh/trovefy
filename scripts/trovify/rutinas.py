@@ -35,8 +35,12 @@ def unidad_caza(vault: Path, claude: str, path: str | None = None) -> tuple[str,
     if path is None:
         path = ":".join(dict.fromkeys([os.path.dirname(claude) or "/usr/bin", "%h/.local/bin",
                                        "/usr/local/bin", "/usr/bin", "/bin"]))
+    for valor in (str(vault), claude, path):
+        if any(ch in valor for ch in '"\\\n'):
+            raise ValueError(f"ruta no admitida en una unidad de systemd: {valor!r}")
+    # «%» es un especificador de systemd: en rutas propias se escribe «%%» (el PATH usa %h a propósito).
     servicio = _rellenar((PLANTILLAS / SERVICIO_CAZA).read_text(encoding="utf-8"),
-                         vault=str(vault), claude=claude, path=path)
+                         vault=str(vault).replace("%", "%%"), claude=claude.replace("%", "%%"), path=path)
     timer = (PLANTILLAS / TIMER_CAZA).read_text(encoding="utf-8")
     if "dangerously" in servicio:  # nunca: §3.6, [D-30]
         raise ValueError("la unidad de la rutina no puede saltarse los permisos")

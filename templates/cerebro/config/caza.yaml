@@ -15,3 +15,11 @@ nichos: []
 # Frases de 2–3 palabras por idioma (código ISO 639-1), por ejemplo:
 #   ro: [fise de lucru, fise pentru copii]
 palabras: {}
+
+# Cuotas de la rutina diaria (decisión del controlador, ronda 1 de la Tarea 8, I3): el tope de
+# búsquedas del día (caza.max_busquedas_sesion en umbrales.yaml) lo comparten tu sesión y la rutina;
+# la rutina nunca usa más de «max_busquedas» y el resto del día queda para ti. «vigilar» mide como
+# mucho «max_vigiladas_por_dia» fichas al día, empezando por las que hace más tiempo que no se miden.
+rutina:
+  max_busquedas: 20
+  max_vigiladas_por_dia: 6

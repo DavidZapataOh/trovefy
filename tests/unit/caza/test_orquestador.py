@@ -6,7 +6,7 @@ import pytest
 from ayudas import anuncio
 from test_cliente import cliente as cliente_falso
 from test_cliente import de_fixture
-from trovify.caza import orquestador
+from trovify.caza import orquestador, snapshots
 from trovify.caza.biblioteca import url_biblioteca
 from trovify.caza.cliente import SesionBloqueada
 from trovify.caza.destino import Destino
@@ -197,6 +197,9 @@ def test_bloqueo_detiene_la_ejecucion_y_marca_no_medido(tmp_path):
     assert [x.resultados for x in e.consultas] == [None, None]
     assert any("no medido" in x for x in e.errores)
     assert e.bloqueos == 1
+    informe = (v / "wiki/caza/2026-11-10/europa.md").read_text()
+    assert "captcha" in informe and "| uno | RO | no medido" in informe
+    assert "| uno | RO | 0" not in informe
 
 
 def test_excepcion_del_cliente_detiene_la_ejecucion(tmp_path):
@@ -213,9 +216,11 @@ def test_excepcion_del_cliente_detiene_la_ejecucion(tmp_path):
     assert url_biblioteca("RO", q="dos") in c.llamadas  # las consultas van antes del recuento
     assert c.llamadas[-1] == url_biblioteca("RO", page_id=P)  # tras la excepción no se busca nada más
     assert e.parada and "SesionBloqueada" in e.parada
-    # lo medido se escribe como muestra parcial, sin total inventado
-    r = e.resultados[0]
-    assert r.total_meta is None and r.completo is False
+    # tras la parada no quedan búsquedas: la oferta nueva queda pendiente, nunca medida a medias
+    assert e.pendientes == 1 and e.resultados == []
+    assert e.consultas[0].resultados == 5 and e.consultas[1].resultados == 0
+    texto = _disco(v)
+    assert "SesionBloqueada" in texto and "no medido" in texto
 
 
 def test_presupuesto_agotado_detiene_y_lo_dice(tmp_path):
@@ -224,6 +229,7 @@ def test_presupuesto_agotado_detiene_y_lo_dice(tmp_path):
     e = ejecutar(v, "nicho", [("RO", "uno")], "tomi", 3, cliente=c, resolver=resolver_fijo({}), hoy=HOY,
                  region="europa")
     assert e.parada and "PresupuestoAgotado" in e.parada and e.consultas[0].resultados is None
+    assert "Presupuesto del día agotado" in (v / "raw/2026-11-10/caza-europa.md").read_text()
 
 
 # --- tope de nuevas y de destinos --------------------------------------------------------
@@ -339,8 +345,29 @@ def test_varias_ofertas_en_una_pagina_se_recuentan_con_frase(tmp_path):
     assert url_biblioteca("RO", q="Fișe de matematică", page_id=P) in c.llamadas
     rs = {r.oferta.clave: r for r in e.resultados}
     assert rs["hotmart:A1"].senales.c8.valor == 9
-    # el total de la página no es el de una oferta: nunca se pasa como total exacto
-    assert rs["hotmart:A1"].total_meta is None
+    # el total de la página (18) no es el de una oferta; el recuento con frase completo y sin
+    # anuncios ajenos sí lo es
+    assert rs["hotmart:A1"].total_meta == 9
+
+
+def test_recuento_con_frase_con_anuncios_ajenos_no_da_total(tmp_path):
+    v = _vault(tmp_path)
+    P = "100000000000052"
+    ua, ub = "https://a-kit.example/", "https://b-kit.example/"
+    a = [replace(x, titulo="Fișe de matematică") for x in viejos(P, 9, 20, 10200, destino=ua)]
+    b = [replace(x, titulo="Povești pentru somn") for x in viejos(P, 9, 20, 10300, destino=ub)]
+    c = ClientePorUrl({
+        url_biblioteca("RO", page_id=P): ok(a[:4] + b[:4], total=18, completo=False),
+        url_biblioteca("RO", q="Fișe de matematică", page_id=P): ok(a + b[:1], total=10),
+        url_biblioteca("RO", q="Povești pentru somn", page_id=P): ok(b, total=9, completo=False),
+    })
+    mapa = {ua: destino_ok(ua, checkout="https://pay.hotmart.com/A1"),
+            ub: destino_ok(ub, checkout="https://pay.hotmart.com/B1")}
+    e = ejecutar(v, "oferta", [], "tomi", 3, page_ids=[P], paises=["RO"], cliente=c,
+                 resolver=resolver_fijo(mapa), hoy=HOY)
+    rs = {r.oferta.clave: r for r in e.resultados}
+    assert rs["hotmart:A1"].total_meta is None  # la frase trajo un anuncio de otra oferta
+    assert rs["hotmart:B1"].total_meta is None  # lectura con frase incompleta
 
 
 # --- vigilar y strikes ---------------------------------------------------------------------
@@ -458,8 +485,8 @@ def test_hueco_actualiza_la_ficha_y_recalcula(tmp_path):
     en_ingles = [replace(a, texto="Printable worksheets for kids, download the PDF and learn at home every day.")
                  for a in viejos(P, 3, 60, 13000)]
     c = ClientePorUrl({url_biblioteca("RO", page_id=P): ok(en_ingles)})
-    h = orquestador.medir_hueco(v, "o-hueco", "RO", ["fise de lucru", "fise pentru copii"], cliente=c, hoy=HOY)
-    assert h.hueco is True and h.original == "sin_traducir"
+    h, parada = orquestador.medir_hueco(v, "o-hueco", "RO", ["fise de lucru", "fise pentru copii"], cliente=c, hoy=HOY)
+    assert h.hueco is True and h.original == "sin_traducir" and parada is None
     meta, cuerpo = frontmatter.leer(v / "wiki/ofertas/o-hueco.md")
     assert meta["huecos"]["RO"]["hueco"] is True and meta["huecos"]["RO"]["enlaces"]
     assert meta["estado"] == "A" and meta["paises"]["BR"]["estado"] == "A"
@@ -472,7 +499,7 @@ def test_hueco_no_comprobado_no_inventa_a(tmp_path):
     _ficha_medida(v, "o-hueco2", P)
     bloqueado = ResultadoBusqueda("bloqueado", "", None, [], "Meta mostró captcha", datetime.now(UTC))
     c = ClientePorUrl({url_biblioteca("RO", q="fise de lucru"): bloqueado})
-    h = orquestador.medir_hueco(v, "o-hueco2", "RO", ["fise de lucru", "fise pentru copii"], cliente=c, hoy=HOY)
+    h, _ = orquestador.medir_hueco(v, "o-hueco2", "RO", ["fise de lucru", "fise pentru copii"], cliente=c, hoy=HOY)
     assert h.hueco is None
     meta, _ = frontmatter.leer(v / "wiki/ofertas/o-hueco2.md")
     assert meta["estado"] == "B" and meta["huecos"]["RO"]["competencia"] is None
@@ -496,3 +523,220 @@ def test_hueco_guardado_entra_en_la_siguiente_caza(tmp_path):
                  resolver=resolver_fijo({url: destino_ok(url)}), hoy=HOY)
     r = e.resultados[0]
     assert [h.pais for h in r.huecos] == ["MD"] and "sin hueco" not in r.explicacion
+
+
+# --- ronda 1: alcance de totales y completitud (I1) ------------------------------------------
+
+
+def _disco(v) -> str:
+    return "\n".join(p.read_text() for p in (v / "wiki").rglob("*.md")) + "\n".join(
+        p.read_text() for p in (v / "raw").rglob("*.md"))
+
+
+def test_pagina_parcial_con_count_exacto_no_es_total_de_la_oferta(tmp_path):
+    # ejemplo de la revisión: 300 anuncios en la página, se leen 10 y todos van a la oferta X
+    v = _vault(tmp_path)
+    P = "100000000000201"
+    url = "https://kit.example/ro/"
+    ads = viejos(P, 10, 20, 20000)
+    c = ClientePorUrl({url_biblioteca("RO", page_id=P): ok(ads, total=300, completo=False, exacto=True)})
+    e = ejecutar(v, "oferta", [], "tomi", 3, page_ids=[P], paises=["RO"], cliente=c,
+                 resolver=resolver_fijo({url: destino_ok(url)}), hoy=HOY)
+    r = e.resultados[0]
+    assert r.total_meta is None and r.completo is False
+    assert r.senales.total.suelo and r.senales.total.valor == 10
+    import sqlite3
+    conn = sqlite3.connect(v / "data/caza/snapshots.sqlite")
+    assert conn.execute("SELECT total FROM snapshots").fetchone() == (None,)
+
+
+def test_crecimiento_de_la_pagina_se_muestra_aparte(tmp_path):
+    v = _vault(tmp_path)
+    P = "100000000000202"
+    url = "https://kit.example/ro/"
+    conn = snapshots.abrir(v / "data/caza/snapshots.sqlite")
+    snapshots.guardar_pagina(conn, P, "RO", HOY - timedelta(days=7), 200, url_biblioteca("RO", page_id=P))
+    conn.close()
+    ads = viejos(P, 10, 20, 21000)
+    c = ClientePorUrl({url_biblioteca("RO", page_id=P): ok(ads, total=300, completo=False, exacto=True)})
+    e = ejecutar(v, "oferta", [], "tomi", 3, page_ids=[P], paises=["RO"], cliente=c,
+                 resolver=resolver_fijo({url: destino_ok(url)}), hoy=HOY)
+    r = e.resultados[0]
+    assert r.senales.crecimiento_7d.valor is None  # el de la oferta no se mide con el total de la página
+    assert [(p, m.valor) for p, m, _ in r.crecimiento_pagina] == [(P, 0.5)]
+    texto = _disco(v)
+    assert "crecimiento de la página (todas sus ofertas)" in texto
+    assert url_biblioteca("RO", page_id=P) in texto
+    conn = snapshots.abrir(v / "data/caza/snapshots.sqlite")
+    assert [f.total for f in snapshots.historial_pagina(conn, P, "RO", HOY - timedelta(days=8))] == [200, 300]
+
+
+def test_crecimiento_de_pagina_no_se_muestra_si_lleva_otras_ofertas(tmp_path):
+    v = _vault(tmp_path)
+    P = "100000000000203"
+    ua, ub = "https://a-kit.example/", "https://b-kit.example/"
+    conn = snapshots.abrir(v / "data/caza/snapshots.sqlite")
+    snapshots.guardar_pagina(conn, P, "RO", HOY - timedelta(days=7), 200, url_biblioteca("RO", page_id=P))
+    conn.close()
+    ads = viejos(P, 5, 20, 22000, destino=ua) + viejos(P, 5, 20, 22100, destino=ub)
+    c = ClientePorUrl({url_biblioteca("RO", page_id=P): ok(ads, total=300, completo=False, exacto=True)})
+    mapa = {ua: destino_ok(ua, checkout="https://pay.hotmart.com/A1"),
+            ub: destino_ok(ub, checkout="https://pay.hotmart.com/B1")}
+    e = ejecutar(v, "oferta", [], "tomi", 3, page_ids=[P], paises=["RO"], cliente=c,
+                 resolver=resolver_fijo(mapa), hoy=HOY)
+    assert all(r.crecimiento_pagina == [] for r in e.resultados)
+
+
+def test_anuncios_sin_atribuir_impiden_completo(tmp_path):
+    v = _vault(tmp_path)
+    P = "100000000000204"
+    url = "https://kit.example/ro/"
+    ads = viejos(P, 9, 20, 23000) + viejos(P, 2, 20, 23100, destino="https://no-abre.example/")
+    c = ClientePorUrl({url_biblioteca("RO", page_id=P): ok(ads)})
+    e = ejecutar(v, "oferta", [], "tomi", 3, page_ids=[P], paises=["RO"], cliente=c,
+                 resolver=resolver_fijo({url: destino_ok(url)}), hoy=HOY)
+    r = next(x for x in e.resultados if x.oferta.clave == "hotmart:K123")
+    assert r.completo is False and r.total_meta is None and r.senales.c8.suelo
+    import sqlite3
+    conn = sqlite3.connect(v / "data/caza/snapshots.sqlite")
+    assert conn.execute("SELECT COUNT(*) FROM corridas").fetchone()[0] == 0
+
+
+def test_pagina_completa_y_atribuida_da_total_exacto(tmp_path):
+    v = _vault(tmp_path)
+    P = "100000000000205"
+    url = "https://kit.example/ro/"
+    ads = viejos(P, 9, 20, 24000)
+    c = ClientePorUrl({url_biblioteca("RO", page_id=P): ok(ads)})
+    e = ejecutar(v, "oferta", [], "tomi", 3, page_ids=[P], paises=["RO"], cliente=c,
+                 resolver=resolver_fijo({url: destino_ok(url)}), hoy=HOY)
+    r = e.resultados[0]
+    assert r.completo is True and r.total_meta == 9 and not r.senales.c8.suelo
+
+
+# --- ronda 1: parada persistente (I2) ---------------------------------------------------
+
+
+def test_parada_persiste_entre_procesos_hasta_el_dia_siguiente(tmp_path):
+    from trovify.caza.presupuesto import ParadaDelDia
+    v = _vault(tmp_path)
+    Presupuesto.desde_umbrales(v, HOY).registrar_parada("Meta mostró captcha")
+    datos = json.loads((v / "data/caza/presupuesto/2026-11-10.json").read_text())
+    assert datos["parada"] == "Meta mostró captcha"
+    with pytest.raises(ParadaDelDia, match="captcha"):
+        Presupuesto.desde_umbrales(v, HOY).antes_de_buscar()
+    Presupuesto.desde_umbrales(v, HOY + timedelta(days=1)).antes_de_buscar()  # otro día: se puede
+
+
+def test_el_cliente_guarda_el_bloqueo_en_el_archivo_del_dia(tmp_path):
+    from test_cliente import NavegadorFalso
+    from trovify.caza.cliente import ClienteBibliotecaPublica, PaginaCapturada
+    v = _vault(tmp_path)
+    p = Presupuesto.desde_umbrales(v, HOY)
+    p._dormir = lambda s: None
+    c = ClienteBibliotecaPublica(p, NavegadorFalso([PaginaCapturada("https://www.facebook.com/login/?n=x", "", "", [])]))
+    assert c.buscar("RO", q="x").estado == "bloqueado"
+    assert "parada" in json.loads((v / "data/caza/presupuesto/2026-11-10.json").read_text())
+    # otro proceso (la rutina, la siguiente tanda): ni siquiera abre el navegador
+    nav = NavegadorFalso([])
+    p2 = Presupuesto.desde_umbrales(v, HOY)
+    p2._dormir = lambda s: None
+    e = ejecutar(v, "nicho", [("RO", "fise")], "tomi", 3, cliente=ClienteBibliotecaPublica(p2, nav),
+                 resolver=resolver_fijo({}), hoy=HOY, region="europa")
+    assert nav.llamadas == [] and e.parada and "login" in e.parada
+    assert "Parada" in _disco(v)
+
+
+def test_hueco_informa_la_parada(tmp_path):
+    v = _vault(tmp_path)
+    P = "100000000000206"
+    _ficha_medida(v, "o-hp", P)
+    bloqueado = ResultadoBusqueda("bloqueado", "", None, [], "Meta mostró captcha", datetime.now(UTC))
+    c = ClientePorUrl({url_biblioteca("RO", q="fise de lucru"): bloqueado})
+    h, parada = orquestador.medir_hueco(v, "o-hp", "RO", ["fise de lucru", "fise pentru copii"], cliente=c,
+                                        hoy=HOY)
+    assert h.hueco is None and parada and "captcha" in parada
+
+
+# --- ronda 1: cuotas (I3) ------------------------------------------------------------------
+
+
+def test_cuota_de_la_rutina(tmp_path):
+    v = _vault(tmp_path)
+    r = Presupuesto.desde_umbrales(v, HOY, max_rutina=2)
+    r.antes_de_buscar(); r.antes_de_buscar()
+    with pytest.raises(PresupuestoAgotado, match="rutina"):
+        r.antes_de_buscar()
+    u = Presupuesto.desde_umbrales(v, HOY)  # el usuario conserva el resto del día
+    u.antes_de_buscar()
+    assert u.usadas_hoy() == 3 and u.restantes() == 27
+
+
+def test_vigilar_rota_las_menos_recientes(tmp_path):
+    v = _vault(tmp_path)
+    paginas = {"o-a": "100000000000301", "o-b": "100000000000302", "o-c": "100000000000303",
+               "o-d": "100000000000304"}
+    fechas = {"o-a": "2026-11-01", "o-b": "2026-11-08", "o-c": "2026-10-20", "o-d": "2026-11-10"}
+    for oid, p in paginas.items():
+        _ficha(v, oid, p)
+        meta, cuerpo = frontmatter.leer(v / "wiki/ofertas" / f"{oid}.md")
+        meta["ultima_vez"] = fechas[oid]
+        frontmatter.escribir(v / "wiki/ofertas" / f"{oid}.md", meta, cuerpo)
+    c = ClientePorUrl({})
+    e = ejecutar(v, "vigilar", [], "tomi", 3, cliente=c, resolver=resolver_fijo({}), hoy=HOY, max_vigiladas=3)
+    # o-d ya se midió hoy: cuenta para el tope del día; quedan 2 turnos para las más antiguas
+    assert c.llamadas == [url_biblioteca("RO", page_id=paginas["o-c"]), url_biblioteca("RO", page_id=paginas["o-a"])]
+    assert any("turno de vigilancia" in x and "o-b" in x for x in e.errores)
+
+
+def test_nueva_queda_pendiente_si_quedan_pocas_busquedas(tmp_path):
+    v = _vault(tmp_path)
+    P = "100000000000305"
+    url = "https://kit.example/ro/"
+    ads = viejos(P, 9, 20, 30000)
+    c = ClientePorUrl({url_biblioteca("RO", page_id=P): ok(ads)})
+    c.presupuesto.restantes = lambda: 2
+    e = ejecutar(v, "oferta", [], "tomi", 3, page_ids=[P], paises=["RO"], cliente=c,
+                 resolver=resolver_fijo({url: destino_ok(url)}), hoy=HOY)
+    assert e.pendientes == 1 and not [r for r in e.resultados if r.descarte is None]
+    assert c.llamadas == [url_biblioteca("RO", page_id=P)]  # sin búsquedas extra a medias
+
+
+# --- ronda 1: strikes solo con medición entera (I4) ----------------------------------------
+
+
+def test_strike_no_cuenta_si_la_oferta_no_se_midio_entera(tmp_path):
+    v = _vault(tmp_path)
+    P1, P2 = "100000000000401", "100000000000402"
+    url = "https://kit.example/ro/"
+    from trovify.caza.destino import clave_oferta, oferta_id
+    oid = oferta_id(clave_oferta(url, "https://pay.hotmart.com/K123"))
+    _ficha(v, oid, P1, strikes=2, motivo="nota baja")
+    meta, cuerpo = frontmatter.leer(v / "wiki/ofertas" / f"{oid}.md")
+    meta["page_ids"] = [P1, P2]
+    frontmatter.escribir(v / "wiki/ofertas" / f"{oid}.md", meta, cuerpo)
+    c = ClientePorUrl({url_biblioteca("RO", page_id=P1): ok(viejos(P1, 2, 2, 31000))},
+                      excepcion_en={url_biblioteca("RO", page_id=P2): PresupuestoAgotado("agotado")})
+    e = ejecutar(v, "vigilar", [], "tomi", 3, cliente=c, resolver=resolver_fijo({url: destino_ok(url)}), hoy=HOY)
+    assert e.resultados[0].decision == "observar" and e.parada
+    meta, _ = frontmatter.leer(v / "wiki/ofertas" / f"{oid}.md")
+    assert meta["strikes"] == 2 and meta["estado"] != "podada"
+
+
+def test_nada_medido_nunca_es_strike():
+    f = {"o-1": {"estado": "B", "strikes": 2, "motivo_strike": "nada medido"}}
+    assert aplicar_strikes(f, {"o-1": ("observar", "nada medido")})["o-1"]["strikes"] == 2
+
+
+# --- ronda 1: menores ----------------------------------------------------------------------
+
+
+def test_navegador_no_disponible_es_parada_controlada(tmp_path):
+    from trovify.navegador import NavegadorError
+    v = _vault(tmp_path)
+    c = ClientePorUrl({}, excepcion_en={url_biblioteca("RO", q="uno"): NavegadorError("no se pudo iniciar Chromium")})
+    e = ejecutar(v, "nicho", [("RO", "uno"), ("RO", "dos")], "tomi", 3, cliente=c, resolver=resolver_fijo({}),
+                 hoy=HOY, region="europa")
+    assert e.parada and "navegador no disponible" in e.parada and len(c.llamadas) == 1
+    texto = (v / "wiki/caza/2026-11-10/europa.md").read_text()
+    assert "no medido" in texto and "navegador no disponible" in texto

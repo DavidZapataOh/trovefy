@@ -78,9 +78,36 @@ def test_hueco_cli(vault, monkeypatch, capsys):
 
     def falso(v, oferta, pais, frases, **kw):
         vistas.update(oferta=oferta, pais=pais, frases=frases, **kw)
-        return HuecoPais(pais, Medida(0), "sin_traducir", True, ["u"])
+        return HuecoPais(pais, Medida(0), "sin_traducir", True, ["u"]), None
 
     monkeypatch.setattr(orquestador, "medir_hueco", falso)
     assert cli.main(["caza", "hueco", "--oferta", "o-x", "--pais", "RO", "--frase", "a b", "--frase", "c d"]) == 0
     assert vistas["frases"] == ["a b", "c d"] and vistas["pais"] == "RO"
     assert "hueco" in capsys.readouterr().out.lower()
+
+
+def test_hueco_cli_parada(vault, monkeypatch, capsys):
+    from trovify.caza.hueco import HuecoPais
+    from trovify.caza.senales import Medida
+    monkeypatch.setattr(orquestador, "medir_hueco", lambda *a, **k: (
+        HuecoPais("RO", Medida(None, "no medido: bloqueo"), "no_medido", None, []), "bloqueo de Meta: captcha"))
+    assert cli.main(["caza", "hueco", "--oferta", "o-x", "--pais", "RO", "--frase", "a b", "--frase", "c d"]) == 1
+    assert "PARADA" in capsys.readouterr().out
+
+
+def test_cuotas_de_la_rutina_y_de_vigilar(vault, monkeypatch):
+    vistas = {}
+    monkeypatch.setattr(orquestador, "ejecutar", lambda *a, **k: vistas.update(k) or ejecucion_ejemplo())
+    monkeypatch.setattr(orquestador, "hoy_negocio", lambda: date(2026, 11, 10))
+    assert cli.main(["caza", "ejecutar", "--modo", "vigilar", "--region", "europa", "--rutina"]) == 0
+    assert vistas["max_busquedas_rutina"] == 20 and vistas["max_vigiladas"] == 6
+    vistas.clear()
+    assert cli.main(["caza", "ejecutar", "--modo", "nicho", "--region", "europa", "--consulta", "RO:x"]) == 0
+    assert vistas["max_busquedas_rutina"] is None  # la sesión del usuario no tiene cuota de rutina
+
+
+def test_caza_yaml_se_crea_si_falta(vault, monkeypatch):
+    (vault / "config/caza.yaml").unlink()
+    monkeypatch.setattr(orquestador, "ejecutar", lambda *a, **k: ejecucion_ejemplo())
+    assert cli.main(["caza", "ejecutar", "--modo", "vigilar", "--region", "europa"]) == 0
+    assert "rutina" in (vault / "config/caza.yaml").read_text()

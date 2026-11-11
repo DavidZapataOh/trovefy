@@ -44,11 +44,25 @@ def _error(msg: str, codigo: int = 2) -> int:
 def _config(vault: Path) -> dict:
     ruta = vault / "config/caza.yaml"
     if not ruta.exists():
-        raise FileNotFoundError("falta config/caza.yaml en el vault; créalo con `trovify cerebro init`")
+        from trovify.vault.andamio import PLANTILLA
+        from trovify.vault.escritura import escribir_atomico
+
+        escribir_atomico(ruta, (PLANTILLA / "config/caza.yaml").read_text(encoding="utf-8"))
+        print("Aviso: no había config/caza.yaml; se creó desde la plantilla.", file=sys.stderr)
     datos = yaml.safe_load(ruta.read_text(encoding="utf-8")) or {}
     if not isinstance(datos, dict):
         raise ValueError("config/caza.yaml no es un mapa")  # noqa: TRY004 - error de configuración para el usuario
     return datos
+
+
+def _rutina(config: dict) -> tuple[int, int]:
+    """Cuotas de la rutina (ronda 1, I3): ``rutina.max_busquedas`` y ``rutina.max_vigiladas_por_dia``."""
+    r = config.get("rutina")
+    try:
+        return int(r["max_busquedas"]), int(r["max_vigiladas_por_dia"])
+    except (TypeError, KeyError, ValueError):
+        raise ValueError("falta la sección rutina (max_busquedas, max_vigiladas_por_dia) en config/caza.yaml; "
+                         "cópiala de la plantilla del cerebro") from None
 
 
 def _consultas(valores: list[str]) -> list[tuple[str, str]]:
@@ -82,9 +96,12 @@ def _ejecutar_caza(args: argparse.Namespace) -> int:
             print(f"Aviso: --max {max_nuevas} supera el tope de R14; se usan {tope}.", file=sys.stderr)
             max_nuevas = tope
         perfil = args.perfil or config.get("perfil") or "tomi"
+        cuota_rutina, max_vigiladas = _rutina(config)
         dia = orquestador.hoy_negocio()
         e = orquestador.ejecutar(vault, args.modo, consultas, perfil, max_nuevas, page_ids=args.page_ids or None,
-                                 hoy=dia, region=args.region, paises=args.pais or None)
+                                 hoy=dia, region=args.region, paises=args.pais or None,
+                                 max_vigiladas=max_vigiladas,
+                                 max_busquedas_rutina=cuota_rutina if args.rutina else None)
     except (ValueError, FileNotFoundError, KeyError) as exc:
         return _error(str(exc))
     usadas = None
@@ -112,8 +129,8 @@ def _ejecutar_hueco(args: argparse.Namespace) -> int:
         print("Aviso: con una sola frase el «sin competencia» no se puede confirmar (hacen falta dos).",
               file=sys.stderr)
     try:
-        h = orquestador.medir_hueco(vault, args.oferta, args.pais.upper(), args.frase, idioma=args.idioma,
-                                    perfil=args.perfil)
+        h, parada = orquestador.medir_hueco(vault, args.oferta, args.pais.upper(), args.frase,
+                                            idioma=args.idioma, perfil=args.perfil)
     except (ValueError, FileNotFoundError, KeyError) as exc:
         return _error(str(exc))
     texto = {True: "sí", False: "no", None: "no comprobado"}[h.hueco]
@@ -124,6 +141,10 @@ def _ejecutar_hueco(args: argparse.Namespace) -> int:
     for enlace in h.enlaces:
         print(f"- {enlace}")
     print(f"Ficha actualizada: wiki/ofertas/{args.oferta}.md")
+    if parada:
+        print(f"PARADA: {parada}. No se buscó nada más; lo que faltaba quedó «no medido». "
+              "No lances más búsquedas hoy.")
+        return 1
     return 0
 
 

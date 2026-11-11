@@ -16,6 +16,7 @@ from trovify.caza.presupuesto import ParadaPorErrores, PresupuestoAgotado
 from trovify.caza.senales import Medida
 from trovify.config.umbrales import Umbral
 from trovify.idioma import detectar
+from trovify.navegador import NavegadorError
 
 Original = Literal["traducido", "sin_traducir", "ausente_reciente", "ausente", "no_medido"]
 
@@ -51,7 +52,7 @@ def _buscar(cliente, pais: str, **kw) -> ResultadoBusqueda | str:
     """El resultado, o el motivo si el cliente paró (nunca se confunde con «sin anuncios»)."""
     try:
         return cliente.buscar(pais, estado="active", max_anuncios=_MAX_ANUNCIOS, **kw)
-    except (SesionBloqueada, ParadaPorErrores, PresupuestoAgotado) as e:
+    except (SesionBloqueada, ParadaPorErrores, PresupuestoAgotado, NavegadorError) as e:
         return f"{type(e).__name__}: {e}"
 
 

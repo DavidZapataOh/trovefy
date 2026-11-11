@@ -77,6 +77,10 @@ class ResultadoOferta:
     dia: date | None = None
     total_meta: int | None = None
     completo: bool = False
+    # Crecimiento en 7 días de cada PÁGINA de la oferta, con el total exacto de Meta de la página
+    # (todas sus ofertas): ``(page_id, Medida, enlace de la página)``. Es un dato de la página, no de
+    # la oferta: no entra en la nota, ni en Snapshot.total, ni en las señales de la oferta.
+    crecimiento_pagina: list[tuple[str, Medida, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -256,6 +260,16 @@ def _paginas(r: ResultadoOferta) -> list[str]:
     return lineas
 
 
+def _crecimiento_pagina(r: ResultadoOferta) -> list[str]:
+    if not r.crecimiento_pagina:
+        return []
+    lineas = ["", "Páginas de la oferta (dato de la página entera, no el total de esta oferta):", ""]
+    for page_id, m, enlace in r.crecimiento_pagina:
+        lineas.append(f"- {page_id}: crecimiento de la página (todas sus ofertas) en 7 días: "
+                      f"{formatear_medida(m)} — {enlace}")
+    return lineas
+
+
 def _cifras(r: ResultadoOferta) -> list[str]:
     if not _varias_paginas(r):
         return [f"Cifras de {r.pais} (enlace reproducible): {r.enlace}"]
@@ -356,6 +370,7 @@ def _bloque_oferta(r: ResultadoOferta) -> list[str]:
         *_cifras(r),
         "",
         *_tabla_senales(r.senales, len(r.oferta.page_ids)),
+        *_crecimiento_pagina(r),
         "",
         *_desglose(r.nota),
         "",
@@ -644,6 +659,7 @@ def render_ficha(r: ResultadoOferta, previa: dict | None) -> tuple[dict, str]:
         *_cifras(r),
         "",
         *_tabla_senales(s, len(o.page_ids)),
+        *_crecimiento_pagina(r),
         "",
         "## Nota",
         "",
@@ -705,6 +721,8 @@ def _render_raw(e: Ejecucion) -> str:
             f"- decisión: {r.decision} — {r.explicacion}",
         ]
         lineas += [f"- {attr}: {formatear_medida(getattr(r.senales, attr))}" for _, attr, _ in _SENALES]
+        lineas += [f"- página {p}: crecimiento de la página (todas sus ofertas) {formatear_medida(m)} · {u}"
+                   for p, m, u in r.crecimiento_pagina]
         lineas.append(f"- nota: {'no medida' if r.nota.valor is None else _num(r.nota.valor, 4)}")
         for d in o.destinos or ([o.destino] if o.destino else []):
             estado = "medido" if d.estado == "ok" else "no medido"
