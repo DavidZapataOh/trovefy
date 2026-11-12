@@ -183,7 +183,7 @@ class ClienteGraph:
         except urllib.error.HTTPError as e:
             try:
                 fallo = (e.code, e.read(_MAX_RESPUESTA + 1))
-            except (OSError, ValueError):
+            except (OSError, ValueError, http.client.HTTPException):  # p. ej. IncompleteRead
                 fallo = (e.code, b"")
             finally:
                 e.close()

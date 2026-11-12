@@ -129,3 +129,28 @@ def test_escritura_sin_reintento(respuesta_json, metodo, fallo):
         else:
             c.crear("act_1", "campaigns", {"name": "x"})
     assert len(n) == 1
+
+
+def test_httperror_con_cuerpo_cortado_no_escapa_sin_envolver():
+    import http.client
+    import io
+    import urllib.error
+
+    cerrado = []
+
+    class Cortado(io.BytesIO):
+        def read(self, *a):
+            raise http.client.IncompleteRead(b"{\"error\": " + TOKEN.encode(), 100)
+
+        def close(self):
+            cerrado.append(1)
+            super().close()
+
+    def abrir(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 500, "x", {}, Cortado())
+
+    with pytest.raises(ErrorGraph) as e:
+        ClienteGraph(TOKEN, abrir=abrir).escribir("1", {"a": 1})
+    assert (e.value.codigo, e.value.mensaje) == (500, "HTTP 500") and cerrado
+    assert e.value.__cause__ is None and e.value.__suppress_context__
+    assert TOKEN not in "".join(traceback.format_exception(e.value))
