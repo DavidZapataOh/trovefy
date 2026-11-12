@@ -17,9 +17,8 @@ def test_idioma_de_la_tabla_resuelve_en_meta(codigo, nombre):
     ruta = os.environ.get("TROVEFY_SECRETOS")
     if not ruta:
         pytest.skip("sin TROVEFY_SECRETOS")
-    token = cargar_secretos(Path(ruta)).meta_token
-    if not token:
-        pytest.skip("sin META_TOKEN")
-    filas = ClienteGraph(token).buscar("adlocale", nombre, ["key", "name"])
+    # El token no se guarda en una variable local: con --showlocals pytest la imprimiría.
+    cliente = ClienteGraph(cargar_secretos(Path(ruta)).meta_token or pytest.skip("sin META_TOKEN"))
+    filas = cliente.buscar("adlocale", nombre, ["key", "name"])
     claves = filas_exactas(filas, nombre)
     assert len(claves) == 1, f"{codigo} → {nombre!r}: {len(claves)} filas exactas"
