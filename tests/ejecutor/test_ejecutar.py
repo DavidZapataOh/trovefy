@@ -8,6 +8,7 @@ import json
 import re
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from ejecutor.fabricas_graph import PROPUESTA_BASE, propuesta
 from ejecutor.falsos.graph_falso import CUENTA
 from trovefy_ejecutor.ejecutar import CAMPOS_POR_TIPO, ejecutar, siguiente_id
@@ -494,3 +495,32 @@ def test_spend_cap_de_campana_en_usd_sigue_igual(entorno):
                            op={"entidad": "campaign", "id": "cu", "campo": "spend_cap",
                                "de_esperado": 5000, "a": 6000, "moneda": "USD"}), g, alm, aud, ahora=_reloj)
     assert r.estado == "ejecutada" and g.objetos["cu"]["spend_cap"] == "6000"
+
+
+# --- final review: error ambiguo en la escritura real y relectura imposible --------------------------
+
+
+def _cae_la_red_tras_escribir(g):
+    original = g.escribir
+
+    def escribir(id, datos, *, validate_only=False):
+        try:
+            return original(id, datos, validate_only=validate_only)
+        finally:
+            if not validate_only:
+                g.red_al_leer = True
+
+    g.escribir = escribir
+
+
+@pytest.mark.parametrize("err", [ErrorGraph(2, None, "Service temporarily unavailable"),
+                                 ErrorGraph(500, None, "HTTP 500")])
+def test_error_ambiguo_sin_relectura_es_discrepancia(entorno, err):
+    g, alm, aud = entorno
+    g.errores_reales["s1"] = err
+    _cae_la_red_tras_escribir(g)
+    r = ejecutar(propuesta(), g, alm, aud, ahora=_reloj)
+    assert r.estado == "discrepancia" and len(_reales(g)) == 1
+    assert f"estado desconocido: Meta devolvió un error ambiguo ({err.codigo}) y no se pudo releer" in r.detalle
+    assert alm.ultimo_cambio("s1", "daily_budget") == T
+

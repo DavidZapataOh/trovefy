@@ -28,7 +28,13 @@ from trovefy_ejecutor.auditoria import EV_EJECUCION, Auditoria, redactar
 from trovefy_ejecutor.ejecutar import Resultado, siguiente_id
 from trovefy_ejecutor.esquema import PropuestaInvalida, cargar_propuesta
 from trovefy_ejecutor.estado import Almacen
-from trovefy_ejecutor.graph import DetenidoPorStop, ErrorGraph, ErrorRed, clasificar
+from trovefy_ejecutor.graph import (
+    DetenidoPorStop,
+    ErrorGraph,
+    ErrorRed,
+    clasificar,
+    es_rechazo_definitivo,
+)
 from trovefy_ejecutor.modelo import Estructura, Propuesta
 
 TIPO = "crear_estructura_pausada"
@@ -49,9 +55,6 @@ IDIOMAS_META: dict[str, str] = {
     "en": "English (All)", "pt": "Portuguese (All)", "fr": "French (All)", "de": "German", "it": "Italian",
     "pl": "Polish",
 }
-# Códigos de Meta que son un rechazo definitivo: el objeto no se creó. Cualquier otro (1, 2, ≥ 500, el
-# «HTTP 5xx» sin cuerpo, desconocidos) es ambiguo: puede haberse creado.
-_RECHAZO_DEFINITIVO = frozenset({100, 190, 102, 10, 4, 17, 32, 613, 80004, *range(200, 300)})
 _SIN_NUMERO = "sin número libre 800–899 hoy: crea la propuesta a mano"
 _REVISA = "puede haberse creado: revísalo en Ads Manager antes de volver a montar"
 
@@ -76,10 +79,6 @@ def _texto_error(e: BaseException) -> str:
     if isinstance(e, ErrorRed):
         return f"red: {e.motivo}"
     return type(e).__name__
-
-
-def _definitivo(e: ErrorGraph) -> bool:
-    return e.codigo in _RECHAZO_DEFINITIVO
 
 
 def _ambiguo(e: ErrorGraph) -> str:
@@ -356,7 +355,7 @@ class _Montaje:
             raise _Fallo(f"{desc}: STOP, no se intentó", error="stop") from None
         except ErrorGraph as ex:
             self.anotar(False, False, f"{desc}; {_texto_error(ex)}")
-            if _definitivo(ex):
+            if es_rechazo_definitivo(ex):
                 raise _Fallo(f"{desc}: Meta lo rechazó, no se creó: {_texto_error(ex)}",
                              error=clasificar(ex)) from None
             raise _Fallo(f"{desc}: {_ambiguo(ex)} ({_texto_error(ex)})", error=clasificar(ex),
@@ -394,7 +393,7 @@ class _Montaje:
             raise _Fallo(f"{desc}: STOP, no se intentó", error="stop") from None
         except ErrorGraph as ex:
             self.anotar(False, False, f"{desc}; {_texto_error(ex)}")
-            if _definitivo(ex):
+            if es_rechazo_definitivo(ex):
                 raise _Fallo(f"{desc}: Meta rechazó la subida, no se subió: {_texto_error(ex)}",
                              error=clasificar(ex)) from None
             raise _Fallo(f"{desc}: {_ambiguo(ex)} ({_texto_error(ex)})", error=clasificar(ex),

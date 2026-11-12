@@ -79,6 +79,15 @@ def clasificar(e: ErrorGraph) -> Literal["token", "limite_meta", "permiso", "otr
     return "otro"
 
 
+# Códigos de Meta que son un rechazo definitivo: la escritura o creación no se aplicó. Cualquier otro
+# (1, 2, ≥ 500, el «HTTP 5xx» sin cuerpo, desconocidos) es ambiguo: puede haberse aplicado.
+_RECHAZO_DEFINITIVO = frozenset({100, 190, 102, 10, 4, 17, 32, 613, 80004, *range(200, 300)})
+
+
+def es_rechazo_definitivo(e: ErrorGraph) -> bool:
+    return e.codigo in _RECHAZO_DEFINITIVO
+
+
 @dataclass(frozen=True)
 class InfoCuenta:
     currency: str

@@ -29,7 +29,13 @@ from trovefy_ejecutor.esquema import (
     cargar_propuesta,
 )
 from trovefy_ejecutor.estado import Almacen
-from trovefy_ejecutor.graph import DetenidoPorStop, ErrorGraph, ErrorRed, clasificar
+from trovefy_ejecutor.graph import (
+    DetenidoPorStop,
+    ErrorGraph,
+    ErrorRed,
+    clasificar,
+    es_rechazo_definitivo,
+)
 from trovefy_ejecutor.modelo import Operacion, Propuesta
 from trovefy_ejecutor.vivo import (
     CAMPOS_IMPORTE,
@@ -274,13 +280,19 @@ def _ejecutar_op(op: Operacion, p: Propuesta, vv: ValoresVivos, graph, almacen: 
 
 def _tras_rechazo(op: Operacion, graph, almacen: Almacen, ahora: Callable[[], datetime], antes: object,
                   r: Callable[..., ResultadoOp], e: ErrorGraph) -> ResultadoOp:
-    """Meta rechazó la escritura real: se relee por si la aplicó igualmente (nunca se reenvía)."""
+    """Meta rechazó la escritura real: se relee por si la aplicó igualmente (nunca se reenvía).
+
+    Si no se puede releer: con un rechazo definitivo (``es_rechazo_definitivo``) no se aplicó, ``fallida``;
+    con un error ambiguo (1, 2, 5xx…) pudo aplicarse, ``discrepancia`` (estado desconocido)."""
     error = clasificar(e)
     texto = f"Meta rechazó la escritura: {_texto_error(e)}"
     try:
         crudo = _releer(graph, op)
     except Exception as ex:  # noqa: BLE001
         _cadencia(almacen, op, ahora)  # lado seguro
+        if not es_rechazo_definitivo(e):
+            return r("discrepancia", f"estado desconocido: Meta devolvió un error ambiguo ({e.codigo}) y no se "
+                                     f"pudo releer ({_texto_error(ex)})", error=error)
         return r("fallida", f"{texto}; no se pudo releer ({_texto_error(ex)})", error=error)
     despues = _normal(op.campo, crudo.get(op.campo))
     sin_status = op.entidad in _ESTADOS and not isinstance(crudo.get("status"), str)

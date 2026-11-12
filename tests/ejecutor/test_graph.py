@@ -290,3 +290,12 @@ def test_buscar_error_redactado(respuesta_json):
     with pytest.raises(ErrorGraph) as e:
         ClienteGraph(TOKEN, abrir=abrir).buscar("adlocale", "ro", ["key"])
     assert TOKEN not in str(e.value)
+
+
+@pytest.mark.parametrize("codigo,si", [(100, True), (190, True), (102, True), (10, True), (4, True), (17, True),
+                                       (32, True), (613, True), (80004, True), (200, True), (299, True),
+                                       (1, False), (2, False), (500, False), (503, False), (300, False)])
+def test_es_rechazo_definitivo(codigo, si):
+    from trovefy_ejecutor.graph import es_rechazo_definitivo
+
+    assert es_rechazo_definitivo(ErrorGraph(codigo, None, "x")) is si
