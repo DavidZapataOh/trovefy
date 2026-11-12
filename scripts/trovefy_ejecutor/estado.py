@@ -100,7 +100,14 @@ class Almacen:
         except BaseException:
             c.execute("ROLLBACK")
             raise
-        c.execute("COMMIT")
+        try:
+            c.execute("COMMIT")
+        except BaseException:
+            try:
+                c.execute("ROLLBACK")
+            except sqlite3.Error:
+                pass
+            raise
         return r
 
     def _ahora(self) -> str:
@@ -119,15 +126,21 @@ class Almacen:
             c.execute("INSERT INTO historial(id,de,a,cuando,datos) VALUES(?,NULL,'recibida',?,NULL)", (p.id, ahora))
         self._escribir(fn)
 
-    def transicion(self, id: str, de: Estado, a: Estado, **datos) -> bool:
+    def transicion(self, id: str, de: Estado, a: Estado, /, **datos) -> bool:
+        """Mueve ``de → a`` de forma atómica. False si el estado actual no es ``de`` o el id no existe.
+
+        ``recibida → ejecutando`` solo vale para las clases ``no_gasto`` y ``notificacion``.
+        """
         if a not in TRANSICIONES.get(de, frozenset()):
             raise TransicionInvalida(f"{de} -> {a}")
         ahora = self._ahora()
 
         def fn(c):
-            fila = c.execute("SELECT datos FROM propuestas WHERE id=? AND estado=?", (id, de)).fetchone()
+            fila = c.execute("SELECT datos, clase FROM propuestas WHERE id=? AND estado=?", (id, de)).fetchone()
             if fila is None:
                 return False
+            if de == "recibida" and a == "ejecutando" and fila[1] not in ("no_gasto", "notificacion"):
+                raise TransicionInvalida(f"{de} -> {a} no vale para la clase {fila[1]}")
             fusion = {**json.loads(fila[0]), **datos}
             cur = c.execute("UPDATE propuestas SET estado=?, datos=?, actualizada=? WHERE id=? AND estado=?",
                             (a, json.dumps(fusion, ensure_ascii=False), ahora, id, de))

@@ -131,3 +131,52 @@ def test_permisos_600_y_persistencia(tmp_path):
     Almacen(ruta).registrar(cargar_propuesta(presupuesto()))
     assert (ruta.stat().st_mode & 0o777) == 0o600
     assert Almacen(ruta).obtener("P-20261112-004").estado == "recibida"
+
+
+def _limite():
+    d = presupuesto(id="P-20261112-006", tipo="limite_ejecutor", operaciones=[
+        {"entidad": "ejecutor", "id": "global", "campo": "max_ops_hora", "de_esperado": 10, "a": 20}])
+    del d["cuenta"]
+    return d
+
+
+def test_gasto_y_limite_nunca_saltan_aceptada(tmp_path):
+    a = Almacen(tmp_path / "e.sqlite")
+    a.registrar(cargar_propuesta(presupuesto()))
+    a.registrar(cargar_propuesta(_limite()))
+    for pid in ("P-20261112-004", "P-20261112-006"):
+        with pytest.raises(TransicionInvalida):
+            a.transicion(pid, "recibida", "ejecutando")
+        assert a.obtener(pid).estado == "recibida" and len(a.historial(pid)) == 1
+
+
+def test_noop_notificacion_puede_ejecutar(tmp_path):
+    a = Almacen(tmp_path / "e.sqlite")
+    a.registrar(cargar_propuesta({"version": 1, "id": "P-20261112-001", "tipo": "noop",
+                                  "creada": "2026-11-12T09:00:00-05:00", "origen": "/arranque"}))
+    assert a.transicion("P-20261112-001", "recibida", "ejecutando")
+
+
+def test_commit_fallido_no_deja_la_transaccion_abierta(tmp_path):
+    a = Almacen(tmp_path / "e.sqlite")
+    real = a._con
+
+    class Falla:
+        fallar = True
+
+        def execute(self, sql, *args):
+            if sql == "COMMIT" and Falla.fallar:
+                Falla.fallar = False
+                raise OSError("disco lleno")
+            return real.execute(sql, *args)
+
+    a._con = Falla()
+    with pytest.raises(OSError):
+        a.registrar(cargar_propuesta(presupuesto()))
+    a.registrar(cargar_propuesta(presupuesto()))  # la conexión sigue sirviendo
+    assert a.obtener("P-20261112-004").estado == "recibida"
+
+
+def test_transicion_de_id_inexistente_devuelve_false(tmp_path):
+    a = Almacen(tmp_path / "e.sqlite")
+    assert a.transicion("P-20261112-777", "recibida", "enviada") is False
