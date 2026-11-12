@@ -214,12 +214,14 @@ def mundo_basico() -> GraphFalso:
     g.cuentas["act_usd"] = {"currency": "USD", "timezone_name": "America/New_York", "spend_cap": "0",
                             "amount_spent": "0", "account_status": 1}
     cuenta = "0000000000000000"
-    g.objetos["c1"] = {"account_id": cuenta, "status": "ACTIVE", "name": "Campaña"}
-    g.objetos["s1"] = {"account_id": cuenta, "status": "ACTIVE", "daily_budget": "20000", "bid_amount": "1500",
-                       "name": "Conjunto 1"}
-    g.objetos["s2"] = {"account_id": cuenta, "status": "ACTIVE", "daily_budget": "15000", "name": "Conjunto 2"}
-    g.objetos["a1"] = {"account_id": cuenta, "status": "ACTIVE", "name": "Anuncio"}
-    g.objetos["x9"] = {"account_id": "999", "status": "ACTIVE", "daily_budget": "10000", "name": "Ajeno"}
+    activo = {"status": "ACTIVE", "effective_status": "ACTIVE"}
+    g.objetos["c1"] = {"account_id": cuenta, **activo, "name": "Campaña"}
+    g.objetos["s1"] = {"account_id": cuenta, **activo, "daily_budget": "20000", "bid_amount": "1500",
+                       "campaign_id": "c1", "name": "Conjunto 1"}
+    g.objetos["s2"] = {"account_id": cuenta, **activo, "daily_budget": "15000", "campaign_id": "c1",
+                       "name": "Conjunto 2"}
+    g.objetos["a1"] = {"account_id": cuenta, **activo, "adset_id": "s1", "campaign_id": "c1", "name": "Anuncio"}
+    g.objetos["x9"] = {"account_id": "999", "status": "ACTIVE", "effective_status": "ACTIVE", "daily_budget": "10000", "name": "Ajeno"}
     g.hijos.update({
         "c1": ("campaigns", {CUENTA}),
         "s1": ("adsets", {CUENTA, "c1"}),
