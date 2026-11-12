@@ -284,3 +284,15 @@ def test_nota_motivo_con_propuesta_y_texto_hostil():
     assert "tipo: otra" not in cabecera
     assert all(ln.startswith("> ") or not ln.strip() for ln in cuerpo.splitlines()
                if "tipo: otra" in ln or "título" in ln)
+
+
+def test_reenviados_y_via_bot_se_ignoran():
+    for clave, valor in (("forward_origin", {"type": "user"}), ("forward_from", {"id": 1}),
+                         ("forward_from_chat", {"id": 2}), ("forward_sender_name", "x")):
+        u = msg("/pausar_todo")
+        u["message"][clave] = valor
+        assert interpretar_update(u, E, K, T) == Ignorar("reenviado")
+    u = msg("/limites")
+    u["message"]["via_bot"] = {"id": 7, "is_bot": True}
+    assert interpretar_update(u, E, K, T) == Ignorar("reenviado")
+    assert not isinstance(interpretar_update(msg("/pausar_todo"), E, K, T), Ignorar)

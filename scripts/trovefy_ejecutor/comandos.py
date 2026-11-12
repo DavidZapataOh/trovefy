@@ -265,6 +265,8 @@ def interpretar_update(update: dict, emparejado: Emparejamiento | None, clave: b
     if (_int(chat.get("id")) != emparejado.chat_id or _int(de.get("id")) != emparejado.user_id
             or chat.get("type", "private") != "private" or de.get("is_bot") is True):
         return Ignorar("chat_ajeno")
+    if any(k in m for k in ("forward_origin", "forward_from", "forward_from_chat", "forward_sender_name", "via_bot")):
+        return Ignorar("reenviado")
     texto = m.get("text")
     if not isinstance(texto, str) or not texto.strip():
         return Responder(AYUDA)
