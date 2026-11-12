@@ -238,23 +238,38 @@ class _Caso:
         except MonedaNoConfigurada:
             return f"{n} (unidades mínimas)"
 
-    def simular(self) -> tuple[int, int, bool]:
-        """Total diario activo antes y después de aplicar las operaciones en orden; y si hay algo desconocido."""
+    def simular(self) -> tuple[int, int, str | None]:
+        """Total diario activo antes y después de aplicar las operaciones; y qué no se sabe calcular.
+
+        El resultado no depende del orden: un cambio de presupuesto sobre una entidad inactiva queda
+        pendiente y se usa si esa misma entidad se activa en la propuesta. Si queda alguno pendiente
+        mientras se activa otra entidad (p. ej. su campaña), no se sabe qué empezaría a gastar: se
+        devuelve ``"mezcla"``. ``"activar"`` = se activa algo cuyo presupuesto al activar se desconoce.
+        """
         sim = dict(self.ctx.presupuestos_activos)
-        desconocido = not all(_no_negativo(v) for v in sim.values())
-        if desconocido:
-            return 0, 0, True
+        if not all(_no_negativo(v) for v in sim.values()):
+            return 0, 0, "activos"
         antes = sum(sim.values())
+        inactivos_con_presupuesto = {op.id for op in self.p.operaciones if _es_presupuesto(op) and op.id not in sim}
+        activados = {op.id for op in self.p.operaciones if _es_activar(op) and op.id not in sim}
+        if inactivos_con_presupuesto and activados - inactivos_con_presupuesto:
+            return antes, antes, "mezcla"
+        pendientes: dict[str, int] = {}
+        motivo: str | None = None
         for op in self.p.operaciones:
-            if _es_presupuesto(op) and op.id in sim:
-                sim[op.id] = op.a
+            if _es_presupuesto(op):
+                if op.id in sim:
+                    sim[op.id] = op.a
+                else:
+                    pendientes[op.id] = op.a
             elif _es_activar(op) and op.id not in sim:
                 v = self.ctx.presupuesto_al_activar.get(op.id)
-                if _no_negativo(v):
-                    sim[op.id] = v
-                else:
-                    desconocido = True
-        return antes, sum(sim.values()), desconocido
+                if not _no_negativo(v):
+                    motivo = "activar"
+                    continue
+                # Con un cambio pendiente se cuenta lo mayor: nunca se infravalora lo que empezará a gastar.
+                sim[op.id] = max(v, pendientes.pop(op.id, 0))
+        return antes, sum(sim.values()), motivo
 
 
 Regla = Callable[[_Caso], list[str]]
@@ -291,8 +306,8 @@ def _tiene_importes(c: _Caso) -> bool:
     if c.p.estructura is not None or any(op.unidad is not None for op in c.p.operaciones):
         return True
     if any(_es_activar(op) for op in c.p.operaciones):
-        antes, despues, desconocido = c.simular()
-        return desconocido or despues > antes
+        antes, despues, motivo = c.simular()
+        return motivo is not None or despues > antes
     return False
 
 
@@ -347,9 +362,24 @@ def _op_puja(c: _Caso, op: Operacion) -> list[str]:
     return v
 
 
+def _sube_gasto_fuera_de_activos(c: _Caso, op: Operacion) -> list[str]:
+    """Subir presupuesto o puja de algo que no figura entre los activos solo si se sabe que está PAUSED."""
+    if op.id in c.ctx.presupuestos_activos:
+        return []
+    vivo = c.ctx.valores.get((op.id, op.campo))
+    if es_importe(vivo) and op.a <= vivo:
+        return []
+    if c.ctx.valores.get((op.id, "status")) == "PAUSED":
+        return []
+    return [(f"valor_vivo_desconocido: {op.id} no figura entre los presupuestos activos y no se sabe "
+            f"que esté PAUSED; no se sube su {op.campo}")]
+
+
 def _r_operaciones(c: _Caso) -> list[str]:
     v: list[str] = []
     for op in c.p.operaciones:
+        if (_es_presupuesto(op) or op.campo == "bid_amount") and type(op.a) is int:
+            v += _sube_gasto_fuera_de_activos(c, op)
         if _es_presupuesto(op) and c.lc is not None:
             v += _op_presupuesto(c, op)
         elif _es_activar(op) and not _no_negativo(c.ctx.presupuesto_al_activar.get(op.id)):
@@ -373,7 +403,10 @@ def _r_tope(c: _Caso) -> list[str]:
         return []
     if not all(_no_negativo(x) for x in c.ctx.presupuestos_activos.values()):
         return ["valor_vivo_desconocido: presupuestos_activos con valores que no son enteros"]
-    antes, despues, _ = c.simular()
+    antes, despues, motivo = c.simular()
+    if motivo == "mezcla":
+        return [("valor_vivo_desconocido: la propuesta cambia el presupuesto de una entidad inactiva y activa "
+                "otra; no se sabe qué gasto diario empezaría")]
     tope = c.lc.tope_gasto_diario_total
     # Solo frena lo que sube el gasto: pausar o bajar con la cuenta ya por encima del tope reduce el riesgo.
     if despues > tope and despues > antes:

@@ -224,7 +224,8 @@ def test_estructura_con_stop(limites_cop):
 def test_sin_duplicados(limites_cop):
     b = "120245000000000103"
     lote = presupuesto(tipo="lote", operaciones=[operacion(), operacion(id=b)])
-    v = comprobar(cargar_propuesta(lote), limites_cop, ctx(valores={}))
+    v = comprobar(cargar_propuesta(lote), limites_cop,
+                  ctx(valores={}, presupuestos_activos={ADSET: 20000, b: 20000, OTRO: 100000}))
     assert len(v) == len(set(v)) == 2 and codigos(v) == ["valor_vivo_desconocido"] * 2
 
 
@@ -247,3 +248,61 @@ def test_contexto_para_desde_almacen(tmp_path, limites_cop):
     assert c.ultimos_cambios[(ADSET, "estructura")] == AHORA - timedelta(hours=3)
     assert (ADSET, "bid_amount") not in c.ultimos_cambios
     assert "max_cambios_hora" in codigos(comprobar(p, limites_cop, c))
+
+
+# --- C1: el tope diario no depende del orden de las operaciones de un lote ---------------------
+PAUSADO = "120245000000000109"
+CAMPANA = "120245000000000200"
+
+
+def _op_activar(id_, entidad="adset"):
+    return {"entidad": entidad, "id": id_, "campo": "status", "de_esperado": "PAUSED", "a": "ACTIVE"}
+
+
+def _ctx_pausado(**c):
+    base = {"valores": {(PAUSADO, "daily_budget"): 60000, (PAUSADO, "status"): "PAUSED"},
+            "presupuestos_activos": {OTRO: 100000}, "presupuesto_al_activar": {PAUSADO: 60000, CAMPANA: 10000}}
+    return ctx(**{**base, **c})
+
+
+@pytest.mark.parametrize("orden", ["subir_y_activar", "activar_y_subir"])
+def test_lote_subir_y_activar_pausado_respeta_el_tope_en_cualquier_orden(limites_cop, orden):
+    # 100.000 activos + 90.000 de PAUSADO = 190.000 > 165.000, sea cual sea el orden.
+    subir = operacion(id=PAUSADO, de_esperado=60000, a=90000)
+    ops = [subir, _op_activar(PAUSADO)] if orden == "subir_y_activar" else [_op_activar(PAUSADO), subir]
+    v = comprobar(cargar_propuesta(presupuesto(tipo="lote", operaciones=ops)), limites_cop, _ctx_pausado())
+    assert codigos(v) == ["tope_diario_cuenta"]
+
+
+@pytest.mark.parametrize("orden", ["subir_y_activar_padre", "activar_padre_y_subir"])
+def test_lote_presupuesto_pendiente_y_activar_otra_entidad_es_desconocido(limites_cop, orden):
+    subir = operacion(id=PAUSADO, de_esperado=60000, a=61000)
+    padre = _op_activar(CAMPANA, entidad="campaign")
+    ops = [subir, padre] if orden == "subir_y_activar_padre" else [padre, subir]
+    v = comprobar(cargar_propuesta(presupuesto(tipo="lote", operaciones=ops)), limites_cop, _ctx_pausado())
+    assert "valor_vivo_desconocido" in codigos(v)
+
+
+# --- M5: subir gasto de una entidad que no está en presupuestos_activos exige saberla PAUSED -----
+@pytest.mark.parametrize("status,pasa", [(None, False), ("ACTIVE", False), ("PAUSED", True)])
+def test_subir_presupuesto_fuera_de_activos_exige_pausada(limites_cop, status, pasa):
+    valores = {(PAUSADO, "daily_budget"): 60000}
+    if status is not None:
+        valores[(PAUSADO, "status")] = status
+    d = presupuesto(operaciones=[operacion(id=PAUSADO, de_esperado=60000, a=61000)])
+    v = comprobar(cargar_propuesta(d), limites_cop, _ctx_pausado(valores=valores))
+    assert v == [] if pasa else "valor_vivo_desconocido" in codigos(v)
+
+
+@pytest.mark.parametrize("status,pasa", [(None, False), ("ACTIVE", False), ("PAUSED", True)])
+def test_subir_puja_fuera_de_activos_exige_pausada(limites_cop, status, pasa):
+    valores = {} if status is None else {(PAUSADO, "status"): status}
+    d = presupuesto(tipo="puja", operaciones=[operacion(id=PAUSADO, campo="bid_amount", de_esperado=None, a=5000)])
+    v = comprobar(cargar_propuesta(d), limites_cop, _ctx_pausado(valores=valores))
+    assert v == [] if pasa else "valor_vivo_desconocido" in codigos(v)
+
+
+def test_bajar_presupuesto_fuera_de_activos_pasa_sin_status(limites_cop):
+    d = presupuesto(operaciones=[operacion(id=PAUSADO, de_esperado=60000, a=50000)])
+    v = comprobar(cargar_propuesta(d), limites_cop, _ctx_pausado(valores={(PAUSADO, "daily_budget"): 60000}))
+    assert v == []
