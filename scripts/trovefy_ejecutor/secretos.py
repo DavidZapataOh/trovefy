@@ -151,44 +151,51 @@ def cargar_secretos(ruta: Path) -> Secretos:
 
 
 def guardar_secreto(ruta: Path, clave: str, valor: str, *, sobrescribir: bool = False) -> None:
+    guardar_secretos(ruta, {clave: valor}, sobrescribir=sobrescribir)
+
+
+def guardar_secretos(ruta: Path, pares: dict[str, str], *, sobrescribir: bool = False) -> None:
+    """Escribe varias claves en UNA sola escritura atómica bajo el candado."""
     ruta = Path(ruta)
-    if clave not in CLAVES:
-        raise ValueError(f"clave desconocida: {clave}")
-    if (
-        not valor.isprintable()
-        or len(valor.splitlines()) > 1
-        or valor != valor.strip()
-    ):
-        raise ValueError(f"el valor de {clave} contiene caracteres no permitidos")
+    for clave, valor in pares.items():
+        if clave not in CLAVES:
+            raise ValueError(f"clave desconocida: {clave}")
+        if (
+            not valor.isprintable()
+            or len(valor.splitlines()) > 1
+            or valor != valor.strip()
+        ):
+            raise ValueError(f"el valor de {clave} contiene caracteres no permitidos")
     lock = ruta.with_name(ruta.name + ".lock")
     lfd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
         fcntl.flock(lfd, fcntl.LOCK_EX)
-        _guardar_bloqueado(ruta, clave, valor, sobrescribir)
+        _guardar_bloqueado(ruta, pares, sobrescribir)
     finally:
         os.close(lfd)
 
 
-def _guardar_bloqueado(ruta: Path, clave: str, valor: str, sobrescribir: bool) -> None:
+def _guardar_bloqueado(ruta: Path, pares: dict[str, str], sobrescribir: bool) -> None:
     lineas: list[str] = []
     try:
         lineas = _lineas(_leer_texto(ruta))
     except FileNotFoundError:
         pass
     nuevas: list[str] = []
-    reemplazada = False
+    puestas: set[str] = set()
     for linea in lineas:
         k = linea.strip().partition("=")[0].strip()
-        if k == clave and not linea.lstrip().startswith("#"):
+        if k in pares and not linea.lstrip().startswith("#"):
             if not sobrescribir:
-                raise ValueError(f"{clave} ya está guardada")
-            if not reemplazada:
-                nuevas.append(f"{clave}={valor}")
-                reemplazada = True
+                raise ValueError(f"{k} ya está guardada")
+            if k not in puestas:
+                nuevas.append(f"{k}={pares[k]}")
+                puestas.add(k)
             continue
         nuevas.append(linea)
-    if not reemplazada:
-        nuevas.append(f"{clave}={valor}")
+    for k, v in pares.items():
+        if k not in puestas:
+            nuevas.append(f"{k}={v}")
     tmp = ruta.with_name(f".{ruta.name}.{os.getpid()}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:

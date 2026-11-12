@@ -69,7 +69,8 @@ def test_caduca_y_se_agota():
 
 def test_codigo_con_digitos_no_ascii_no_revienta():
     p = CodigoPendiente("123456", T + timedelta(minutes=10))
-    assert intentar_emparejar(msg("١٢٣٤٥٦"), p, None, T) == "codigo"
+    assert intentar_emparejar(msg("١٢٣٤٥٦"), p, None, T) == "no_codigo"
+    assert p.fallos == 0
 
 
 def test_secretos(tmp_path):
@@ -99,7 +100,8 @@ def test_flujo_con_el_falso(tmp_path):
         cliente = ClienteTelegram(TOKEN_PRUEBA, tg.base)
 
         def usuario():
-            while not mostrado:
+            limite = time.monotonic() + 10
+            while not mostrado and time.monotonic() < limite:
                 time.sleep(0.02)
             c = re.search(r"\d{6}", mostrado[0]).group(0)
             malo = "000000" if c != "000000" else "111111"
@@ -114,7 +116,7 @@ def test_flujo_con_el_falso(tmp_path):
             cliente, almacen, s, mostrado.append, auditoria=aud, buzon=buzon,
             ahora=lambda: datetime.now(ZONA_COT),
         )
-        h.join()
+        h.join(timeout=15)
         enviados = [ll for ll in tg.llamadas if ll.metodo == "sendMessage"]
     assert res == Emparejamiento(42, 42)
     assert leer_emparejamiento(s) == res
@@ -145,3 +147,107 @@ def test_caduca_sin_emparejar(tmp_path):
         res = ejecutar_emparejamiento(cliente, almacen, s, lambda _: None, auditoria=aud, buzon=buzon, ahora=ahora, minutos=1)
         assert not [ll for ll in tg.llamadas if ll.metodo == "sendMessage"]
     assert res is None and leer_emparejamiento(s) is None
+
+
+def test_cola_vieja_y_charla_no_gastan_intentos(tmp_path):
+    s, almacen, aud, buzon = _entorno(tmp_path)
+    mostrado: list[str] = []
+    with TelegramFalso() as tg:
+        for i in range(5):  # un extraño encola 5 códigos ANTES de la emisión
+            tg.meter_mensaje(f"00000{i}", user_id=99, chat_id=99)
+        for u in tg._updates:
+            u["message"]["date"] -= 1000
+        tg.meter_mensaje("/start", user_id=42, chat_id=42)  # charla tras la emisión: se ignora
+        cliente = ClienteTelegram(TOKEN_PRUEBA, tg.base)
+
+        def usuario():
+            limite = time.monotonic() + 10
+            while not mostrado and time.monotonic() < limite:
+                time.sleep(0.02)
+            tg.meter_mensaje(re.search(r"\d{6}", mostrado[0]).group(0), user_id=42, chat_id=42)
+
+        h = threading.Thread(target=usuario)
+        h.start()
+        res = ejecutar_emparejamiento(
+            cliente, almacen, s, mostrado.append, auditoria=aud, buzon=buzon,
+            ahora=lambda: datetime.now(ZONA_COT),
+        )
+        h.join(timeout=15)
+    assert res == Emparejamiento(42, 42)
+    eventos = [json.loads(x) for x in (tmp_path / "a.jsonl").read_text().splitlines()]
+    assert not [x for x in eventos if x["evento"] == "emparejar_rechazado"]
+
+
+def test_cinco_codigos_malos_tras_emitir_agotan():
+    p = nuevo_codigo(T)
+    m = msg("000000" if p.codigo != "000000" else "111111")
+    m["message"]["date"] = int(T.timestamp()) + 1
+    for _ in range(MAX_FALLOS):
+        assert intentar_emparejar(m, p, None, T) == "codigo"
+    bueno = msg(p.codigo)
+    bueno["message"]["date"] = int(T.timestamp()) + 1
+    assert intentar_emparejar(bueno, p, None, T) == "agotado"
+    viejo = msg(p.codigo)
+    viejo["message"]["date"] = int(T.timestamp()) - 100
+    assert intentar_emparejar(viejo, nuevo_codigo(T), None, T) == "antiguo"
+
+
+def test_fallo_al_confirmar_se_avisa_y_audita(tmp_path):
+    s, almacen, aud, buzon = _entorno(tmp_path)
+    mostrado: list[str] = []
+    with TelegramFalso() as tg:
+        tg.fallar("sendMessage", veces=1, codigo=403)
+        cliente = ClienteTelegram(TOKEN_PRUEBA, tg.base)
+
+        def usuario():
+            limite = time.monotonic() + 10
+            while not mostrado and time.monotonic() < limite:
+                time.sleep(0.02)
+            tg.meter_mensaje(re.search(r"\d{6}", mostrado[0]).group(0), user_id=42, chat_id=42)
+
+        h = threading.Thread(target=usuario)
+        h.start()
+        res = ejecutar_emparejamiento(
+            cliente, almacen, s, mostrado.append, auditoria=aud, buzon=buzon,
+            ahora=lambda: datetime.now(ZONA_COT),
+        )
+        h.join(timeout=15)
+    assert res == Emparejamiento(42, 42) and leer_emparejamiento(s) == res
+    assert "Emparejado, pero no se pudo confirmar en Telegram." in mostrado
+    eventos = [json.loads(x) for x in (tmp_path / "a.jsonl").read_text().splitlines()]
+    assert any(x["datos"].get("motivo") == "confirmacion_no_enviada" for x in eventos)
+
+
+def test_ya_emparejado_no_muestra_codigo(tmp_path):
+    s, almacen, aud, _ = _entorno(tmp_path)
+    guardar_emparejamiento(s, Emparejamiento(42, 42))
+    mostrado: list[str] = []
+    with TelegramFalso() as tg:
+        cliente = ClienteTelegram(TOKEN_PRUEBA, tg.base)
+        with pytest.raises(ValueError, match="ya emparejado"):
+            ejecutar_emparejamiento(cliente, almacen, s, mostrado.append, auditoria=aud,
+                                    ahora=lambda: datetime.now(ZONA_COT))
+        assert not tg.llamadas
+    assert mostrado == []
+
+
+def test_par_a_medias(tmp_path):
+    s, almacen, aud, _ = _entorno(tmp_path)
+    s.write_text(s.read_text() + "TELEGRAM_USER_ID=42\n")
+    with TelegramFalso() as tg:
+        cliente = ClienteTelegram(TOKEN_PRUEBA, tg.base)
+        with pytest.raises(ValueError, match="a medias"):
+            ejecutar_emparejamiento(cliente, almacen, s, lambda _: None, auditoria=aud,
+                                    ahora=lambda: datetime.now(ZONA_COT))
+        assert not tg.llamadas
+
+
+def test_guardar_par_en_una_escritura(tmp_path, monkeypatch):
+    from trovefy_ejecutor import secretos as sec
+    s, *_ = _entorno(tmp_path)
+    llamadas = []
+    orig = sec._guardar_bloqueado
+    monkeypatch.setattr(sec, "_guardar_bloqueado", lambda *a: (llamadas.append(a), orig(*a))[1])
+    guardar_emparejamiento(s, Emparejamiento(42, 42))
+    assert len(llamadas) == 1
+    assert set(llamadas[0][1]) == {"TELEGRAM_USER_ID", "TELEGRAM_CHAT_ID"}
