@@ -88,7 +88,8 @@ class Buzon:
 
     def leer(self, ruta: Path) -> dict:
         try:
-            fd = os.open(ruta, os.O_RDONLY | os.O_NOFOLLOW)
+            # O_NONBLOCK: abrir una FIFO (o un dispositivo) no se queda esperando; luego S_ISREG la rechaza.
+            fd = os.open(ruta, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         except OSError as e:
             raise _malo(f"no se puede abrir (¿enlace simbólico?): {e.strerror}") from e
         try:

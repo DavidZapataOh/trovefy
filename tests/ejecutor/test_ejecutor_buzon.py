@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 
 import pytest
 from fabricas import presupuesto
@@ -82,3 +83,27 @@ def test_procesar_y_estado(tmp_path):
     assert json.loads(e.read_text())["ts"] and oct(e.stat().st_mode & 0o777) == "0o640"
     with pytest.raises(ValueError):
         b.escribir_estado("../fuera", {})
+
+
+def test_fifo_se_rechaza_sin_colgarse(tmp_path):
+    # Si alguien cambia el archivo por una FIFO entre nuevas() y leer(), abrirla no debe bloquear.
+    b = buzon(tmp_path)
+    fifo = tmp_path / "entrada/P-8.json"
+    os.mkfifo(fifo)
+    resultado: list = []
+
+    def leer():
+        try:
+            b.leer(fifo)
+        except PropuestaInvalida as e:
+            resultado.append(e)
+
+    hilo = threading.Thread(target=leer, daemon=True)
+    hilo.start()
+    hilo.join(timeout=2)
+    if hilo.is_alive():  # desbloquea el hilo antes de fallar
+        fd = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+        os.close(fd)
+        hilo.join(timeout=2)
+        pytest.fail("leer() se quedó bloqueado abriendo una FIFO")
+    assert len(resultado) == 1 and "regular" in resultado[0].motivo
