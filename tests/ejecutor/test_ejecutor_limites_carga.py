@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -159,3 +160,27 @@ def test_claves_repetidas(tmp_path):
         os.chmod(f, 0o600)
         with pytest.raises(LimitesInvalidos, match=clave):
             cargar_limites(f)
+
+
+def test_limites_a_dict_forma_de_la_resolucion_12(limites_cop):
+    from trovefy_ejecutor.limites import limites_a_dict
+
+    d = limites_a_dict(limites_cop)
+    assert json.loads(json.dumps(d)) == d
+    assert set(d) == {"version", "cuentas_permitidas", "acciones_permitidas", "montaje_status_forzado",
+                      "paso_max_pct", "cadencia_min_presupuesto_min", "enfriamiento_puja_estructura_h",
+                      "max_cambios_hora_conjunto", "cuentas"}
+    assert set(d["cuentas"]) == {C}
+    assert d["cuentas"][C] == {"moneda": "COP", "offset": 1, "zona_horaria": "America/Bogota",
+                               "tope_gasto_diario_total": 165000, "max_presupuesto_conjunto": 99000,
+                               "max_presupuesto_campana_cbo": 132000, "spend_cap_test": 99000,
+                               "spend_cap_test_prorroga": 181500}
+    assert d["version"] == 1 and d["paso_max_pct"] == 50 and d["montaje_status_forzado"] == "PAUSED"
+    assert d["cuentas_permitidas"] == [C]
+    assert d["acciones_permitidas"] == sorted(limites_cop.acciones_permitidas)
+
+
+def test_limites_a_dict_offset_nulo(limites_cop_sin_offset):
+    from trovefy_ejecutor.limites import limites_a_dict
+
+    assert limites_a_dict(limites_cop_sin_offset)["cuentas"][C]["offset"] is None

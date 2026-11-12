@@ -185,6 +185,23 @@ def cargar_limites(ruta: Path, *, exigir_0600: bool = True) -> Limites:
 
 
 
+_CUENTA_PUBLICA = ("tope_gasto_diario_total", "max_presupuesto_conjunto", "max_presupuesto_campana_cbo",
+                   "spend_cap_test", "spend_cap_test_prorroga")
+
+
+def limites_a_dict(l: Limites) -> dict:
+    """(extra) Contenido de ``estado/limites.json`` (resolución 12): claves globales y, por cuenta, moneda,
+    offset, zona e importes en unidades mínimas. Sin páginas ni datasets; serializable a JSON."""
+    d: dict = {"version": 1, "cuentas_permitidas": sorted(l.cuentas_permitidas),
+               "acciones_permitidas": sorted(l.acciones_permitidas),
+               "montaje_status_forzado": l.montaje_status_forzado}
+    d.update({k: getattr(l, k) for k in sorted(CLAVES_GLOBALES)})
+    d["cuentas"] = {cid: {"moneda": lc.moneda_codigo, "offset": lc.offset, "zona_horaria": lc.zona_horaria,
+                          **{k: getattr(lc, k) for k in _CUENTA_PUBLICA}}
+                    for cid, lc in sorted(l.cuentas.items())}
+    return d
+
+
 # --- Validación del ejecutor (§5.2, Tarea 7) -----------------------------------------------------
 # Falla cerrada: un valor vivo ausente o mal tipado es una violación, nunca un «pasa». Todas las
 # comparaciones son enteras, en unidades mínimas de la moneda de la cuenta; nada pasa a float.
