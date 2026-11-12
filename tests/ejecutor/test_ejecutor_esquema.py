@@ -96,3 +96,21 @@ def test_inmutable():
     p = cargar_propuesta(presupuesto())
     with pytest.raises(TypeError):
         p.evidencia["x"] = 1
+
+
+def test_estado_exacto_del_contrato():
+    from typing import get_args
+
+    from trovefy_ejecutor.modelo import Estado
+    assert set(get_args(Estado)) == {"recibida", "enviada", "aceptada", "ejecutando", "ejecutada",
+                                     "fallida", "discrepancia", "rechazada", "caducada", "obsoleta"}
+
+
+@pytest.mark.parametrize("datos", [
+    presupuesto(id="P-20261112-١٢٣"),
+    presupuesto(cuenta="act_١٢٣"),
+    presupuesto(operaciones=[operacion(id="١٢٣")]),
+])
+def test_ids_solo_digitos_ascii(datos):
+    with pytest.raises(PropuestaInvalida):
+        cargar_propuesta(datos)

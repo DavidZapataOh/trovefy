@@ -17,9 +17,9 @@ from typing import Any
 from .dinero import es_importe
 from .modelo import TIPOS, Operacion, Propuesta, clase_de
 
-ID_RE = r"^P-\d{8}-\d{3}$"
-CUENTA_RE = r"^act_\d{1,20}$"
-ENTIDAD_ID_RE = r"^\d{1,20}$"
+ID_RE = r"^P-[0-9]{8}-[0-9]{3}$"
+CUENTA_RE = r"^act_[0-9]{1,20}$"
+ENTIDAD_ID_RE = r"^[0-9]{1,20}$"
 RANGO_CLAUDE = range(1, 800)
 RANGO_EJECUTOR = range(800, 900)
 RANGO_USUARIO = range(900, 1000)

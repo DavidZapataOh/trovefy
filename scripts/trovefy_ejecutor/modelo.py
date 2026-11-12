@@ -8,7 +8,10 @@ from datetime import datetime
 from types import MappingProxyType
 from typing import Any, Literal
 
-Estado = Literal["pendiente", "enviada", "aceptada", "rechazada", "expirada", "ejecutada", "fallida", "cancelada"]
+Estado = Literal[
+    "recibida", "enviada", "aceptada", "ejecutando", "ejecutada",
+    "fallida", "discrepancia", "rechazada", "caducada", "obsoleta",
+]
 Clase = Literal["gasto", "no_gasto", "limite", "notificacion"]
 
 TIPOS: frozenset[str] = frozenset({
