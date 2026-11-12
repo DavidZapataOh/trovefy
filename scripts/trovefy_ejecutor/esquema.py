@@ -10,12 +10,23 @@ from __future__ import annotations
 import copy
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from typing import Any
 
 from .dinero import es_importe
-from .modelo import TIPOS, Operacion, Propuesta, clase_de
+from .modelo import (
+    TIPOS,
+    Alerta,
+    Anuncio,
+    Campana,
+    Conjunto,
+    Estructura,
+    Medio,
+    Operacion,
+    Propuesta,
+    clase_de,
+)
 
 ID_RE = r"^P-[0-9]{8}-[0-9]{3}$"
 CUENTA_RE = r"^act_[0-9]{1,20}$"
@@ -179,6 +190,165 @@ def _opcional_tipado(datos: dict, clave: str, ok: Callable[[Any], bool], desc: s
     return datos.get(clave)
 
 
+# --- crear_estructura_pausada y alerta (Tarea 4) -------------------------------------------------
+
+REF_RE = r"[A-Za-z0-9_-]{1,40}"
+SHA256_RE = r"[0-9a-f]{64}"
+CODIGO_RE = r"[A-Z][A-Z0-9_]{0,59}"
+UBICACION_RE = r"[a-z][a-z0-9_]{0,59}"
+NIVELES = ("info", "aviso", "urgente")
+
+
+def _exacto(obj: Any, nombre: str, obligatorias: tuple[str, ...], opcionales: tuple[str, ...] = ()) -> dict:
+    if not isinstance(obj, dict):
+        raise _err(f"{nombre} debe ser un objeto")
+    for k in obj:
+        if k not in obligatorias and k not in opcionales:
+            raise _err(f"campo no permitido: {k}")
+    for k in obligatorias:
+        if k not in obj:
+            raise _err(f"{nombre}: falta el campo {k}")
+    return obj
+
+
+def _cadena(obj: dict, clave: str, minimo: int = 1, maximo: int = 500, patron: str | None = None) -> str:
+    v = obj[clave]
+    if not isinstance(v, str) or not minimo <= len(v) <= maximo:
+        raise _err(f"{clave} debe ser texto de {minimo} a {maximo} caracteres")
+    if patron is not None and re.fullmatch(patron, v) is None:
+        raise _err(f"{clave} no es válido: {v!r}")
+    return v
+
+
+def _importe(obj: dict, clave: str) -> int:
+    v = obj[clave]
+    if not es_importe(v):
+        raise _err(f"{clave} debe ser un importe (entero > 0 en unidades mínimas)")
+    return v
+
+
+def _lista(obj: dict, clave: str, minimo: int, maximo: int) -> list:
+    v = obj[clave]
+    if not isinstance(v, list) or not minimo <= len(v) <= maximo:
+        raise _err(f"{clave} debe ser una lista de {minimo} a {maximo} elementos")
+    return v
+
+
+def _ruta_vault(v: Any, clave: str) -> str:
+    if (not isinstance(v, str) or not 1 <= len(v) <= 300 or v.startswith("/") or "\\" in v or "\0" in v
+            or any(seg in ("", ".", "..") for seg in v.split("/"))):
+        raise _err(f"{clave} debe ser una ruta relativa al vault, sin «..» ni «/» inicial: {v!r}")
+    return v
+
+
+def _validar_medio(m: Any) -> Medio:
+    m = _exacto(m, "medio", ("ref", "ruta", "sha256"))
+    ref = _cadena(m, "ref", patron=REF_RE)
+    ruta = _ruta_vault(m["ruta"], "ruta")
+    sha = _cadena(m, "sha256", 64, 64, SHA256_RE)
+    return Medio(ref, ruta, sha)
+
+
+def _validar_anuncio(a: Any, refs: set[str]) -> Anuncio:
+    a = _exacto(a, "anuncio", ("nombre", "medio", "texto", "titulo", "descripcion", "cta", "url"))
+    nombre = _cadena(a, "nombre", 1, 200)
+    medio = _cadena(a, "medio", patron=REF_RE)
+    if medio not in refs:
+        raise _err(f"medio {medio!r} del anuncio no existe en medios")
+    texto = _cadena(a, "texto", 1, 3000)
+    titulo = _cadena(a, "titulo", 1, 500)
+    descripcion = _cadena(a, "descripcion", 1, 500)
+    cta = _cadena(a, "cta", patron=CODIGO_RE)
+    url = _cadena(a, "url", 9, 2000)
+    if not url.startswith("https://") or any(c.isspace() for c in url):
+        raise _err("url debe empezar por https:// y no llevar espacios")
+    return Anuncio(nombre, medio, texto, titulo, descripcion, cta, url)
+
+
+def _validar_conjunto(c: Any, abo: bool, refs: set[str]) -> Conjunto:
+    c = _exacto(c, "conjunto", ("nombre", "paises", "idiomas", "evento", "ubicaciones_excluidas", "anuncios"),
+                ("daily_budget",))
+    nombre = _cadena(c, "nombre", 1, 200)
+    if abo:
+        if "daily_budget" not in c:
+            raise _err("conjunto: falta daily_budget (ABO)")
+        presupuesto: int | None = _importe(c, "daily_budget")
+    else:
+        if "daily_budget" in c:
+            raise _err("conjunto: daily_budget no va en CBO (va en la campaña)")
+        presupuesto = None
+    paises = _lista(c, "paises", 1, 50)
+    if not all(isinstance(x, str) and re.fullmatch(r"[A-Z]{2}", x) for x in paises) or len(set(paises)) != len(paises):
+        raise _err("paises debe ser una lista sin repetir de códigos de 2 letras mayúsculas")
+    idiomas = _lista(c, "idiomas", 1, 20)
+    if not all(isinstance(x, str) and re.fullmatch(r"[a-z]{2}", x) for x in idiomas):
+        raise _err("idiomas debe ser una lista de códigos de 2 letras minúsculas")
+    evento = _cadena(c, "evento", patron=CODIGO_RE)
+    ubic = _lista(c, "ubicaciones_excluidas", 0, 20)
+    if not all(isinstance(x, str) and re.fullmatch(UBICACION_RE, x) for x in ubic):
+        raise _err("ubicaciones_excluidas debe ser una lista de identificadores en minúsculas")
+    anuncios = tuple(_validar_anuncio(a, refs) for a in _lista(c, "anuncios", 1, 50))
+    return Conjunto(nombre, presupuesto, tuple(paises), tuple(idiomas), evento, tuple(ubic), anuncios)
+
+
+def _validar_campana(c: Any) -> Campana:
+    c = _exacto(c, "campana", ("nombre", "objetivo", "tipo_presupuesto", "spend_cap", "bid_strategy"),
+                ("daily_budget",))
+    nombre = _cadena(c, "nombre", 1, 200)
+    objetivo = _cadena(c, "objetivo", patron=CODIGO_RE)
+    tipo = c["tipo_presupuesto"]
+    if tipo not in ("ABO", "CBO") or not isinstance(tipo, str):
+        raise _err("tipo_presupuesto debe ser ABO o CBO")
+    tope = _importe(c, "spend_cap")
+    puja = _cadena(c, "bid_strategy", patron=CODIGO_RE)
+    if tipo == "CBO":
+        if "daily_budget" not in c:
+            raise _err("campana: falta daily_budget (CBO)")
+        presupuesto: int | None = _importe(c, "daily_budget")
+    else:
+        if "daily_budget" in c:
+            raise _err("campana: daily_budget solo va en CBO")
+        presupuesto = None
+    return Campana(nombre, objetivo, tipo, tope, puja, presupuesto)
+
+
+def _validar_estructura(datos: dict) -> Estructura:
+    for k in ("pagina_id", "dataset_id", "medios", "campana", "conjuntos", "unidad", "moneda"):
+        if k not in datos:
+            raise _err(f"falta el campo {k}")
+    pagina = _cadena(datos, "pagina_id", patron=ENTIDAD_ID_RE)
+    dataset = _cadena(datos, "dataset_id", patron=ENTIDAD_ID_RE)
+    medios = tuple(_validar_medio(m) for m in _lista(datos, "medios", 1, 50))
+    refs = [m.ref for m in medios]
+    if len(set(refs)) != len(refs):
+        raise _err("ref de medios repetida")
+    campana = _validar_campana(datos["campana"])
+    abo = campana.tipo_presupuesto == "ABO"
+    conjuntos = tuple(_validar_conjunto(c, abo, set(refs)) for c in _lista(datos, "conjuntos", 1, 20))
+    if datos["unidad"] != "minima" or not isinstance(datos["unidad"], str):
+        raise _err('unidad debe ser "minima"')
+    moneda = _cadena(datos, "moneda", 3, 3, r"[A-Z]{3}")
+    solo = datos.get("solo_validar", False)
+    if type(solo) is not bool:
+        raise _err("solo_validar debe ser booleano (true o false)")
+    return Estructura(pagina, dataset, medios, campana, conjuntos, "minima", moneda, solo)
+
+
+def _validar_alerta(datos: dict) -> Alerta:
+    for k in ("nivel", "titulo", "texto"):
+        if k not in datos:
+            raise _err(f"falta el campo {k}")
+    nivel = datos["nivel"]
+    if not isinstance(nivel, str) or nivel not in NIVELES:
+        raise _err("nivel debe ser info, aviso o urgente")
+    titulo = _cadena(datos, "titulo", 1, 120)
+    texto = _cadena(datos, "texto", 1, 3000)
+    adj = datos.get("adjuntos", [])
+    if not isinstance(adj, list) or len(adj) > 10:
+        raise _err("adjuntos debe ser una lista de como mucho 10 rutas")
+    return Alerta(nivel, titulo, texto, tuple(_ruta_vault(a, "adjuntos") for a in adj))
+
+
 def cargar_propuesta(datos: dict) -> Propuesta:
     if not isinstance(datos, dict):
         raise _err("la propuesta debe ser un objeto")
@@ -190,18 +360,24 @@ def cargar_propuesta(datos: dict) -> Propuesta:
     tipo = datos.get("tipo")
     if not isinstance(tipo, str) or tipo not in TIPOS:
         raise _err(f"tipo desconocido: {tipo!r}")
-    if tipo in ("alerta", "crear_estructura_pausada"):
-        raise _err(f"tipo {tipo} aún no soportado por este esquema")
     creada = _fecha(datos.get("creada"))
     origen = _texto(datos, "origen", 1, 100)
     if tipo == "noop":
         permitidas = COMUNES | {"motivo", "prioridad", "expira_en_min"}
+    elif tipo == "alerta":
+        permitidas = COMUNES | {"nivel", "titulo", "texto", "adjuntos", "prioridad", "expira_en_min"}
+    elif tipo == "crear_estructura_pausada":
+        permitidas = COMUNES | {"producto", "pais", "cuenta", "pagina_id", "dataset_id", "medios", "campana",
+                                "conjuntos", "unidad", "moneda", "solo_validar", "prioridad", "expira_en_min"}
     else:
         permitidas = COMUNES | OPCIONALES | {"cuenta", "operaciones", "motivo"}
     for k in datos:
         if k not in permitidas:
             raise _err(f"campo no permitido: {k}")
-    motivo = _texto(datos, "motivo", 1, 1000, obligatorio=tipo != "noop")
+    if tipo in ("alerta", "crear_estructura_pausada"):
+        motivo = None
+    else:
+        motivo = _texto(datos, "motivo", 1, 1000, obligatorio=tipo != "noop")
     prioridad = datos.get("prioridad", "normal")
     if prioridad not in ("normal", "alta") or not isinstance(prioridad, str):
         raise _err("prioridad debe ser normal o alta")
@@ -212,6 +388,9 @@ def cargar_propuesta(datos: dict) -> Propuesta:
     if tipo == "noop":
         return Propuesta(**base, cuenta=None, producto=None, pais=None, operaciones=(), evidencia=None,
                          reinicia_aprendizaje=False)
+    if tipo == "alerta":
+        return Propuesta(**base, cuenta=None, producto=None, pais=None, operaciones=(), evidencia=None,
+                         reinicia_aprendizaje=False, alerta=_validar_alerta(datos))
     cuenta = datos.get("cuenta")
     if cuenta is None and "cuenta" not in datos:
         if tipo != "limite_ejecutor":
@@ -224,6 +403,9 @@ def cargar_propuesta(datos: dict) -> Propuesta:
                             "debe ser un código de 2 letras mayúsculas")
     evidencia = _opcional_tipado(datos, "evidencia", lambda v: isinstance(v, dict), "debe ser un objeto")
     reinicia = _opcional_tipado(datos, "reinicia_aprendizaje", lambda v: type(v) is bool, "debe ser booleano")
+    if tipo == "crear_estructura_pausada":
+        return Propuesta(**base, cuenta=cuenta, producto=producto, pais=pais, operaciones=(), evidencia=None,
+                         reinicia_aprendizaje=False, estructura=_validar_estructura(datos))
     ops = datos.get("operaciones")
     if not isinstance(ops, list) or not 1 <= len(ops) <= 40:
         raise _err("operaciones debe ser una lista de 1 a 40 elementos")
@@ -246,6 +428,10 @@ def _plano(v: Any) -> Any:
     return v
 
 
+def _sin_none(d: dict) -> dict:
+    return {k: v for k, v in _plano(d).items() if v is not None}
+
+
 def volcar_propuesta(p: Propuesta) -> dict:
     """Inversa de ``cargar_propuesta``; omite los opcionales ``None``."""
     d: dict[str, Any] = {"version": p.version, "id": p.id, "tipo": p.tipo, "creada": p.creada.isoformat(),
@@ -253,7 +439,18 @@ def volcar_propuesta(p: Propuesta) -> dict:
     for k in ("cuenta", "producto", "pais", "motivo"):
         if getattr(p, k) is not None:
             d[k] = getattr(p, k)
-    if p.tipo != "noop":
+    if p.tipo == "alerta":
+        d.update(nivel=p.alerta.nivel, titulo=p.alerta.titulo, texto=p.alerta.texto)
+        if p.alerta.adjuntos:
+            d["adjuntos"] = list(p.alerta.adjuntos)
+    elif p.tipo == "crear_estructura_pausada":
+        e = p.estructura
+        d.update(pagina_id=e.pagina_id, dataset_id=e.dataset_id, medios=_plano([asdict(m) for m in e.medios]),
+                 campana=_sin_none(asdict(e.campana)), conjuntos=[_sin_none(asdict(c)) for c in e.conjuntos],
+                 unidad=e.unidad, moneda=e.moneda)
+        if e.solo_validar:
+            d["solo_validar"] = True
+    elif p.tipo != "noop":
         d["operaciones"] = [{k: _plano(v) for k, v in
                              (("entidad", o.entidad), ("id", o.id), ("campo", o.campo),
                               ("de_esperado", o.de_esperado), ("a", o.a), ("unidad", o.unidad),

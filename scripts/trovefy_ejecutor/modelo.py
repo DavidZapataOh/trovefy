@@ -56,6 +56,65 @@ class Operacion:
 
 
 @dataclass(frozen=True)
+class Medio:
+    ref: str
+    ruta: str
+    sha256: str
+
+
+@dataclass(frozen=True)
+class Anuncio:
+    nombre: str
+    medio: str
+    texto: str
+    titulo: str
+    descripcion: str
+    cta: str
+    url: str
+
+
+@dataclass(frozen=True)
+class Conjunto:
+    nombre: str
+    daily_budget: int | None
+    paises: tuple[str, ...]
+    idiomas: tuple[str, ...]
+    evento: str
+    ubicaciones_excluidas: tuple[str, ...]
+    anuncios: tuple[Anuncio, ...]
+
+
+@dataclass(frozen=True)
+class Campana:
+    nombre: str
+    objetivo: str
+    tipo_presupuesto: Literal["ABO", "CBO"]
+    spend_cap: int
+    bid_strategy: str
+    daily_budget: int | None
+
+
+@dataclass(frozen=True)
+class Estructura:
+    pagina_id: str
+    dataset_id: str
+    medios: tuple[Medio, ...]
+    campana: Campana
+    conjuntos: tuple[Conjunto, ...]
+    unidad: str
+    moneda: str
+    solo_validar: bool = False
+
+
+@dataclass(frozen=True)
+class Alerta:
+    nivel: Literal["info", "aviso", "urgente"]
+    titulo: str
+    texto: str
+    adjuntos: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Propuesta:
     version: int
     id: str
@@ -72,8 +131,8 @@ class Propuesta:
     reinicia_aprendizaje: bool
     prioridad: Literal["normal", "alta"]
     expira_en_min: int | None
-    estructura: Any | None = None  # Estructura: Tarea 4
-    alerta: Any | None = None  # Alerta: Tarea 4
+    estructura: Estructura | None = None
+    alerta: Alerta | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "evidencia", congelar(self.evidencia))
