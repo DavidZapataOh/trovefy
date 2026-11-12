@@ -226,6 +226,10 @@ class GraphFalso:
             raise self.fallar_creacion[arista]
         self._existe(padre)
         self._sin_negativos(normal)
+        if arista == "campaigns" and not any(k in normal for k in ("daily_budget", "lifetime_budget",
+                                                                    "is_adset_budget_sharing_enabled")):
+            # Como Meta: sin presupuesto de campaña hay que decir si los conjuntos comparten presupuesto.
+            raise ErrorGraph(100, None, "Invalid parameter: is_adset_budget_sharing_enabled is required")
         for k in ("campaign_id", "adset_id"):  # el padre referido debe existir, como en Meta
             if k in normal:
                 self._existe(str(normal[k]))

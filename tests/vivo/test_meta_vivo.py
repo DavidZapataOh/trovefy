@@ -33,6 +33,7 @@ def test_campana_validate_only_vivo():
     cuenta = _cuenta()
     cliente = ClienteGraph(os.environ.get("TROVEFY_META_TOKEN_PRUEBA") or pytest.skip(_SIN_ENTORNO))
     r = cliente.crear(cuenta, "campaigns", {"name": "trovefy validate conjunto", "objective": "OUTCOME_SALES",
-                                            "status": "PAUSED", "special_ad_categories": []},
+                                            "status": "PAUSED", "special_ad_categories": [],
+                                            "is_adset_budget_sharing_enabled": False},
                       validate_only=True)
     assert r.get("success") is True and "id" not in r

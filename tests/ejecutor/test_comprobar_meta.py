@@ -19,7 +19,8 @@ def test_cuenta_cop_ok():
     assert g.escrituras() == []
     assert [x.validate_only for x in g.llamadas if x.metodo == "crear"] == [True]
     assert g.llamadas[-1].datos == {"name": "trovefy comprobar-meta", "objective": "OUTCOME_SALES",
-                                    "status": "PAUSED", "special_ad_categories": []}
+                                    "status": "PAUSED", "special_ad_categories": [],
+                                    "is_adset_budget_sharing_enabled": False}
 
 
 def test_token_caducado():

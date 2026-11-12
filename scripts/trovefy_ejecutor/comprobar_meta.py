@@ -13,7 +13,9 @@ from datetime import UTC, datetime
 from trovefy_ejecutor.graph import ErrorGraph, ErrorRed, InfoCuenta, clasificar
 
 _CAMPANA_PRUEBA = {"name": "trovefy comprobar-meta", "objective": "OUTCOME_SALES", "status": "PAUSED",
-                   "special_ad_categories": []}
+                   "special_ad_categories": [],
+                   # Meta lo exige en campañas sin presupuesto de campaña (el montaje ya lo envía).
+                   "is_adset_budget_sharing_enabled": False}
 
 
 @dataclass(frozen=True)

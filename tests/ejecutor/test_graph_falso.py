@@ -168,9 +168,10 @@ def test_cambiar_edicion_manual():
 
 def test_crear_ids_crecientes_y_validate_only():
     g = mundo_basico()
-    assert g.crear("act_0000000000000000", "campaigns", {"name": "x"}, validate_only=True) == {"success": True}
+    abo = {"is_adset_budget_sharing_enabled": False}
+    assert g.crear("act_0000000000000000", "campaigns", {"name": "x", **abo}, validate_only=True) == {"success": True}
     assert "9000001" not in g.objetos
-    r1 = g.crear("act_0000000000000000", "campaigns", {"name": "x", "status": "PAUSED"})
+    r1 = g.crear("act_0000000000000000", "campaigns", {"name": "x", "status": "PAUSED", **abo})
     r2 = g.crear("act_0000000000000000", "adsets", {"name": "y"})
     assert (r1, r2) == ({"id": "9000001"}, {"id": "9000002"})
     assert g.objetos["9000001"]["name"] == "x"
@@ -194,3 +195,16 @@ def test_buscar_q_invalida(q):
     with pytest.raises(ValueError):
         g.buscar("adlocale", q, ["key"])
     assert g.llamadas == []
+
+
+def test_crear_campana_sin_presupuesto_exige_is_adset_budget_sharing_enabled():
+    g = mundo_basico()
+    for vo in (True, False):
+        with pytest.raises(ErrorGraph) as e:
+            g.crear("act_0000000000000000", "campaigns", {"name": "x", "status": "PAUSED"}, validate_only=vo)
+        assert e.value.codigo == 100
+    assert len(g.objetos) == 5 and "9000001" not in g.objetos  # rechazada: no se crea nada
+    assert g.crear("act_0000000000000000", "campaigns", {"name": "x", "daily_budget": 1000},
+                   validate_only=True) == {"success": True}
+    assert g.crear("act_0000000000000000", "campaigns", {"name": "x", "is_adset_budget_sharing_enabled": False},
+                   validate_only=True) == {"success": True}
