@@ -297,7 +297,7 @@ def _ejecutar(args: argparse.Namespace) -> int:
         nota = nota if len(nota) <= 80 else nota[:79] + "…"
         print(f"{p.id:<4} {p.nombre:<40} {p.estado:<11} {p.fecha or '—':<10} {nota}".rstrip())
     frac = porcentaje_fase(pasos, 0)
-    print(f"\nFase 0: {round(frac * 12)}/12 verificados ({frac * 100:.0f} %)")
+    print(f"\nFase 0: {round(frac * 12)}/12 completados, hechos o verificados ({frac * 100:.0f} %)")
     return 0
 
 
