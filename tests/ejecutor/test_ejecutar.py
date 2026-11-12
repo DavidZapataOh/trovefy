@@ -158,7 +158,7 @@ def test_tipo_no_soportado(entorno):
 def test_campos_por_tipo():
     assert CAMPOS_POR_TIPO["puja"] == {("adset", "bid_amount")}
     assert CAMPOS_POR_TIPO["limite_cuenta"] == {("account", "spend_cap")}
-    assert ("campaign", "lifetime_budget") in CAMPOS_POR_TIPO["presupuesto"]
+    assert CAMPOS_POR_TIPO["presupuesto"] == {("adset", "daily_budget"), ("campaign", "daily_budget")}
     assert CAMPOS_POR_TIPO["pausar"] == CAMPOS_POR_TIPO["activar"] == {
         ("campaign", "status"), ("adset", "status"), ("ad", "status")}
 
@@ -385,3 +385,90 @@ def test_auditoria_rota_antes_de_escribir_no_escribe(entorno):
     aud.cabeza.unlink()  # cadena inverificable: anotar falla
     r = ejecutar(propuesta(), g, alm, aud)
     assert r.estado == "fallida" and _reales(g) == []
+
+
+# -- fix round 1 ---------------------------------------------------------------------------
+def test_campos_por_tipo_nunca_mas_abierto_que_el_esquema():
+    from trovefy_ejecutor.esquema import REGLAS
+    for tipo, pares in CAMPOS_POR_TIPO.items():
+        for entidad, campo in pares:
+            assert any(entidad in r.entidades and r.campo == campo for r in REGLAS[tipo]), (tipo, entidad, campo)
+
+
+def test_lifetime_budget_no_soportado(entorno):
+    g, alm, aud = entorno
+    g.cambiar("s1", lifetime_budget="90000")
+    r = ejecutar(propuesta(op={"campo": "lifetime_budget", "de_esperado": 90000, "a": 100000}), g, alm, aud)
+    assert r.estado == "fallida" and g.llamadas == []
+
+
+def _error_real_aplicado(g, aplicar: bool):
+    """La escritura real devuelve ErrorGraph; con ``aplicar`` Meta la aplicó igualmente."""
+    original = g.escribir
+
+    def escribir(id, datos, *, validate_only=False):
+        if validate_only:
+            return original(id, datos, validate_only=True)
+        if aplicar:
+            original(id, datos)
+        else:
+            g.llamadas.append(type(g.llamadas[0])("escribir", id, dict(datos), False))
+        raise ErrorGraph(17, 2446079, "limit")
+
+    g.escribir = escribir
+
+
+def test_error_meta_real_pero_aplicado_es_discrepancia(entorno):
+    g, alm, aud = entorno
+    _error_real_aplicado(g, aplicar=True)
+    r = ejecutar(propuesta(), g, alm, aud, ahora=_reloj)
+    assert r.estado == "discrepancia" and len(_reales(g)) == 1
+    assert alm.ultimo_cambio("s1", "daily_budget") == T
+
+
+def test_error_meta_real_no_aplicado_relee_y_falla(entorno):
+    g, alm, aud = entorno
+    _error_real_aplicado(g, aplicar=False)
+    r = ejecutar(propuesta(), g, alm, aud, ahora=_reloj)
+    assert (r.estado, r.error) == ("fallida", "limite_meta") and r.reintentable_desde == T + timedelta(hours=1)
+    assert len(_reales(g)) == 1 and alm.ultimo_cambio("s1", "daily_budget") is None
+    assert [x.metodo for x in g.llamadas].count("leer") >= 3  # cuenta + s1 + relectura
+
+
+def test_error_meta_real_sin_relectura_registra_y_falla(entorno):
+    g, alm, aud = entorno
+    g.errores_reales["s1"] = ErrorGraph(17, 2446079, "limit")
+    original = g.escribir
+
+    def escribir(id, datos, *, validate_only=False):
+        try:
+            return original(id, datos, validate_only=validate_only)
+        finally:
+            if not validate_only:
+                g.red_al_leer = True
+
+    g.escribir = escribir
+    r = ejecutar(propuesta(), g, alm, aud, ahora=_reloj)
+    assert (r.estado, r.error) == ("fallida", "limite_meta") and len(_reales(g)) == 1
+    assert alm.ultimo_cambio("s1", "daily_budget") == T
+
+
+def test_reactivar_que_revienta_no_escapa(entorno):
+    g, alm, aud = entorno
+    _con_numerico(g)
+    g.forzar_pausa.add(NUM)
+
+    def roto(_id):
+        raise RuntimeError("sqlite caído")
+
+    alm.obtener = roto
+    r = ejecutar(propuesta(op={"id": NUM}), g, alm, aud, ahora=_reloj)
+    assert r.estado == "discrepancia" and r.nueva_propuesta is None and "crea la propuesta a mano" in r.detalle
+    assert len(_ejecuciones(aud)) == 3 and len(_reales(g)) == 1
+
+
+def test_relectura_sin_status_es_discrepancia(entorno):
+    g, alm, aud = entorno
+    g.al_escribir = lambda: g.objetos["s1"].pop("status")
+    r = ejecutar(propuesta(), g, alm, aud)
+    assert r.estado == "discrepancia" and len(_reales(g)) == 1

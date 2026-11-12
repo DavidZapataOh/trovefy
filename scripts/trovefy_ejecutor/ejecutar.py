@@ -34,7 +34,7 @@ EstadoRes = Literal["ejecutada", "fallida", "discrepancia", "obsoleta"]
 
 _ESTADOS = frozenset({"campaign", "adset", "ad"})
 CAMPOS_POR_TIPO: dict[str, set[tuple[str, str]]] = {
-    "presupuesto": {(e, c) for e in ("adset", "campaign") for c in ("daily_budget", "lifetime_budget")},
+    "presupuesto": {("adset", "daily_budget"), ("campaign", "daily_budget")},
     "puja": {("adset", "bid_amount")},
     "spend_cap": {("campaign", "spend_cap")},
     "limite_cuenta": {("account", "spend_cap")},
@@ -43,7 +43,7 @@ CAMPOS_POR_TIPO: dict[str, set[tuple[str, str]]] = {
 }
 _STATUS_POR_TIPO = {"pausar": "PAUSED", "activar": "ACTIVE"}
 # Campo de la regla de cadencia (limites) que cuenta cada cambio. status y spend_cap no tienen regla.
-CAMPO_CADENCIA = {"daily_budget": "daily_budget", "lifetime_budget": "daily_budget", "bid_amount": "bid_amount"}
+CAMPO_CADENCIA = {"daily_budget": "daily_budget", "bid_amount": "bid_amount"}
 
 ZONA_IDS = "America/Bogota"
 _EMITIDOS: set[str] = set()
@@ -209,7 +209,7 @@ def _ejecutar_op(op: Operacion, p: Propuesta, vv: ValoresVivos, graph, almacen: 
         return r("no_intentada", "STOP: no se intentó", error="stop")
     except ErrorGraph as e:
         _anotar(auditoria, p, False, False, f"{desc}; {_texto_error(e)}")
-        return r("fallida", f"Meta rechazó la escritura: {_texto_error(e)}", error=clasificar(e))
+        return _tras_rechazo(op, graph, almacen, ahora, antes, r, e)
     except ErrorRed as e:
         perdida = e.motivo
         _anotar(auditoria, p, False, False, f"{desc}; red tras enviar ({e.motivo}): se relee")
@@ -225,6 +225,9 @@ def _ejecutar_op(op: Operacion, p: Propuesta, vv: ValoresVivos, graph, almacen: 
     except Exception as e:  # noqa: BLE001
         _cadencia(almacen, op, ahora)  # pudo cambiar: cuenta para la cadencia (lado seguro)
         return r("discrepancia", f"estado desconocido: no se pudo releer ({_texto_error(e)})")
+    if op.entidad in _ESTADOS and not isinstance(crudo.get("status"), str):
+        _cadencia(almacen, op, ahora)
+        return r("discrepancia", "estado desconocido: la relectura no trae status")
     despues = _normal(op.campo, crudo.get(op.campo))
     status_antes = vv.status(op.id)
     status_despues = crudo.get("status")
@@ -243,6 +246,25 @@ def _ejecutar_op(op: Operacion, p: Propuesta, vv: ValoresVivos, graph, almacen: 
         return r("discrepancia", f"después {despues}; Meta dejó la entidad en PAUSED sin pedirlo", despues,
                  pausada=True)
     return r("discrepancia", f"después {despues}: no es lo pedido", despues)
+
+
+def _tras_rechazo(op: Operacion, graph, almacen: Almacen, ahora: Callable[[], datetime], antes: object,
+                  r: Callable[..., ResultadoOp], e: ErrorGraph) -> ResultadoOp:
+    """Meta rechazó la escritura real: se relee por si la aplicó igualmente (nunca se reenvía)."""
+    error = clasificar(e)
+    texto = f"Meta rechazó la escritura: {_texto_error(e)}"
+    try:
+        crudo = _releer(graph, op)
+    except Exception as ex:  # noqa: BLE001
+        _cadencia(almacen, op, ahora)  # lado seguro
+        return r("fallida", f"{texto}; no se pudo releer ({_texto_error(ex)})", error=error)
+    despues = _normal(op.campo, crudo.get(op.campo))
+    sin_status = op.entidad in _ESTADOS and not isinstance(crudo.get("status"), str)
+    if despues != antes or sin_status:
+        _cadencia(almacen, op, ahora)
+    if despues == antes and not sin_status:
+        return r("fallida", f"{texto}; la relectura dice {despues}: no se aplicó", despues, error=error)
+    return r("discrepancia", f"{texto}; pero la relectura dice {despues}", despues, error=error)
 
 
 def _cadencia(almacen: Almacen, op: Operacion, ahora: Callable[[], datetime]) -> None:
@@ -362,7 +384,11 @@ def _cerrar(p: Propuesta, ops: list[ResultadoOp], vv: ValoresVivos, almacen: Alm
     nueva: dict | None = None
     pausadas = [o for o in ops if o.pausada_sin_pedir]
     if pausadas:
-        nueva, aviso = _reactivar(p, pausadas, dict(vv.tipos), almacen, ahora)
+        try:
+            nueva, aviso = _reactivar(p, pausadas, dict(vv.tipos), almacen, ahora)
+        except Exception as e:  # noqa: BLE001 — nada tras una escritura real puede escapar
+            nueva = None
+            aviso = f"no se pudo preparar la propuesta de reactivar ({_texto_error(e)}): crea la propuesta a mano"
         if aviso:
             detalle = f"{detalle} | {aviso}"
     desde = ahora() + _ESPERA_LIMITE_META if error == "limite_meta" else None
