@@ -154,3 +154,42 @@ def test_lote_numerado_y_lote_que_no_cabe():
     nombres = {d.id_conjunto(i): "N" * 64 for i in range(1, n + 1)}
     with pytest.raises(MensajeDemasiadoLargo):
         render_propuesta(cargar_propuesta(d.lote(n)), DatosRender(COP, T(14, 5), T(23, 59), valores, nombres))
+
+
+def test_limite_ejecutor_falla_cerrado_si_la_operacion_no_es_de_la_cuenta_o_moneda():
+    LE = DatosRender(COP, T(14, 5), T(14, 50), {("ejecutor", d.CUENTA, "tope_gasto_diario_total"): 165000})
+    p = cargar_propuesta(d.limite_ejecutor())
+    assert "165.000 COP → 150.000 COP" in render_propuesta(p, LE)  # coincide: se renderiza igual
+    otra_moneda = d.limite_ejecutor()
+    otra_moneda["operaciones"][0]["moneda"] = "USD"
+    with pytest.raises(SinValorVivo):
+        render_propuesta(cargar_propuesta(otra_moneda), LE)
+    otra_cuenta = d.limite_ejecutor()
+    otra_cuenta["operaciones"][0]["id"] = "act_1111111111111111"
+    LE2 = DatosRender(COP, T(14, 5), T(14, 50), {("ejecutor", "act_1111111111111111", "tope_gasto_diario_total"): 1})
+    with pytest.raises(SinValorVivo):
+        render_propuesta(cargar_propuesta(otra_cuenta), LE2)
+
+
+def test_propuesta_con_emoji_se_mide_en_utf16():
+    from trovefy_ejecutor.telegram import ClienteTelegram, largo_telegram
+    motivo = "😀" * 400
+    txt = render_propuesta(cargar_propuesta(d.presupuesto_cop(motivo=motivo)), V)
+    assert largo_telegram(txt) <= 3800
+    ClienteTelegram._validar_largo(txt)
+    por_que = next(ln for ln in txt.splitlines() if ln.startswith("Por qué: "))
+    assert largo_telegram(por_que) <= len("Por qué: ") + 300 and por_que.endswith("…")
+    assert "\ud800" not in txt and txt.encode("utf-16", "strict")
+
+
+def test_propuesta_larga_en_utf16_se_rechaza_aunque_len_sea_menor():
+    # 1950 emojis = 1950 caracteres pero 3900 unidades UTF-16 (> 3800)
+    from trovefy_ejecutor.render import MAX_PROPUESTA
+    assert MAX_PROPUESTA == 3800
+    ops = [{"entidad": "adset", "id": d.id_conjunto(i), "campo": "daily_budget", "de_esperado": 20000, "a": 26000,
+            "unidad": "minima", "moneda": "COP"} for i in range(1, 40)]
+    valores = {("adset", d.id_conjunto(i), "daily_budget"): 20000 for i in range(1, 40)}
+    nombres = {d.id_conjunto(i): "😀" * 60 for i in range(1, 40)}
+    vivo = DatosRender(COP, T(14, 5), T(14, 50), valores, nombres)
+    with pytest.raises(MensajeDemasiadoLargo):
+        render_propuesta(cargar_propuesta(d.presupuesto_cop(operaciones=ops)), vivo)

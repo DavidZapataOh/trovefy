@@ -116,3 +116,32 @@ def test_resumen_demasiado_largo_no_se_corta():
 def test_desenlace_desconocido_falla():
     with pytest.raises(ValueError):
         render_resultado(O, Desenlace("raro", T))  # type: ignore[arg-type]
+
+
+def test_resultado_con_emoji_cabe_en_4096_utf16():
+    from trovefy_ejecutor.telegram import ClienteTelegram, largo_telegram
+    lote = tuple("😀" * 100 for _ in range(200))
+    txt = render_resultado("😀" * 1900, Desenlace("ejecutada", T, relectura="ok", lineas_lote=lote))
+    assert largo_telegram(txt) <= 4096 and "detalle en el vault" in txt
+    ClienteTelegram._validar_largo(txt)
+    txt.encode("utf-16-le", "strict")
+
+
+def test_resultado_con_original_enorme_se_acota():
+    from trovefy_ejecutor.telegram import ClienteTelegram, largo_telegram
+    for original in ("😀" * 5000, "x" * 9000):
+        for d in (Desenlace("ejecutada", T, relectura="ok"),
+                  Desenlace("ejecutada", T, relectura="ok", lineas_lote=("1. OK",))):
+            txt = render_resultado(original, d)
+            assert largo_telegram(txt) <= 4096
+            ClienteTelegram._validar_largo(txt)
+            assert "EJECUTADA" in txt
+
+
+def test_resumen_con_emoji_se_mide_en_utf16():
+    from trovefy_ejecutor.telegram import largo_telegram
+    it = ItemResumen("P-20261112-004", "😀" * 100, "😀" * 100, T, "enviada")
+    txt, _ = render_resumen([it] * 5, "😀" * 100, 42, K)
+    assert largo_telegram(txt) <= 4096
+    with pytest.raises(MensajeDemasiadoLargo):
+        render_resumen([it], "t", 42, K, maximo=300 // 2)  # 2 unidades por emoji

@@ -15,7 +15,7 @@ from .dinero import Moneda, formatear
 from .esquema import RANGO_USUARIO
 from .modelo import Estado, Operacion, Propuesta
 from .reloj import ZONA_COT
-from .telegram import Boton
+from .telegram import Boton, largo_telegram
 
 MAX_PROPUESTA = 3800  # deja sitio a la línea de resultado
 MAX_POR_QUE = 300
@@ -51,6 +51,16 @@ def _descartable(c: str) -> bool:
             or 0x202A <= o <= 0x202E or 0x2066 <= o <= 0x2069)
 
 
+def _cortar(texto: str, unidades: int) -> str:
+    """Prefijo más largo de ``texto`` con ≤ ``unidades`` unidades UTF-16 (nunca parte un par subrogado)."""
+    usado = 0
+    for i, c in enumerate(texto):
+        usado += 2 if ord(c) > 0xFFFF else 1
+        if usado > unidades:
+            return texto[:i]
+    return texto
+
+
 def limpiar_texto(texto: str, maximo: int) -> str:
     texto = _SALTOS.sub("\n", str(texto))
     sal = []
@@ -65,8 +75,8 @@ def limpiar_texto(texto: str, maximo: int) -> str:
             sal.append(c)
     lineas = [re.sub(r" +", " ", ln).strip() for ln in "".join(sal).split("\n")]
     texto = " · ".join(ln for ln in lineas if ln)
-    if len(texto) > maximo:
-        texto = texto[: maximo - 1] + "…"
+    if largo_telegram(texto) > maximo:
+        texto = _cortar(texto, maximo - 1) + "…"
     return texto
 
 
@@ -172,6 +182,8 @@ def _lineas_limite(p: Propuesta, vivo: DatosRender) -> list[str]:
         if actual is None:
             raise SinValorVivo(f"ejecutor {limpiar_texto(op.id, 30)} {limpiar_texto(op.campo, 40)}")
         cuenta = limpiar_texto(op.id, 30)
+        if op.unidad == "minima" and (op.moneda != vivo.moneda.codigo or op.id != p.cuenta):
+            raise SinValorVivo(f"ejecutor {cuenta} {limpiar_texto(op.campo, 40)}: moneda o cuenta no coinciden")
         if op.unidad == "minima" and isinstance(op.a, int) and isinstance(actual, int):
             de, a = formatear(actual, vivo.moneda), formatear(op.a, vivo.moneda)
         else:
@@ -233,8 +245,9 @@ def render_propuesta(p: Propuesta, vivo: DatosRender) -> str:
     else:
         lineas.append(f"Reinicia aprendizaje: {'sí' if p.reinicia_aprendizaje else 'no'} · {_caduca(vivo)}")
     texto = "\n".join(lineas)
-    if len(texto) > MAX_PROPUESTA:
-        raise MensajeDemasiadoLargo(f"{len(texto)} caracteres (máximo {MAX_PROPUESTA})")
+    n = largo_telegram(texto)
+    if n > MAX_PROPUESTA:
+        raise MensajeDemasiadoLargo(f"{n} unidades (máximo {MAX_PROPUESTA})")
     return texto
 
 
@@ -297,23 +310,28 @@ def _linea_desenlace(d: Desenlace) -> str:
 
 
 def render_resultado(texto_original: str, d: Desenlace) -> str:
-    base = texto_original + "\n\n" + _linea_desenlace(d)
+    linea = _linea_desenlace(d)
+    pie_max = largo_telegram("\n… y 999999 más (detalle en el vault)") if d.lineas_lote else 0
+    presupuesto = MAX_MENSAJE - largo_telegram("\n\n" + linea) - pie_max
+    if largo_telegram(texto_original) > presupuesto:
+        texto_original = _cortar(texto_original, presupuesto - 1) + "…"
+    base = texto_original + "\n\n" + linea
     if not d.lineas_lote:
         return base
     lineas = [_externo(ln, 300) for ln in d.lineas_lote]
     completo = base + "".join("\n" + ln for ln in lineas)
-    if len(completo) <= MAX_MENSAJE:
+    if largo_telegram(completo) <= MAX_MENSAJE:
         return completo
-    salida, usado = [], len(base)
+    salida, usado = [], largo_telegram(base)
     for i, ln in enumerate(lineas):
         resto = len(lineas) - i
         pie = f"\n… y {resto} más (detalle en el vault)"
-        if usado + 1 + len(ln) + len(pie) > MAX_MENSAJE:
+        if usado + 1 + largo_telegram(ln) + largo_telegram(pie) > MAX_MENSAJE:
             break
         salida.append("\n" + ln)
-        usado += 1 + len(ln)
+        usado += 1 + largo_telegram(ln)
     resto = len(lineas) - len(salida)
-    return (base + "".join(salida) + f"\n… y {resto} más (detalle en el vault)")[:MAX_MENSAJE]
+    return base + "".join(salida) + f"\n… y {resto} más (detalle en el vault)"
 
 
 def texto_ya_procesada(estado: Estado) -> str:
@@ -321,7 +339,7 @@ def texto_ya_procesada(estado: Estado) -> str:
         return "Caducada: no se ejecutó nada"
     if estado == "recibida":
         return "Aún no enviada: no se hizo nada"
-    return f"Ya procesada ({limpiar_texto(estado, 40)})"[:200]
+    return f"Ya procesada ({limpiar_texto(estado, 40)})"
 
 
 def botones_propuesta(id: str, chat_id: int, clave: bytes) -> list[list[Boton]]:
@@ -348,7 +366,7 @@ def render_estado(r: ResumenEstado) -> str:
                    for i, t, c in r.pendientes]
     else:
         lineas.append("Sin propuestas pendientes")
-    return "\n".join(lineas)[:MAX_MENSAJE]
+    return _cortar("\n".join(lineas), MAX_MENSAJE)
 
 
 @dataclass(frozen=True)
@@ -376,6 +394,7 @@ def render_resumen(items: Sequence[ItemResumen], titulo: str, chat_id: int, clav
             final = f"Estado: {limpiar_texto(it.estado, 40).upper()}"
         bloques.append("\n".join([f"{n} · {limpiar_texto(it.id, 20)} · " + limpiar_texto(it.linea, 200), "Por qué: " + limpiar_texto(it.motivo, 120), final]))
     texto = "\n\n".join([limpiar_texto(titulo, 100)] + bloques)
-    if len(texto) > maximo:
-        raise MensajeDemasiadoLargo(f"{len(texto)} caracteres (máximo {maximo})")
+    n = largo_telegram(texto)
+    if n > maximo:
+        raise MensajeDemasiadoLargo(f"{n} unidades (máximo {maximo})")
     return texto, botones
