@@ -5,7 +5,6 @@ import sys
 import tomllib
 from pathlib import Path
 
-import pytest
 from trovefy_ejecutor.config import rutas_por_defecto
 
 RAIZ = Path(__file__).resolve().parents[2]
@@ -33,7 +32,6 @@ def test_solo_stdlib_y_yaml_y_nunca_trovefy():
                 assert m.split(".")[0] in permitidos, (f.name, m)
 
 
-@pytest.mark.xfail(strict=False, reason="hasta la Tarea 8 no existen los cuatro módulos")
 def test_modulos_importables_sin_yaml():
     # resolución 15: esquema, modelo, dinero y auditoria no cargan PyYAML al importarse
     codigo = (
