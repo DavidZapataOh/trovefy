@@ -93,3 +93,26 @@ def test_ejecutor_no_importa_trovefy():
     assert archivos
     for f in archivos:
         assert not re.search(r"^\s*(from|import)\s+trovefy(\.|\s|$)", f.read_text(), re.MULTILINE), f.name
+
+
+def test_motivo_es_el_de_validate_only_no_el_primer_problema():
+    g = mundo_basico()
+    g.cuentas[CUENTA]["account_status"] = 2
+    g.fallar_validacion["campaigns"] = ErrorGraph(100, 1487, "mal")
+    d = informe_a_dict(comprobar_meta(g, CUENTA))
+    assert d["validate_only"] == {"ok": False, "motivo": "validate_only falló: Meta 100/1487"}
+
+
+def test_moneda_desconocida_con_validate_ok_no_pone_motivo():
+    g = mundo_basico()
+    g.cuentas[CUENTA]["currency"] = "XXX"
+    i = comprobar_meta(g, CUENTA)
+    assert not i.ok
+    assert informe_a_dict(i)["validate_only"] == {"ok": True, "motivo": None}
+
+
+def test_lectura_fallida_motivo_no_se_pudo_leer():
+    g = mundo_basico()
+    g.token_caduca_tras = 0
+    assert informe_a_dict(comprobar_meta(g, CUENTA))["validate_only"] == {
+        "ok": False, "motivo": "no se pudo leer la cuenta"}

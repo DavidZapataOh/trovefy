@@ -26,11 +26,10 @@ def test_cuenta_real_cop():
 
 
 @pytest.mark.vivo
-def test_conjunto_validate_only_vivo():
-    """Un conjunto no se puede validar sin una campaña existente y crear una campaña sería crear algo real.
-    Se valida en su lugar una campaña con los mismos datos de ubicación; ``publisher_platforms`` sin
-    ``threads`` es un campo de conjunto, así que aquí solo se confirma que Meta acepta la campaña de prueba
-    (``validate_only``) y que no se escribe nada."""
+def test_campana_validate_only_vivo():
+    """``validate_only`` de una campaña PAUSED en la cuenta real: Meta la acepta y no se crea nada. El payload
+    no lleva datos de ubicación; la comprobación de ``publisher_platforms`` sin ``threads`` a nivel de conjunto
+    NO queda cubierta (un conjunto exige una campaña existente y crearla sería crear algo real)."""
     cuenta = _cuenta()
     cliente = ClienteGraph(os.environ.get("TROVEFY_META_TOKEN_PRUEBA") or pytest.skip(_SIN_ENTORNO))
     r = cliente.crear(cuenta, "campaigns", {"name": "trovefy validate conjunto", "objective": "OUTCOME_SALES",

@@ -24,6 +24,7 @@ class InformeMeta:
     offset_confirmado: bool
     validate_only_ok: bool
     problemas: tuple[str, ...]
+    validate_only_motivo: str | None = None
 
     @property
     def ok(self) -> bool:
@@ -57,7 +58,7 @@ def comprobar_meta(graph, act_id: str, *, ahora: Callable[[], datetime] = _ahora
     except Exception:  # noqa: BLE001 - nunca lanza
         problemas.append("no se pudo leer la cuenta de Meta")
     if cuenta is None:
-        return InformeMeta(act_id, leido_en, None, False, False, tuple(problemas))
+        return InformeMeta(act_id, leido_en, None, False, False, tuple(problemas), "no se pudo leer la cuenta")
 
     offset_confirmado = cuenta.offset is not None
     if cuenta.account_status != 1:
@@ -65,19 +66,19 @@ def comprobar_meta(graph, act_id: str, *, ahora: Callable[[], datetime] = _ahora
     if not offset_confirmado:
         problemas.append(f"moneda {cuenta.currency} sin offset confirmado: el ejecutor rechazará importes")
     validate_ok = False
+    motivo: str | None = None
     try:
         graph.crear(act_id, "campaigns", dict(_CAMPANA_PRUEBA), validate_only=True)
         validate_ok = True
     except ErrorRed:
-        problemas.append("sin red")
+        motivo = "sin red"
     except ErrorGraph as e:
-        if clasificar(e) == "token":
-            problemas.append(_texto_error(e))
-        else:
-            problemas.append(f"validate_only falló: Meta {e.codigo}/{e.subcodigo or '-'}")
-    except Exception:  # noqa: BLE001 - nunca lanza
-        problemas.append("validate_only falló: error inesperado")
-    return InformeMeta(act_id, leido_en, cuenta, offset_confirmado, validate_ok, tuple(problemas))
+        motivo = _texto_error(e) if clasificar(e) == "token" else f"validate_only falló: Meta {e.codigo}/{e.subcodigo or '-'}"
+    except Exception:  # noqa: BLE001 - nunca lanza (BaseException/KeyboardInterrupt no se captura a propósito)
+        motivo = "validate_only falló: error inesperado"
+    if motivo is not None:
+        problemas.append(motivo)
+    return InformeMeta(act_id, leido_en, cuenta, offset_confirmado, validate_ok, tuple(problemas), motivo)
 
 
 def informe_a_dict(i: InformeMeta) -> dict:
@@ -91,5 +92,5 @@ def informe_a_dict(i: InformeMeta) -> dict:
         "account_status": c.account_status if c else None,
         "amount_spent": c.amount_spent if c else None,
         "spend_cap": c.spend_cap if c else None,
-        "validate_only": {"ok": i.validate_only_ok, "motivo": i.problemas[0] if i.problemas else None},
+        "validate_only": {"ok": i.validate_only_ok, "motivo": None if i.validate_only_ok else i.validate_only_motivo},
     }
