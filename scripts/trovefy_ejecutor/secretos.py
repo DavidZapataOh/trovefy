@@ -76,7 +76,7 @@ def _abrir_seguro(ruta: Path) -> int:
 
 def _leer_texto(ruta: Path) -> str:
     fd = _abrir_seguro(ruta)
-    with os.fdopen(fd, "r", encoding="utf-8") as f:
+    with os.fdopen(fd, "r", encoding="utf-8", newline="") as f:
         return f.read()
 
 
@@ -94,7 +94,7 @@ def _leer_pares(texto: str) -> list[tuple[str, str]]:
     pares: list[tuple[str, str]] = []
     vistas: set[str] = set()
     for n, linea in enumerate(_lineas(texto), start=1):
-        linea = linea.strip()
+        linea = linea.strip(" \t\r")
         if not linea or linea.startswith("#"):
             continue
         clave, sep, valor = linea.partition("=")
@@ -107,7 +107,9 @@ def _leer_pares(texto: str) -> list[tuple[str, str]]:
             if _NOMBRE.match(clave) and len(clave) <= 40:
                 raise ValueError(f"clave desconocida: {clave}")
             raise ValueError(f"línea {n} con clave desconocida")
-        valor = valor.strip()
+        valor = valor.strip(" \t\r")
+        if not valor.isprintable():
+            raise ValueError(f"{clave}: caracteres no permitidos")
         if valor[:1] in ("'", '"'):
             raise ValueError(f"{clave}: no se admiten valores entre comillas")
         if clave in vistas:

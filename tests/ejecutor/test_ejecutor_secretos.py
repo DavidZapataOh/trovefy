@@ -23,13 +23,20 @@ def test_cargar_y_guardar(tmp_path):
     s = env(tmp_path, "TELEGRAM_BOT_TOKEN=" + TOKEN + "\nHMAC_CLAVE=" + HMAC + "\n")
     guardar_secreto(s, "TELEGRAM_USER_ID", "42")
     x = cargar_secretos(s)
-    assert x.telegram_user_id == 42 and x.hmac_clave == bytes.fromhex(HMAC) and x.meta_token is None
+    assert (
+        x.telegram_user_id == 42
+        and x.hmac_clave == bytes.fromhex(HMAC)
+        and x.meta_token is None
+    )
     assert "A" * 35 not in repr(x) and HMAC not in repr(x)
     assert stat.S_IMODE(s.stat().st_mode) == 0o600
     with pytest.raises(ValueError):
         guardar_secreto(s, "TELEGRAM_USER_ID", "99")
     guardar_secreto(s, "TELEGRAM_USER_ID", "99", sobrescribir=True)
-    assert cargar_secretos(s).telegram_user_id == 99 and "TELEGRAM_BOT_TOKEN=" in s.read_text()
+    assert (
+        cargar_secretos(s).telegram_user_id == 99
+        and "TELEGRAM_BOT_TOKEN=" in s.read_text()
+    )
     assert stat.S_IMODE(s.stat().st_mode) == 0o600
 
 
@@ -131,3 +138,29 @@ def test_lectura_por_descriptor_y_cerrojo(tmp_path):
     assert (tmp_path / "secretos.env.lock").exists()
     assert not list(tmp_path.glob(".*.tmp"))
     assert cargar_secretos(s).meta_token == "tokenSintetico1"
+
+
+@pytest.mark.parametrize(
+    "valor",
+    [
+        "valorSinteticoQ1\rHMAC_CLAVE=00",
+        "valorSinteticoQ1\x00",
+        "valorSinteticoQ1\x1b[0m",
+        "valorSinteticoQ1 ",
+    ],
+)
+def test_lectura_rechaza_control_sin_eco(tmp_path, valor):
+    s = tmp_path / "secretos.env"
+    s.write_bytes(("META_TOKEN=" + valor + "\n").encode())
+    os.chmod(s, 0o600)
+    with pytest.raises(ValueError) as e:
+        cargar_secretos(s)
+    assert "valorSinteticoQ1" not in str(e.value) and "META_TOKEN" in str(e.value)
+
+
+def test_crlf_se_admite(tmp_path):
+    s = tmp_path / "secretos.env"
+    s.write_bytes(b"CLAUDE_UID=5\r\nTELEGRAM_CHAT_ID=6\r\n")
+    os.chmod(s, 0o600)
+    x = cargar_secretos(s)
+    assert x.claude_uid == 5 and x.telegram_chat_id == 6
