@@ -91,6 +91,41 @@ def _url_limpia(valor: str) -> str:
     return urlunsplit((partes.scheme, partes.netloc, partes.path, consulta, ""))
 
 
+def _solo_digitos(clave: str):
+    def validar(valor: str) -> str:
+        if not re.fullmatch(r"\d+", valor):
+            raise ValueError(f"--dato {clave}: debe ser solo el número (dígitos), p. ej. el de `{clave}=` en la dirección")
+        return valor
+
+    return validar
+
+
+def _moneda(valor: str) -> str:
+    if not re.fullmatch(r"[A-Za-z]{3}", valor):
+        raise ValueError("--dato moneda: usa el código de tres letras de la moneda (p. ej. COP o USD)")
+    return valor.upper()
+
+
+def _zona(valor: str) -> str:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    if "/" not in valor:
+        raise ValueError("--dato zona: usa el nombre de la zona horaria tipo Región/Ciudad (p. ej. America/Bogota)")
+    try:
+        ZoneInfo(valor)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise ValueError(f"--dato zona: «{valor}» no es una zona horaria conocida (p. ej. America/Bogota)") from None
+    return valor
+
+
+_VALIDADORES = {
+    "business_id": _solo_digitos("business_id"),
+    "act_id": _solo_digitos("act_id"),
+    "moneda": _moneda,
+    "zona": _zona,
+}
+
+
 def _parsear_datos(items: list[str]) -> dict[str, str]:
     datos: dict[str, str] = {}
     for item in items:
@@ -108,6 +143,8 @@ def _parsear_datos(items: list[str]) -> dict[str, str]:
                 datos[clave] = normalizar_dominio(valor)
             except ValueError as exc:
                 raise ValueError(f"--dato dominio: {exc}") from None
+        elif clave in _VALIDADORES:
+            datos[clave] = _VALIDADORES[clave](valor.strip())
         else:
             datos[clave] = valor
     return datos

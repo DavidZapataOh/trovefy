@@ -168,3 +168,100 @@ def test_resultado_provisional_publico_en_base(tmp_path):
     assert r.ok is None and r.motivo == "no medido: patrón sin confirmar con tu pantalla real" and not r.datos and not r.evidencia
     assert any("provisional" in l for l in r.lineas[1:])
     assert "token" not in "".join(f.read_text() for f in (tmp_path / "config/evidencia/provisional").glob("*.json"))
+
+
+# --- Fallos reales del 2026-11-11: varios portfolios («Seleccionar negocio») y verificación de seguridad ---
+
+SELECT = "https://business.facebook.com/select/"
+SELECT_TXT = (pathlib.Path(__file__).resolve().parents[2] / "fixtures/arranque/seleccionar_negocio.txt").read_text()
+INTERSTICIAL = "Contenido\nVerificación necesaria\nPara mantener la seguridad de esta cuenta, necesitamos que la verifiques antes de continuar.\nVerificar cuenta\n"
+
+
+def falso_texto(url_final, texto="", png=PNG):
+    llamadas = []
+
+    def capturar(servicio, url, esperar_ms=3000, visible=True, captura_png=None):
+        llamadas.append((servicio, url))
+        if captura_png is not None and png is not None:
+            captura_png.write_bytes(png)
+        return Captura(url_final, "", texto, captura_png)
+
+    capturar.llamadas = llamadas
+    return capturar
+
+
+@pytest.mark.parametrize("conf", [CONF, Confirmacion(fecha=None, fuente="prueba")])
+def test_04_varios_portfolios_sin_id_guardado_pide_guardarlo(tmp_path, conf):
+    r = verificar_business(tmp_path, capturar=falso_texto(SELECT, SELECT_TXT), confirmacion=conf)
+    assert r.ok is None and "tienes varios portfolios" in r.motivo
+    assert "trovefy arranque hecho 04 --dato business_id=<id>" in r.motivo
+    assert not r.evidencia and not r.datos
+
+
+def test_04_con_id_guardado_abre_su_portfolio(tmp_path):
+    marcar_hecho(tmp_path, "04", datos={"business_id": "778461336017450"})
+    cap = falso_texto("https://business.facebook.com/latest/settings/business_info?business_id=778461336017450")
+    r = verificar_business(tmp_path, capturar=cap, confirmacion=CONF)
+    assert cap.llamadas == [("meta", "https://business.facebook.com/latest/settings/business_info?business_id=778461336017450")]
+    assert r.ok is True and r.datos == {"business_id": "778461336017450"}
+
+
+def test_04_con_id_guardado_sin_confirmar_guarda_provisional_con_el_id(tmp_path):
+    from trovefy.arranque.verificadores.base import (
+        leer_texto_provisional,
+        ultimo_texto_provisional,
+    )
+
+    marcar_hecho(tmp_path, "04", datos={"business_id": "778461336017450"})
+    url = "https://business.facebook.com/latest/settings/business_info?business_id=778461336017450"
+    r = verificar_business(tmp_path, capturar=falso_texto(url), confirmacion=Confirmacion(fecha=None, fuente="prueba"))
+    assert r.ok is None and "sin confirmar" in r.motivo
+    texto = leer_texto_provisional(ultimo_texto_provisional(tmp_path, "04"))["pagina"]
+    assert "business_id=778461336017450" in texto
+
+
+def test_04_con_id_guardado_pero_meta_abre_el_selector(tmp_path):
+    marcar_hecho(tmp_path, "04", datos={"business_id": "778461336017450"})
+    r = verificar_business(tmp_path, capturar=falso_texto(SELECT, SELECT_TXT), confirmacion=CONF)
+    assert r.ok is None and "778461336017450" in r.motivo and "Seleccionar negocio" in r.motivo
+
+
+def test_04_otro_portfolio_que_el_guardado_falla(tmp_path):
+    marcar_hecho(tmp_path, "04", datos={"business_id": "778461336017450"})
+    cap = falso_texto("https://business.facebook.com/latest/settings/business_info?business_id=111")
+    r = verificar_business(tmp_path, capturar=cap, confirmacion=CONF)
+    assert r.ok is False and "111" in r.motivo and "778461336017450" in r.motivo
+
+
+def test_04_id_guardado_no_numerico_se_ignora(tmp_path):
+    marcar_hecho(tmp_path, "04", datos={"business_id": "glemo"})
+    cap = falso_texto(SELECT, SELECT_TXT)
+    verificar_business(tmp_path, capturar=cap, confirmacion=CONF)
+    assert cap.llamadas == [("meta", "https://business.facebook.com/settings/")]
+
+
+def test_verificacion_de_seguridad_de_meta_es_no_medido(tmp_path):
+    url = "https://business.facebook.com/latest/settings/business_info?business_id=1"
+    r = verificar_business(tmp_path, capturar=falso_texto(url, INTERSTICIAL), confirmacion=CONF)
+    assert r.ok is None
+    assert r.motivo == "no medido: Meta pide una verificación de seguridad en el navegador de Trovefy; hazla tú y vuelve a verificar"
+    assert any("trovefy navegador abrir meta" in a for a in r.arreglos)
+    assert not (tmp_path / "config/evidencia").exists()
+    en = "Verification required\nTo keep this account secure, we need you to verify it before continuing.\nVerify account\n"
+    assert verificar_business(tmp_path, capturar=falso_texto(url, en), confirmacion=CONF).motivo.startswith("no medido: Meta pide")
+
+
+def test_texto_normal_con_la_palabra_verificar_no_es_intersticial(tmp_path):
+    url = "https://business.facebook.com/latest/settings/business_info?business_id=1"
+    r = verificar_business(tmp_path, capturar=falso_texto(url, "Dominios\nVerificar dominio\nVerificado"), confirmacion=CONF)
+    assert r.ok is True
+
+
+@pytest.mark.parametrize("valor,ok", [("778461336017450", True), (" 778461336017450 ", True), ("abc", False), ("12a", False)])
+def test_cli_dato_business_id_solo_digitos(tmp_path, valor, ok):
+    from trovefy.arranque.estado import cargar
+
+    codigo = main(["arranque", "hecho", "04", "--vault", str(tmp_path), "--dato", f"business_id={valor}"])
+    assert (codigo == 0) is ok
+    if ok:
+        assert next(p for p in cargar(tmp_path) if p.id == "04").datos["business_id"] == "778461336017450"
