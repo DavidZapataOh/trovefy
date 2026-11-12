@@ -43,7 +43,7 @@ packages = ["scripts/trovefy", "scripts/trovefy_ejecutor"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["scripts"]
+pythonpath = ["scripts", "tests"]
 addopts = '-m "not integracion and not vivo"'
 markers = [
     "integracion: usa un navegador real (Chromium de Playwright); se ejecuta con -m integracion",
