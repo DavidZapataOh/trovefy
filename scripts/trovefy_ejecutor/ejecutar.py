@@ -5,6 +5,10 @@ real → relectura nueva a Graph. Las escrituras nunca se reintentan: tras un fa
 enviar se relee y se decide con lo leído; si tampoco se puede releer, ``discrepancia`` (estado
 desconocido). Ante cualquier duda, falla cerrado y no escribe.
 
+``lote``: precondición de todas antes de escribir ninguna; luego op por op, sin reintentar las fallidas;
+solo token y STOP detienen el resto. ``noop``/``alerta``/``limite_ejecutor`` nunca llaman a Graph;
+``agenda``/``regla_meta`` se rechazan (P-07); ``crear_estructura_pausada`` lanza ``ValueError``.
+
 No mira STOP ni límites ni hace transiciones (resolución 9): eso lo hace el servicio (plan 12) antes
 y después. Solo reacciona a ``DetenidoPorStop`` del cliente (resolución 11).
 """
@@ -41,7 +45,16 @@ CAMPOS_POR_TIPO: dict[str, set[tuple[str, str]]] = {
     "pausar": {(e, "status") for e in _ESTADOS},
     "activar": {(e, "status") for e in _ESTADOS},
 }
-_STATUS_POR_TIPO = {"pausar": "PAUSED", "activar": "ACTIVE"}
+# Lote: solo formas de presupuesto y pausar (esquema: presupuesto + pausar + activar; activar se excluye
+# a propósito, más estricto que el esquema: un lote nunca pone ACTIVE).
+CAMPOS_POR_TIPO["lote"] = CAMPOS_POR_TIPO["presupuesto"] | CAMPOS_POR_TIPO["pausar"]
+_STATUS_POR_TIPO = {"pausar": "PAUSED", "activar": "ACTIVE", "lote": "PAUSED"}
+# Errores de una operación que detienen el resto del lote (las demás quedan no_intentada, sin llamar).
+_DETIENEN_LOTE = frozenset({"token", "stop"})
+TIPOS_SOPORTADOS: frozenset[str] = frozenset({
+    "presupuesto", "pausar", "activar", "puja", "spend_cap", "limite_cuenta", "lote", "noop", "alerta",
+    "limite_ejecutor"})
+NO_SOPORTADO_P07 = "no soportado aún (P-07)"
 # Campo de la regla de cadencia (limites) que cuenta cada cambio. status y spend_cap no tienen regla.
 CAMPO_CADENCIA = {"daily_budget": "daily_budget", "bid_amount": "bid_amount"}
 
@@ -313,8 +326,53 @@ def _rechazo(p: Propuesta, auditoria: Auditoria, detalle: str, *, estado: Estado
                      reintentable_desde=desde)
 
 
+def _sin_meta(p: Propuesta, auditoria: Auditoria, detalle: str) -> Resultado:
+    """``noop``/``alerta``: nada que hacer en Meta; un único ``ejecucion`` final."""
+    if p.operaciones:
+        return _rechazo(p, auditoria, f"{p.tipo} no lleva operaciones")
+    _anotar(auditoria, p, False, True, detalle)
+    return Resultado("ejecutada", detalle)
+
+
+def _limite_ejecutor(p: Propuesta, auditoria: Auditoria) -> Resultado:
+    """Devuelve el cambio para que el servicio (plan 12) escriba ``limites.yaml``. Nunca llama a Graph.
+
+    Falla cerrado ante cualquier forma inesperada (el esquema ya la valida; esto es la segunda barrera)
+    o si la auditoría no puede anotarlo."""
+    if len(p.operaciones) != 1:
+        return _rechazo(p, auditoria, "limite_ejecutor lleva exactamente una operación")
+    op = p.operaciones[0]
+    if op.entidad != "ejecutor" or not isinstance(op.campo, str) or op.campo == "offset":
+        return _rechazo(p, auditoria, f"{_desc(op)}: no es una clave de límite del ejecutor")
+    if not (_es_importe_valido(op.de_esperado) and _es_importe_valido(op.a)):
+        return _rechazo(p, auditoria, f"{_desc(op)}: de_esperado y a deben ser enteros > 0")
+    cambio: dict = {"clave": op.campo, "id": op.id, "de": op.de_esperado, "a": op.a}
+    if op.moneda is not None or op.unidad is not None:
+        if op.unidad != "minima" or op.moneda is None:
+            return _rechazo(p, auditoria, f"{_desc(op)}: unidad debe ser \"minima\" con moneda")
+        cambio.update(moneda=op.moneda, unidad=op.unidad)
+    detalle = f"límite {op.id} {op.campo}: {op.de_esperado} → {op.a}; nada cambió en Meta"
+    if not _anotar(auditoria, p, False, True, detalle):
+        return Resultado("fallida", "auditoría no disponible: no se cambia el límite",
+                         _no_intentadas(p.operaciones, None, "auditoría no disponible"), error="otro")
+    return Resultado("ejecutada", detalle, cambio_limite=cambio)
+
+
 def ejecutar(p: Propuesta, graph, almacen: Almacen, auditoria: Auditoria, *,
              ahora: Callable[[], datetime] = _ahora) -> Resultado:
+    """Ejecuta ``p`` y devuelve siempre un ``Resultado``; la única excepción es
+    ``crear_estructura_pausada``, que lanza ``ValueError`` (se ejecuta con ``montaje.montar``)."""
+    if p.tipo == "crear_estructura_pausada":
+        raise ValueError("crear_estructura_pausada se ejecuta con montaje.montar")
+    if p.tipo in ("agenda", "regla_meta"):
+        # §5.8 depende de P-07 (budget_schedules, reglas por API) sin verificar: se rechaza sin llamar.
+        return _rechazo(p, auditoria, NO_SOPORTADO_P07, error="no_soportado")
+    if p.tipo == "noop":
+        return _sin_meta(p, auditoria, "circuito probado; nada cambió en Meta")
+    if p.tipo == "alerta":
+        return _sin_meta(p, auditoria, "notificación; nada cambió en Meta")
+    if p.tipo == "limite_ejecutor":
+        return _limite_ejecutor(p, auditoria)
     if p.tipo not in CAMPOS_POR_TIPO:
         return _rechazo(p, auditoria, f"tipo {p.tipo} no soportado por ejecutar", error="no_soportado")
     if not p.operaciones:
@@ -354,6 +412,16 @@ def ejecutar(p: Propuesta, graph, almacen: Almacen, auditoria: Auditoria, *,
     for i, op in enumerate(p.operaciones):
         ro = _ejecutar_op(op, p, vv, graph, almacen, auditoria, ahora)
         resultados.append(ro)
+        if p.tipo == "lote":
+            # Lote: op por op; una fallida o en discrepancia no se reintenta y el lote sigue. Solo token
+            # y STOP detienen: las restantes quedan no_intentada sin llamar.
+            if ro.estado == "no_intentada" or ro.error in _DETIENEN_LOTE:
+                resto = p.operaciones[i + 1:]
+                nota = ("STOP: no se intentó" if ro.estado == "no_intentada" or ro.error == "stop"
+                        else "no se intentó: token caducado")
+                resultados.extend(_no_intentadas(resto, vv, nota))
+                break
+            continue
         if ro.estado != "ejecutada":
             # Ante cualquier duda (STOP, fallo, discrepancia) no se sigue escribiendo.
             resto = p.operaciones[i + 1:]
@@ -378,7 +446,18 @@ def _cerrar(p: Propuesta, ops: list[ResultadoOp], vv: ValoresVivos, almacen: Alm
         error = next(o.error for o in ops if o.estado == "fallida") or "otro"
     else:
         estado = "ejecutada"
+    if p.tipo == "lote":
+        # (extra) en un lote la discrepancia no detiene: el error conserva STOP/token aunque el estado sea
+        # discrepancia, y token manda sobre el primer error si el lote se cortó por él.
+        if stop:
+            error = "stop"
+        elif any(o.error == "token" for o in ops):
+            error = "token"
     partes = [o.detalle for o in ops if o.estado != "no_intentada"] or [ops[0].detalle]
+    if p.tipo == "lote":
+        aplicadas = estados.count("ejecutada")
+        cuenta = f"{aplicadas} de {len(ops)} aplicadas"
+        partes.insert(0, f"parcial: {cuenta}" if parcial else f"lote: {cuenta}")
     detalle = " | ".join(partes)
 
     nueva: dict | None = None
