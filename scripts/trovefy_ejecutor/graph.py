@@ -30,6 +30,7 @@ _MAX_VIDEO = 100 * 1024 * 1024
 _MAX_MENSAJE = 300
 _MAX_TRAZA = 64
 _SEGMENTO = re.compile(r"[A-Za-z0-9_]+")
+_TIPO_BUSQUEDA = re.compile(r"[a-z_]+")
 
 # Offset oficial de Meta por moneda. Graph no lo expone: la confirmación es «moneda leída + esta tabla» (P-21).
 # Fuente: https://developers.facebook.com/documentation/ads-commerce/marketing-api/currencies (leído 2026-11-12).
@@ -250,6 +251,23 @@ class ClienteGraph:
             if not despues:
                 break
         raise ErrorRed("listado incompleto")
+
+    def buscar(self, tipo: str, q: str, campos: Sequence[str]) -> list[dict]:
+        """``GET /search?type=…&q=…`` (solo lectura; p. ej. ``adlocale``). Una sola página: si Meta
+        indica que hay más (``paging.next``), falla cerrado con ``ErrorRed("listado incompleto")``."""
+        if not isinstance(tipo, str) or not _TIPO_BUSQUEDA.fullmatch(tipo):
+            raise ValueError("tipo de búsqueda inválido")
+        if not isinstance(q, str) or not 1 <= len(q) <= 100:
+            raise ValueError("texto de búsqueda inválido")
+        consulta = urlencode([("type", tipo), ("q", q), ("fields", ",".join(campos))], safe=",")
+        r = self._enviar("GET", _seg("search"), consulta=consulta, timeout=self._t_lectura)
+        datos = r.get("data")
+        if not isinstance(datos, list):
+            raise ErrorRed("respuesta ilegible") from None
+        paging = r.get("paging")
+        if isinstance(paging, dict) and paging.get("next"):
+            raise ErrorRed("listado incompleto") from None
+        return [d for d in datos if isinstance(d, dict)]
 
     def _post(self, ruta: str, datos: Mapping[str, object], validate_only: bool) -> dict:
         return self._enviar("POST", ruta, cuerpo=_codificar(datos, validate_only),

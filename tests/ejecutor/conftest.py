@@ -52,3 +52,25 @@ def entorno(tmp_path: Path):
     finally:
         alm.cerrar()
         _ejecutar._EMITIDOS.clear()
+
+
+@pytest.fixture
+def entorno_montaje(tmp_path: Path):
+    """``(g, almacen, auditoria, vault)``: como ``entorno`` más un vault en ``tmp_path`` con una imagen y un
+    vídeo de pocos bytes (los de ``fabricas_graph``)."""
+    from ejecutor.fabricas_graph import BYTES_IMG, BYTES_VID, RUTA_IMG, RUTA_VID
+    from trovefy_ejecutor import ejecutar as _ejecutar
+
+    _ejecutar._EMITIDOS.clear()
+    vault = tmp_path / "vault"
+    for ruta, datos in ((RUTA_IMG, BYTES_IMG), (RUTA_VID, BYTES_VID)):
+        f = vault / ruta
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(datos)
+    (tmp_path / "secretos.env").write_text("TOKEN=no")
+    alm = Almacen(tmp_path / "estado.db")
+    try:
+        yield mundo_basico(), alm, Auditoria(tmp_path / "auditoria.jsonl"), vault
+    finally:
+        alm.cerrar()
+        _ejecutar._EMITIDOS.clear()

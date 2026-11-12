@@ -253,3 +253,40 @@ def test_sin_redirecciones():
     from trovefy_ejecutor.graph import _SinRedireccion
 
     assert _SinRedireccion().redirect_request(None, None, 302, "", {}, "https://x") is None
+
+
+def test_buscar_adlocale(respuesta_json):
+    abrir = respuesta_json(200, {"data": [{"key": 10, "name": "Romanian"}]})
+    r = ClienteGraph(TOKEN, abrir=abrir).buscar("adlocale", "ro", ["key", "name"])
+    req, timeout = abrir.peticiones[0]
+    url = urlparse(req.full_url)
+    assert r == [{"key": 10, "name": "Romanian"}] and req.get_method() == "GET" and timeout == 20
+    assert url.path == "/v25.0/search" and parse_qs(url.query) == {"type": ["adlocale"], "q": ["ro"],
+                                                                    "fields": ["key,name"]}
+    assert TOKEN not in req.full_url and req.get_header("Authorization") == f"Bearer {TOKEN}"
+
+
+@pytest.mark.parametrize("tipo", ["", "AdLocale", "ad/locale", "a&b", None])
+def test_buscar_tipo_invalido_no_llama(respuesta_json, tipo):
+    abrir = respuesta_json(200, {"data": []})
+    with pytest.raises(ValueError):
+        ClienteGraph(TOKEN, abrir=abrir).buscar(tipo, "ro", ["key"])
+    assert not abrir.peticiones
+
+
+def test_buscar_mas_paginas_falla_cerrado(respuesta_json):
+    abrir = respuesta_json(200, {"data": [{"key": 1}], "paging": {"next": "x", "cursors": {"after": "c"}}})
+    with pytest.raises(ErrorRed, match="listado incompleto"):
+        ClienteGraph(TOKEN, abrir=abrir).buscar("adlocale", "ro", ["key"])
+
+
+def test_buscar_sin_data_ilegible(respuesta_json):
+    with pytest.raises(ErrorRed, match="ilegible"):
+        ClienteGraph(TOKEN, abrir=respuesta_json(200, {"x": 1})).buscar("adlocale", "ro", ["key"])
+
+
+def test_buscar_error_redactado(respuesta_json):
+    abrir = respuesta_json(400, {"error": {"code": 100, "message": f"bad {TOKEN}"}})
+    with pytest.raises(ErrorGraph) as e:
+        ClienteGraph(TOKEN, abrir=abrir).buscar("adlocale", "ro", ["key"])
+    assert TOKEN not in str(e.value)

@@ -28,7 +28,7 @@ def test_validate_only_no_cambia_nada():
 
 
 def test_misma_interfaz_publica_que_cliente():
-    for nombre in ("leer", "listar", "escribir", "crear", "subir_imagen", "subir_video", "cuenta"):
+    for nombre in ("leer", "listar", "buscar", "escribir", "crear", "subir_imagen", "subir_video", "cuenta"):
         real = list(inspect.signature(getattr(ClienteGraph, nombre)).parameters)
         falso = list(inspect.signature(getattr(GraphFalso, nombre)).parameters)
         assert real == falso, nombre

@@ -51,6 +51,15 @@ class GraphFalso:
     tam_pagina: int | None = None  # filas por página al listar; con max_paginas insuficiente, listado incompleto
     errores_reales: dict[str, ErrorGraph] = field(default_factory=dict)  # solo en escrituras reales
     al_escribir: Callable[[], None] | None = None  # se llama tras aplicar una escritura real
+    # -- montaje (Tarea 6) --
+    fallar_creacion: dict[str, ErrorGraph] = field(default_factory=dict)  # por arista, solo creación real
+    fallar_validacion: dict[str, ErrorGraph] = field(default_factory=dict)  # por arista, solo validate_only
+    estado_tras_crear: str | None = None  # Meta guarda otro status que el pedido
+    red_tras_crear: set[str] = field(default_factory=set)  # por arista: crea y la respuesta se pierde
+    locales: dict[str, list[dict]] = field(default_factory=lambda: {"ro": [{"key": 10, "name": "Romanian"}]})
+    video_listo_tras: int | None = 2  # lecturas de status hasta "ready"; None = nunca
+    video_error: bool = False  # el vídeo queda en "error"
+    miniatura: str = "https://scontent.example/miniatura.jpg"
 
     def __post_init__(self) -> None:
         self._reales = 0  # escrituras reales ya aplicadas
@@ -58,6 +67,7 @@ class GraphFalso:
         self._siguiente_video = 7000001
         # id -> (arista, padres): jerarquía para ``listar``
         self.hijos: dict[str, tuple[str, set[str]]] = {}
+        self.videos: dict[str, int] = {}  # video_id -> lecturas de status
 
     # -- mandos y consultas -------------------------------------------------------------
     def escrituras(self) -> list[Llamada]:
@@ -121,6 +131,8 @@ class GraphFalso:
     def leer(self, id: str, campos: Sequence[str]) -> dict:
         _seg(id)
         self._leyendo("leer", id, {"campos": list(campos)})
+        if id in self.videos:
+            return self._leer_video(id, campos)
         origen = self.objetos.get(id)
         if origen is None:
             origen = self.cuentas.get(id)
@@ -150,6 +162,28 @@ class GraphFalso:
             raise ErrorRed("listado incompleto")
         return salida
 
+    def _leer_video(self, id: str, campos: Sequence[str]) -> dict:
+        salida: dict = {"id": id}
+        for c in campos:
+            base = c.split("{")[0]
+            if base == "status":
+                self.videos[id] += 1
+                listo = self.video_listo_tras is not None and self.videos[id] >= self.video_listo_tras
+                estado = "error" if self.video_error else ("ready" if listo else "processing")
+                salida["status"] = {"video_status": estado}
+            elif base == "thumbnails":
+                salida["thumbnails"] = {"data": [{"uri": "https://scontent.example/otra.jpg", "is_preferred": False},
+                                                 {"uri": self.miniatura, "is_preferred": True}]}
+        return salida
+
+    def buscar(self, tipo: str, q: str, campos: Sequence[str]) -> list[dict]:
+        if not isinstance(tipo, str) or not tipo or not all(ch.islower() or ch == "_" for ch in tipo):
+            raise ValueError("tipo de búsqueda inválido")
+        self._leyendo("buscar", "search", {"type": tipo, "q": q, "campos": list(campos)})
+        if tipo != "adlocale":
+            return []
+        return [{k: v for k, v in d.items() if k in campos} for d in self.locales.get(q, [])]
+
     def escribir(self, id: str, datos: Mapping[str, object], *, validate_only: bool = False) -> dict:
         _seg(id)
         normal = {k: self._guardar(k, _check(v)) for k, v in datos.items()}
@@ -178,15 +212,29 @@ class GraphFalso:
         self._stop(validate_only)
         self._entrada("crear", f"{padre}/{arista}", dict(datos), validate_only)
         self._antes_de_escribir(padre, validate_only)
+        if validate_only and arista in self.fallar_validacion:
+            raise self.fallar_validacion[arista]
+        if not validate_only and arista in self.fallar_creacion:
+            raise self.fallar_creacion[arista]
         self._existe(padre)
         self._sin_negativos(normal)
+        for k in ("campaign_id", "adset_id"):  # el padre referido debe existir, como en Meta
+            if k in normal:
+                self._existe(str(normal[k]))
         if validate_only:
             return {"success": True}
         nuevo = str(self._siguiente_id)
         self._siguiente_id += 1
-        self.objetos[nuevo] = dict(normal)
+        obj = dict(normal)
+        if "status" in obj:
+            if self.estado_tras_crear is not None:
+                obj["status"] = self.estado_tras_crear
+            obj["effective_status"] = obj["status"]
+        self.objetos[nuevo] = obj
         self.hijos[nuevo] = (arista, {padre})
         self._despues_de_escribir(padre, validate_only)
+        if arista in self.red_tras_crear:
+            raise ErrorRed("conexión")
         return {"id": nuevo}
 
     def subir_imagen(self, act_id: str, contenido: bytes, nombre: str) -> str:
@@ -206,6 +254,7 @@ class GraphFalso:
         self._antes_de_escribir(act_id, False)
         vid = str(self._siguiente_video)
         self._siguiente_video += 1
+        self.videos[vid] = 0
         self._despues_de_escribir(act_id, False)
         return vid
 
