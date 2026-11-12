@@ -1,0 +1,25 @@
+# Límites del ejecutor (§5.6, D-37): los importes van por cuenta, en unidades mínimas de su moneda.
+# Plantilla del repo con la cuenta ficticia; el instalador (plan 12) escribe la real en
+# /home/trovefy-exec/.config/trovefy-ejecutor/limites.yaml (0600) tomando el id de config/arranque.yaml.
+version: 1
+cuentas_permitidas: [act_0000000000000000]
+paso_max_pct: 50
+cadencia_min_presupuesto_min: 120
+enfriamiento_puja_estructura_h: 48
+max_cambios_hora_conjunto: 4            # límite de Meta
+acciones_permitidas: [noop, alerta, crear_estructura_pausada, activar, pausar, presupuesto, lote, spend_cap, limite_cuenta, limite_ejecutor, agenda, regla_meta, puja]
+montaje_status_forzado: PAUSED
+cuentas:
+  act_0000000000000000:
+    moneda: COP
+    offset: null                        # por confirmar (P-21): COP = 1 según Meta, pero queda null hasta que estado/meta.json confirme la moneda
+    zona_horaria: America/Bogota
+    # Unidades mínimas de COP con offset 1 (1 unidad = 1 peso). Equivalen a los US$ de §5.6 con la TRM de nov-2026
+    # (≈ 3.300, datos.gov.co), redondeando hacia abajo; el instalador los recalcula con la TRM del día.
+    tope_gasto_diario_total: 165000     # ≈ US$ 50 (D-36)
+    max_presupuesto_conjunto: 99000     # ≈ US$ 30
+    max_presupuesto_campana_cbo: 132000 # ≈ US$ 40
+    spend_cap_test: 99000               # ≈ US$ 30
+    spend_cap_test_prorroga: 181500     # ≈ US$ 55, solo tests con ventas, una vez
+    paginas_permitidas: []              # se completa al instalar
+    datasets_permitidos: []             # se completa en el paso 11 (/tracking)
