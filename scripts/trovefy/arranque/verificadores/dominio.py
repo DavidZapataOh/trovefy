@@ -1,7 +1,8 @@
 """Pasos 07 y 08: el dominio propio en Cloudflare y su verificación en Meta.
 
 07 y la parte TXT del 08 son públicas y se miden por DNS sobre HTTPS. El estado «verificado» de
-business.facebook.com/settings/owned-domains es una pantalla privada: mientras `CONFIRMACION_08`
+business.facebook.com/settings/owned-domains es una pantalla privada (con un business_id guardado en el 04 se abre
+/latest/settings/domains?business_id=<id>: con varios portfolios, la dirección sin ID lleva a «Seleccionar negocio»): mientras `CONFIRMACION_08`
 no tenga fecha, el 08 no certifica aunque el TXT esté (el TXT solo no es la verificación de Meta; un TXT de otro Business
 también queda provisional hasta confirmar esa pantalla).
 """
@@ -25,9 +26,13 @@ from trovefy.arranque.verificadores.base import (
     registrar_lector,
 )
 from trovefy.arranque.verificadores.meta_ids import (
+    business_id_guardado,
     capturar_por_defecto,
+    es_selector_de_negocio,
     leer_pagina,
     no_medido,
+    selector_con_id,
+    varios_portfolios,
 )
 from trovefy.dns import SinRed, normalizar
 from trovefy.dns import consultar as consultar_doh
@@ -35,6 +40,7 @@ from trovefy.vault.escritura import ZONA_NEGOCIO
 from trovefy.vault.rutas import vault_root
 
 URL_DOMINIOS = "https://business.facebook.com/settings/owned-domains"
+URL_DOMINIOS_ID = "https://business.facebook.com/latest/settings/domains?business_id={bid}"
 SUFIJO_NS = ".ns.cloudflare.com"
 PREFIJO_TXT = "facebook-domain-verification="
 SIN_RED = "no medido: sin red"
@@ -170,9 +176,13 @@ def verificar_verificacion_meta(
     t = evaluar_txt(txt)
     if not t.ok:
         return t
-    cap, png, motivo = leer_pagina(URL_DOMINIOS, capturar or capturar_por_defecto)
+    bid = business_id_guardado(vault)
+    url = URL_DOMINIOS_ID.format(bid=bid) if bid else URL_DOMINIOS
+    cap, png, motivo = leer_pagina(url, capturar or capturar_por_defecto)
     if cap is None:
         return no_medido(motivo)
+    if es_selector_de_negocio(cap.url_final):
+        return selector_con_id(bid) if bid else varios_portfolios()
     if not confirmacion.confirmada:
         rutas, avisos = guardar_provisional(vault, "08", [PantallaProvisional("pagina", cap.url_final, png, cap.texto)])
         motivo = MOTIVO_TXT_PENDIENTE if confirmacion.aviso is None else f"{MOTIVO_TXT_PENDIENTE} ({confirmacion.aviso})"
@@ -184,7 +194,7 @@ def verificar_verificacion_meta(
             "en Business Settings → Marcas → Dominios, abre el dominio y pulsa «Verificar»; si el TXT es reciente, espera y repite",
         ])
     ev = [guardar_evidencia(vault, "08", "captura", png)] if png else []
-    ev.append(guardar_evidencia(vault, "08", "dominio", {"dominio": dominio, "txt": True, "url": URL_DOMINIOS}))
+    ev.append(guardar_evidencia(vault, "08", "dominio", {"dominio": dominio, "txt": True, "url": url}))
     return _resultado(True, f"{dominio} verificado en Meta", evidencia=ev, datos={"dominio": dominio})
 
 
