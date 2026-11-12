@@ -89,11 +89,39 @@ def test_errores_una_vez_sin_aplicar():
     assert g.objetos["s1"]["daily_budget"] == "5"
 
 
-def test_errores_no_afectan_validate_only():
+def test_errores_tambien_en_validate_only_y_se_consumen():
     g = mundo_basico()
-    g.errores["s1"] = ErrorGraph(100, None, "no")
-    g.escribir("s1", {"daily_budget": 5}, validate_only=True)
-    assert "s1" in g.errores
+    g.errores["s1"] = ErrorGraph(100, 1487, "no")
+    with pytest.raises(ErrorGraph):
+        g.escribir("s1", {"daily_budget": 5}, validate_only=True)
+    assert "s1" not in g.errores and g.objetos["s1"]["daily_budget"] == "20000"
+    g.errores["c1"] = ErrorGraph(100, None, "no")
+    with pytest.raises(ErrorGraph):
+        g.crear("c1", "adsets", {"name": "x"}, validate_only=True)
+    assert "9000001" not in g.objetos
+
+
+def test_inexistente_error_graph_100_tambien_validate_only():
+    g = mundo_basico()
+    for vo in (False, True):
+        with pytest.raises(ErrorGraph) as e:
+            g.escribir("nope", {"status": "PAUSED"}, validate_only=vo)
+        assert e.value.codigo == 100
+        with pytest.raises(ErrorGraph) as e:
+            g.crear("nope", "adsets", {"name": "x"}, validate_only=vo)
+        assert e.value.codigo == 100
+    assert g.objetos.keys() == mundo_basico().objetos.keys()
+
+
+def test_importe_negativo_rechazado():
+    g = mundo_basico()
+    for vo in (False, True):
+        with pytest.raises(ErrorGraph) as e:
+            g.escribir("s1", {"daily_budget": -5}, validate_only=vo)
+        assert e.value.codigo == 100
+    with pytest.raises(ErrorGraph):
+        g.crear("act_0000000000000000", "adsets", {"daily_budget": "-1"})
+    assert g.objetos["s1"]["daily_budget"] == "20000" and "9000001" not in g.objetos
 
 
 def test_red_al_leer():

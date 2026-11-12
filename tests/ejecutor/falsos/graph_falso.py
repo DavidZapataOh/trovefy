@@ -1,4 +1,8 @@
-"""Graph falso en memoria: misma interfaz pública que ``ClienteGraph``, sin red."""
+"""Graph falso en memoria: misma interfaz pública que ``ClienteGraph``, sin red.
+
+NO aplica el tope de gasto (spend_cap) ni presupuestos mínimos: para probar esos rechazos de Meta,
+inyecta el error con ``errores`` (que dispara también en validate_only).
+"""
 
 from __future__ import annotations
 
@@ -81,12 +85,20 @@ class GraphFalso:
             raise ErrorRed("conexión")
 
     def _antes_de_escribir(self, clave: str, validate_only: bool) -> None:
-        if validate_only:
-            return
-        if self.stop_tras is not None and self._reales >= self.stop_tras:
+        if not validate_only and self.stop_tras is not None and self._reales >= self.stop_tras:
             raise DetenidoPorStop()
         if clave in self.errores:
             raise self.errores.pop(clave)
+
+    def _existe(self, id: str) -> None:
+        if id not in self.objetos and id not in self.cuentas:
+            raise ErrorGraph(100, 33, "Unsupported post request. Object does not exist")
+
+    @staticmethod
+    def _sin_negativos(normal: dict) -> None:
+        for k, v in normal.items():
+            if k in _IMPORTES and int(v) < 0:
+                raise ErrorGraph(100, None, f"Invalid parameter: {k} must not be negative")
 
     def _despues_de_escribir(self, clave: str, validate_only: bool) -> None:
         if validate_only:
@@ -126,10 +138,10 @@ class GraphFalso:
         normal = {k: self._guardar(k, _check(v)) for k, v in datos.items()}
         self._entrada("escribir", id, dict(datos), validate_only)
         self._antes_de_escribir(id, validate_only)
+        self._existe(id)
+        self._sin_negativos(normal)
         if validate_only:
             return {"success": True}
-        if id not in self.objetos:
-            raise ErrorGraph(100, 33, "Unsupported post request. Object does not exist")
         obj = self.objetos[id]
         tocado_importe = False
         for k, v in normal.items():
@@ -147,6 +159,8 @@ class GraphFalso:
         normal = {k: self._guardar(k, _check(v)) for k, v in datos.items()}
         self._entrada("crear", f"{padre}/{arista}", dict(datos), validate_only)
         self._antes_de_escribir(padre, validate_only)
+        self._existe(padre)
+        self._sin_negativos(normal)
         if validate_only:
             return {"success": True}
         nuevo = str(self._siguiente_id)
