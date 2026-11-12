@@ -3,15 +3,19 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
+from typing import Literal
 
+from .auditoria import redactar
+from .callbacks import firmar
 from .dinero import Moneda, formatear
 from .esquema import RANGO_USUARIO
-from .modelo import Operacion, Propuesta
+from .modelo import Estado, Operacion, Propuesta
 from .reloj import ZONA_COT
+from .telegram import Boton
 
 MAX_PROPUESTA = 3800  # deja sitio a la línea de resultado
 MAX_POR_QUE = 300
@@ -232,3 +236,142 @@ def render_propuesta(p: Propuesta, vivo: DatosRender) -> str:
     if len(texto) > MAX_PROPUESTA:
         raise MensajeDemasiadoLargo(f"{len(texto)} caracteres (máximo {MAX_PROPUESTA})")
     return texto
+
+
+# --- Tarea 5: resultado, «ya procesada», /estado y resumen -------------------------------------------------
+
+RECIBIDO = "Recibido"
+PREGUNTA_MOTIVO = "{id} · ¿Motivo? (responde a este mensaje, opcional)"
+STOP_ACTIVO = "STOP activo: no se ejecutó nada"
+BOTON_NO_VALIDO = "Botón no válido: no se hizo nada"
+AYUDA = "\n".join([  # noqa: FLY002
+    "Comandos:",
+    "/estado: gasto de hoy, propuestas pendientes y STOP",
+    "/stop: parar todo al instante (no pausa campañas)",
+    "/reanudar: quitar el STOP (pide confirmación)",
+    "/pausar_todo: proponer pausar todas las campañas activas",
+    "/limites: ver los límites del ejecutor",
+    "/limites <clave> <valor>: proponer un cambio de límite",
+    "/limites <act_…> <clave> <valor>: proponer un cambio de límite de una cuenta",
+    "/emparejar: ver el estado del emparejamiento",
+])
+
+MAX_MENSAJE = 4096
+MAX_RESUMEN = 5
+
+
+@dataclass(frozen=True)
+class Desenlace:
+    estado: Literal["ejecutando", "ejecutada", "fallida", "discrepancia", "rechazada", "caducada", "obsoleta", "stop"]
+    cuando: datetime
+    relectura: str | None = None
+    codigo: str | None = None
+    nueva_propuesta: str | None = None
+    lineas_lote: tuple[str, ...] = ()
+
+
+def _externo(texto: str | None, maximo: int = 200) -> str:
+    return limpiar_texto(redactar(limpiar_texto(texto or "", 100_000)), maximo)
+
+
+def _linea_desenlace(d: Desenlace) -> str:
+    hora = _hora(d.cuando)
+    if d.estado == "ejecutando":
+        return "EJECUTANDO…"
+    if d.estado == "ejecutada":
+        return f"EJECUTADA {hora} · relectura OK: {_externo(d.relectura)}"
+    if d.estado == "fallida":
+        return f"FALLÓ: {_externo(d.codigo)} · no se cambió nada"
+    if d.estado == "discrepancia":
+        return (f"DISCREPANCIA: Meta dice {_externo(d.relectura)} → nueva propuesta "
+                f"{_externo(d.nueva_propuesta)}")
+    if d.estado == "rechazada":
+        return f"RECHAZADA {hora}"
+    if d.estado == "caducada":
+        return "CADUCADA, no se ejecutó nada"
+    if d.estado == "obsoleta":
+        return f"OBSOLETA: el valor cambió desde que se envió ({_externo(d.relectura)}); no se ejecutó nada"
+    return STOP_ACTIVO
+
+
+def render_resultado(texto_original: str, d: Desenlace) -> str:
+    base = texto_original + "\n\n" + _linea_desenlace(d)
+    if not d.lineas_lote:
+        return base
+    lineas = [_externo(ln, 300) for ln in d.lineas_lote]
+    completo = base + "".join("\n" + ln for ln in lineas)
+    if len(completo) <= MAX_MENSAJE:
+        return completo
+    salida, usado = [], len(base)
+    for i, ln in enumerate(lineas):
+        resto = len(lineas) - i
+        pie = f"\n… y {resto} más (detalle en el vault)"
+        if usado + 1 + len(ln) + len(pie) > MAX_MENSAJE:
+            break
+        salida.append("\n" + ln)
+        usado += 1 + len(ln)
+    resto = len(lineas) - len(salida)
+    return (base + "".join(salida) + f"\n… y {resto} más (detalle en el vault)")[:MAX_MENSAJE]
+
+
+def texto_ya_procesada(estado: Estado) -> str:
+    if estado == "caducada":
+        return "Caducada: no se ejecutó nada"
+    if estado == "recibida":
+        return "Aún no enviada: no se hizo nada"
+    return f"Ya procesada ({limpiar_texto(estado, 40)})"[:200]
+
+
+def botones_propuesta(id: str, chat_id: int, clave: bytes) -> list[list[Boton]]:
+    return [[Boton("Aceptar", firmar(id, "A", chat_id, clave)), Boton("Rechazar", firmar(id, "R", chat_id, clave))]]
+
+
+@dataclass(frozen=True)
+class ResumenEstado:
+    gasto_hoy: Mapping[str, str]
+    pendientes: Sequence[tuple[str, str, datetime]]
+    stop: bool
+
+
+def render_estado(r: ResumenEstado) -> str:
+    lineas = ["STOP: activo" if r.stop else "STOP: no"]
+    if r.gasto_hoy:
+        lineas.append("Gasto de hoy:")
+        lineas += [f"{limpiar_texto(c, 40)}: {limpiar_texto(v, 40)}" for c, v in r.gasto_hoy.items()]
+    else:
+        lineas.append("Gasto de hoy: sin datos")
+    if r.pendientes:
+        lineas.append(f"Pendientes ({len(r.pendientes)}):")
+        lineas += [f"{limpiar_texto(i, 20)} · {limpiar_texto(t, 80)} · caduca {_hora(c)} (hora Colombia)"
+                   for i, t, c in r.pendientes]
+    else:
+        lineas.append("Sin propuestas pendientes")
+    return "\n".join(lineas)[:MAX_MENSAJE]
+
+
+@dataclass(frozen=True)
+class ItemResumen:
+    id: str
+    linea: str
+    motivo: str
+    caduca: datetime
+    estado: Estado
+
+
+def render_resumen(items: Sequence[ItemResumen], titulo: str, chat_id: int, clave: bytes) -> tuple[str, list[list[Boton]]]:
+    if len(items) > MAX_RESUMEN:
+        raise ValueError(f"un resumen admite como máximo {MAX_RESUMEN} propuestas")
+    bloques, botones = [], []
+    for it in items:
+        ultimo = limpiar_texto(it.id, 20)[-3:]
+        if it.estado == "enviada":
+            final = f"Caduca: {_hora(it.caduca)} (hora Colombia)"
+            botones.append([
+                Boton(f"Aceptar …{ultimo}", firmar(it.id, "A", chat_id, clave)),
+                Boton(f"Rechazar …{ultimo}", firmar(it.id, "R", chat_id, clave)),
+            ])
+        else:
+            final = f"Estado: {limpiar_texto(it.estado, 40).upper()}"
+        bloques.append("\n".join([limpiar_texto(it.linea, 200), "Por qué: " + limpiar_texto(it.motivo, 120), final]))
+    texto = "\n\n".join([limpiar_texto(titulo, 100)] + bloques)
+    return texto[:MAX_MENSAJE], botones
