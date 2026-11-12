@@ -11,6 +11,7 @@ from trovefy_ejecutor.render import (
     STOP_ACTIVO,
     Desenlace,
     ItemResumen,
+    MensajeDemasiadoLargo,
     ResumenEstado,
     botones_propuesta,
     render_estado,
@@ -74,7 +75,7 @@ def test_resumen_con_botones_solo_para_las_pendientes():
     items = [ItemResumen("P-20261112-004", "SUBIR PRESUPUESTO · 02 VIDEO G1 · 20.000 → 26.000 COP", "x", T, "enviada"),
              ItemResumen("P-20261112-005", "PAUSAR · AD03", "y", T, "rechazada")]
     texto, botones = render_resumen(items, "Resumen de la noche (06:30)", 42, K)
-    assert len(botones) == 1 and botones[0][0].texto == "Aceptar …004" and botones[0][1].texto == "Rechazar …004"
+    assert len(botones) == 1 and botones[0][0].texto == "Aceptar 1" and botones[0][1].texto == "Rechazar 1"
     assert "RECHAZADA" in texto.upper() and "Caduca: 14:07 (hora Colombia)" in texto
     assert texto.startswith("Resumen de la noche (06:30)")
 
@@ -92,3 +93,26 @@ def test_estado():
     assert "STOP: activo" in t and "P-20261112-004" in t and "46.000 COP" in t
     t2 = render_estado(ResumenEstado({}, [], False))
     assert "STOP: no" in t2 and "Sin propuestas pendientes" in t2
+
+
+def test_resumen_ids_con_mismo_final_se_distinguen():
+    a, b = "P-20261111-004", "P-20261112-004"
+    items = [ItemResumen(a, "L1", "m", T, "enviada"), ItemResumen(b, "L2", "m", T, "enviada")]
+    texto, botones = render_resumen(items, "t", 42, K)
+    assert [x.texto for x in botones[0]] == ["Aceptar 1", "Rechazar 1"]
+    assert [x.texto for x in botones[1]] == ["Aceptar 2", "Rechazar 2"]
+    assert f"1 \u00b7 {a} \u00b7 L1" in texto and f"2 \u00b7 {b} \u00b7 L2" in texto
+    assert botones[0][0].data == callbacks.firmar(a, "A", 42, K)
+    assert botones[1][1].data == callbacks.firmar(b, "R", 42, K)
+
+
+def test_resumen_demasiado_largo_no_se_corta():
+    items = [ItemResumen(f"P-20261112-{i:03d}", "L" * 200, "m" * 120, T, "enviada") for i in range(5)]
+    items = [ItemResumen(i.id, i.linea, i.motivo, i.caduca, i.estado) for i in items]
+    with pytest.raises(MensajeDemasiadoLargo):
+        render_resumen(items, "t" * 100, 42, K, maximo=500)
+
+
+def test_desenlace_desconocido_falla():
+    with pytest.raises(ValueError):
+        render_resultado(O, Desenlace("raro", T))  # type: ignore[arg-type]

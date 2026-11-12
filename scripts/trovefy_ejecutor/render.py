@@ -291,7 +291,9 @@ def _linea_desenlace(d: Desenlace) -> str:
         return "CADUCADA, no se ejecutó nada"
     if d.estado == "obsoleta":
         return f"OBSOLETA: el valor cambió desde que se envió ({_externo(d.relectura)}); no se ejecutó nada"
-    return STOP_ACTIVO
+    if d.estado == "stop":
+        return STOP_ACTIVO
+    raise ValueError(f"desenlace desconocido: {d.estado!r}")
 
 
 def render_resultado(texto_original: str, d: Desenlace) -> str:
@@ -358,20 +360,22 @@ class ItemResumen:
     estado: Estado
 
 
-def render_resumen(items: Sequence[ItemResumen], titulo: str, chat_id: int, clave: bytes) -> tuple[str, list[list[Boton]]]:
+def render_resumen(items: Sequence[ItemResumen], titulo: str, chat_id: int, clave: bytes,
+                   maximo: int = MAX_MENSAJE) -> tuple[str, list[list[Boton]]]:
     if len(items) > MAX_RESUMEN:
         raise ValueError(f"un resumen admite como máximo {MAX_RESUMEN} propuestas")
     bloques, botones = [], []
-    for it in items:
-        ultimo = limpiar_texto(it.id, 20)[-3:]
+    for n, it in enumerate(items, 1):
         if it.estado == "enviada":
             final = f"Caduca: {_hora(it.caduca)} (hora Colombia)"
             botones.append([
-                Boton(f"Aceptar …{ultimo}", firmar(it.id, "A", chat_id, clave)),
-                Boton(f"Rechazar …{ultimo}", firmar(it.id, "R", chat_id, clave)),
+                Boton(f"Aceptar {n}", firmar(it.id, "A", chat_id, clave)),
+                Boton(f"Rechazar {n}", firmar(it.id, "R", chat_id, clave)),
             ])
         else:
             final = f"Estado: {limpiar_texto(it.estado, 40).upper()}"
-        bloques.append("\n".join([limpiar_texto(it.linea, 200), "Por qué: " + limpiar_texto(it.motivo, 120), final]))
+        bloques.append("\n".join([f"{n} · {limpiar_texto(it.id, 20)} · " + limpiar_texto(it.linea, 200), "Por qué: " + limpiar_texto(it.motivo, 120), final]))
     texto = "\n\n".join([limpiar_texto(titulo, 100)] + bloques)
-    return texto[:MAX_MENSAJE], botones
+    if len(texto) > maximo:
+        raise MensajeDemasiadoLargo(f"{len(texto)} caracteres (máximo {maximo})")
+    return texto, botones
