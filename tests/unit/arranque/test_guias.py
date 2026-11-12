@@ -83,7 +83,7 @@ def test_guias_03_04_05_dicen_lo_esencial():
 
 def test_guia_06_avisa_antes_de_crear_nada():
     t = _t("06-cuenta-publicitaria.md")
-    aviso = t.index("**Antes de crear nada: la moneda (USD) y la zona horaria no se pueden cambiar después.**")
+    aviso = t.index("**Antes de crear nada: la moneda (USD) y la zona horaria no se pueden cambiar sin crear otra cuenta.**")
     assert aviso < t.index("**Pasos**")
     assert "/trovefy:auditar" in t and "compras internacionales" in t
     assert "cuenta.limite_gasto_inicial_usd" in t and "US$ 250" in t and "Fase 1" in t
@@ -143,3 +143,27 @@ def test_entorno_arreglo_de_playwright_con_cd():
     t = (RAIZ.parents[1] / "scripts/trovefy/arranque/verificadores/entorno.py").read_text()
     assert "plan 05" not in t
     assert "cd ~/trovefy/trovefy && uv run playwright install chromium" in t
+
+
+def test_guias_04_08_cubren_varios_portfolios():
+    for n in ["04-business.md", "08-verificar-dominio.md"]:
+        t = _t(n)
+        assert "trovefy arranque hecho 04 --dato business_id=" in t, n
+        assert "tienes varios portfolios" in t, n
+        assert "Verificación necesaria" in t, n
+    assert "business_info?business_id=" in _t("04-business.md")
+    assert "domains?business_id=" in _t("08-verificar-dominio.md")
+
+
+def test_guia_06_avisa_de_la_informacion_fiscal_y_la_decision_de_moneda():
+    t = _t("06-cuenta-publicitaria.md")
+    assert (
+        "revisa la Divisa y la Zona horaria en la pantalla de Información fiscal de la facturación antes de añadir la tarjeta: "
+        "Meta puede cambiarlas por las de tu país"
+    ) in t
+    for x in [
+        "https://www.facebook.com/business/help/291404291014138", "60 días", "crea una cuenta nueva", "límite de cuentas nuevas",
+        "--dato moneda=COP --dato zona=America/Bogota", "decisión del usuario: moneda COP (la guía pide USD)",
+        "equivalencia en USD no medida", "Verificación necesaria",
+    ]:
+        assert x in t, x

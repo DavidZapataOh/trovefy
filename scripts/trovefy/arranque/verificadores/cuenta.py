@@ -378,7 +378,7 @@ def verificar_cuenta(
 def _aceptar_06(valores: dict[str, str | None]) -> str | None:
     limite = valores.get("limite_gasto")
     if limite in (None, SIN_LIMITE):
-        return "pon primero el límite de gasto (paso 5 de la guía) y vuelve a capturar"
+        return "pon primero el límite de gasto (paso 6 de la guía) y vuelve a capturar"
     if limite == ILEGIBLE:
         return "el número del límite de gasto no se entiende; hay que ajustar el patrón (cambio en el repo)"
     return None
