@@ -225,11 +225,16 @@ class ClienteGraph:
                             timeout=self._t_lectura)
 
     def listar(self, padre: str, arista: str, campos: Sequence[str],
-               filtros: Mapping[str, object] | None = None, max_paginas: int = 20) -> list[dict]:
+               filtros: Mapping[str, object] | None = None, max_paginas: int = 20,
+               limite: int | None = None) -> list[dict]:
+        """Lista una arista. Falla cerrado: si quedan páginas tras ``max_paginas`` o hay ``next`` sin
+        cursor, lanza ``ErrorRed("listado incompleto")`` (nunca devuelve un listado truncado)."""
         salida: list[dict] = []
         despues: str | None = None
         for _ in range(max_paginas):
             pares = [("fields", ",".join(campos))] + [(k, _valor(v)) for k, v in (filtros or {}).items()]
+            if limite is not None:
+                pares.append(("limit", str(int(limite))))
             if despues is not None:
                 pares.append(("after", despues))
             r = self._enviar("GET", _seg(padre, arista), consulta=urlencode(pares, safe=","),
@@ -239,12 +244,12 @@ class ClienteGraph:
                 salida.extend(d for d in datos if isinstance(d, dict))
             paging = r.get("paging")
             if not isinstance(paging, dict) or not paging.get("next"):
-                break
+                return salida
             cursores = paging.get("cursors")
             despues = cursores.get("after") if isinstance(cursores, dict) else None
             if not despues:
                 break
-        return salida
+        raise ErrorRed("listado incompleto")
 
     def _post(self, ruta: str, datos: Mapping[str, object], validate_only: bool) -> dict:
         return self._enviar("POST", ruta, cuerpo=_codificar(datos, validate_only),

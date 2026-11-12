@@ -32,6 +32,11 @@ _ENTEROS = CAMPOS_IMPORTE | {"amount_spent", "account_status"}
 _TIPOS_META = ("campaign", "adset", "ad")
 _CON_SUMA = frozenset({"presupuesto", "activar", "lote"})
 _CON_ACTIVACION = frozenset({"activar", "lote"})
+# «Gastando» = status propio ACTIVE y effective_status fuera de estos (IN_PROCESS, WITH_ISSUES,
+# PENDING_REVIEW, PREAPPROVED y PENDING_BILLING_INFO cuentan: contar de más es el lado seguro).
+_NO_GASTA = frozenset({"PAUSED", "CAMPAIGN_PAUSED", "ADSET_PAUSED", "DELETED", "ARCHIVED", "DISAPPROVED"})
+_ESTADOS_GASTA = ("ACTIVE", "IN_PROCESS", "WITH_ISSUES", "PENDING_REVIEW", "PREAPPROVED", "PENDING_BILLING_INFO")
+_LIMITE_LISTADO = 500
 _ENTERO = re.compile(r"-?[0-9]+")
 
 
@@ -58,6 +63,11 @@ def _normalizar(campo: str, v: object) -> int | str | None:
     if campo in _ENTEROS:
         return _entero(v)
     return v if isinstance(v, str) else str(v)
+
+
+def _gasta(status: object, efectivo: object) -> bool:
+    """Un status ausente se da por ACTIVE (contar de más es seguro); effective_status ausente, igual."""
+    return (status is None or status == "ACTIVE") and efectivo not in _NO_GASTA
 
 
 def _activa(op: Operacion) -> bool:
@@ -124,17 +134,25 @@ class ValoresVivos:
         """Presupuesto diario que empezaría a gastar cada operación que activa algo.
 
         Cada conjunto ABO o campaña CBO que, tras aplicar ``p``, tendría su status y el de su campaña en
-        ``ACTIVE`` y hoy no tiene ``effective_status == "ACTIVE"`` se atribuye a una sola operación: la
-        primera que activa esa entidad o su campaña. Conservador: cuenta aunque no tenga anuncios activos.
-        Un padre desconocido se da por ACTIVE. Solo ``activar`` y ``lote``; en el resto, ``{}``.
+        ``ACTIVE`` y hoy no gasta (ver ``_gasta``) se atribuye a una sola operación: la primera que activa
+        esa entidad o su campaña; si ninguna, la primera operación que activa algo. Conservador: cuenta
+        aunque no tenga anuncios activos. Un padre desconocido se da por ACTIVE.
+        Si lo que empezaría a gastar no tiene ``daily_budget`` positivo (solo vitalicio o ninguno, sin
+        campaña con presupuesto) no se sabe cuánto: la clave de esa operación queda FUERA del resultado
+        (``limites.comprobar`` rechaza con ``valor_vivo_desconocido``). Solo ``activar`` y ``lote``;
+        en el resto, ``{}``.
         """
+        return self._calcular(p)[0]
+
+    def _calcular(self, p: Propuesta) -> tuple[dict[str, int], bool]:
         if p.tipo not in _CON_ACTIVACION:
-            return {}
+            return {}, False
+        activas = [op for op in p.operaciones if _activa(op)]
+        if not activas:
+            return {}, False
         final = self._final(p)
-        salida: dict[str, int] = {}
-        for op in p.operaciones:
-            if _activa(op):
-                salida.setdefault(op.id, 0)
+        total: dict[str, int] = {op.id: 0 for op in activas}
+        desconocidas: set[str] = set()
 
         def tras(id_: str) -> str | None:
             return final.get(id_, self.status(id_))
@@ -142,20 +160,33 @@ class ValoresVivos:
         for id_, tipo in self.tipos.items():
             if tipo not in ("adset", "campaign"):
                 continue
+            ent = self.entidades[id_]
+            if _gasta(ent.get("status"), ent.get("effective_status")):
+                continue  # ya gasta hoy: no hay gasto nuevo
+            padre = ent.get("campaign_id") if tipo == "adset" else None
+            padre = padre if isinstance(padre, str) else None
+            if tras(id_) != "ACTIVE" or (padre is not None and tras(padre) not in ("ACTIVE", None)):
+                continue
             monto = self._presupuesto_propio(id_)
-            if monto is None or self.entidades[id_].get("effective_status") == "ACTIVE":
-                continue
-            padre = self.entidades[id_].get("campaign_id") if tipo == "adset" else None
-            if tras(id_) != "ACTIVE" or (isinstance(padre, str) and tras(padre) not in ("ACTIVE", None)):
-                continue
-            for op in p.operaciones:
-                if _activa(op) and op.id in (id_, padre):
-                    salida[op.id] = salida.get(op.id, 0) + monto
-                    break
-        return salida
+            if monto is None:
+                if tipo == "campaign":
+                    continue  # sin presupuesto propio: lo que gaste lo dicen sus conjuntos
+                if padre is not None and self._presupuesto_propio(padre) is not None:
+                    continue  # CBO: lo cuenta la campaña
+            op = next((o for o in activas if o.id in (id_, padre)), activas[0])
+            if monto is None:
+                desconocidas.add(op.id)
+            else:
+                total[op.id] += monto
+        return {k: v for k, v in total.items() if k not in desconocidas}, bool(desconocidas)
 
-    def presupuesto_al_activar(self, p: Propuesta) -> int:
-        return sum(self.presupuesto_al_activar_por_id(p).values())
+    def presupuesto_al_activar(self, p: Propuesta) -> int | None:
+        """Suma de ``presupuesto_al_activar_por_id``; ``None`` si alguna operación que activa algo no
+        tiene clave (no se sabe cuánto gastaría). ``0`` para tipos sin activación."""
+        por_id = self.presupuesto_al_activar_por_id(p)
+        if p.tipo in _CON_ACTIVACION and any(_activa(op) and op.id not in por_id for op in p.operaciones):
+            return None
+        return sum(por_id.values())
 
 
 def _ahora() -> datetime:
@@ -200,7 +231,7 @@ def valores_vivos(p: Propuesta, graph, *, ahora: Callable[[], datetime] = _ahora
     for op in p.operaciones:
         if op.entidad == "account":
             if op.id != cuenta:
-                raise EntidadAjena(op.id, op.id)
+                raise EntidadAjena(op.id, None)
         elif op.entidad in _TIPOS_META:
             lector.leer(op.id, op.entidad)
     if p.tipo in _CON_ACTIVACION:
@@ -233,27 +264,33 @@ def _leer_contexto_activar(p: Propuesta, lector: _Lector) -> None:
             if isinstance(padre, str):
                 lector.leer(padre, "campaign")
         if op.entidad == "campaign":
-            for h in lector.graph.listar(op.id, "adsets", CAMPOS_LECTURA["adset"]):
+            for h in lector.graph.listar(op.id, "adsets", CAMPOS_LECTURA["adset"], limite=_LIMITE_LISTADO):
                 if isinstance(h.get("id"), str):
                     lector.registrar(h["id"], "adset", h)
 
 
 def _presupuestos_activos(p: Propuesta, graph) -> tuple[int | None, dict[str, int]]:
+    """``daily_budget`` de cada conjunto y campaña que gasta (``_gasta``). Un ``lifetime_budget`` no
+    entra. Un importe ilegible o negativo en algo que gasta lanza ``LecturaIncompleta``."""
     if p.tipo not in _CON_SUMA:
         return None, {}
     activos: dict[str, int] = {}
-    completo = True
     for arista in ("adsets", "campaigns"):
-        filas = graph.listar(p.cuenta, arista, ("id", "daily_budget", "effective_status"),
-                             filtros={"effective_status": ["ACTIVE"]})
+        filas = graph.listar(p.cuenta, arista, ("id", "status", "effective_status", "daily_budget"),
+                             filtros={"effective_status": list(_ESTADOS_GASTA)}, limite=_LIMITE_LISTADO)
         for f in filas:
-            if f.get("effective_status") != "ACTIVE" or not isinstance(f.get("id"), str):
+            id_ = f.get("id")
+            if not isinstance(id_, str) or not _gasta(f.get("status"), f.get("effective_status")):
                 continue
             if f.get("daily_budget") is None:
-                continue  # sin presupuesto propio (ABO bajo CBO o campaña ABO, o solo vitalicio)
+                continue  # sin presupuesto diario propio (ABO bajo CBO, o solo vitalicio)
             monto = _entero(f["daily_budget"])
             if monto is None or monto < 0:
-                completo = False
-            elif monto > 0:
-                activos[f["id"]] = monto
-    return (sum(activos.values()) if completo else None), activos
+                raise LecturaIncompleta(f"presupuesto diario ilegible en {id_}")
+            if monto > 0:
+                activos[id_] = monto
+    return sum(activos.values()), activos
+
+
+class LecturaIncompleta(Exception):
+    """Un importe de lo que gasta no se pudo leer: no se calcula el gasto diario (falla cerrado)."""

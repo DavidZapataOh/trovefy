@@ -48,6 +48,7 @@ class GraphFalso:
     token_caduca_tras: int | None = None
     redondeo: dict[str, int] = field(default_factory=dict)
     stop_tras: int | None = None
+    tam_pagina: int | None = None  # filas por página al listar; con max_paginas insuficiente, listado incompleto
 
     def __post_init__(self) -> None:
         self._reales = 0  # escrituras reales ya aplicadas
@@ -121,16 +122,20 @@ class GraphFalso:
         return salida
 
     def listar(self, padre: str, arista: str, campos: Sequence[str],
-               filtros: Mapping[str, object] | None = None, max_paginas: int = 20) -> list[dict]:
+               filtros: Mapping[str, object] | None = None, max_paginas: int = 20,
+               limite: int | None = None) -> list[dict]:
         _seg(padre, arista)
         for v in (filtros or {}).values():
             _valor(v)
-        self._leyendo("listar", f"{padre}/{arista}", {"campos": list(campos), "filtros": dict(filtros or {})})
+        self._leyendo("listar", f"{padre}/{arista}",
+                      {"campos": list(campos), "filtros": dict(filtros or {}), "limite": limite})
         salida = []
         for oid, (ar, padres) in self.hijos.items():
             if ar == arista and padre in padres and oid in self.objetos:
                 obj = self.objetos[oid]
                 salida.append({"id": oid, **{c: obj[c] for c in campos if c in obj and c != "id"}})
+        if self.tam_pagina is not None and len(salida) > self.tam_pagina * max_paginas:
+            raise ErrorRed("listado incompleto")
         return salida
 
     def escribir(self, id: str, datos: Mapping[str, object], *, validate_only: bool = False) -> dict:

@@ -10,6 +10,7 @@ from trovefy_ejecutor.vivo import (
     CAMPOS_IMPORTE,
     CAMPOS_LECTURA,
     EntidadAjena,
+    LecturaIncompleta,
     valores_vivos,
 )
 
@@ -76,8 +77,9 @@ def test_entidad_account_exige_la_cuenta_de_la_propuesta():
                        "a": 900000})
     assert valores_vivos(ok, g).valor(ok.operaciones[0]) == 1000000
     mal = propuesta(op={"entidad": "account", "id": "act_usd", "campo": "spend_cap"})
-    with pytest.raises(EntidadAjena):
+    with pytest.raises(EntidadAjena) as e:
         valores_vivos(mal, g)
+    assert e.value.cuenta_viva is None
 
 
 def test_errores_de_red_y_graph_se_propagan():
@@ -104,15 +106,79 @@ def test_obsoleta_status_y_ausente():
     assert "vivo None" in valores_vivos(p2, g).obsoleta(p2)
 
 
-def test_importe_ilegible_se_omite_y_nunca_es_float():
+@pytest.mark.parametrize("malo", ["20000.5", "-5", "abc"])
+def test_presupuesto_ilegible_o_negativo_de_algo_que_gasta_falla_cerrado(malo):
     g = mundo_basico()
-    g.objetos["s1"]["daily_budget"] = "20000.5"
-    vv = valores_vivos(propuesta(), g)
-    assert vv.valor(propuesta().operaciones[0]) is None
-    assert (("s1", "daily_budget")) not in vv.valores_para_limites()
-    assert vv.suma_diaria_activa is None  # no se sabe lo que gasta: no se inventa una suma
-    for v in valores_vivos(propuesta(), mundo_basico()).valores_para_limites().values():
+    g.objetos["s1"]["daily_budget"] = malo
+    with pytest.raises(LecturaIncompleta) as e:
+        valores_vivos(propuesta(), g)
+    assert "s1" in str(e.value) and malo not in str(e.value)
+
+
+def test_invariante_suma_igual_a_presupuestos_activos():
+    vv = valores_vivos(propuesta(), mundo_basico())
+    assert vv.suma_diaria_activa == sum(vv.presupuestos_activos.values())
+    for v in vv.valores_para_limites().values():
         assert not isinstance(v, float)
+
+
+@pytest.mark.parametrize("eff,gasta", [("ACTIVE", True), ("IN_PROCESS", True), ("WITH_ISSUES", True),
+                                       ("PENDING_REVIEW", True), ("PREAPPROVED", True),
+                                       ("PENDING_BILLING_INFO", True), ("PAUSED", False),
+                                       ("CAMPAIGN_PAUSED", False), ("ADSET_PAUSED", False),
+                                       ("DELETED", False), ("ARCHIVED", False), ("DISAPPROVED", False)])
+def test_que_cuenta_como_gastando(eff, gasta):
+    g = mundo_basico()
+    g.cambiar("s2", effective_status=eff)
+    assert ("s2" in valores_vivos(propuesta(), g).presupuestos_activos) is gasta
+
+
+def test_status_propio_pausado_no_gasta_aunque_effective_diga_active():
+    g = mundo_basico()
+    g.cambiar("s2", status="PAUSED")
+    assert "s2" not in valores_vivos(propuesta(), g).presupuestos_activos
+
+
+def test_listado_se_pide_con_limit_y_filtra_estados():
+    g = mundo_basico()
+    valores_vivos(propuesta(), g)
+    ls = [c for c in g.llamadas if c.metodo == "listar"]
+    assert ls and all(c.datos["limite"] == 500 for c in ls)
+    assert "DISAPPROVED" not in ls[0].datos["filtros"]["effective_status"]
+    assert "IN_PROCESS" in ls[0].datos["filtros"]["effective_status"]
+
+
+def _con_muchos_conjuntos(g, n=25):
+    for i in range(n):
+        g.objetos[f"w{i}"] = {"account_id": "0000000000000000", "status": "ACTIVE", "effective_status": "ACTIVE",
+                              "daily_budget": "1000", "campaign_id": "c1"}
+        g.hijos[f"w{i}"] = ("adsets", {CUENTA, "c1"})
+
+
+def test_listado_truncado_falla_cerrado():
+    g = mundo_basico()
+    _con_muchos_conjuntos(g)
+    g.tam_pagina = 1
+    with pytest.raises(ErrorRed, match="listado incompleto"):
+        valores_vivos(propuesta(), g)
+
+
+def test_listado_multipagina_completo_se_suma_entero():
+    g = mundo_basico()
+    _con_muchos_conjuntos(g)
+    g.tam_pagina = 500
+    vv = valores_vivos(propuesta(), g)
+    assert vv.suma_diaria_activa == 35000 + 25000 and len(vv.presupuestos_activos) == 27
+
+
+def test_listado_de_hijos_de_campana_truncado_falla_cerrado():
+    g = mundo_basico()
+    _con_muchos_conjuntos(g)
+    pausado(g, "c1")
+    g.tam_pagina = 1
+    p = propuesta(tipo="activar", op={"entidad": "campaign", "id": "c1", **ACTIVAR})
+    with pytest.raises(ErrorRed, match="listado incompleto"):
+        valores_vivos(p, g)
 
 
 def test_presupuesto_al_activar():
@@ -228,3 +294,81 @@ def test_comprobar_rechaza_subir_puja_de_conjunto_activo_fuera_de_activos(limite
     g = mundo_basico()
     g.objetos["s1"].pop("daily_budget")  # ACTIVE sin presupuesto propio (CBO): no figura en presupuestos_activos
     assert "valor_vivo_desconocido" in _violaciones(g, limites_cop, tmp_path)
+
+
+def _activar_violaciones(g, p, limites, tmp_path):
+    vv = valores_vivos(p, g, ahora=lambda: T)
+    a = Almacen(tmp_path / "e.sqlite")
+    try:
+        ctx = contexto_para(p, a, ahora=T, stop=False, valores=vv.valores_para_limites(),
+                            presupuestos_activos=vv.presupuestos_activos,
+                            presupuesto_al_activar=vv.presupuesto_al_activar_por_id(p))
+    finally:
+        a.cerrar()
+    return vv, [x.split(":")[0] for x in comprobar(p, limites, ctx)]
+
+
+def test_activar_sin_presupuesto_diario_positivo_no_se_sabe(limites_cop, tmp_path):
+    g = mundo_basico()
+    pausado(g, "s1")
+    g.objetos["s1"].pop("daily_budget")
+    g.objetos["s1"]["lifetime_budget"] = "900000"
+    p = propuesta(tipo="activar", op=ACTIVAR)
+    vv, cods = _activar_violaciones(g, p, limites_cop, tmp_path)
+    assert vv.presupuesto_al_activar_por_id(p) == {} and vv.presupuesto_al_activar(p) is None
+    assert "valor_vivo_desconocido" in cods
+
+
+def test_activar_conjunto_sin_ningun_presupuesto_ni_padre_con_presupuesto(limites_cop, tmp_path):
+    g = mundo_basico()
+    pausado(g, "s1")
+    g.objetos["s1"].pop("daily_budget")
+    p = propuesta(tipo="activar", op=ACTIVAR)
+    vv, cods = _activar_violaciones(g, p, limites_cop, tmp_path)
+    assert vv.presupuesto_al_activar(p) is None and "valor_vivo_desconocido" in cods
+
+
+def test_activar_con_presupuesto_conocido_no_da_desconocido(limites_cop, tmp_path):
+    g = mundo_basico()
+    pausado(g, "s1")
+    p = propuesta(tipo="activar", op=ACTIVAR)
+    vv, cods = _activar_violaciones(g, p, limites_cop, tmp_path)
+    assert vv.presupuesto_al_activar(p) == 20000 and "valor_vivo_desconocido" not in cods
+
+
+def test_gasto_nuevo_sin_op_propia_se_carga_a_la_primera_activacion():
+    g = mundo_basico()
+    pausado(g, "a1")
+    g.cambiar("s1", effective_status="DISAPPROVED")  # ACTIVE pero no gasta hoy; activar el anuncio lo arranca
+    p = propuesta(tipo="activar", op={"entidad": "ad", "id": "a1", **ACTIVAR})
+    vv = valores_vivos(p, g)
+    assert vv.presupuesto_al_activar_por_id(p) == {"a1": 20000}
+    assert vv.presupuesto_al_activar(p) == 20000
+
+
+@pytest.mark.parametrize("eff", ["IN_PROCESS", "WITH_ISSUES"])
+def test_conjunto_en_proceso_o_con_problemas_ya_cuenta_como_gastando(eff):
+    g = mundo_basico()
+    pausado(g, "a1")
+    g.cambiar("s1", effective_status=eff)
+    p = propuesta(tipo="activar", op={"entidad": "ad", "id": "a1", **ACTIVAR})
+    assert valores_vivos(p, g).presupuesto_al_activar_por_id(p) == {"a1": 0}
+
+
+def test_conjunto_bajo_cbo_con_problemas_no_suma_dos_veces():
+    g = mundo_basico()
+    pausado(g, "a1")
+    g.cambiar("c1", daily_budget="50000", effective_status="WITH_ISSUES")
+    g.objetos["s1"].pop("daily_budget")
+    g.cambiar("s1", effective_status="WITH_ISSUES")
+    p = propuesta(tipo="activar", op={"entidad": "ad", "id": "a1", **ACTIVAR})
+    assert valores_vivos(p, g).presupuesto_al_activar_por_id(p) == {"a1": 0}
+
+
+def test_cbo_no_gasta_hoy_se_carga_a_la_activacion():
+    g = mundo_basico()
+    pausado(g, "a1")
+    g.cambiar("c1", daily_budget="50000", effective_status="DISAPPROVED")
+    g.objetos["s1"].pop("daily_budget")
+    p = propuesta(tipo="activar", op={"entidad": "ad", "id": "a1", **ACTIVAR})
+    assert valores_vivos(p, g).presupuesto_al_activar_por_id(p) == {"a1": 50000}

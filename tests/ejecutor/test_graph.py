@@ -197,10 +197,27 @@ def test_listar_pagina_con_cursor():
     assert all(v.startswith("https://graph.facebook.com/v25.0/act_1/campaigns?") for v in vistas)
 
 
-def test_listar_max_paginas():
+def test_listar_max_paginas_falla_cerrado():
     pagina = {"data": [{"id": "1"}], "paging": {"cursors": {"after": "C"}, "next": "x"}}
-    r = ClienteGraph(TOKEN, abrir=lambda req, timeout=None: _R(pagina)).listar("a", "b", ["id"], max_paginas=3)
-    assert len(r) == 3
+    with pytest.raises(ErrorRed, match="listado incompleto"):
+        ClienteGraph(TOKEN, abrir=lambda req, timeout=None: _R(pagina)).listar("a", "b", ["id"], max_paginas=3)
+
+
+def test_listar_next_sin_cursor_falla_cerrado():
+    pagina = {"data": [{"id": "1"}], "paging": {"next": "x"}}
+    with pytest.raises(ErrorRed, match="listado incompleto"):
+        ClienteGraph(TOKEN, abrir=lambda req, timeout=None: _R(pagina)).listar("a", "b", ["id"])
+
+
+def test_listar_envia_limit():
+    vistas = []
+
+    def abrir(req, timeout=None):
+        vistas.append(req.full_url)
+        return _R({"data": []})
+
+    ClienteGraph(TOKEN, abrir=abrir).listar("a", "b", ["id"], limite=500)
+    assert "limit=500" in vistas[0]
 
 
 def test_subir_imagen(respuesta_json):
