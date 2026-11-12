@@ -35,6 +35,7 @@ class TelegramFalso:
         self._next_cq = 1
         self._fallos: dict[str, list[tuple[int, int]]] = {}
         self._cortes: dict[str, int] = {}
+        self._entregas: dict[str, float] = {}
         self._srv = _Servidor(("127.0.0.1", 0), self._handler())
         self.base = f"http://127.0.0.1:{self._srv.server_address[1]}"
         self._hilo = threading.Thread(target=self._srv.serve_forever, daemon=True)
@@ -62,7 +63,10 @@ class TelegramFalso:
                 "text": texto,
             }
             if reply_to is not None:
+                previo = self.mensajes.get(reply_to)
                 msg["reply_to_message"] = {"message_id": reply_to}
+                if previo is not None:  # como Telegram: el mensaje citado con su autor (el bot) y su texto
+                    msg["reply_to_message"].update({"from": {"id": 1, "is_bot": True}, "text": previo["texto"]})
             self._poner({"message": msg})
             return mid
 
@@ -70,17 +74,22 @@ class TelegramFalso:
         with self._cond:
             cq = str(self._next_cq)
             self._next_cq += 1
+            self._entregas[cq] = time.monotonic()
             self._poner(
                 {
                     "callback_query": {
                         "id": cq,
                         "from": {"id": user_id, "is_bot": False},
-                        "message": {"message_id": message_id, "chat": {"id": chat_id, "type": "private"}},
+                        "message": {"message_id": message_id, "date": int(time.time()),
+                                    "chat": {"id": chat_id, "type": "private"}},
                         "data": data,
                     }
                 }
             )
             return cq
+
+    def entregado_en(self, callback_id: str) -> float:
+        return self._entregas[callback_id]
 
     def fallar(self, metodo, veces=1, codigo=429, retry_after=1) -> None:
         with self._cond:
