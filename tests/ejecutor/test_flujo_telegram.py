@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import traceback
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -15,7 +16,6 @@ from pathlib import Path
 import pytest
 from ejecutor.datos_telegram import noop
 from ejecutor.falsos.telegram_falso import TOKEN_PRUEBA, TelegramFalso
-from trovefy_ejecutor import callbacks
 from trovefy_ejecutor.auditoria import EV_CALLBACK_INVALIDO, EV_TRANSICION, Auditoria
 from trovefy_ejecutor.callbacks import firmar
 from trovefy_ejecutor.comandos import (
@@ -42,7 +42,7 @@ from trovefy_ejecutor.render import (
     render_resultado,
     texto_ya_procesada,
 )
-from trovefy_ejecutor.telegram import ClienteTelegram, ErrorRedTelegram
+from trovefy_ejecutor.telegram import ClienteTelegram, ErrorRedTelegram, ErrorTelegram
 
 ID = "P-20261112-001"
 ID2 = "P-20261112-002"
@@ -96,11 +96,7 @@ def despachar(e: Entorno, accion: Accion, update: dict | None = None) -> None:
         evento = EV_CALLBACK_INVALIDO if accion.motivo.startswith("callback_") else "mensaje_ignorado"
         e.aud.anotar(evento, motivo=accion.motivo)
     elif isinstance(accion, ResponderToque):
-        data = update["callback_query"]["data"]
-        cq = update["callback_query"]
-        motivo = callbacks.motivo_rechazo(data, cq["message"]["chat"]["id"], cq["from"]["id"],
-                                          Emparejamiento(USUARIO, USUARIO), K)
-        e.aud.anotar(EV_CALLBACK_INVALIDO, motivo=f"callback_{motivo or 'otro'}")
+        e.aud.anotar(EV_CALLBACK_INVALIDO, motivo=accion.motivo)
         e.cliente.responder_callback(accion.callback_id, accion.texto)
     elif isinstance(accion, Toque):
         fila = e.alm.obtener(accion.id)
@@ -257,12 +253,28 @@ def test_token_fuera_de_todo(entorno, caplog, tmp_path):
     buena = firmar(ID, "A", 42, K)
     tg.meter_toque(buena[:-1] + "x", 42, 42, mid)
     tg.meter_toque(buena, 42, 42, mid)
-    tg.fallar("editMessageText", veces=1, codigo=429, retry_after=1)
-    tg.meter_toque(firmar(ID2, "A", 42, K), 42, 42, mid)
     ciclo(entorno)
     tg.cortar("sendMessage")
     with pytest.raises(ErrorRedTelegram) as exc:
         entorno.cliente.enviar(USUARIO, "x")
-    assert TOKEN_PRUEBA not in str(exc.value) and TOKEN_PRUEBA not in repr(exc.value)
+    tg.fallar("editMessageText", veces=3, codigo=429, retry_after=1)  # agota los reintentos
+    with pytest.raises(ErrorTelegram) as exc2:
+        entorno.cliente.editar(USUARIO, mid, "otro texto")
+    for exc_ in (exc, exc2):
+        assert exc_.value.__cause__ is None and exc_.value.__suppress_context__ is True
+        assert TOKEN_PRUEBA not in str(exc_.value) and TOKEN_PRUEBA not in repr(exc_.value)
+        assert TOKEN_PRUEBA not in "".join(traceback.format_exception(exc_.value))
     assert TOKEN_PRUEBA not in (tmp_path / "a.jsonl").read_text()
     assert TOKEN_PRUEBA not in caplog.text and TOKEN_PRUEBA not in repr(entorno.cliente)
+
+
+def test_toque_de_mensaje_inaccesible(entorno):
+    tg, alm, aud, mid = entorno
+    antes = len(ediciones(tg))
+    tg.meter_toque(firmar(ID, "A", 42, K), 42, 42, mid)
+    tg._updates[-1]["callback_query"]["message"]["date"] = 0  # Telegram: mensaje de más de 48 h
+    ciclo(entorno)
+    assert alm.obtener(ID).estado == "enviada" and len(ediciones(tg)) == antes
+    assert respuestas(tg) == []
+    lineas = [json.loads(ln) for ln in Path(aud.ruta).read_text().splitlines()]
+    assert [ln["datos"]["motivo"] for ln in lineas] == ["callback_sin_fecha"]

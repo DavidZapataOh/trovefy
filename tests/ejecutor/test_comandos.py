@@ -61,6 +61,13 @@ def toque(data, uid=42, cid=42, fecha=T):
             "message": {"message_id": 9, "date": int(fecha.timestamp()), "chat": {"id": cid}}}}
 
 
+def test_toque_de_mensaje_inaccesible_se_ignora():
+    d = firmar("P-20261112-004", "A", 42, K)
+    u = toque(d)
+    u["callback_query"]["message"]["date"] = 0  # Telegram: mensaje de más de 48 h
+    assert interpretar_update(u, E, K, T) == Ignorar("callback_sin_fecha")
+
+
 # --- interpretar_update --------------------------------------------------------------------------
 
 def test_comandos_basicos():
@@ -120,7 +127,7 @@ def test_toques():
         Ignorar("callback_usuario_ajeno")
     assert interpretar_update(toque(firmar("P-20261112-004", "A", 77, K), cid=77), E, K, T) == \
         Ignorar("callback_chat_ajeno")
-    assert interpretar_update(toque("v1|P20261112004|A|AAAAAAAAAA"), E, K, T) == ResponderToque("cq1", BOTON_NO_VALIDO)
+    assert interpretar_update(toque("v1|P20261112004|A|AAAAAAAAAA"), E, K, T) == ResponderToque("cq1", BOTON_NO_VALIDO, "callback_firma")
     assert interpretar_update(toque(firmar("P-20261112-004", "A", 42, K), fecha=T + timedelta(hours=1)), E, K, T) == \
         Ignorar("callback_futuro")
     assert interpretar_update(toque(firmar("P-20261112-004", "A", 42, K)), None, K, T) == Ignorar("sin_emparejar")
@@ -131,7 +138,7 @@ def test_confirmacion_stop_caduca():
     a = interpretar_update(toque(d), E, K, T + timedelta(minutes=5))
     assert a == ToqueInterruptor("Q-20261112-140000", False, "A", "cq1", 9)
     c = interpretar_update(toque(d), E, K, T + timedelta(minutes=11))
-    assert c == ResponderToque("cq1", "Caducada: no se ejecutó nada")
+    assert c == ResponderToque("cq1", "Caducada: no se ejecutó nada", "callback_caducada")
     s = interpretar_update(toque(firmar("S-20261112-140000", "R", 42, K)), E, K, T)
     assert s == ToqueInterruptor("S-20261112-140000", True, "R", "cq1", 9)
 

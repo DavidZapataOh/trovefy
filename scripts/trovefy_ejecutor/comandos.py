@@ -95,6 +95,7 @@ class Responder:
 class ResponderToque:
     callback_id: str
     texto: str
+    motivo: str  # para la auditoría (callback_invalido): callback_firma, callback_caducada…
 
 
 @dataclass(frozen=True)
@@ -199,23 +200,23 @@ def _callback(cq: dict, emparejado: Emparejamiento, clave: bytes, ahora: datetim
     data = cq.get("data")
     motivo = motivo_rechazo(data, chat_id, user_id, emparejado, clave)
     if motivo is not None:
-        return ResponderToque(cq_id, BOTON_NO_VALIDO)
+        return ResponderToque(cq_id, BOTON_NO_VALIDO, f"callback_{motivo}")
     fecha = _int(mensaje.get("date"))
-    if fecha is None:
+    if fecha is None or fecha <= 0:  # date == 0: mensaje inaccesible (más de 48 h); no se actúa
         return Ignorar("callback_sin_fecha")
     if fecha > (ahora + MARGEN_FUTURO).timestamp():
         return Ignorar("callback_futuro")
     verificado = verificar(data, chat_id, user_id, emparejado, clave)
     if verificado is None:  # no debería pasar: motivo_rechazo ya dijo que es válido
-        return ResponderToque(cq_id, BOTON_NO_VALIDO)
+        return ResponderToque(cq_id, BOTON_NO_VALIDO, "callback_formato")
     id, accion = verificado
     if id.startswith("P-"):
         return Toque(id, accion, cq_id, message_id)
     hora = _hora_confirmacion(id)
     if hora is None:
-        return ResponderToque(cq_id, BOTON_NO_VALIDO)
+        return ResponderToque(cq_id, BOTON_NO_VALIDO, "callback_formato")
     if ahora - hora > CADUCIDAD_CONFIRMACION or hora - ahora > MARGEN_FUTURO:
-        return ResponderToque(cq_id, texto_ya_procesada("caducada"))
+        return ResponderToque(cq_id, texto_ya_procesada("caducada"), "callback_caducada")
     return ToqueInterruptor(id, id.startswith("S"), accion, cq_id, message_id)
 
 
