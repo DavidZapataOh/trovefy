@@ -297,9 +297,10 @@ def test_red_y_no_se_aplico_es_fallida_red(entorno):
         raise ErrorRed("timeout")  # la petición nunca llegó a Meta
 
     g.escribir = escribir_perdido
-    r = ejecutar(propuesta(), g, alm, aud)
+    r = ejecutar(propuesta(), g, alm, aud, ahora=_reloj)
     assert (r.estado, r.error) == ("fallida", "red") and "no se aplicó" in r.detalle
-    assert len(_reales(g)) == 1 and alm.ultimo_cambio("s1", "daily_budget") is None
+    # respuesta perdida: Meta puede aplicarla tarde, así que cuenta para la cadencia (lado seguro)
+    assert len(_reales(g)) == 1 and alm.ultimo_cambio("s1", "daily_budget") == T
 
 
 def test_meta_redondea_es_discrepancia(entorno):

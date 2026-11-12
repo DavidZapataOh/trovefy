@@ -263,7 +263,8 @@ def _ejecutar_op(op: Operacion, p: Propuesta, vv: ValoresVivos, graph, almacen: 
     status_despues = crudo.get("status")
     pausada = (op.entidad in _ESTADOS and op.campo != "status" and status_antes == "ACTIVE"
                and status_despues == "PAUSED")
-    if despues != antes:
+    if despues != antes or perdida:
+        # Respuesta perdida: aunque hoy se lea lo de antes, Meta puede aplicarla tarde (lado seguro).
         _cadencia(almacen, op, ahora)
     esperado = _normal(op.campo, op.de_esperado)
     if despues == op.a and not pausada:
