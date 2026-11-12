@@ -5,8 +5,8 @@ mínimas de la moneda de la cuenta; un importe que no sea un entero decimal se o
 consume los valores falla cerrado cuando falta.
 
 Presupuestos diarios: ``presupuestos_activos`` y ``suma_diaria_activa`` solo suman ``daily_budget``
-(conjuntos ABO y campañas CBO con ``effective_status == "ACTIVE"``). Un ``lifetime_budget`` no entra en
-la suma diaria.
+(conjuntos ABO y campañas CBO que gastan). Algo que gasta solo con ``lifetime_budget`` no se puede
+contar en la suma diaria: ``LecturaIncompleta`` (falla cerrado, nunca se infravalora el gasto).
 
 Quien use esto debe tratar ``presupuesto_al_activar(p) is None`` como desconocido (nunca sumarlo ni
 darlo por 0) y convertir ``LecturaIncompleta`` en un rechazo de la propuesta. El estado «gastando» es
@@ -274,25 +274,37 @@ def _leer_contexto_activar(p: Propuesta, lector: _Lector) -> None:
 
 
 def _presupuestos_activos(p: Propuesta, graph) -> tuple[int | None, dict[str, int]]:
-    """``daily_budget`` de cada conjunto y campaña que gasta (``_gasta``). Un ``lifetime_budget`` no
-    entra. Un importe ilegible o negativo en algo que gasta lanza ``LecturaIncompleta``."""
+    """``daily_budget`` de cada conjunto y campaña que gasta (``_gasta``). Un importe ilegible o negativo
+    en algo que gasta lanza ``LecturaIncompleta``; también algo que gasta sin ``daily_budget`` positivo
+    pero con ``lifetime_budget`` (su gasto diario no se puede contar en el tope: falla cerrado)."""
     if p.tipo not in _CON_SUMA:
         return None, {}
     activos: dict[str, int] = {}
     for arista in ("adsets", "campaigns"):
-        filas = graph.listar(p.cuenta, arista, ("id", "status", "effective_status", "daily_budget"),
+        filas = graph.listar(p.cuenta, arista,
+                             ("id", "status", "effective_status", "daily_budget", "lifetime_budget"),
                              limite=_LIMITE_LISTADO)  # sin filtro de estado en el servidor: lista negra local
         for f in filas:
             id_ = f.get("id")
             if not isinstance(id_, str) or not _gasta(f.get("status"), f.get("effective_status")):
                 continue
-            if f.get("daily_budget") is None:
-                continue  # sin presupuesto diario propio (ABO bajo CBO, o solo vitalicio)
-            monto = _entero(f["daily_budget"])
-            if monto is None or monto < 0:
-                raise LecturaIncompleta(f"presupuesto diario ilegible en {id_}")
+            monto = 0
+            if f.get("daily_budget") is not None:
+                monto = _entero(f["daily_budget"])
+                if monto is None or monto < 0:
+                    raise LecturaIncompleta(f"presupuesto diario ilegible en {id_}")
             if monto > 0:
                 activos[id_] = monto
+                continue
+            # Sin presupuesto diario propio: ABO bajo CBO (lo cuenta la campaña) o solo vitalicio.
+            vitalicio = f.get("lifetime_budget")
+            if vitalicio is not None:
+                v = _entero(vitalicio)
+                if v is None or v < 0:
+                    raise LecturaIncompleta(f"presupuesto total ilegible en {id_}")
+                if v > 0:
+                    raise LecturaIncompleta(f"{id_} gasta con presupuesto total (lifetime_budget): su gasto "
+                                            "diario no se puede contar en el tope")
     return sum(activos.values()), activos
 
 

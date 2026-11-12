@@ -384,3 +384,54 @@ def test_cbo_no_gasta_hoy_se_carga_a_la_activacion():
     g.objetos["s1"].pop("daily_budget")
     p = propuesta(tipo="activar", op={"entidad": "ad", "id": "a1", **ACTIVAR})
     assert valores_vivos(p, g).presupuesto_al_activar_por_id(p) == {"a1": 50000}
+
+
+# --- final review: gasto vitalicio en la cuenta (no se puede contar en el tope diario) -------------
+
+def _conjunto_vitalicio(g, id_="s3", **extra):
+    g.objetos[id_] = {"account_id": "0000000000000000", "status": "ACTIVE", "effective_status": "ACTIVE",
+                      "lifetime_budget": "900000", "campaign_id": "c1", **extra}
+    g.hijos[id_] = ("adsets", {CUENTA, "c1"})
+
+
+def test_conjunto_que_gasta_con_solo_vitalicio_falla_cerrado():
+    g = mundo_basico()
+    _conjunto_vitalicio(g)
+    with pytest.raises(LecturaIncompleta) as e:
+        valores_vivos(propuesta(), g)
+    assert "s3" in str(e.value)
+
+
+def test_campana_que_gasta_con_solo_vitalicio_falla_cerrado():
+    g = mundo_basico()
+    g.cambiar("c1", lifetime_budget="5000000")
+    g.objetos["s1"].pop("daily_budget")
+    g.objetos["s2"].pop("daily_budget")
+    with pytest.raises(LecturaIncompleta) as e:
+        valores_vivos(propuesta(op={"entidad": "campaign", "id": "c1", "de_esperado": None}), g)
+    assert "c1" in str(e.value)
+
+
+def test_vitalicio_pausado_o_con_diario_positivo_no_bloquea():
+    g = mundo_basico()
+    _conjunto_vitalicio(g, status="PAUSED", effective_status="PAUSED")
+    _conjunto_vitalicio(g, "s4", daily_budget="1000")
+    vv = valores_vivos(propuesta(), g)
+    assert dict(vv.presupuestos_activos) == {"s1": 20000, "s2": 15000, "s4": 1000}
+
+
+def test_listado_de_cuenta_pide_lifetime_budget():
+    g = mundo_basico()
+    valores_vivos(propuesta(), g)
+    ls = [c for c in g.llamadas if c.metodo == "listar" and c.ruta.startswith(CUENTA)]
+    assert ls and all("lifetime_budget" in c.datos["campos"] for c in ls)
+
+
+def test_ejecutar_no_sube_presupuesto_con_gasto_vitalicio_sin_contar(entorno):
+    from trovefy_ejecutor.ejecutar import ejecutar
+
+    g, alm, aud = entorno
+    _conjunto_vitalicio(g)
+    r = ejecutar(propuesta(), g, alm, aud)
+    assert r.estado == "fallida" and "lectura incompleta" in r.detalle
+    assert g.escrituras() == [] and not [c for c in g.llamadas if c.validate_only]
