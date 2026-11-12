@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import http.client
 import json
+import re
 import urllib.error
 import urllib.request
 import uuid
@@ -27,6 +28,8 @@ VERSION = "v25.0"
 _MAX_RESPUESTA = 5 * 1024 * 1024
 _MAX_VIDEO = 100 * 1024 * 1024
 _MAX_MENSAJE = 300
+_MAX_TRAZA = 64
+_SEGMENTO = re.compile(r"[A-Za-z0-9_]+")
 
 # Offset oficial de Meta por moneda. Graph no lo expone: la confirmación es «moneda leída + esta tabla» (P-21).
 # Fuente: https://developers.facebook.com/documentation/ads-commerce/marketing-api/currencies (leído 2026-11-12).
@@ -55,7 +58,7 @@ class ErrorGraph(Exception):
         self.codigo = codigo
         self.subcodigo = subcodigo
         self.mensaje = redactar(str(mensaje))[:_MAX_MENSAJE]
-        self.fbtrace_id = fbtrace_id
+        self.fbtrace_id = None if fbtrace_id is None else redactar(str(fbtrace_id))[:_MAX_TRAZA]
         super().__init__(f"Meta {codigo}/{subcodigo or '-'}: {self.mensaje}")
 
 
@@ -94,6 +97,13 @@ def _abrir_defecto(req, timeout=None):
     return urllib.request.build_opener(_SinRedireccion).open(req, timeout=timeout)
 
 
+def _seg(*partes: str) -> str:
+    for x in partes:
+        if not isinstance(x, str) or not _SEGMENTO.fullmatch(x):
+            raise ValueError("identificador de Graph inválido")
+    return "/".join(partes)
+
+
 def _entero(v: object) -> int | None:
     try:
         return int(str(v))
@@ -102,6 +112,8 @@ def _entero(v: object) -> int | None:
 
 
 def _valor(v: object) -> str:
+    if v is None:
+        raise ValueError("valor None no se envía a Graph")
     if isinstance(v, (dict, list, tuple)):
         return json.dumps(v, separators=(",", ":"), ensure_ascii=False)
     if isinstance(v, bool):
@@ -163,16 +175,18 @@ class ClienteGraph:
                 fallo = (e.code, e.read(_MAX_RESPUESTA + 1))
             except (OSError, ValueError):
                 fallo = (e.code, b"")
+            finally:
+                e.close()
         except TimeoutError:
             motivo = "timeout"
         except (urllib.error.URLError, OSError):
             motivo = "conexión"
-        except (ValueError, http.client.HTTPException):
+        except http.client.HTTPException:
             motivo = "conexión"
         if motivo is not None:
             raise ErrorRed(motivo) from None
         if fallo is not None:
-            raise self._error(fallo[1], fallo[0]) from None
+            raise (self._error(fallo[1], fallo[0]) or ErrorGraph(fallo[0], None, f"HTTP {fallo[0]}")) from None
         assert datos is not None
         if len(datos) > _MAX_RESPUESTA:
             raise ErrorRed("respuesta ilegible") from None
@@ -183,10 +197,13 @@ class ClienteGraph:
         if not isinstance(obj, dict):
             raise ErrorRed("respuesta ilegible") from None
         if "error" in obj:
-            raise self._error(datos, 200) from None
+            err = self._error(datos, 200)
+            if err is None:
+                raise ErrorRed("respuesta ilegible") from None
+            raise err from None
         return obj
 
-    def _error(self, cuerpo: bytes, http: int) -> ErrorGraph:
+    def _error(self, cuerpo: bytes, http: int) -> ErrorGraph | None:
         try:
             obj = json.loads(cuerpo.decode("utf-8"))
             err = obj["error"]
@@ -197,14 +214,14 @@ class ClienteGraph:
                 codigo,
                 _entero(err.get("error_subcode")),
                 self._limpio(str(err.get("message", ""))),
-                None if err.get("fbtrace_id") is None else str(err["fbtrace_id"]),
+                None if err.get("fbtrace_id") is None else self._limpio(str(err["fbtrace_id"])),
             )
         except (ValueError, KeyError, TypeError, AttributeError):
-            return ErrorGraph(http, None, f"HTTP {http}")
+            return None if http < 400 else ErrorGraph(http, None, f"HTTP {http}")
 
     # -- API --------------------------------------------------------------------------------
     def leer(self, id: str, campos: Sequence[str]) -> dict:
-        return self._enviar("GET", id, consulta=urlencode({"fields": ",".join(campos)}, safe=","),
+        return self._enviar("GET", _seg(id), consulta=urlencode({"fields": ",".join(campos)}, safe=","),
                             timeout=self._t_lectura)
 
     def listar(self, padre: str, arista: str, campos: Sequence[str],
@@ -215,7 +232,7 @@ class ClienteGraph:
             pares = [("fields", ",".join(campos))] + [(k, _valor(v)) for k, v in (filtros or {}).items()]
             if despues is not None:
                 pares.append(("after", despues))
-            r = self._enviar("GET", f"{padre}/{arista}", consulta=urlencode(pares, safe=","),
+            r = self._enviar("GET", _seg(padre, arista), consulta=urlencode(pares, safe=","),
                              timeout=self._t_lectura)
             datos = r.get("data")
             if isinstance(datos, list):
@@ -234,14 +251,14 @@ class ClienteGraph:
                             tipo="application/x-www-form-urlencoded", timeout=self._t_escritura)
 
     def escribir(self, id: str, datos: Mapping[str, object], *, validate_only: bool = False) -> dict:
-        return self._post(id, datos, validate_only)
+        return self._post(_seg(id), datos, validate_only)
 
     def crear(self, padre: str, arista: str, datos: Mapping[str, object], *, validate_only: bool = False) -> dict:
-        return self._post(f"{padre}/{arista}", datos, validate_only)
+        return self._post(_seg(padre, arista), datos, validate_only)
 
     def subir_imagen(self, act_id: str, contenido: bytes, nombre: str) -> str:
         cuerpo = urlencode({"bytes": base64.b64encode(contenido).decode("ascii"), "name": nombre}).encode()
-        r = self._enviar("POST", f"{act_id}/adimages", cuerpo=cuerpo,
+        r = self._enviar("POST", _seg(act_id, "adimages"), cuerpo=cuerpo,
                          tipo="application/x-www-form-urlencoded", timeout=self._t_subida)
         imagenes = r.get("images")
         if isinstance(imagenes, dict):
@@ -259,7 +276,7 @@ class ClienteGraph:
             f'--{borde}\r\nContent-Disposition: form-data; name="source"; filename="{nombre}"\r\n'
             "Content-Type: application/octet-stream\r\n\r\n"
         ).encode() + ruta.read_bytes() + f"\r\n--{borde}--\r\n".encode()
-        r = self._enviar("POST", f"{act_id}/advideos", cuerpo=cuerpo,
+        r = self._enviar("POST", _seg(act_id, "advideos"), cuerpo=cuerpo,
                          tipo=f"multipart/form-data; boundary={borde}", timeout=self._t_subida)
         vid = r.get("id")
         if not vid:
