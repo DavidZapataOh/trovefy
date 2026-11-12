@@ -1,8 +1,9 @@
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
-from fabricas import operacion, pausar, presupuesto
+from fabricas import ADSET, alerta, estructura, operacion, pausar, presupuesto
 from trovefy_ejecutor.esquema import cargar_propuesta
 from trovefy_ejecutor.reloj import (
     ZONA_COT,
@@ -61,17 +62,65 @@ def test_silencio_desde_otra_zona_y_naive():
     with pytest.raises(ValueError):
         en_silencio(datetime(2026, 11, 12, 23, 30))
 
-def test_otros_tipos_24h_zona_desconocida_y_naive():
-    p = cargar_propuesta(sin_expira(tipo="lote", operaciones=[operacion()]))
+def _sin(d): return {k: v for k, v in d.items() if k != "expira_en_min"}
+
+def _de_tipo(tipo):
+    """Propuesta válida de `tipo` sin expira_en_min. activar, alerta y estructura vienen de las fábricas;
+    el resto reutiliza una propuesta válida con el tipo cambiado (caducidad solo mira tipo y expira_en_min)."""
+    if tipo == "activar":
+        return cargar_propuesta(_sin(pausar(tipo="activar", operaciones=[
+            {"entidad": "adset", "id": ADSET, "campo": "status", "de_esperado": "PAUSED", "a": "ACTIVE"}])))
+    if tipo == "alerta":
+        return cargar_propuesta(alerta())
+    if tipo == "crear_estructura_pausada":
+        return cargar_propuesta(estructura())
+    return replace(cargar_propuesta(_sin(presupuesto())), tipo=tipo)
+
+@pytest.mark.parametrize("tipo", ["activar", "agenda", "regla_meta", "puja", "spend_cap", "limite_cuenta",
+                                  "limite_ejecutor", "noop", "alerta", "crear_estructura_pausada"])
+@pytest.mark.parametrize("zona", [BOG, SOF])
+def test_tipos_de_24h(tipo, zona):
+    p = _de_tipo(tipo)
+    c = cot(2026, 11, 12, 10, 0)
+    r = caducidad(p, c, zona)
+    assert r == c + timedelta(hours=24)
+    assert r.utcoffset() == c.astimezone(ZoneInfo(zona)).utcoffset()
+
+def test_pausar_con_expira_en_min_caduca_a_los_45():
+    p = cargar_propuesta(pausar()); c = cot(2026, 11, 12, 20, 0)
+    assert caducidad(p, c, BOG) == c + timedelta(minutes=45)
+
+def test_recordatorios_no_pasan_de_la_caducidad():
+    c = cot(2026, 11, 12, 20, 0)
+    assert recordatorios(cargar_propuesta(pausar()), c) == []                      # expira a los 45 min
+    p = cargar_propuesta(pausar(expira_en_min=120))
+    assert recordatorios(p, c) == [c + timedelta(hours=1)]
+    assert recordatorios(cargar_propuesta(pausar(expira_en_min=60)), c) == []      # el borde excluye
+
+def test_zona_desconocida_naive_y_sin_recordatorios():
     q = cargar_propuesta(sin_expira())
     c = cot(2026, 11, 12, 10, 0)
     with pytest.raises(ValueError):
         caducidad(q, datetime(2026, 11, 12, 10, 0), BOG)
     with pytest.raises(ValueError):
         caducidad(q, c, "Marte/Olimpo")
-    assert caducidad(p, c, SOF).tzinfo is not None
     assert recordatorios(q, c) == []
 
-def test_creada_en_el_futuro_no_rompe():
-    p = cargar_propuesta(presupuesto())
-    assert caducidad(p, cot(2030, 1, 1, 10, 0), BOG) == cot(2030, 1, 1, 10, 45)
+def test_lote_en_sofia():
+    p = cargar_propuesta(sin_expira(tipo="lote", operaciones=[operacion()]))
+    # 12:00 COT = 19:00 Sofía del 12 → 23:59 Sofía = 16:59 COT
+    assert caducidad(p, cot(2026, 11, 12, 12, 0), SOF) == cot(2026, 11, 12, 16, 59)
+    # 15:50 COT = 22:50 Sofía → faltan 69 min, se mantiene 23:59 Sofía
+    assert caducidad(p, cot(2026, 11, 12, 15, 50), SOF) == cot(2026, 11, 12, 16, 59)
+    # 16:45 COT = 23:45 Sofía → faltan 14 min → creada + 30 min
+    assert caducidad(p, cot(2026, 11, 12, 16, 45), SOF) == cot(2026, 11, 12, 17, 15)
+
+def test_fin_silencio_pasada_medianoche():
+    assert fin_silencio(cot(2026, 11, 13, 2, 0)) == cot(2026, 11, 13, 6, 30)
+    assert fin_silencio(cot(2026, 11, 13, 6, 30)) == cot(2026, 11, 14, 6, 30)
+
+def test_base_caducidad_con_creada_futura_usa_recibida():
+    p = cargar_propuesta(presupuesto(creada="2030-01-01T10:00:00-05:00"))
+    r = cot(2026, 11, 12, 14, 0)
+    assert base_caducidad(p, r) == r
+    assert caducidad(p, base_caducidad(p, r), BOG) == r + timedelta(minutes=45)

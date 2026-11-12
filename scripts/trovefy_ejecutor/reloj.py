@@ -51,11 +51,13 @@ def base_caducidad(p: Propuesta, recibida: datetime) -> datetime:
     return min(p.creada, recibida)
 
 
-def recordatorios(p: Propuesta, creada: datetime) -> list[datetime]:
+def recordatorios(p: Propuesta, creada: datetime, zona_cuenta: str = "America/Bogota") -> list[datetime]:
+    """Recordatorios de `pausar` (+1 h y +3 h), solo los anteriores a la caducidad."""
     if p.tipo != "pausar":
         return []
     _aware(creada, "creada")
-    return [creada + timedelta(hours=1), creada + timedelta(hours=3)]
+    limite = caducidad(p, creada, zona_cuenta)
+    return [r for r in (creada + timedelta(hours=1), creada + timedelta(hours=3)) if r < limite]
 
 
 def en_silencio(t: datetime) -> bool:
