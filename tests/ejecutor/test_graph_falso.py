@@ -186,3 +186,11 @@ def test_subidas():
     v = g.subir_video("act_0000000000000000", __import__("pathlib").Path(__file__))
     assert isinstance(v, str) and v
     assert [x.metodo for x in g.escrituras()] == ["subir_imagen", "subir_imagen", "subir_video"]
+
+
+@pytest.mark.parametrize("q", ["", "x" * 101, None])
+def test_buscar_q_invalida(q):
+    g = mundo_basico()
+    with pytest.raises(ValueError):
+        g.buscar("adlocale", q, ["key"])
+    assert g.llamadas == []

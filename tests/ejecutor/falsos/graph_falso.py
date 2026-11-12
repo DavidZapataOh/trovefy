@@ -56,7 +56,12 @@ class GraphFalso:
     fallar_validacion: dict[str, ErrorGraph] = field(default_factory=dict)  # por arista, solo validate_only
     estado_tras_crear: str | None = None  # Meta guarda otro status que el pedido
     red_tras_crear: set[str] = field(default_factory=set)  # por arista: crea y la respuesta se pierde
-    locales: dict[str, list[dict]] = field(default_factory=lambda: {"ro": [{"key": 10, "name": "Romanian"}]})
+    # adlocale: Meta busca por subcadena del nombre, así que una búsqueda devuelve varias filas.
+    locales: list[dict] = field(default_factory=lambda: [
+        {"key": 10, "name": "Romanian"}, {"key": 1010, "name": "Romanian (Moldova)"},
+        {"key": 1011, "name": "Aromanian"}, {"key": 9, "name": "Bulgarian"},
+        {"key": 1001, "name": "Spanish (All)"}, {"key": 23, "name": "Spanish (Spain)"},
+        {"key": 7, "name": "Spanish"}])
     video_listo_tras: int | None = 2  # lecturas de status hasta "ready"; None = nunca
     video_error: bool = False  # el vídeo queda en "error"
     miniatura: str = "https://scontent.example/miniatura.jpg"
@@ -179,10 +184,13 @@ class GraphFalso:
     def buscar(self, tipo: str, q: str, campos: Sequence[str]) -> list[dict]:
         if not isinstance(tipo, str) or not tipo or not all(ch.islower() or ch == "_" for ch in tipo):
             raise ValueError("tipo de búsqueda inválido")
+        if not isinstance(q, str) or not 1 <= len(q) <= 100:
+            raise ValueError("texto de búsqueda inválido")
         self._leyendo("buscar", "search", {"type": tipo, "q": q, "campos": list(campos)})
         if tipo != "adlocale":
             return []
-        return [{k: v for k, v in d.items() if k in campos} for d in self.locales.get(q, [])]
+        return [{k: v for k, v in d.items() if k in campos} for d in self.locales
+                if q.lower() in str(d.get("name", "")).lower()]
 
     def escribir(self, id: str, datos: Mapping[str, object], *, validate_only: bool = False) -> dict:
         _seg(id)

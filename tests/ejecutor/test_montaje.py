@@ -120,17 +120,47 @@ def test_extension_desconocida(entorno_montaje):
     assert r.estado == "fallida" and "no soportado" in r.detalle and g.llamadas == []
 
 
-def test_idioma_sin_resolver(entorno_montaje):
+def test_idioma_sin_tabla(entorno_montaje):
     g, alm, aud, vault = entorno_montaje
     r = montar(estructura(conjuntos=[conjunto(idiomas=("xx",))]), g, alm, aud, vault)
-    assert r.estado == "fallida" and "idioma sin resolver: xx" in r.detalle and _sin_escritura(g)
+    assert r.estado == "fallida" and "idioma sin tabla: xx" in r.detalle and _sin_escritura(g)
+    assert not [l for l in g.llamadas if l.metodo == "buscar"]
 
 
-def test_idioma_ambiguo(entorno_montaje):
+def test_idioma_por_nombre_exacto(entorno_montaje):
     g, alm, aud, vault = entorno_montaje
-    g.locales["ro"] = [{"key": 10, "name": "Romanian"}, {"key": 99, "name": "Rotokas"}]
+    r = montar(estructura(conjuntos=[conjunto(idiomas=("ro", "es"))]), g, alm, aud, vault, esperar=NADA)
+    (adset,) = _reales(g, "adsets")
+    busquedas = [l.datos["q"] for l in g.llamadas if l.metodo == "buscar"]
+    assert r.estado == "ejecutada" and busquedas == ["Romanian", "Spanish (All)"]
+    assert adset.datos["targeting"]["locales"] == [10, 1001]  # entre varias filas por subcadena, la exacta
+
+
+def test_idioma_sin_fila_exacta(entorno_montaje):
+    g, alm, aud, vault = entorno_montaje
+    g.locales = [x for x in g.locales if x["name"] != "Romanian"]  # quedan «Aromanian», «Romanian (Moldova)»
     r = montar(estructura(), g, alm, aud, vault)
     assert r.estado == "fallida" and "idioma sin resolver: ro" in r.detalle and _sin_escritura(g)
+
+
+@pytest.mark.parametrize("filas", [
+    [{"key": 10, "name": "Romanian"}, {"key": 11, "name": "Romanian"}],  # dos exactas
+    [{"key": "abc", "name": "Romanian"}],  # clave no entera
+    [{"key": True, "name": "Romanian"}],
+    [{"name": "Romanian"}],
+])
+def test_idioma_ambiguo_o_ilegible(entorno_montaje, filas):
+    g, alm, aud, vault = entorno_montaje
+    g.locales = filas
+    r = montar(estructura(), g, alm, aud, vault)
+    assert r.estado == "fallida" and "idioma sin resolver: ro" in r.detalle and _sin_escritura(g)
+
+
+def test_tabla_de_idiomas():
+    assert montaje.IDIOMAS_META == {
+        "bg": "Bulgarian", "ro": "Romanian", "ru": "Russian", "uk": "Ukrainian", "es": "Spanish (All)",
+        "en": "English (All)", "pt": "Portuguese (All)", "fr": "French (All)", "de": "German", "it": "Italian",
+        "pl": "Polish"}
 
 
 def test_moneda_de_la_propuesta_distinta(entorno_montaje):
@@ -413,3 +443,75 @@ def test_montaje_audita_y_registra_estructura(entorno_montaje):
     assert sum(1 for e in evs if e["validate_only"] and e["ok"]) == 7
     assert evs[-1]["validate_only"] is False and evs[-1]["ok"] is True and evs[-1]["detalle"].startswith("ejecutada")
     assert r.ids_creados["anuncios"].keys() == {"AD01 img", "AD02 vid"}
+
+
+# -- fix round 1: errores ambiguos, STOP en lecturas, parcial ----------------------------------------
+@pytest.mark.parametrize("error", [ErrorGraph(2, None, "Service temporarily unavailable"),
+                                   ErrorGraph(500, None, "HTTP 500"), ErrorGraph(1, None, "unknown"),
+                                   ErrorGraph(12345, None, "raro")])
+def test_error_ambiguo_al_crear_es_discrepancia(entorno_montaje, error):
+    g, alm, aud, vault = entorno_montaje
+    g.fallar_creacion["adsets"] = error
+    r = montar(estructura(origen="/montar"), g, alm, aud, vault, esperar=NADA)
+    assert r.estado == "discrepancia" and len(_reales(g, "adsets")) == 1 and _reales(g, "ads") == []
+    assert f"Meta devolvió un error ambiguo ({error.codigo})" in r.detalle and "Ads Manager" in r.detalle
+    assert r.nueva_propuesta is None and r.parcial is True
+
+
+@pytest.mark.parametrize("codigo", [100, 190, 102, 10, 200, 299, 4, 17, 32, 613, 80004])
+def test_rechazo_definitivo_al_crear_es_fallida(entorno_montaje, codigo):
+    g, alm, aud, vault = entorno_montaje
+    g.fallar_creacion["adsets"] = ErrorGraph(codigo, 1487, "rechazo")
+    r = montar(estructura(), g, alm, aud, vault, esperar=NADA)
+    assert r.estado == "fallida" and "no se creó" in r.detalle and len(_reales(g, "adsets")) == 1
+
+
+@pytest.mark.parametrize(("error", "estado"), [(ErrorGraph(500, None, "HTTP 500"), "discrepancia"),
+                                              (ErrorGraph(2, None, "x"), "discrepancia"),
+                                              (ErrorGraph(100, None, "Invalid image"), "fallida")])
+def test_error_al_subir(entorno_montaje, monkeypatch, error, estado):
+    g, alm, aud, vault = entorno_montaje
+
+    def subir(*a):
+        g.llamadas.append(type(g.llamadas[0])("subir_imagen", "x", {}))
+        raise error
+
+    monkeypatch.setattr(g, "subir_imagen", subir)
+    r = montar(estructura(), g, alm, aud, vault, esperar=NADA)
+    assert r.estado == estado and _reales(g) == []
+    assert [l.metodo for l in g.llamadas].count("subir_imagen") == 1
+
+
+def test_stop_en_lectura_del_video(entorno_montaje, monkeypatch):
+    g, alm, aud, vault = entorno_montaje
+    real = g.leer
+
+    def leer(id, campos):
+        if id in g.videos:
+            raise DetenidoPorStop()
+        return real(id, campos)
+
+    monkeypatch.setattr(g, "leer", leer)
+    r = montar(estructura(), g, alm, aud, vault, esperar=NADA)
+    assert r.estado == "fallida" and r.error == "stop" and _reales(g) == []
+
+
+def test_stop_en_relectura(entorno_montaje, monkeypatch):
+    g, alm, aud, vault = entorno_montaje
+    real = g.leer
+
+    def leer(id, campos):
+        if "effective_status" in campos:
+            raise DetenidoPorStop()
+        return real(id, campos)
+
+    monkeypatch.setattr(g, "leer", leer)
+    r = montar(estructura(origen="/montar"), g, alm, aud, vault, esperar=NADA)
+    assert r.estado == "discrepancia" and r.error == "stop" and r.nueva_propuesta is None
+
+
+def test_montaje_completo_en_discrepancia_no_es_parcial(entorno_montaje):
+    g, alm, aud, vault = entorno_montaje
+    g.estado_tras_crear = "ACTIVE"
+    r = montar(estructura(), g, alm, aud, vault, esperar=NADA)
+    assert r.estado == "discrepancia" and r.parcial is False

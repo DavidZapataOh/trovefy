@@ -40,6 +40,18 @@ MAX_VIDEO = 100 * 1024 * 1024  # igual que ClienteGraph.subir_video (subida simp
 EXT_IMAGEN = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp"})
 EXT_VIDEO = frozenset({".mp4", ".mov", ".m4v"})
 _ID_META = re.compile(r"[0-9]{1,20}")
+# Idioma (código de 2 letras de la propuesta) → nombre exacto del ``adlocale`` de Meta. Se busca por nombre
+# (``GET /search?type=adlocale&q=<nombre>``, que casa por subcadena) y se exige exactamente una fila con ese
+# nombre exacto y clave entera. Resolución del controlador (fix 1 de la Tarea 6). Los nombres están por
+# confirmar en el ensayo del paso 18 (plan 14): ``tests/vivo/test_idiomas_meta_vivo.py`` los comprueba.
+IDIOMAS_META: dict[str, str] = {
+    "bg": "Bulgarian", "ro": "Romanian", "ru": "Russian", "uk": "Ukrainian", "es": "Spanish (All)",
+    "en": "English (All)", "pt": "Portuguese (All)", "fr": "French (All)", "de": "German", "it": "Italian",
+    "pl": "Polish",
+}
+# Códigos de Meta que son un rechazo definitivo: el objeto no se creó. Cualquier otro (1, 2, ≥ 500, el
+# «HTTP 5xx» sin cuerpo, desconocidos) es ambiguo: puede haberse creado.
+_RECHAZO_DEFINITIVO = frozenset({100, 190, 102, 10, 4, 17, 32, 613, 80004, *range(200, 300)})
 _SIN_NUMERO = "sin número libre 800–899 hoy: crea la propuesta a mano"
 _REVISA = "puede haberse creado: revísalo en Ads Manager antes de volver a montar"
 
@@ -64,6 +76,30 @@ def _texto_error(e: BaseException) -> str:
     if isinstance(e, ErrorRed):
         return f"red: {e.motivo}"
     return type(e).__name__
+
+
+def _definitivo(e: ErrorGraph) -> bool:
+    return e.codigo in _RECHAZO_DEFINITIVO
+
+
+def _ambiguo(e: ErrorGraph) -> str:
+    return f"Meta devolvió un error ambiguo ({e.codigo}): estado desconocido, {_REVISA}"
+
+
+def filas_exactas(filas: list, nombre: str) -> list[int]:
+    """Claves enteras de las filas cuyo ``name`` es exactamente ``nombre``."""
+    claves: list[int] = []
+    for f in filas:
+        if not isinstance(f, dict) or f.get("name") != nombre:
+            continue
+        k = f.get("key")
+        if type(k) is int and k > 0:
+            claves.append(k)
+        elif isinstance(k, str) and _ID_META.fullmatch(k):
+            claves.append(int(k))
+        else:
+            claves.append(-1)  # fila exacta con clave ilegible: cuenta, y hace fallar
+    return claves
 
 
 def _importe(v: object) -> bool:
@@ -193,6 +229,9 @@ def _preparar_forma(p: Propuesta) -> None:
         _plataformas(cj.ubicaciones_excluidas, cj.nombre)
         if not cj.anuncios or not cj.paises or not cj.idiomas:
             raise _Fallo(f"conjunto {cj.nombre}: faltan anuncios, países o idiomas")
+        for codigo in cj.idiomas:
+            if codigo not in IDIOMAS_META:
+                raise _Fallo(f"idioma sin tabla: {codigo}")
         for a in cj.anuncios:
             if a.nombre in anuncios:
                 raise _Fallo(f"nombre de anuncio repetido: {a.nombre}")
@@ -226,14 +265,11 @@ def _preparar_meta(p: Propuesta, graph) -> dict[str, int]:
         for codigo in cj.idiomas:
             if codigo in locales:
                 continue
-            filas = graph.buscar("adlocale", codigo, ["key", "name"])
-            claves = {str(f.get("key")) for f in filas if isinstance(f, dict) and f.get("key") is not None}
-            if len(filas) != 1 or len(claves) != 1:
-                raise _Fallo(f"idioma sin resolver: {codigo}")
-            (clave,) = claves
-            if not _ID_META.fullmatch(clave):
-                raise _Fallo(f"idioma sin resolver: {codigo}")
-            locales[codigo] = int(clave)
+            nombre = IDIOMAS_META[codigo]
+            claves = filas_exactas(graph.buscar("adlocale", nombre, ["key", "name"]), nombre)
+            if len(claves) != 1 or claves[0] <= 0:
+                raise _Fallo(f"idioma sin resolver: {codigo} ({nombre})")
+            locales[codigo] = claves[0]
     return locales
 
 
@@ -285,6 +321,7 @@ class _Montaje:
         self.almacen, self.auditoria, self.ahora, self.esperar = almacen, auditoria, ahora, esperar
         self.ids = _Ids()
         self.notas: list[str] = []
+        self.completo = False  # True cuando se crearon todos los objetos de la estructura
 
     def anotar(self, validate_only: bool, ok: bool, detalle: str) -> bool:
         try:
@@ -319,7 +356,11 @@ class _Montaje:
             raise _Fallo(f"{desc}: STOP, no se intentó", error="stop") from None
         except ErrorGraph as ex:
             self.anotar(False, False, f"{desc}; {_texto_error(ex)}")
-            raise _Fallo(f"{desc}: Meta lo rechazó: {_texto_error(ex)}", error=clasificar(ex)) from None
+            if _definitivo(ex):
+                raise _Fallo(f"{desc}: Meta lo rechazó, no se creó: {_texto_error(ex)}",
+                             error=clasificar(ex)) from None
+            raise _Fallo(f"{desc}: {_ambiguo(ex)} ({_texto_error(ex)})", error=clasificar(ex),
+                         estado="discrepancia") from None
         except Exception as ex:  # noqa: BLE001 — no se sabe si salió: nunca se reenvía
             self.anotar(False, False, f"{desc}; sin respuesta tras enviar ({_texto_error(ex)})")
             raise _Fallo(f"{desc}: estado desconocido tras enviar ({_texto_error(ex)}); {_REVISA}",
@@ -353,11 +394,16 @@ class _Montaje:
             raise _Fallo(f"{desc}: STOP, no se intentó", error="stop") from None
         except ErrorGraph as ex:
             self.anotar(False, False, f"{desc}; {_texto_error(ex)}")
-            raise _Fallo(f"{desc}: Meta rechazó la subida: {_texto_error(ex)}", error=clasificar(ex)) from None
+            if _definitivo(ex):
+                raise _Fallo(f"{desc}: Meta rechazó la subida, no se subió: {_texto_error(ex)}",
+                             error=clasificar(ex)) from None
+            raise _Fallo(f"{desc}: {_ambiguo(ex)} ({_texto_error(ex)})", error=clasificar(ex),
+                         estado="discrepancia") from None
         except Exception as ex:  # noqa: BLE001 — subida en duda: no se reintenta
             self.anotar(False, False, f"{desc}; sin respuesta tras enviar ({_texto_error(ex)})")
-            raise _Fallo(f"{desc}: subida en estado desconocido ({_texto_error(ex)}); revísalo en la biblioteca "
-                         "de medios", error="red" if isinstance(ex, ErrorRed) else "otro") from None
+            raise _Fallo(f"{desc}: subida en estado desconocido ({_texto_error(ex)}); puede haberse subido: "
+                         "revísalo en la biblioteca de medios de Ads Manager",
+                         error="red" if isinstance(ex, ErrorRed) else "otro", estado="discrepancia") from None
         if not isinstance(medio, str) or not medio:
             raise _Fallo(f"{desc}: Meta respondió sin identificador", estado="discrepancia")
         self.ids.medios[a.ref] = medio
@@ -370,6 +416,8 @@ class _Montaje:
                 self.esperar(INTERVALO_VIDEO)
             try:
                 r = self.graph.leer(vid, ["status"])
+            except DetenidoPorStop:
+                raise _Fallo(f"vídeo {ref} {vid}: STOP mientras se esperaba", error="stop") from None
             except Exception as ex:  # noqa: BLE001
                 raise _Fallo(f"vídeo {ref} {vid}: no se pudo leer su estado ({_texto_error(ex)})",
                              error="red" if isinstance(ex, ErrorRed) else "otro") from None
@@ -383,6 +431,8 @@ class _Montaje:
             raise _Fallo(f"vídeo {ref} {vid}: no quedó listo tras {MAX_LECTURAS_VIDEO} lecturas")
         try:
             r = self.graph.leer(vid, ["thumbnails{uri,is_preferred}"])
+        except DetenidoPorStop:
+            raise _Fallo(f"vídeo {ref} {vid}: STOP al leer la miniatura", error="stop") from None
         except Exception as ex:  # noqa: BLE001
             raise _Fallo(f"vídeo {ref} {vid}: no se pudo leer la miniatura ({_texto_error(ex)})") from None
         th = r.get("thumbnails") if isinstance(r, dict) else None
@@ -419,6 +469,7 @@ class _Montaje:
                                                       "creative": {"creative_id": creativo}, "status": "PAUSED"},
                                       f"anuncio {a.nombre}")
                 self.ids.anuncios[a.nombre] = anuncio
+        self.completo = True
 
     def releer(self) -> tuple[list[str], list[str]]:
         """Devuelve (no PAUSED, otras discrepancias). Cualquier duda cuenta como discrepancia."""
@@ -437,6 +488,8 @@ class _Montaje:
         for desc, oid, importes in objetos:
             try:
                 r = self.graph.leer(oid, ["status", "effective_status", *importes])
+            except DetenidoPorStop:
+                raise
             except Exception as ex:  # noqa: BLE001
                 otras.append(f"{desc}: no se pudo releer ({_texto_error(ex)}): estado desconocido")
                 continue
@@ -478,8 +531,9 @@ class _Montaje:
     def cerrar(self, estado: str, detalle: str, error: str | None = None) -> Resultado:
         partes = [detalle, self.ids.resumen(), *self.notas]
         texto = " | ".join(x for x in partes if x)
-        algo = self.ids.algo()
-        parcial = estado != "ejecutada" and algo
+        # parcial: el montaje se cortó antes de crear todo y dejó algo creado (no una discrepancia
+        # de relectura sobre una estructura completa).
+        parcial = estado != "ejecutada" and not self.completo and self.ids.algo()
         r = Resultado(estado, redactar(texto), parcial=parcial, error=error, ids_creados=self.ids.a_dict())
         self.anotar(False, estado == "ejecutada", f"{estado}: {texto}")
         return r
@@ -541,6 +595,9 @@ def montar(p: Propuesta, graph, almacen: Almacen, auditoria: Auditoria, vault: P
                         "otro")
     try:
         no_paused, otras = m.releer()
+    except DetenidoPorStop:
+        return m.cerrar("discrepancia", "STOP durante la relectura: lo creado no se pudo confirmar en PAUSED; "
+                                        "revísalo en Ads Manager", "stop")
     except Exception as ex:  # noqa: BLE001
         return m.cerrar("discrepancia", f"no se pudo releer lo creado ({_texto_error(ex)})")
     if no_paused:
