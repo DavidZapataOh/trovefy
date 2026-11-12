@@ -35,7 +35,7 @@ CAMPOS_LECTURA: dict[str, tuple[str, ...]] = {
 CAMPOS_IMPORTE = frozenset({"daily_budget", "lifetime_budget", "bid_amount", "spend_cap"})
 _ENTEROS = CAMPOS_IMPORTE | {"amount_spent", "account_status"}
 _TIPOS_META = ("campaign", "adset", "ad")
-_CON_SUMA = frozenset({"presupuesto", "activar", "lote"})
+_CON_SUMA = frozenset({"presupuesto", "puja", "activar", "lote"})
 _CON_ACTIVACION = frozenset({"activar", "lote"})
 # «Gastando» = status propio ACTIVE y effective_status fuera de estos (IN_PROCESS, WITH_ISSUES,
 # PENDING_REVIEW, PREAPPROVED y PENDING_BILLING_INFO cuentan: contar de más es el lado seguro).

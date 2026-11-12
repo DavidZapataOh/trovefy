@@ -435,3 +435,16 @@ def test_ejecutar_no_sube_presupuesto_con_gasto_vitalicio_sin_contar(entorno):
     r = ejecutar(propuesta(), g, alm, aud)
     assert r.estado == "fallida" and "lectura incompleta" in r.detalle
     assert g.escrituras() == [] and not [c for c in g.llamadas if c.validate_only]
+
+
+# --- final review: puja también rellena presupuestos_activos ---------------------------------------
+
+def test_comprobar_deja_subir_puja_de_conjunto_abo_activo(limites_cop, tmp_path):
+    g = mundo_basico()  # s1 ACTIVE con daily_budget propio (ABO): figura entre los activos
+    assert "valor_vivo_desconocido" not in _violaciones(g, limites_cop, tmp_path)
+
+
+def test_puja_lee_presupuestos_activos():
+    p = propuesta(tipo="puja", op={"campo": "bid_amount", "de_esperado": 1500, "a": 2000})
+    vv = valores_vivos(p, mundo_basico())
+    assert dict(vv.presupuestos_activos) == {"s1": 20000, "s2": 15000} and vv.suma_diaria_activa == 35000
