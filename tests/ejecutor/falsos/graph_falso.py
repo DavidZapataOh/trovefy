@@ -7,7 +7,7 @@ inyecta el error con ``errores`` (que dispara también en validate_only).
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -49,6 +49,8 @@ class GraphFalso:
     redondeo: dict[str, int] = field(default_factory=dict)
     stop_tras: int | None = None
     tam_pagina: int | None = None  # filas por página al listar; con max_paginas insuficiente, listado incompleto
+    errores_reales: dict[str, ErrorGraph] = field(default_factory=dict)  # solo en escrituras reales
+    al_escribir: Callable[[], None] | None = None  # se llama tras aplicar una escritura real
 
     def __post_init__(self) -> None:
         self._reales = 0  # escrituras reales ya aplicadas
@@ -85,11 +87,16 @@ class GraphFalso:
         if self.red_al_leer:
             raise ErrorRed("conexión")
 
-    def _antes_de_escribir(self, clave: str, validate_only: bool) -> None:
+    def _stop(self, validate_only: bool) -> None:
+        """Como ``GraphConStop``: corta antes de llegar al cliente (la llamada no queda registrada)."""
         if not validate_only and self.stop_tras is not None and self._reales >= self.stop_tras:
             raise DetenidoPorStop()
+
+    def _antes_de_escribir(self, clave: str, validate_only: bool) -> None:
         if clave in self.errores:
             raise self.errores.pop(clave)
+        if not validate_only and clave in self.errores_reales:
+            raise self.errores_reales.pop(clave)
 
     def _existe(self, id: str) -> None:
         if id not in self.objetos and id not in self.cuentas:
@@ -105,6 +112,8 @@ class GraphFalso:
         if validate_only:
             return
         self._reales += 1
+        if self.al_escribir is not None:
+            self.al_escribir()
         if clave in self.red_tras_escribir:
             raise ErrorRed("conexión")
 
@@ -144,13 +153,14 @@ class GraphFalso:
     def escribir(self, id: str, datos: Mapping[str, object], *, validate_only: bool = False) -> dict:
         _seg(id)
         normal = {k: self._guardar(k, _check(v)) for k, v in datos.items()}
+        self._stop(validate_only)
         self._entrada("escribir", id, dict(datos), validate_only)
         self._antes_de_escribir(id, validate_only)
         self._existe(id)
         self._sin_negativos(normal)
         if validate_only:
             return {"success": True}
-        obj = self.objetos[id]
+        obj = self.objetos[id] if id in self.objetos else self.cuentas[id]
         tocado_importe = False
         for k, v in normal.items():
             if k in _IMPORTES and id in self.redondeo:
@@ -165,6 +175,7 @@ class GraphFalso:
     def crear(self, padre: str, arista: str, datos: Mapping[str, object], *, validate_only: bool = False) -> dict:
         _seg(padre, arista)
         normal = {k: self._guardar(k, _check(v)) for k, v in datos.items()}
+        self._stop(validate_only)
         self._entrada("crear", f"{padre}/{arista}", dict(datos), validate_only)
         self._antes_de_escribir(padre, validate_only)
         self._existe(padre)
@@ -180,6 +191,7 @@ class GraphFalso:
 
     def subir_imagen(self, act_id: str, contenido: bytes, nombre: str) -> str:
         _seg(act_id)
+        self._stop(False)
         self._entrada("subir_imagen", act_id, {"nombre": nombre, "bytes": len(contenido)})
         self._antes_de_escribir(act_id, False)
         self._despues_de_escribir(act_id, False)
@@ -189,6 +201,7 @@ class GraphFalso:
         _seg(act_id)
         if ruta.stat().st_size > _MAX_VIDEO:
             raise ValueError("vídeo > 100 MB: subida por partes no soportada")
+        self._stop(False)
         self._entrada("subir_video", act_id, {"nombre": ruta.name})
         self._antes_de_escribir(act_id, False)
         vid = str(self._siguiente_video)

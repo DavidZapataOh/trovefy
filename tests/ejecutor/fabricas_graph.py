@@ -7,9 +7,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+from ejecutor.fabricas import presupuesto as presupuesto_dict
 from trovefy_ejecutor.modelo import Operacion, Propuesta, clase_de
 
 CUENTA = "act_0000000000000000"
+# Propuesta por defecto como dict válido para ``cargar_propuesta`` (ids numéricos).
+PROPUESTA_BASE: dict = presupuesto_dict()
 _IMPORTES = ("daily_budget", "lifetime_budget", "bid_amount", "spend_cap")
 
 
