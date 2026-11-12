@@ -472,3 +472,25 @@ def test_relectura_sin_status_es_discrepancia(entorno):
     g.al_escribir = lambda: g.objetos["s1"].pop("status")
     r = ejecutar(propuesta(), g, alm, aud)
     assert r.estado == "discrepancia" and len(_reales(g)) == 1
+
+
+# --- final review: spend_cap de cuenta en moneda con offset ≠ 1 (P-21) ------------------------------
+
+def test_limite_cuenta_en_usd_no_escribe(entorno):
+    g, alm, aud = entorno
+    g.cuentas["act_usd"]["spend_cap"] = "5000"
+    r = ejecutar(propuesta(tipo="limite_cuenta", cuenta="act_usd",
+                           op={"entidad": "account", "id": "act_usd", "campo": "spend_cap",
+                               "de_esperado": 5000, "a": 6000, "moneda": "USD"}), g, alm, aud, ahora=_reloj)
+    assert r.estado == "fallida" and r.error == "moneda"
+    assert "spend_cap de cuenta con offset ≠ 1 sin confirmar la unidad (P-21)" in r.detalle
+    assert _posts(g) == [] and g.cuentas["act_usd"]["spend_cap"] == "5000"
+
+
+def test_spend_cap_de_campana_en_usd_sigue_igual(entorno):
+    g, alm, aud = entorno
+    g.objetos["cu"] = {"account_id": "usd", "status": "ACTIVE", "effective_status": "ACTIVE", "spend_cap": "5000"}
+    r = ejecutar(propuesta(tipo="spend_cap", cuenta="act_usd",
+                           op={"entidad": "campaign", "id": "cu", "campo": "spend_cap",
+                               "de_esperado": 5000, "a": 6000, "moneda": "USD"}), g, alm, aud, ahora=_reloj)
+    assert r.estado == "ejecutada" and g.objetos["cu"]["spend_cap"] == "6000"

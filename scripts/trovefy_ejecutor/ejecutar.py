@@ -421,6 +421,12 @@ def ejecutar(p: Propuesta, graph, almacen: Almacen, auditoria: Auditoria, *,
             if op.campo in CAMPOS_IMPORTE and op.moneda != vv.cuenta.currency:
                 return _rechazo(p, auditoria, f"{_desc(op)}: moneda {op.moneda} distinta de la de la cuenta "
                                               f"({vv.cuenta.currency})", error="moneda", vv=vv)
+        # El spend_cap de la cuenta va en la unidad principal de la moneda, no en mínimas: con offset ≠ 1
+        # no se sabe convertir sin confirmarlo (P-21). Con offset 1 (COP) ambas coinciden.
+        if vv.cuenta.offset != 1 and any((op.entidad, op.campo) == ("account", "spend_cap")
+                                         for op in p.operaciones):
+            return _rechazo(p, auditoria, "spend_cap de cuenta con offset ≠ 1 sin confirmar la unidad (P-21)",
+                            error="moneda", vv=vv)
 
     motivo = vv.obsoleta(p)
     if motivo:
