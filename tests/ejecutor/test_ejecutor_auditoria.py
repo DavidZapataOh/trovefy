@@ -88,3 +88,68 @@ def test_vacio_reabrir_y_primer_fallo(tmp_path):
     f.write_text(f.read_text().replace("enviada", "aceptada", 1))
     assert "1" in Auditoria(f).primer_fallo()
     assert (f.stat().st_mode & 0o777) == 0o600
+
+
+def test_reabrir_tras_truncar_cola_falla_cerrado(tmp_path):
+    llenar(tmp_path)
+    f = tmp_path / "a.jsonl"
+    ls = f.read_text().splitlines(keepends=True)
+    f.write_text("".join(ls[:2]))
+    with pytest.raises(AuditoriaCorrupta):
+        Auditoria(f).anotar("stop", activo=True)
+    assert not Auditoria(f).verificar()
+    reparar(f)
+    assert Auditoria(f).verificar()
+
+
+def test_hueco_benigno_entre_append_y_cabeza_se_cura(tmp_path):
+    a = llenar(tmp_path, 2)
+    cab = a.cabeza
+    guardada = cab.read_text()
+    a.anotar("stop", activo=True)
+    cab.write_text(guardada)  # la caída ocurrió antes de escribir la cabeza
+    b = Auditoria(tmp_path / "a.jsonl")
+    b.anotar("stop", activo=False)
+    assert b.verificar()
+    assert len((tmp_path / "a.jsonl").read_text().splitlines()) == 4
+
+
+@pytest.mark.parametrize("cual", [0, 1, 2])
+def test_cadena_corrupta_bloquea_anotar(tmp_path, cual):
+    llenar(tmp_path)
+    f = tmp_path / "a.jsonl"
+    ls = f.read_text().splitlines(keepends=True)
+    ls[cual] = ls[cual].replace("enviada", "aceptada")
+    f.write_text("".join(ls))
+    with pytest.raises(AuditoriaCorrupta):
+        Auditoria(f).anotar("stop", activo=True)
+
+
+def _worker(ruta):
+    a = Auditoria(ruta)
+    for i in range(20):
+        a.anotar("stop", activo=bool(i % 2))
+
+
+def test_dos_procesos_concurrentes(tmp_path):
+    import multiprocessing as mp
+
+    f = tmp_path / "a.jsonl"
+    Auditoria(f).anotar("stop", activo=True)
+    ps = [mp.get_context("fork").Process(target=_worker, args=(f,)) for _ in range(2)]
+    for p in ps:
+        p.start()
+    for p in ps:
+        p.join()
+        assert p.exitcode == 0
+    assert len(f.read_text().splitlines()) == 41 and Auditoria(f).verificar()
+
+
+def test_reparar_no_pisa_evidencia_ni_falla_sin_archivo(tmp_path):
+    f = tmp_path / "a.jsonl"
+    fijo = lambda: __import__("datetime").datetime(2026, 11, 12, tzinfo=__import__("datetime").UTC)
+    r0 = reparar(f, fijo)  # no existe: no lanza
+    assert Auditoria(f).verificar() and not r0.exists()
+    r1 = reparar(f, fijo)
+    r2 = reparar(f, fijo)
+    assert r1 != r2 and r1.exists() and r2.exists()

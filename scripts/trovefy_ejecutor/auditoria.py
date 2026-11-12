@@ -1,10 +1,12 @@
 """Auditoría append-only encadenada por hash (§5.10, resolución 13). Sin PyYAML."""
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import re
+import uuid
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
@@ -44,6 +46,10 @@ _PATRONES = (
     re.compile(r"EAA[A-Za-z0-9]+"),
     re.compile(r"\b\d{8,10}:[A-Za-z0-9_-]{35}\b"),
 )
+
+
+def _lock_de(ruta: Path) -> Path:
+    return ruta.with_name(ruta.name + ".lock")
 
 
 class AuditoriaCorrupta(Exception):
@@ -111,31 +117,46 @@ class Auditoria:
     def __init__(self, ruta: Path, reloj: Callable[[], datetime] = _ahora) -> None:
         self.ruta = Path(ruta)
         self._reloj = reloj
-        self._n, self._hash = 0, GENESIS
         if self.ruta.exists() and self.ruta.stat().st_size:
             with self.ruta.open("rb") as f:
-                f.seek(0, os.SEEK_END)
-                tam = f.tell()
-                f.seek(max(0, tam - 1))
+                f.seek(-1, os.SEEK_END)
                 if f.read(1) != b"\n":
                     raise AuditoriaCorrupta(f"{self.ruta}: última línea incompleta")
-                # cola: última línea (puede ser larga; se lee hacia atrás por bloques)
-                bloque, pos = b"", tam - 1
-                while pos > 0 and b"\n" not in bloque:
-                    ini = max(0, pos - 4096)
-                    f.seek(ini)
-                    bloque = f.read(pos - ini) + bloque
-                    pos = ini
-                ultima = bloque.rsplit(b"\n", 1)[-1]
-            try:
-                linea = json.loads(ultima.decode("utf-8"))
-                self._n, self._hash = int(linea["n"]), str(linea["hash"])
-            except (ValueError, KeyError, TypeError, UnicodeDecodeError) as e:
-                raise AuditoriaCorrupta(f"{self.ruta}: última línea ilegible") from e
 
     @property
     def cabeza(self) -> Path:
         return _cabeza_de(self.ruta)
+
+    def _leer_cabeza(self) -> dict[str, Any] | None:
+        if not self.cabeza.exists():
+            return None
+        try:
+            cab = json.loads(self.cabeza.read_text(encoding="utf-8"))
+            if isinstance(cab, dict) and isinstance(cab.get("n"), int) and "hash" in cab:
+                return cab
+        except (ValueError, OSError):
+            pass
+        raise AuditoriaCorrupta(f"{self.cabeza}: cabeza ilegible")
+
+    def _estado_verificado(self) -> tuple[int, str]:
+        """Bajo el cerrojo: verifica la cadena y su cabeza; solo `reparar` lo desbloquea."""
+        fallo, n_ok, ultimo, _ = _recorrer(self.ruta)
+        if fallo:
+            raise AuditoriaCorrupta(f"{self.ruta}: {fallo}")
+        cab = self._leer_cabeza()
+        if cab is None:
+            if n_ok:
+                raise AuditoriaCorrupta(f"{self.ruta}: falta el archivo de cabeza")
+            return 0, GENESIS
+        if n_ok and cab["n"] == n_ok and cab["hash"] == ultimo:
+            return n_ok, ultimo
+        if n_ok >= 1 and cab["n"] == n_ok - 1:
+            # hueco benigno: caída entre el append y la cabeza
+            prev = json.loads(self.ruta.read_bytes().split(b"\n")[-2])["hash_prev"]
+            if prev == (cab["hash"] if cab["n"] else GENESIS):
+                self._escribir_cabeza(n_ok, ultimo)
+                return n_ok, ultimo
+        raise AuditoriaCorrupta(f"{self.ruta}: la cabeza no coincide con la última línea")
 
     def anotar(self, evento: str, **datos: Any) -> dict[str, Any]:
         minimos = CAMPOS_MINIMOS.get(evento)
@@ -144,30 +165,37 @@ class Auditoria:
             if faltan:
                 raise ValueError(f"evento {evento}: faltan campos {', '.join(faltan)}")
         limpios = _redactar_todo(json.loads(json.dumps(datos, default=str)))
-        ts = self._reloj().astimezone(UTC).isoformat(timespec="microseconds")
-        linea: dict[str, Any] = {
-            "n": self._n + 1, "ts": ts, "evento": evento,
-            "datos": limpios, "hash_prev": self._hash,
-        }
-        linea["hash"] = _hash(linea)
-        crudo = (json.dumps(linea, sort_keys=True, separators=(",", ":"),
-                            ensure_ascii=False) + "\n").encode("utf-8")
         self.ruta.parent.mkdir(parents=True, exist_ok=True)
-        fd = os.open(self.ruta, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        lock = os.open(_lock_de(self.ruta), os.O_WRONLY | os.O_CREAT, 0o600)
         try:
-            os.write(fd, crudo)
-            os.fsync(fd)
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            n, previo = self._estado_verificado()
+            ts = self._reloj().astimezone(UTC).isoformat(timespec="microseconds")
+            linea: dict[str, Any] = {
+                "n": n + 1, "ts": ts, "evento": evento,
+                "datos": limpios, "hash_prev": previo,
+            }
+            linea["hash"] = _hash(linea)
+            crudo = (json.dumps(linea, sort_keys=True, separators=(",", ":"),
+                                ensure_ascii=False) + "\n").encode("utf-8")
+            fd = os.open(self.ruta, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            try:
+                vista = memoryview(crudo)
+                while vista:
+                    vista = vista[os.write(fd, vista):]
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            self._escribir_cabeza(linea["n"], linea["hash"])
+            return linea
         finally:
-            os.close(fd)
-        self._n, self._hash = linea["n"], linea["hash"]
-        self._escribir_cabeza()
-        return linea
+            os.close(lock)  # suelta el flock
 
-    def _escribir_cabeza(self) -> None:
-        tmp = self.cabeza.with_name(self.cabeza.name + ".tmp")
+    def _escribir_cabeza(self, n: int, h: str) -> None:
+        tmp = self.cabeza.with_name(f"{self.cabeza.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
-            os.write(fd, json.dumps({"n": self._n, "hash": self._hash}).encode("utf-8"))
+            os.write(fd, json.dumps({"n": n, "hash": h}).encode("utf-8"))
             os.fsync(fd)
         finally:
             os.close(fd)
@@ -197,11 +225,19 @@ def reparar(ruta: Path, reloj: Callable[[], datetime] = _ahora) -> Path:
     ruta = Path(ruta)
     _, _, ultimo, _ = _recorrer(ruta)
     sello = reloj().astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
-    roto = ruta.with_name(f"{ruta.name}.roto-{sello}")
-    os.replace(ruta, roto)
-    cab = _cabeza_de(ruta)
-    if cab.exists():
-        os.replace(cab, cab.with_name(f"{cab.name}.roto-{sello}"))
+    k = 0
+    while True:
+        sufijo = f".roto-{sello}" + (f"-{k}" if k else "")
+        roto = ruta.with_name(ruta.name + sufijo)
+        cab = _cabeza_de(ruta)
+        if not roto.exists() and not cab.with_name(cab.name + sufijo).exists():
+            break
+        k += 1
+    for origen in (ruta, cab):
+        destino = roto if origen is ruta else cab.with_name(cab.name + sufijo)
+        if origen.exists():
+            os.link(origen, destino)  # exclusivo: nunca pisa pruebas previas
+            origen.unlink()
     Auditoria(ruta, reloj).anotar(
         EV_CADENA_REANUDADA, archivo_anterior=roto.name, hash_ultimo_valido=ultimo
     )
