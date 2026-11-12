@@ -37,6 +37,13 @@ def test_plantilla_carga_y_offset_nulo_bloquea(tmp_path):
         lc.moneda()
 
 
+def test_plantilla_sin_agenda_ni_regla_meta(tmp_path):
+    # Resolución 22: fuera hasta que se resuelva P-07 (el plan 11 aún no valida su contenido).
+    lim = cargar_limites(escribir(tmp_path, base()))
+    assert not {"agenda", "regla_meta"} & lim.acciones_permitidas
+    assert "limite_ejecutor" in lim.acciones_permitidas and "presupuesto" in lim.acciones_permitidas
+
+
 def test_cop_con_offset(limites_cop):
     lc = limites_cop.cuentas[C]
     assert lc.moneda().offset == 1 and lc.tope_gasto_diario_total == 165000

@@ -7,7 +7,8 @@ paso_max_pct: 50
 cadencia_min_presupuesto_min: 120
 enfriamiento_puja_estructura_h: 48
 max_cambios_hora_conjunto: 4            # límite de Meta
-acciones_permitidas: [noop, alerta, crear_estructura_pausada, activar, pausar, presupuesto, lote, spend_cap, limite_cuenta, limite_ejecutor, agenda, regla_meta, puja]
+# Sin agenda ni regla_meta (resolución 22): su contenido (parametros) aún no lo valida nadie; vuelven cuando se resuelva P-07.
+acciones_permitidas: [noop, alerta, crear_estructura_pausada, activar, pausar, presupuesto, lote, spend_cap, limite_cuenta, limite_ejecutor, puja]
 montaje_status_forzado: PAUSED
 cuentas:
   act_0000000000000000:
