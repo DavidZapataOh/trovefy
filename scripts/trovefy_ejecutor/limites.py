@@ -2,15 +2,29 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from pathlib import Path
+from types import MappingProxyType
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
-from .dinero import OFFSETS_OFICIALES, Moneda, moneda_configurada
+from .dinero import (
+    OFFSETS_OFICIALES,
+    Moneda,
+    MonedaNoConfigurada,
+    es_importe,
+    formatear,
+    moneda_configurada,
+)
 from .esquema import CUENTA_RE
-from .modelo import TIPOS
+from .modelo import TIPOS, Operacion, Propuesta
+
+if TYPE_CHECKING:
+    from .estado import Almacen
 
 _OFFSETS = (1, 10, 100, 1000)
 
@@ -168,3 +182,280 @@ def cargar_limites(ruta: Path, *, exigir_0600: bool = True) -> Limites:
     return Limites(cuentas_permitidas=frozenset(perm), acciones_permitidas=frozenset(acc),
                    montaje_status_forzado="PAUSED",
                    cuentas={cid: _cuenta(cid, d) for cid, d in secciones.items()}, **nums)
+
+
+
+# --- Validación del ejecutor (§5.2, Tarea 7) -----------------------------------------------------
+# Falla cerrada: un valor vivo ausente o mal tipado es una violación, nunca un «pasa». Todas las
+# comparaciones son enteras, en unidades mínimas de la moneda de la cuenta; nada pasa a float.
+
+MARGEN_RELOJ = timedelta(minutes=5)
+CAMPOS_CAMBIO = ("daily_budget", "bid_amount", "estructura")  # contrato con el plan 11 (registrar_cambio)
+_MAPAS = ("valores", "presupuestos_activos", "presupuesto_al_activar", "ultimos_cambios", "cambios_ultima_hora")
+
+
+@dataclass(frozen=True)
+class ContextoVivo:
+    ahora: datetime
+    stop: bool
+    valores: Mapping[tuple[str, str], int | str]
+    presupuestos_activos: Mapping[str, int]
+    presupuesto_al_activar: Mapping[str, int]
+    ultimos_cambios: Mapping[tuple[str, str], datetime]
+    cambios_ultima_hora: Mapping[str, int]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.ahora, datetime) or self.ahora.utcoffset() is None:
+            raise ValueError("ContextoVivo.ahora: se exige datetime con zona horaria")
+        if type(self.stop) is not bool:
+            raise ValueError("ContextoVivo.stop: debe ser booleano")
+        for nombre in _MAPAS:
+            object.__setattr__(self, nombre, MappingProxyType(dict(getattr(self, nombre))))
+
+
+def _no_negativo(v: object) -> bool:
+    return type(v) is int and v >= 0
+
+
+def _es_presupuesto(op: Operacion) -> bool:
+    return op.campo == "daily_budget" and op.entidad in ("adset", "campaign")
+
+
+def _es_activar(op: Operacion) -> bool:
+    return op.campo == "status" and op.a == "ACTIVE"
+
+
+@dataclass(frozen=True)
+class _Caso:
+    p: Propuesta
+    lim: Limites
+    ctx: ContextoVivo
+    lc: LimitesCuenta | None
+
+    def fmt(self, n: int) -> str:
+        try:
+            return formatear(n, self.lc.moneda()) if self.lc else f"{n} (unidades mínimas)"
+        except MonedaNoConfigurada:
+            return f"{n} (unidades mínimas)"
+
+    def simular(self) -> tuple[int, int, bool]:
+        """Total diario activo antes y después de aplicar las operaciones en orden; y si hay algo desconocido."""
+        sim = dict(self.ctx.presupuestos_activos)
+        desconocido = not all(_no_negativo(v) for v in sim.values())
+        if desconocido:
+            return 0, 0, True
+        antes = sum(sim.values())
+        for op in self.p.operaciones:
+            if _es_presupuesto(op) and op.id in sim:
+                sim[op.id] = op.a
+            elif _es_activar(op) and op.id not in sim:
+                v = self.ctx.presupuesto_al_activar.get(op.id)
+                if _no_negativo(v):
+                    sim[op.id] = v
+                else:
+                    desconocido = True
+        return antes, sum(sim.values()), desconocido
+
+
+Regla = Callable[[_Caso], list[str]]
+
+
+def _r_futuro(c: _Caso) -> list[str]:
+    if c.p.creada > c.ctx.ahora + MARGEN_RELOJ:
+        return [(f"creada_en_el_futuro: creada {c.p.creada.isoformat()} va más de 5 min por delante "
+                f"del reloj del ejecutor ({c.ctx.ahora.isoformat()})")]
+    return []
+
+
+def _r_stop(c: _Caso) -> list[str]:
+    return ["stop_activo: STOP activo; no se ejecuta nada hasta /reanudar"] if c.ctx.stop else []
+
+
+def _r_cuenta(c: _Caso) -> list[str]:
+    if c.p.cuenta is None:
+        if c.p.tipo == "limite_ejecutor":
+            return []
+        return ["cuenta_no_permitida: la propuesta no indica cuenta"]
+    if c.p.cuenta not in c.lim.cuentas_permitidas or c.lc is None:
+        return [f"cuenta_no_permitida: {c.p.cuenta} no está en cuentas_permitidas"]
+    return []
+
+
+def _r_tipo(c: _Caso) -> list[str]:
+    if c.p.tipo not in c.lim.acciones_permitidas:
+        return [f"tipo_no_permitido: {c.p.tipo} no está en acciones_permitidas"]
+    return []
+
+
+def _tiene_importes(c: _Caso) -> bool:
+    if c.p.estructura is not None or any(op.unidad is not None for op in c.p.operaciones):
+        return True
+    if any(_es_activar(op) for op in c.p.operaciones):
+        antes, despues, desconocido = c.simular()
+        return desconocido or despues > antes
+    return False
+
+
+def _r_moneda(c: _Caso) -> list[str]:
+    if not _tiene_importes(c):
+        return []
+    if c.lc is None:
+        return ["cuenta_no_permitida: importes sin cuenta de la que tomar la moneda"]
+    try:
+        c.lc.moneda()
+    except MonedaNoConfigurada:
+        return [f"moneda_no_configurada: {c.lc.moneda_codigo} sin offset confirmado (P-21)"]
+    codigo = c.lc.moneda_codigo
+    v = [f"moneda_distinta: operación sobre {op.id} en {op.moneda}; la cuenta usa {codigo}"
+         for op in c.p.operaciones if op.unidad is not None and op.moneda != codigo]
+    if c.p.estructura is not None and c.p.estructura.moneda != codigo:
+        v.append(f"moneda_distinta: estructura en {c.p.estructura.moneda}; la cuenta usa {codigo}")
+    return v
+
+
+def _op_presupuesto(c: _Caso, op: Operacion) -> list[str]:
+    lc, lim, ctx, v = c.lc, c.lim, c.ctx, []
+    maximo = lc.max_presupuesto_conjunto if op.entidad == "adset" else lc.max_presupuesto_campana_cbo
+    nombre = "max_presupuesto_conjunto" if op.entidad == "adset" else "max_presupuesto_campana_cbo"
+    if op.a > maximo:
+        v.append(f"importe_sobre_limite: {op.entidad} {op.id} a {c.fmt(op.a)} supera {nombre} ({c.fmt(maximo)})")
+    vivo = ctx.valores.get((op.id, "daily_budget"))
+    if not es_importe(vivo):
+        v.append(f"valor_vivo_desconocido: no se conoce el daily_budget vivo de {op.id}")
+    elif op.a * 100 > vivo * (100 + lim.paso_max_pct):
+        v.append(f"paso_excesivo: {op.id} de {c.fmt(vivo)} a {c.fmt(op.a)} sube más del {lim.paso_max_pct} %")
+    ultimo = ctx.ultimos_cambios.get((op.id, "daily_budget"))
+    if ultimo is not None and ctx.ahora - ultimo < timedelta(minutes=lim.cadencia_min_presupuesto_min):
+        hace = int((ctx.ahora - ultimo).total_seconds() // 60)
+        v.append(f"cadencia_presupuesto: {op.id} cambió de presupuesto hace {hace} min "
+                 f"(mínimo {lim.cadencia_min_presupuesto_min} min)")
+    n = ctx.cambios_ultima_hora.get(op.id, 0)
+    if type(n) is not int or n >= lim.max_cambios_hora_conjunto:
+        v.append(f"max_cambios_hora: {op.id} lleva {n} cambios de presupuesto en la última hora "
+                 f"(máximo {lim.max_cambios_hora_conjunto})")
+    return v
+
+
+def _op_puja(c: _Caso, op: Operacion) -> list[str]:
+    horas = c.lim.enfriamiento_puja_estructura_h
+    v = []
+    for campo in ("bid_amount", "estructura"):
+        ultimo = c.ctx.ultimos_cambios.get((op.id, campo))
+        if ultimo is not None and c.ctx.ahora - ultimo < timedelta(hours=horas):
+            hace = int((c.ctx.ahora - ultimo).total_seconds() // 3600)
+            v.append(f"enfriamiento_puja_estructura: {op.id} cambió {campo} hace {hace} h (mínimo {horas} h)")
+    return v
+
+
+def _r_operaciones(c: _Caso) -> list[str]:
+    v: list[str] = []
+    for op in c.p.operaciones:
+        if _es_presupuesto(op) and c.lc is not None:
+            v += _op_presupuesto(c, op)
+        elif _es_activar(op) and not _no_negativo(c.ctx.presupuesto_al_activar.get(op.id)):
+            v.append(f"valor_vivo_desconocido: no se sabe qué presupuesto empezaría a gastar {op.id} al activarse")
+        elif op.campo == "bid_amount":
+            v += _op_puja(c, op)
+        elif op.entidad == "campaign" and op.campo == "spend_cap" and c.lc is not None:
+            if op.a > c.lc.spend_cap_test_prorroga:
+                v.append(f"importe_sobre_limite: spend_cap de {op.id} a {c.fmt(op.a)} supera "
+                         f"spend_cap_test_prorroga ({c.fmt(c.lc.spend_cap_test_prorroga)})")
+        elif op.entidad == "ejecutor":
+            ok = ((op.id == "global" and op.campo in CLAVES_GLOBALES)
+                  or (op.id in c.lim.cuentas_permitidas and op.campo in CLAVES_CUENTA))
+            if not ok:
+                v.append(f"clave_limite_desconocida: {op.campo} no es una clave de límite de {op.id}")
+    return v
+
+
+def _r_tope(c: _Caso) -> list[str]:
+    if c.lc is None or not c.p.operaciones:
+        return []
+    if not all(_no_negativo(x) for x in c.ctx.presupuestos_activos.values()):
+        return ["valor_vivo_desconocido: presupuestos_activos con valores que no son enteros"]
+    antes, despues, _ = c.simular()
+    tope = c.lc.tope_gasto_diario_total
+    # Solo frena lo que sube el gasto: pausar o bajar con la cuenta ya por encima del tope reduce el riesgo.
+    if despues > tope and despues > antes:
+        return [(f"tope_diario_cuenta: el gasto diario activo pasaría de {c.fmt(antes)} a {c.fmt(despues)}, "
+                f"por encima de tope_gasto_diario_total ({c.fmt(tope)})")]
+    return []
+
+
+def _r_estructura(c: _Caso) -> list[str]:
+    e, lc = c.p.estructura, c.lc
+    if e is None or lc is None:
+        return []
+    v = []
+    if e.pagina_id not in lc.paginas_permitidas:
+        v.append(f"pagina_no_permitida: {e.pagina_id} no está en paginas_permitidas")
+    if e.dataset_id not in lc.datasets_permitidos:
+        v.append(f"dataset_no_permitido: {e.dataset_id} no está en datasets_permitidos")
+    if e.campana.spend_cap > lc.spend_cap_test:
+        v.append(f"spend_cap_sobre_limite: spend_cap {c.fmt(e.campana.spend_cap)} supera "
+                 f"spend_cap_test ({c.fmt(lc.spend_cap_test)})")
+    if e.campana.tipo_presupuesto == "CBO":
+        presupuestos = [e.campana.daily_budget]
+        if e.campana.daily_budget > lc.max_presupuesto_campana_cbo:
+            v.append(f"importe_sobre_limite: campaña {c.fmt(e.campana.daily_budget)} supera "
+                     f"max_presupuesto_campana_cbo ({c.fmt(lc.max_presupuesto_campana_cbo)})")
+    else:
+        presupuestos = [cj.daily_budget for cj in e.conjuntos]
+        for cj in e.conjuntos:
+            if cj.daily_budget > lc.max_presupuesto_conjunto:
+                v.append(f"importe_sobre_limite: conjunto «{cj.nombre}» {c.fmt(cj.daily_budget)} supera "
+                         f"max_presupuesto_conjunto ({c.fmt(lc.max_presupuesto_conjunto)})")
+    total = sum(presupuestos)
+    if total > lc.tope_gasto_diario_total:
+        v.append(f"tope_diario_cuenta: la estructura sola suma {c.fmt(total)} al día, por encima de "
+                 f"tope_gasto_diario_total ({c.fmt(lc.tope_gasto_diario_total)})")
+    return v
+
+
+# (regla, corta): si una regla que corta devuelve algo, no se mira más.
+_NOTIFICACION: tuple[tuple[Regla, bool], ...] = ((_r_futuro, False), (_r_tipo, False))
+_BASICAS: tuple[tuple[Regla, bool], ...] = (
+    (_r_futuro, False), (_r_stop, False), (_r_cuenta, True), (_r_tipo, False), (_r_moneda, True))
+_COMPLETAS = _BASICAS + ((_r_operaciones, False), (_r_tope, False), (_r_estructura, False))
+_SOLO_BASICAS = frozenset({"agenda", "regla_meta"})  # su contenido lo valida el plan 11 (P-07)
+
+
+def comprobar(propuesta: Propuesta, limites: Limites, ctx: ContextoVivo) -> list[str]:
+    """Violaciones ``codigo: detalle`` de §5.2, sin duplicados y en orden estable; vacía si pasa."""
+    lc = limites.cuentas.get(propuesta.cuenta) if propuesta.cuenta is not None else None
+    caso = _Caso(propuesta, limites, ctx, lc)
+    if propuesta.clase == "notificacion":
+        reglas = _NOTIFICACION
+    elif propuesta.tipo in _SOLO_BASICAS:
+        reglas = _BASICAS
+    else:
+        reglas = _COMPLETAS
+    v: list[str] = []
+    for regla, corta in reglas:
+        nuevas = regla(caso)
+        v += nuevas
+        if corta and nuevas:
+            break
+    return list(dict.fromkeys(v))
+
+
+def contexto_para(p: Propuesta, almacen: Almacen, *, ahora: datetime, stop: bool,
+                  valores: Mapping[tuple[str, str], int | str], presupuestos_activos: Mapping[str, int],
+                  presupuesto_al_activar: Mapping[str, int]) -> ContextoVivo:
+    """(extra) Completa el contexto con la cadencia guardada en el Almacen.
+
+    Contrato con el plan 11: al ejecutar con éxito registra ``registrar_cambio(id, campo)`` con los
+    campos de ``CAMPOS_CAMBIO``, y ``"estructura"`` en cada objeto creado por ``crear_estructura_pausada``.
+    """
+    ids = list(dict.fromkeys(op.id for op in p.operaciones if op.entidad not in ("ejecutor", "account")))
+    ultimos: dict[tuple[str, str], datetime] = {}
+    for id_ in ids:
+        for campo in CAMPOS_CAMBIO:
+            u = almacen.ultimo_cambio(id_, campo)
+            if u is not None:
+                ultimos[(id_, campo)] = u
+    hora = ahora - timedelta(hours=1)
+    cambios = {id_: almacen.cambios_desde(id_, "daily_budget", hora) for id_ in ids}
+    return ContextoVivo(ahora=ahora, stop=stop, valores=valores, presupuestos_activos=presupuestos_activos,
+                        presupuesto_al_activar=presupuesto_al_activar, ultimos_cambios=ultimos,
+                        cambios_ultima_hora=cambios)
