@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import errno
+import fcntl
 import os
+import re
 import stat
 from dataclasses import dataclass
 from pathlib import Path
@@ -47,46 +50,82 @@ class Secretos:
     __str__ = __repr__
 
 
-def _comprobar_permisos(ruta: Path) -> None:
-    """Lanza FileNotFoundError si no existe, SecretosInseguros si no es seguro."""
-    st = os.lstat(ruta)
-    if stat.S_ISLNK(st.st_mode):
-        raise SecretosInseguros(f"{ruta} es un enlace simbólico")
-    if not stat.S_ISREG(st.st_mode):
-        raise SecretosInseguros(f"{ruta} no es un archivo regular")
-    if st.st_mode & 0o077:
-        raise SecretosInseguros(
-            f"{ruta} tiene permisos {stat.S_IMODE(st.st_mode):04o}; se exige 0600"
-        )
-    if st.st_uid != os.getuid():
-        raise SecretosInseguros(f"{ruta} no pertenece al usuario que ejecuta")
+def _abrir_seguro(ruta: Path) -> int:
+    """Abre sin seguir enlaces y valida por descriptor (sin TOCTOU)."""
+    try:
+        fd = os.open(ruta, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as e:
+        if e.errno == errno.ELOOP:
+            raise SecretosInseguros(f"{ruta} es un enlace simbólico") from None
+        raise
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise SecretosInseguros(f"{ruta} no es un archivo regular")
+        if st.st_mode & 0o077:
+            raise SecretosInseguros(
+                f"{ruta} tiene permisos {stat.S_IMODE(st.st_mode):04o}; se exige 0600"
+            )
+        if st.st_uid != os.getuid():
+            raise SecretosInseguros(f"{ruta} no pertenece al usuario que ejecuta")
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
 
 
-def _leer_pares(ruta: Path) -> list[tuple[str, str]]:
+def _leer_texto(ruta: Path) -> str:
+    fd = _abrir_seguro(ruta)
+    with os.fdopen(fd, "r", encoding="utf-8") as f:
+        return f.read()
+
+
+_NOMBRE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+
+
+def _lineas(texto: str) -> list[str]:
+    lineas = texto.split("\n")
+    if lineas and lineas[-1] == "":
+        lineas.pop()
+    return lineas
+
+
+def _leer_pares(texto: str) -> list[tuple[str, str]]:
     pares: list[tuple[str, str]] = []
-    for linea in ruta.read_text(encoding="utf-8").splitlines():
+    vistas: set[str] = set()
+    for n, linea in enumerate(_lineas(texto), start=1):
         linea = linea.strip()
         if not linea or linea.startswith("#"):
             continue
         clave, sep, valor = linea.partition("=")
+        if not sep:
+            raise ValueError(f"línea {n} sin '='")
         clave = clave.strip()
-        if not sep or clave not in CLAVES:
-            raise ValueError(f"clave desconocida en {ruta}: {clave}")
-        pares.append((clave, valor.strip()))
+        if clave.startswith("export ") or clave == "export":
+            raise ValueError(f"línea {n} usa 'export'; no se admite")
+        if clave not in CLAVES:
+            if _NOMBRE.match(clave) and len(clave) <= 40:
+                raise ValueError(f"clave desconocida: {clave}")
+            raise ValueError(f"línea {n} con clave desconocida")
+        valor = valor.strip()
+        if valor[:1] in ("'", '"'):
+            raise ValueError(f"{clave}: no se admiten valores entre comillas")
+        if clave in vistas:
+            raise ValueError(f"{clave} duplicada")
+        vistas.add(clave)
+        pares.append((clave, valor))
     return pares
 
 
 def _entero(clave: str, valor: str) -> int:
-    try:
-        return int(valor)
-    except ValueError:
-        raise ValueError(f"{clave} no es un entero") from None
+    if not (valor.isascii() and valor.isdigit()):
+        raise ValueError(f"{clave} no es un entero")
+    return int(valor)
 
 
 def cargar_secretos(ruta: Path) -> Secretos:
     ruta = Path(ruta)
-    _comprobar_permisos(ruta)
-    d = dict(_leer_pares(ruta))
+    d = dict(_leer_pares(_leer_texto(ruta)))
     hmac: bytes | None = None
     if "HMAC_CLAVE" in d:
         try:
@@ -113,16 +152,27 @@ def guardar_secreto(ruta: Path, clave: str, valor: str, *, sobrescribir: bool = 
     ruta = Path(ruta)
     if clave not in CLAVES:
         raise ValueError(f"clave desconocida: {clave}")
-    if "\n" in valor or "\r" in valor:
-        raise ValueError(f"el valor de {clave} no puede contener saltos de línea")
-    lineas: list[str] = []
-    existe = True
+    if (
+        not valor.isprintable()
+        or len(valor.splitlines()) > 1
+        or valor != valor.strip()
+    ):
+        raise ValueError(f"el valor de {clave} contiene caracteres no permitidos")
+    lock = ruta.with_name(ruta.name + ".lock")
+    lfd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
-        _comprobar_permisos(ruta)
+        fcntl.flock(lfd, fcntl.LOCK_EX)
+        _guardar_bloqueado(ruta, clave, valor, sobrescribir)
+    finally:
+        os.close(lfd)
+
+
+def _guardar_bloqueado(ruta: Path, clave: str, valor: str, sobrescribir: bool) -> None:
+    lineas: list[str] = []
+    try:
+        lineas = _lineas(_leer_texto(ruta))
     except FileNotFoundError:
-        existe = False
-    if existe:
-        lineas = ruta.read_text(encoding="utf-8").splitlines()
+        pass
     nuevas: list[str] = []
     reemplazada = False
     for linea in lineas:

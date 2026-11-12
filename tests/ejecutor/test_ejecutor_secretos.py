@@ -86,3 +86,48 @@ def test_comentarios_y_vacias(tmp_path):
     s = env(tmp_path, "# c\n\nTELEGRAM_CHAT_ID=7\nCLAUDE_UID=1001\n")
     x = cargar_secretos(s)
     assert x.telegram_chat_id == 7 and x.claude_uid == 1001
+
+
+SECRETO = "valorSinteticoXyz987654321"
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        SECRETO + "\n",
+        "clave-rara-" + "x" * 60 + "=" + SECRETO + "\n",
+        "minus=" + SECRETO + "\n",
+        "export META_TOKEN=" + SECRETO + "\n",
+        'META_TOKEN="' + SECRETO + '"\n',
+        "META_TOKEN='" + SECRETO + "'\n",
+        "META_TOKEN=" + SECRETO + "\nMETA_TOKEN=" + SECRETO + "\n",
+        "TELEGRAM_USER_ID=" + SECRETO + "\n",
+        "TELEGRAM_USER_ID=-5\n",
+        "TELEGRAM_USER_ID=1_0\n",
+        "TELEGRAM_USER_ID=٣٢\n",
+    ],
+)
+def test_parseo_estricto_sin_eco(tmp_path, texto):
+    s = env(tmp_path, texto)
+    with pytest.raises(ValueError) as e:
+        cargar_secretos(s)
+    assert SECRETO not in str(e.value) and "x" * 20 not in str(e.value)
+
+
+@pytest.mark.parametrize(
+    "valor",
+    ["a HMAC_CLAVE=00", "a\x0bb", "a\x85b", "a\x1cb", "a\x00b", " a", "a ", "a b"],
+)
+def test_valor_con_separadores_rechazado(tmp_path, valor):
+    s = env(tmp_path, "CLAUDE_UID=1\n")
+    with pytest.raises(ValueError):
+        guardar_secreto(s, "META_TOKEN", valor)
+    assert s.read_text() == "CLAUDE_UID=1\n"
+
+
+def test_lectura_por_descriptor_y_cerrojo(tmp_path):
+    s = env(tmp_path, "CLAUDE_UID=1\n")
+    guardar_secreto(s, "META_TOKEN", "tokenSintetico1")
+    assert (tmp_path / "secretos.env.lock").exists()
+    assert not list(tmp_path.glob(".*.tmp"))
+    assert cargar_secretos(s).meta_token == "tokenSintetico1"
