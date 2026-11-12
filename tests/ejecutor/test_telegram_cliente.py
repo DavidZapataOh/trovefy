@@ -50,9 +50,9 @@ def test_token_invalido_no_aparece_en_el_error():
 def test_validaciones_de_telegram():
     with TelegramFalso() as tg:
         c = ClienteTelegram(TOKEN_PRUEBA, tg.base)
-        with pytest.raises(ErrorTelegram) as e:
+        with pytest.raises(ValueError):  # el cliente corta antes de llamar a la red
             c.enviar(1, "x" * 4097)
-        assert e.value.codigo == 400
+        assert tg.llamadas == []
         with pytest.raises(ErrorTelegram):
             c.enviar(1, "x", [[Boton("a", "d" * 65)]])
         with pytest.raises(ErrorTelegram):
@@ -72,10 +72,10 @@ def test_token_erroneo_da_401_sin_token():
 def test_429_expone_retry_after():
     with TelegramFalso() as tg:
         c = ClienteTelegram(TOKEN_PRUEBA, tg.base)
-        tg.fallar("sendMessage", veces=1, codigo=429, retry_after=7)
+        tg.fallar("sendMessage", veces=1, codigo=429, retry_after=3600)  # demasiado: no espera
         with pytest.raises(ErrorTelegram) as e:
             c.enviar(1, "x")
-        assert e.value.codigo == 429 and e.value.retry_after == 7
+        assert e.value.codigo == 429 and e.value.retry_after == 3600
         assert c.enviar(1, "x")
 
 
@@ -112,7 +112,7 @@ def test_error_telegram_sin_contexto_con_el_token(caso):
             c = ClienteTelegram("999999:" + "B" * 35, tg.base)
         else:
             c = ClienteTelegram(TOKEN_PRUEBA, tg.base)
-            tg.fallar("sendMessage", codigo=429, retry_after=3)
+            tg.fallar("sendMessage", codigo=429, retry_after=3600)
         with pytest.raises(ErrorTelegram) as e:
             c.enviar(1, "x")
         assert e.value.__cause__ is None and e.value.__suppress_context__

@@ -21,10 +21,18 @@ from trovefy_ejecutor.auditoria import redactar
 
 BASE_OFICIAL = "https://api.telegram.org"
 _TOKEN_RE = re.compile(r"\d+:[A-Za-z0-9_-]{30,}")
-_LOCAL_RE = re.compile(r"http://127\.0\.0\.1:(\d{1,5})")
+_LOCAL_RE = re.compile(r"http://127\.0\.0\.1:([0-9]{1,5})")
+MAX_TEXTO = 4096
 _MAX_BYTES = 2_000_000
 _TIMEOUT_NORMAL = 30.0
 _TIMEOUT_CALLBACK = 3.0
+_INTENTOS_429 = 3
+_RETRY_AFTER_MAX = 60
+_PAUSA_CHAT = 1.0
+
+
+def largo_telegram(texto: str) -> int:
+    return len(texto.encode("utf-16-le")) // 2
 
 
 @dataclass(frozen=True)
@@ -88,6 +96,7 @@ class ClienteTelegram:
         self._abrir = abrir or _abrir_por_defecto
         self._dormir = dormir
         self._reloj = reloj
+        self.ultimo_envio: dict[int, float] = {}
 
     def __repr__(self) -> str:
         return f"ClienteTelegram(base={self._base!r})"
@@ -103,20 +112,48 @@ class ClienteTelegram:
         )
         del url
         http_error: int | None = None
+        crudo: bytes | None = None
+        fallo_red: str | None = None
+        # Ningún raise dentro de un except: así ninguna excepción lleva la URL en su cadena.
         try:
             with self._abrir(req, timeout) as r:
                 crudo = r.read(_MAX_BYTES + 1)
         except urllib.error.HTTPError as e:
             http_error = e.code
-            crudo = e.read(_MAX_BYTES + 1)
+            try:
+                crudo = e.read(_MAX_BYTES + 1)
+            except (OSError, http.client.HTTPException) as e2:
+                fallo_red = f"{type(e2).__name__} leyendo el error HTTP {http_error}"
         except (OSError, http.client.HTTPException) as e:
-            raise ErrorRedTelegram(self._limpiar(f"{type(e).__name__}: {e}")) from None
-        if http_error is not None:  # fuera del except: sin contexto que lleve la URL
+            fallo_red = f"{type(e).__name__}: {e}"
+        del req
+        if fallo_red is not None:
+            raise ErrorRedTelegram(self._limpiar(fallo_red)) from None
+        assert crudo is not None
+        if http_error is not None:
             self._lanzar_si_error(http_error, crudo)
             raise ErrorRedTelegram(f"respuesta HTTP {http_error} ilegible")
         if len(crudo) > _MAX_BYTES:
             raise ErrorRedTelegram("respuesta demasiado grande")
         return self._resultado(crudo)
+
+    def _con_429(self, metodo: str, params: dict[str, Any], timeout: float, chat_id: int | None = None) -> Any:
+        for intento in range(1, _INTENTOS_429 + 1):
+            if chat_id is not None:
+                previo = self.ultimo_envio.get(chat_id)
+                if previo is not None:
+                    falta = _PAUSA_CHAT - (self._reloj() - previo)
+                    if falta > 0:
+                        self._dormir(falta)
+                self.ultimo_envio[chat_id] = self._reloj()
+            try:
+                return self._llamar(metodo, params, timeout)
+            except ErrorTelegram as e:
+                ra = e.retry_after
+                if e.codigo != 429 or ra is None or ra > _RETRY_AFTER_MAX or intento == _INTENTOS_429:
+                    raise
+            self._dormir(ra)
+        raise AssertionError("inalcanzable")
 
     def _lanzar_si_error(self, http_code: int, crudo: bytes) -> None:
         try:
@@ -144,8 +181,14 @@ class ClienteTelegram:
             raise ErrorRedTelegram("respuesta con forma inesperada")
         return datos.get("result")
 
+    @staticmethod
+    def _validar_largo(texto: str) -> None:
+        n = largo_telegram(texto)
+        if n > MAX_TEXTO:
+            raise ValueError(f"texto de {n} > {MAX_TEXTO}")
+
     def obtener_updates(self, offset: int, timeout_s: int = 25) -> list[dict]:
-        res = self._llamar(
+        res = self._con_429(
             "getUpdates",
             {"offset": offset, "timeout": timeout_s, "allowed_updates": ["message", "callback_query"]},
             timeout_s + 10,
@@ -170,7 +213,8 @@ class ClienteTelegram:
         }
         if botones:
             params["reply_markup"] = _teclado(botones)
-        res = self._llamar("sendMessage", params, _TIMEOUT_NORMAL)
+        self._validar_largo(texto)
+        res = self._con_429("sendMessage", params, _TIMEOUT_NORMAL, chat_id)
         if not isinstance(res, dict) or not isinstance(res.get("message_id"), int):
             raise ErrorRedTelegram("sendMessage con forma inesperada")
         return res["message_id"]
@@ -182,6 +226,7 @@ class ClienteTelegram:
         texto: str,
         botones: list[list[Boton]] | None = None,
     ) -> None:
+        self._validar_largo(texto)
         params = {
             "chat_id": chat_id,
             "message_id": message_id,
@@ -190,7 +235,7 @@ class ClienteTelegram:
             "reply_markup": _teclado(botones),
         }
         try:
-            self._llamar("editMessageText", params, _TIMEOUT_NORMAL)
+            self._con_429("editMessageText", params, _TIMEOUT_NORMAL, chat_id)
         except ErrorTelegram as e:
             if e.codigo == 400 and "message is not modified" in e.descripcion.lower():
                 return
