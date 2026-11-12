@@ -1,4 +1,5 @@
 import socket
+import traceback
 
 import pytest
 from ejecutor.falsos.telegram_falso import TOKEN_PRUEBA, TelegramFalso
@@ -34,7 +35,7 @@ def test_responder_callback():
         assert tg.llamadas[-1].metodo == "answerCallbackQuery"
 
 
-@pytest.mark.parametrize("base", ["http://api.telegram.org", "https://evil.example", "http://10.0.0.1:80"])
+@pytest.mark.parametrize("base", ["http://api.telegram.org", "https://evil.example", "http://10.0.0.1:80", "http://127.0.0.1:80\n", "http://127.0.0.1:99999"])
 def test_base_no_permitida(base):
     with pytest.raises(ValueError):
         ClienteTelegram(TOKEN_PRUEBA, base)
@@ -102,3 +103,18 @@ def test_base_inalcanzable_no_filtra_token():
 def test_repr_del_cliente_sin_token():
     c = ClienteTelegram(TOKEN_PRUEBA, "https://api.telegram.org")
     assert TOKEN_PRUEBA not in repr(c) and "AAAA" not in repr(c)
+
+
+@pytest.mark.parametrize("caso", ["401", "429"])
+def test_error_telegram_sin_contexto_con_el_token(caso):
+    with TelegramFalso() as tg:
+        if caso == "401":
+            c = ClienteTelegram("999999:" + "B" * 35, tg.base)
+        else:
+            c = ClienteTelegram(TOKEN_PRUEBA, tg.base)
+            tg.fallar("sendMessage", codigo=429, retry_after=3)
+        with pytest.raises(ErrorTelegram) as e:
+            c.enviar(1, "x")
+        assert e.value.__cause__ is None and e.value.__suppress_context__
+        texto = "".join(traceback.format_exception(e.value))
+        assert "AAAAAAAAAA" not in texto and "BBBBBBBBBB" not in texto

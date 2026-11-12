@@ -16,13 +16,12 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlparse
 
 from trovefy_ejecutor.auditoria import redactar
 
 BASE_OFICIAL = "https://api.telegram.org"
-_TOKEN_RE = re.compile(r"^\d+:[A-Za-z0-9_-]{30,}$")
-_LOCAL_RE = re.compile(r"^http://127\.0\.0\.1:\d{1,5}$")
+_TOKEN_RE = re.compile(r"\d+:[A-Za-z0-9_-]{30,}")
+_LOCAL_RE = re.compile(r"http://127\.0\.0\.1:(\d{1,5})")
 _MAX_BYTES = 2_000_000
 _TIMEOUT_NORMAL = 30.0
 _TIMEOUT_CALLBACK = 3.0
@@ -42,6 +41,7 @@ class ErrorTelegram(Exception):
         self.descripcion = descripcion
         self.retry_after = retry_after
         super().__init__(f"Telegram {codigo}: {descripcion}")
+        self.__suppress_context__ = True
 
 
 class ErrorRedTelegram(Exception):
@@ -50,6 +50,7 @@ class ErrorRedTelegram(Exception):
     def __init__(self, motivo: str):
         self.motivo = motivo
         super().__init__(motivo)
+        self.__suppress_context__ = True
 
 
 class _SinRedireccion(urllib.request.HTTPRedirectHandler):
@@ -76,12 +77,12 @@ class ClienteTelegram:
         dormir: Callable[[float], None] = time.sleep,
         reloj: Callable[[], float] = time.monotonic,
     ):
-        if not isinstance(token, str) or not _TOKEN_RE.match(token):
+        if not isinstance(token, str) or not _TOKEN_RE.fullmatch(token):
             raise ValueError("token del bot con formato inválido")
-        if base != BASE_OFICIAL and not _LOCAL_RE.match(base):
-            raise ValueError("base de Telegram no permitida")
-        if base != BASE_OFICIAL and urlparse(base).hostname != "127.0.0.1":
-            raise ValueError("base de Telegram no permitida")
+        if base != BASE_OFICIAL:
+            m = _LOCAL_RE.fullmatch(base)
+            if m is None or not 0 < int(m.group(1)) <= 65535:
+                raise ValueError("base de Telegram no permitida")
         self._token = token
         self._base = base
         self._abrir = abrir or _abrir_por_defecto
@@ -101,15 +102,18 @@ class ClienteTelegram:
             url, data=cuerpo, method="POST", headers={"Content-Type": "application/json"}
         )
         del url
+        http_error: int | None = None
         try:
             with self._abrir(req, timeout) as r:
                 crudo = r.read(_MAX_BYTES + 1)
         except urllib.error.HTTPError as e:
+            http_error = e.code
             crudo = e.read(_MAX_BYTES + 1)
-            self._lanzar_si_error(e.code, crudo)
-            raise ErrorRedTelegram(f"respuesta HTTP {e.code} ilegible") from None
         except (OSError, http.client.HTTPException) as e:
             raise ErrorRedTelegram(self._limpiar(f"{type(e).__name__}: {e}")) from None
+        if http_error is not None:  # fuera del except: sin contexto que lleve la URL
+            self._lanzar_si_error(http_error, crudo)
+            raise ErrorRedTelegram(f"respuesta HTTP {http_error} ilegible")
         if len(crudo) > _MAX_BYTES:
             raise ErrorRedTelegram("respuesta demasiado grande")
         return self._resultado(crudo)
