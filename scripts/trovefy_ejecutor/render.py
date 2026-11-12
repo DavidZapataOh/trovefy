@@ -2,20 +2,20 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
 
 from .dinero import Moneda, formatear
+from .esquema import RANGO_USUARIO
 from .modelo import Operacion, Propuesta
 from .reloj import ZONA_COT
 
 MAX_PROPUESTA = 3800  # deja sitio a la línea de resultado
 MAX_POR_QUE = 300
 
-_INVISIBLES = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]")
-_CONTROL = re.compile("[\x00-\x09\x0b\x0c\x0e-\x1f\x7f-\x9f]")
 _SALTOS = re.compile(r"\r\n|\r|\n|\u2028|\u2029|\x85")
 
 _VACIO: Mapping = MappingProxyType({})
@@ -40,11 +40,26 @@ class DatosRender:
     tope_cuenta: int | None = None
 
 
+def _descartable(c: str) -> bool:
+    o = ord(c)
+    return (unicodedata.category(c) == "Cf" or c == "\u061c" or 0x2060 <= o <= 0x2064 or o == 0xAD
+            or 0xE0000 <= o <= 0xE007F or o in (0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0xFEFF)
+            or 0x202A <= o <= 0x202E or 0x2066 <= o <= 0x2069)
+
+
 def limpiar_texto(texto: str, maximo: int) -> str:
     texto = _SALTOS.sub("\n", str(texto))
-    texto = _INVISIBLES.sub("", texto)
-    texto = _CONTROL.sub(lambda m: " " if m.group() == "\t" else "", texto)
-    lineas = [re.sub(r"[ \t]+", " ", ln).strip() for ln in texto.split("\n")]
+    sal = []
+    for c in texto:
+        if c == "\n" or c == " ":
+            sal.append(c)
+        elif c == "\t":
+            sal.append(" ")
+        elif _descartable(c) or unicodedata.category(c) == "Cc":
+            continue
+        else:
+            sal.append(c)
+    lineas = [re.sub(r" +", " ", ln).strip() for ln in "".join(sal).split("\n")]
     texto = " · ".join(ln for ln in lineas if ln)
     if len(texto) > maximo:
         texto = texto[: maximo - 1] + "…"
@@ -105,8 +120,10 @@ def _pct(v: int, a: int) -> str:
 
 def _cambio(op: Operacion, v: int | str, vivo: DatosRender, con_pct: bool) -> str:
     if op.campo == "status" or not isinstance(v, int) or not isinstance(op.a, int):
-        return f"{v} → {op.a}"
+        return f"{v} (sin cambio)" if v == op.a else f"{v} → {op.a}"
     m = vivo.moneda
+    if v == op.a:
+        return f"{formatear(v, m)} (sin cambio)"
     return f"{_sin_codigo(v, m)} → {formatear(op.a, m)}" + (_pct(v, op.a) if con_pct else "")
 
 
@@ -114,10 +131,12 @@ def _titulo(p: Propuesta, vivo: DatosRender) -> str:
     if p.tipo == "lote":
         return f"LOTE ({len(p.operaciones)} operaciones)"
     if p.tipo == "presupuesto":
-        op = p.operaciones[0]
-        v = _valor_vivo(op, vivo)
-        return "BAJAR PRESUPUESTO" if isinstance(v, int) and isinstance(op.a, int) and op.a < v \
-            else "SUBIR PRESUPUESTO"
+        pares = [(_valor_vivo(op, vivo), op.a) for op in p.operaciones]
+        if all(isinstance(v, int) and isinstance(a, int) and a > v for v, a in pares):
+            return "SUBIR PRESUPUESTO"
+        if all(isinstance(v, int) and isinstance(a, int) and a < v for v, a in pares):
+            return "BAJAR PRESUPUESTO"
+        return f"CAMBIAR PRESUPUESTOS ({len(pares)})"
     return _TITULOS[p.tipo]
 
 
@@ -132,25 +151,30 @@ def _nombre_producto(slug: str, vivo: DatosRender) -> str:
 def _linea_contexto(p: Propuesta, vivo: DatosRender) -> str | None:
     partes = []
     if p.producto:
-        corto = "-".join(p.producto.split("-")[:2])
+        corto = limpiar_texto("-".join(p.producto.split("-")[:2]), 64)
         partes.append(f"Producto: {_nombre_producto(p.producto, vivo)} ({corto})")
     if p.pais:
-        partes.append(f"País: {p.pais}")
+        partes.append(f"País: {limpiar_texto(p.pais, 8)}")
     if p.cuenta:
-        partes.append(f"Cuenta: …{p.cuenta[-4:]} ({vivo.moneda.codigo})")
+        partes.append(f"Cuenta: …{limpiar_texto(p.cuenta[-4:], 4)} ({vivo.moneda.codigo})")
     return " · ".join(partes) or None
 
 
 def _lineas_limite(p: Propuesta, vivo: DatosRender) -> list[str]:
+    """El valor actual sale de ``vivo.valores[("ejecutor", id, campo)]`` (id = ``global`` o ``act_…``)."""
     out = []
     for op in p.operaciones:
-        cuenta = "global" if op.id == "global" else op.id
-        if op.unidad == "minima" and isinstance(op.a, int) and isinstance(op.de_esperado, int):
-            de, a = formatear(op.de_esperado, vivo.moneda), formatear(op.a, vivo.moneda)
+        actual = vivo.valores.get(("ejecutor", op.id, op.campo))
+        if actual is None:
+            raise SinValorVivo(f"ejecutor {limpiar_texto(op.id, 30)} {limpiar_texto(op.campo, 40)}")
+        cuenta = limpiar_texto(op.id, 30)
+        if op.unidad == "minima" and isinstance(op.a, int) and isinstance(actual, int):
+            de, a = formatear(actual, vivo.moneda), formatear(op.a, vivo.moneda)
         else:
-            de, a = str(op.de_esperado), str(op.a)
-        out.append(f"Límite: {op.campo} ({cuenta}): {de} → {a}")
-    if p.origen.startswith("telegram:"):
+            de, a = str(actual), str(op.a)
+        out.append(f"Límite: {limpiar_texto(op.campo, 40)} ({cuenta}): {de} → {a}")
+    n = int(p.id[-3:])
+    if n in RANGO_USUARIO and p.origen.startswith("telegram:"):
         out.append("Lo pide: tú (Telegram)")
     else:
         out.append(f"Lo pide: Claude ({limpiar_texto(p.origen, 100)})")
@@ -185,6 +209,8 @@ def _caduca(vivo: DatosRender) -> str:
 def render_propuesta(p: Propuesta, vivo: DatosRender) -> str:
     if p.tipo == "alerta":
         return render_alerta(p)
+    if p.tipo in ("agenda", "regla_meta"):
+        raise ValueError("tipo no soportado aún (P-07)")
     lineas = [f"{p.id} · {_titulo(p, vivo)} · prioridad {p.prioridad}"]
     ctx = _linea_contexto(p, vivo)
     if ctx:
