@@ -133,6 +133,9 @@ class GraphFalso:
         for oid, (ar, padres) in self.hijos.items():
             if ar == arista and padre in padres and oid in self.objetos:
                 obj = self.objetos[oid]
+                permitidos = (filtros or {}).get("effective_status")
+                if permitidos is not None and obj.get("effective_status") not in permitidos:
+                    continue  # como Meta: lista blanca de estados
                 salida.append({"id": oid, **{c: obj[c] for c in campos if c in obj and c != "id"}})
         if self.tam_pagina is not None and len(salida) > self.tam_pagina * max_paginas:
             raise ErrorRed("listado incompleto")

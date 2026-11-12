@@ -7,6 +7,11 @@ consume los valores falla cerrado cuando falta.
 Presupuestos diarios: ``presupuestos_activos`` y ``suma_diaria_activa`` solo suman ``daily_budget``
 (conjuntos ABO y campañas CBO con ``effective_status == "ACTIVE"``). Un ``lifetime_budget`` no entra en
 la suma diaria.
+
+Quien use esto debe tratar ``presupuesto_al_activar(p) is None`` como desconocido (nunca sumarlo ni
+darlo por 0) y convertir ``LecturaIncompleta`` en un rechazo de la propuesta. El estado «gastando» es
+una lista negra local (``_NO_GASTA``): el servidor no filtra por estado, así que un estado nuevo de Meta
+cuenta como gasto.
 """
 
 from __future__ import annotations
@@ -35,7 +40,6 @@ _CON_ACTIVACION = frozenset({"activar", "lote"})
 # «Gastando» = status propio ACTIVE y effective_status fuera de estos (IN_PROCESS, WITH_ISSUES,
 # PENDING_REVIEW, PREAPPROVED y PENDING_BILLING_INFO cuentan: contar de más es el lado seguro).
 _NO_GASTA = frozenset({"PAUSED", "CAMPAIGN_PAUSED", "ADSET_PAUSED", "DELETED", "ARCHIVED", "DISAPPROVED"})
-_ESTADOS_GASTA = ("ACTIVE", "IN_PROCESS", "WITH_ISSUES", "PENDING_REVIEW", "PREAPPROVED", "PENDING_BILLING_INFO")
 _LIMITE_LISTADO = 500
 _ENTERO = re.compile(r"-?[0-9]+")
 
@@ -277,7 +281,7 @@ def _presupuestos_activos(p: Propuesta, graph) -> tuple[int | None, dict[str, in
     activos: dict[str, int] = {}
     for arista in ("adsets", "campaigns"):
         filas = graph.listar(p.cuenta, arista, ("id", "status", "effective_status", "daily_budget"),
-                             filtros={"effective_status": list(_ESTADOS_GASTA)}, limite=_LIMITE_LISTADO)
+                             limite=_LIMITE_LISTADO)  # sin filtro de estado en el servidor: lista negra local
         for f in filas:
             id_ = f.get("id")
             if not isinstance(id_, str) or not _gasta(f.get("status"), f.get("effective_status")):

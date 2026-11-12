@@ -139,13 +139,25 @@ def test_status_propio_pausado_no_gasta_aunque_effective_diga_active():
     assert "s2" not in valores_vivos(propuesta(), g).presupuestos_activos
 
 
-def test_listado_se_pide_con_limit_y_filtra_estados():
+def test_listado_se_pide_con_limit_y_sin_filtro_de_estado_en_el_servidor():
     g = mundo_basico()
     valores_vivos(propuesta(), g)
     ls = [c for c in g.llamadas if c.metodo == "listar"]
-    assert ls and all(c.datos["limite"] == 500 for c in ls)
-    assert "DISAPPROVED" not in ls[0].datos["filtros"]["effective_status"]
-    assert "IN_PROCESS" in ls[0].datos["filtros"]["effective_status"]
+    assert ls and all(c.datos["limite"] == 500 and "effective_status" not in c.datos["filtros"] for c in ls)
+
+
+def test_estado_desconocido_de_meta_cuenta_como_gastando():
+    g = mundo_basico()
+    g.cambiar("s2", effective_status="NEW_STATE")
+    vv = valores_vivos(propuesta(), g)
+    assert vv.presupuestos_activos["s2"] == 15000 and vv.suma_diaria_activa == 35000
+
+
+def test_el_falso_respeta_la_lista_blanca_de_estados():
+    g = mundo_basico()
+    g.cambiar("s2", effective_status="NEW_STATE")
+    ids = [o["id"] for o in g.listar(CUENTA, "adsets", ["id"], {"effective_status": ["ACTIVE"]})]
+    assert ids == ["s1"]
 
 
 def _con_muchos_conjuntos(g, n=25):
