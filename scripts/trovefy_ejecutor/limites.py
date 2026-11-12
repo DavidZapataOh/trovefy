@@ -8,7 +8,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
-from .dinero import Moneda, moneda_configurada
+from .dinero import OFFSETS_OFICIALES, Moneda, moneda_configurada
 from .esquema import CUENTA_RE
 from .modelo import TIPOS
 
@@ -26,6 +26,24 @@ _CUENTA = {"moneda", "offset", "zona_horaria", "paginas_permitidas", "datasets_p
 
 class LimitesInvalidos(Exception):
     pass
+
+
+class _CargadorEstricto(yaml.SafeLoader):
+    pass
+
+
+def _mapa_sin_repetidas(loader: yaml.SafeLoader, nodo: yaml.MappingNode, deep: bool = False) -> dict:
+    loader.flatten_mapping(nodo)
+    vistas: set = set()
+    for clave_nodo, _ in nodo.value:
+        clave = loader.construct_object(clave_nodo, deep=True)
+        if clave in vistas:
+            raise LimitesInvalidos(f"{clave}: clave repetida")
+        vistas.add(clave)
+    return loader.construct_mapping(nodo, deep)
+
+
+_CargadorEstricto.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _mapa_sin_repetidas)
 
 
 @dataclass(frozen=True)
@@ -95,6 +113,11 @@ def _cuenta(cid: str, d: object) -> LimitesCuenta:
     off = d["offset"]
     if off is not None and (type(off) is not int or off not in _OFFSETS):
         raise LimitesInvalidos(f"{donde}offset: debe ser null o uno de {list(_OFFSETS)}")
+    if off is not None:
+        if moneda not in OFFSETS_OFICIALES:
+            raise LimitesInvalidos(f"{donde}offset: moneda sin offset oficial conocido (P-21)")
+        if off != OFFSETS_OFICIALES[moneda]:
+            raise LimitesInvalidos(f"{donde}offset: {moneda} usa {OFFSETS_OFICIALES[moneda]}, no {off}")
     zona = d["zona_horaria"]
     try:
         if type(zona) is not str or not zona:
@@ -113,7 +136,7 @@ def cargar_limites(ruta: Path, *, exigir_0600: bool = True) -> Limites:
     try:
         if exigir_0600 and ruta.stat().st_mode & 0o077:
             raise LimitesInvalidos(f"permisos: {ruta} debe ser 0600 (sin acceso de grupo ni otros)")
-        crudo = yaml.safe_load(ruta.read_text(encoding="utf-8"))
+        crudo = yaml.load(ruta.read_text(encoding="utf-8"), Loader=_CargadorEstricto)
     except (OSError, yaml.YAMLError, UnicodeDecodeError) as e:
         raise LimitesInvalidos(f"archivo: no se puede leer {ruta}: {e}") from e
     if not isinstance(crudo, dict):

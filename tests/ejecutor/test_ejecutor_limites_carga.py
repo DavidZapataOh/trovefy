@@ -30,7 +30,9 @@ def test_plantilla_carga_y_offset_nulo_bloquea(tmp_path):
     lim = cargar_limites(escribir(tmp_path, base()))
     lc = lim.cuentas[C]
     assert lc.moneda_codigo == "COP" and lc.zona_horaria == "America/Bogota"
-    assert lc.spend_cap_test_prorroga == 181500 and lc.paginas_permitidas == frozenset()
+    assert (lc.tope_gasto_diario_total, lc.max_presupuesto_conjunto, lc.max_presupuesto_campana_cbo,
+            lc.spend_cap_test, lc.spend_cap_test_prorroga) == (165000, 99000, 132000, 99000, 181500)
+    assert lc.paginas_permitidas == frozenset()
     with pytest.raises(MonedaNoConfigurada):
         lc.moneda()
 
@@ -123,3 +125,30 @@ def test_permisos_abiertos(tmp_path):
     with pytest.raises(LimitesInvalidos, match="0600"):
         cargar_limites(escribir(tmp_path, base(), 0o644))
     assert cargar_limites(escribir(tmp_path, base(), 0o644), exigir_0600=False)
+
+
+@pytest.mark.parametrize("moneda,offset,ok", [("USD", 1, False), ("COP", 100, False), ("EUR", 100, False),
+                                              ("COP", 1, True), ("USD", 100, True), ("COP", None, True),
+                                              ("EUR", None, True)])
+def test_offset_coherente_con_moneda(tmp_path, moneda, offset, ok):
+    d = base()
+    d["cuentas"][C]["moneda"] = moneda
+    d["cuentas"][C]["offset"] = offset
+    f = escribir(tmp_path, d)
+    if ok:
+        assert cargar_limites(f)
+    else:
+        with pytest.raises(LimitesInvalidos, match="offset"):
+            cargar_limites(f)
+
+
+def test_claves_repetidas(tmp_path):
+    f = tmp_path / "limites.yaml"
+    texto = PLANTILLA.read_text()
+    os.chmod(tmp_path, 0o700)
+    for malo, clave in [(texto.replace("    spend_cap_test: 99000", "    tope_gasto_diario_total: 1\n    spend_cap_test: 99000"),
+                         "tope_gasto_diario_total"), (texto + "paso_max_pct: 10\n", "paso_max_pct")]:
+        f.write_text(malo)
+        os.chmod(f, 0o600)
+        with pytest.raises(LimitesInvalidos, match=clave):
+            cargar_limites(f)

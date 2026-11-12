@@ -25,3 +25,8 @@ def test_moneda_invalida(c, o):
 
 def test_es_importe():
     assert es_importe(1) and not es_importe(0) and not es_importe(True) and not es_importe(1.0) and not es_importe("5")
+
+
+def test_offsets_oficiales():
+    from trovefy_ejecutor.dinero import OFFSETS_OFICIALES
+    assert dict(OFFSETS_OFICIALES) == {"COP": 1, "USD": 100}

@@ -2,9 +2,14 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 _OFFSETS = {1, 10, 100, 1000}
+
+# Offset oficial de Meta por moneda (resolución 1). Fuente:
+# https://developers.facebook.com/documentation/ads-commerce/marketing-api/currencies (leído 2026-11-12)
+OFFSETS_OFICIALES: Mapping[str, int] = {"COP": 1, "USD": 100}
 
 
 class MonedaNoConfigurada(Exception):
