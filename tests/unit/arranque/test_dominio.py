@@ -1,3 +1,5 @@
+import pathlib
+
 from trovefy.arranque.estado import marcar_hecho
 from trovefy.arranque.verificadores.base import Confirmacion
 from trovefy.arranque.verificadores.dominio import (
@@ -176,3 +178,45 @@ def test_confirmar_08_solo_con_dominio_verificado(tmp_path, capsys):
     assert "08" in yaml.safe_load((tmp_path / "config/confirmaciones.yaml").read_text())
     r = verificar_verificacion_meta(tmp_path, capturar=falso("kits-docentes.com Verificado"), consultar=dns)
     assert r.ok is True
+
+
+# --- Fallo real del 2026-11-12: con varios portfolios, owned-domains lleva a «Seleccionar negocio» ---
+
+SELECT = "https://business.facebook.com/select/"
+SELECT_TXT = (pathlib.Path(__file__).resolve().parents[2] / "fixtures/arranque/seleccionar_negocio.txt").read_text()
+DOMINIOS_BID = "https://business.facebook.com/latest/settings/domains?business_id=778461336017450"
+
+
+def test_08_reutiliza_el_business_id_del_04(tmp_path):
+    paso(tmp_path)
+    marcar_hecho(tmp_path, "04", datos={"business_id": "778461336017450"})
+    cap = falso(url_final=DOMINIOS_BID)
+    r = verificar_verificacion_meta(tmp_path, capturar=cap, consultar=dns_falso({"TXT": TXT_OK}), confirmacion=CONF)
+    assert cap.llamadas == [("meta", DOMINIOS_BID)]
+    assert r.ok is True
+
+
+def test_08_varios_portfolios_sin_id_pide_guardarlo(tmp_path):
+    paso(tmp_path)
+    for conf in (CONF, SIN_CONF):
+        r = verificar_verificacion_meta(
+            tmp_path, capturar=falso(SELECT_TXT, url_final=SELECT), consultar=dns_falso({"TXT": TXT_OK}), confirmacion=conf
+        )
+        assert r.ok is None and "tienes varios portfolios" in r.motivo
+        assert "trovefy arranque hecho 04 --dato business_id=<id>" in r.motivo and not r.evidencia
+
+
+def test_08_con_id_pero_meta_abre_el_selector(tmp_path):
+    paso(tmp_path)
+    marcar_hecho(tmp_path, "04", datos={"business_id": "778461336017450"})
+    r = verificar_verificacion_meta(
+        tmp_path, capturar=falso(SELECT_TXT, url_final=SELECT), consultar=dns_falso({"TXT": TXT_OK}), confirmacion=CONF
+    )
+    assert r.ok is None and "778461336017450" in r.motivo
+
+
+def test_08_verificacion_de_seguridad_es_no_medido(tmp_path):
+    paso(tmp_path)
+    texto = "kits-docentes.com Verificado\nVerificación necesaria\nVerificar cuenta"
+    r = verificar_verificacion_meta(tmp_path, capturar=falso(texto), consultar=dns_falso({"TXT": TXT_OK}), confirmacion=CONF)
+    assert r.ok is None and "verificación de seguridad" in r.motivo

@@ -189,7 +189,7 @@ def test_confirmar_06_exige_el_limite(tmp_path, capsys):
     sin = "Currency: USD\nTime zone: Europe/Bucharest\nAccount spending limit\nSet limit\n"
     verificar_cuenta(v, capturar=falso(sin))
     assert main(["arranque", "confirmar", "06", "--respuesta", "si", "--vault", str(v)]) == 2
-    assert "pon primero el límite de gasto (paso 5 de la guía) y vuelve a capturar" in capsys.readouterr().err
+    assert "pon primero el límite de gasto (paso 6 de la guía) y vuelve a capturar" in capsys.readouterr().err
     assert _confirmaciones(v) is None
 
 

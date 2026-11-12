@@ -28,8 +28,25 @@ from trovefy.arranque.verificadores.base import (
 from trovefy.vault.rutas import vault_root
 
 URL_BUSINESS = "https://business.facebook.com/settings/"
+# Con un business_id guardado se abre su portfolio directamente: con varios portfolios, /settings/ lleva a
+# «Seleccionar negocio» (https://business.facebook.com/select/, captura real del 2026-11-11).
+URL_BUSINESS_INFO = "https://business.facebook.com/latest/settings/business_info?business_id={bid}"
 COMANDO_ABRIR = "trovefy navegador abrir meta https://business.facebook.com/"
+COMANDO_GUARDAR_ID = "trovefy arranque hecho 04 --dato business_id=<id>"
 SIN_SESION = f"no medido: inicia sesión en el navegador de Trovefy (`{COMANDO_ABRIR}`)"
+VARIOS_PORTFOLIOS = f"no medido: tienes varios portfolios: guarda cuál usas con `{COMANDO_GUARDAR_ID}`"
+ARREGLO_VARIOS = (
+    f"abre tu portfolio con `{COMANDO_ABRIR}`, elígelo en «Seleccionar negocio» y copia el número de `business_id=` "
+    "de la dirección; luego guárdalo con ese comando"
+)
+VERIFICACION_SEGURIDAD = (
+    "no medido: Meta pide una verificación de seguridad en el navegador de Trovefy; hazla tú y vuelve a verificar"
+)
+ARREGLO_SEGURIDAD = f"ábrelo con `{COMANDO_ABRIR}`, completa tú la verificación que pide Meta y cierra la ventana"
+
+# Intersticial de seguridad de Meta (captura real del 2026-11-11, en la facturación: «Verificación necesaria …
+# Verificar cuenta»). Basta el título: «Verificar» suelto aparece en pantallas normales (dominios, etc.).
+_INTERSTICIAL = re.compile(r"^\s*(?:Verificación necesaria|Verification (?:required|needed))\s*$", re.MULTILINE | re.IGNORECASE)
 
 # Hasta que el usuario haga el paso y se capture su pantalla real, ninguno de los dos certifica.
 CONFIRMACION_04 = Confirmacion(fecha=None, fuente="encargo del plan 05: `business_id=` en la URL de business.facebook.com/settings/")
@@ -49,6 +66,36 @@ def extraer_business_id(url: str) -> str | None:
         if re.fullmatch(r"\d+", valor):
             return valor
     return None
+
+
+def es_selector_de_negocio(url: str) -> bool:
+    """La URL final es «Seleccionar negocio» (business.facebook.com/select/): hay varios portfolios."""
+    partes = urlparse(url)
+    return (partes.hostname or "").lower() == "business.facebook.com" and partes.path.rstrip("/") == "/select"
+
+
+def pide_verificacion_seguridad(texto: str | None) -> bool:
+    return bool(texto) and bool(_INTERSTICIAL.search(texto))
+
+
+def business_id_guardado(vault: Path) -> str | None:
+    """El business_id del paso 04 (guardado con `--dato business_id=` o por una verificación anterior)."""
+    p = next((p for p in cargar(vault) if p.id == "04"), None)
+    valor = (p.datos.get("business_id") or "").strip() if p else ""
+    return valor if re.fullmatch(r"\d+", valor) else None
+
+
+def varios_portfolios() -> ResultadoVerificacion:
+    return ResultadoVerificacion(None, [], VARIOS_PORTFOLIOS, [ARREGLO_VARIOS], {}, [f"? {VARIOS_PORTFOLIOS}"])
+
+
+def selector_con_id(bid: str) -> ResultadoVerificacion:
+    m = f"no medido: Meta abrió «Seleccionar negocio» en vez del portfolio {bid}"
+    return ResultadoVerificacion(
+        None, [], m,
+        [f"comprueba que {bid} es el `business_id=` de tu portfolio (sale en la dirección al abrirlo) o guarda el correcto con `{COMANDO_GUARDAR_ID}`"],
+        {}, [f"? {m}"],
+    )
 
 
 def extraer_page_id(html: str) -> str | None:
@@ -86,12 +133,15 @@ def leer_pagina(url: str, capturar: Callable, servicio: str = "meta") -> tuple[o
             return None, None, f"no medido: {exc}"
         if sesion_caducada(cap.url_final):
             return None, None, sin_sesion(servicio)
+        if servicio == "meta" and pide_verificacion_seguridad(getattr(cap, "texto", None)):
+            return None, None, VERIFICACION_SEGURIDAD
         png = destino.read_bytes() if destino.is_file() else None
     return cap, png, None
 
 
 def no_medido(motivo: str) -> ResultadoVerificacion:
-    return ResultadoVerificacion(None, [], motivo, [], {}, [f"? {motivo}"])
+    arreglos = [ARREGLO_SEGURIDAD] if motivo == VERIFICACION_SEGURIDAD else []
+    return ResultadoVerificacion(None, [], motivo, arreglos, {}, [f"? {motivo}"])
 
 
 def _evidencia(vault: Path, id_: str, png: bytes | None, resumen: dict) -> list[str]:
@@ -104,12 +154,22 @@ def verificar_business(
 ) -> ResultadoVerificacion:
     vault = vault_root() if vault is None else Path(vault)
     confirmacion = confirmacion_de(vault, "04", confirmacion)
-    cap, png, motivo = leer_pagina(URL_BUSINESS, capturar or capturar_por_defecto)
+    guardado = business_id_guardado(vault)
+    url = URL_BUSINESS_INFO.format(bid=guardado) if guardado else URL_BUSINESS
+    cap, png, motivo = leer_pagina(url, capturar or capturar_por_defecto)
     if cap is None:
         return no_medido(motivo)
+    if es_selector_de_negocio(cap.url_final):
+        return selector_con_id(guardado) if guardado else varios_portfolios()
     if not confirmacion.confirmada:
         return resultado_provisional(vault, "04", cap, png, texto=texto_04(cap.url_final), motivo=confirmacion.aviso)
     bid = extraer_business_id(cap.url_final)
+    if guardado and bid and bid != guardado:
+        m = f"Meta abrió el portfolio {bid}, no el guardado ({guardado})"
+        return ResultadoVerificacion(
+            False, [], m, [f"comprueba que tu perfil tiene acceso al portfolio {guardado} o guarda el correcto con `{COMANDO_GUARDAR_ID}`"],
+            {}, [f"✗ {m}"],
+        )
     if bid is None:
         m = "la página de ajustes de Business no muestra un portfolio con ID"
         return ResultadoVerificacion(
@@ -122,7 +182,7 @@ def verificar_business(
             ],
             {}, [f"✗ {m}"],
         )
-    ev = _evidencia(vault, "04", png, {"url": URL_BUSINESS, "business_id": bid})
+    ev = _evidencia(vault, "04", png, {"url": sin_query(url), "business_id": bid})
     return ResultadoVerificacion(True, ev, f"portfolio comercial con ID {bid}", [], {"business_id": bid}, [f"✓ business_id {bid}"])
 
 
