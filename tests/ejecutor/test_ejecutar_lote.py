@@ -4,6 +4,7 @@ Almacén y auditoría reales en ``tmp_path`` (fixture ``entorno``). Nunca Graph 
 """
 from __future__ import annotations
 
+import dataclasses
 import json
 
 import pytest
@@ -18,7 +19,7 @@ from trovefy_ejecutor.ejecutar import (
 )
 from trovefy_ejecutor.esquema import REGLAS, cargar_propuesta
 from trovefy_ejecutor.graph import ErrorGraph
-from trovefy_ejecutor.modelo import TIPOS
+from trovefy_ejecutor.modelo import TIPOS, Operacion
 
 OPS = [{"entidad": "adset", "id": "s1", "campo": "daily_budget", "de_esperado": 20000, "a": 15000,
         "unidad": "minima", "moneda": "COP"},
@@ -308,3 +309,104 @@ def test_tipos_soportados():
                                           "lote", "noop", "alerta", "limite_ejecutor"})
     assert TIPOS_SOPORTADOS <= TIPOS
     assert not TIPOS_SOPORTADOS & {"agenda", "regla_meta", "crear_estructura_pausada"}
+
+
+# -- fix round 1 ---------------------------------------------------------------------------
+PAUSAR_S1 = {"entidad": "adset", "id": "s1", "campo": "status", "de_esperado": "ACTIVE", "a": "PAUSED"}
+
+
+@pytest.mark.parametrize("ops", [[PAUSAR_S1, OPS[0]], [OPS[0], PAUSAR_S1]], ids=["pausa_primero", "pausa_despues"])
+def test_lote_pausa_y_presupuesto_misma_entidad(entorno, ops):
+    g, alm, aud = entorno
+    r = ejecutar(propuesta(tipo="lote", ops=ops), g, alm, aud)
+    assert r.estado == "ejecutada" and r.nueva_propuesta is None
+    assert not any(o.pausada_sin_pedir for o in r.operaciones)
+    assert g.objetos["s1"]["status"] == "PAUSED" and g.objetos["s1"]["daily_budget"] == "15000"
+
+
+def test_lote_forced_to_paused_sigue_detectandose(entorno):
+    g, alm, aud = entorno
+    g.forzar_pausa.add("s2")
+    r = ejecutar(propuesta(tipo="lote", ops=[PAUSAR_A1, OPS[1]]), g, alm, aud)
+    assert [o.estado for o in r.operaciones] == ["ejecutada", "discrepancia"]
+    assert r.operaciones[1].pausada_sin_pedir
+
+
+def test_limite_meta_detiene_el_lote(entorno):
+    g, alm, aud = entorno
+    g.errores["s1"] = ErrorGraph(17, 2446079, "limit")
+    r = ejecutar(propuesta(tipo="lote", ops=OPS + [PAUSAR_A1]), g, alm, aud)
+    assert [o.estado for o in r.operaciones] == ["fallida", "no_intentada", "no_intentada"]
+    assert r.operaciones[1].detalle == "no se intentó: Meta pide frenar"
+    assert _posts_a(g, "s2") == [] and _posts_a(g, "a1") == []
+    assert (r.error, r.parcial) == ("limite_meta", False) and r.reintentable_desde is not None
+
+
+def test_limite_meta_tras_una_aplicada_no_es_reintentable(entorno):
+    g, alm, aud = entorno
+    g.errores["s2"] = ErrorGraph(17, 2446079, "limit")
+    r = ejecutar(propuesta(tipo="lote", ops=OPS + [PAUSAR_A1]), g, alm, aud)
+    assert [o.estado for o in r.operaciones] == ["ejecutada", "fallida", "no_intentada"]
+    assert (r.estado, r.error, r.parcial) == ("fallida", "limite_meta", True) and r.reintentable_desde is None
+    assert _posts_a(g, "a1") == []
+
+
+def test_lote_discrepancia_conserva_el_error_del_fallo(entorno):
+    g, alm, aud = entorno
+    g.redondeo["s1"] = 15100
+    g.errores["s2"] = ErrorGraph(200, None, "Permissions error")
+    r = ejecutar(propuesta(tipo="lote", ops=OPS), g, alm, aud)
+    assert (r.estado, r.error) == ("discrepancia", "permiso")
+
+
+def _audit_rota(aud):
+    aud.anotar("stop", activo=False)
+    aud.cabeza.unlink()
+
+
+def test_noop_sin_auditoria_falla(entorno):
+    g, alm, aud = entorno
+    _audit_rota(aud)
+    r = ejecutar(_noop(), g, alm, aud)
+    assert (r.estado, r.error) == ("fallida", "otro") and g.llamadas == []
+
+
+def test_alerta_sin_auditoria_sigue_ejecutada(entorno):
+    g, alm, aud = entorno
+    _audit_rota(aud)
+    assert ejecutar(cargar_propuesta(alerta_dict()), g, alm, aud).estado == "ejecutada"
+
+
+def _limite_a_mano(**op):
+    base = {"entidad": "ejecutor", "id": CUENTA, "campo": "tope_gasto_diario_total", "de_esperado": 200000,
+            "a": 240000, "unidad": "minima", "moneda": "COP"}
+    base.update(op)
+    return dataclasses.replace(propuesta(tipo="limite_ejecutor"), operaciones=(Operacion(**base),))
+
+
+@pytest.mark.parametrize("op", [
+    {"id": "s1"},
+    {"id": "act_"},
+    {"id": "act_12x"},
+    {"id": "act_1/../x"},
+    {"unidad": None, "moneda": None},
+    {"unidad": "centavos"},
+    {"moneda": None},
+    {"unidad": None},
+    {"id": "global", "campo": "paso_max_pct", "de_esperado": 20, "a": 25},  # global con moneda/unidad
+    {"id": "global", "campo": "paso_max_pct", "de_esperado": 20, "a": 25, "moneda": None},
+    {"campo": "clave_inventada", "unidad": None, "moneda": None},
+])
+def test_limite_ejecutor_segunda_barrera(entorno, op):
+    g, alm, aud = entorno
+    r = ejecutar(_limite_a_mano(**op), g, alm, aud)
+    assert r.estado == "fallida" and r.cambio_limite is None and g.llamadas == []
+
+
+def test_limite_ejecutor_a_mano_valido(entorno):
+    g, alm, aud = entorno
+    r = ejecutar(_limite_a_mano(), g, alm, aud)
+    assert r.estado == "ejecutada" and r.cambio_limite["moneda"] == "COP"
+    r = ejecutar(_limite_a_mano(id="global", campo="paso_max_pct", de_esperado=20, a=25, unidad=None,
+                                moneda=None), g, alm, aud)
+    assert r.estado == "ejecutada" and r.cambio_limite == {"clave": "paso_max_pct", "id": "global", "de": 20, "a": 25}

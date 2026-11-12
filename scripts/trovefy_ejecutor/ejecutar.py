@@ -14,14 +14,20 @@ y después. Solo reacciona a ``DetenidoPorStop`` del cliente (resolución 11).
 """
 from __future__ import annotations
 
-from collections.abc import Callable
+import re
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 from zoneinfo import ZoneInfo
 
 from trovefy_ejecutor.auditoria import EV_EJECUCION, Auditoria, redactar
-from trovefy_ejecutor.esquema import PropuestaInvalida, cargar_propuesta
+from trovefy_ejecutor.esquema import (
+    CLAVES_LIMITE_CUENTA,
+    CLAVES_LIMITE_GLOBALES,
+    PropuestaInvalida,
+    cargar_propuesta,
+)
 from trovefy_ejecutor.estado import Almacen
 from trovefy_ejecutor.graph import DetenidoPorStop, ErrorGraph, ErrorRed, clasificar
 from trovefy_ejecutor.modelo import Operacion, Propuesta
@@ -50,7 +56,9 @@ CAMPOS_POR_TIPO: dict[str, set[tuple[str, str]]] = {
 CAMPOS_POR_TIPO["lote"] = CAMPOS_POR_TIPO["presupuesto"] | CAMPOS_POR_TIPO["pausar"]
 _STATUS_POR_TIPO = {"pausar": "PAUSED", "activar": "ACTIVE", "lote": "PAUSED"}
 # Errores de una operación que detienen el resto del lote (las demás quedan no_intentada, sin llamar).
-_DETIENEN_LOTE = frozenset({"token", "stop"})
+_DETIENEN_LOTE = frozenset({"token", "stop", "limite_meta"})
+_NOTA_DETENIDO = {"stop": "STOP: no se intentó", "token": "no se intentó: token caducado",
+                  "limite_meta": "no se intentó: Meta pide frenar"}
 TIPOS_SOPORTADOS: frozenset[str] = frozenset({
     "presupuesto", "pausar", "activar", "puja", "spend_cap", "limite_cuenta", "lote", "noop", "alerta",
     "limite_ejecutor"})
@@ -187,9 +195,12 @@ def _releer(graph, op: Operacion) -> dict:
 
 
 def _ejecutar_op(op: Operacion, p: Propuesta, vv: ValoresVivos, graph, almacen: Almacen, auditoria: Auditoria,
-                 ahora: Callable[[], datetime]) -> ResultadoOp:
+                 ahora: Callable[[], datetime], status_confirmados: Mapping[str, str] | None = None) -> ResultadoOp:
     """Valida, escribe una sola vez y relee. Nunca reenvía una escritura real ni deja escapar errores
-    de Graph: el resultado lo dice ``ResultadoOp.estado``. ``no_intentada`` = STOP (quien llama para)."""
+    de Graph: el resultado lo dice ``ResultadoOp.estado``. ``no_intentada`` = STOP (quien llama para).
+
+    ``status_confirmados``: status que operaciones anteriores del mismo lote dejaron confirmados
+    (relectura); mandan sobre la foto previa al decidir si Meta pausó la entidad sin pedirlo."""
     antes = vv.valor(op)
     desc = f"{_desc(op)}: antes {antes}, pedido {op.a}"
 
@@ -242,7 +253,7 @@ def _ejecutar_op(op: Operacion, p: Propuesta, vv: ValoresVivos, graph, almacen: 
         _cadencia(almacen, op, ahora)
         return r("discrepancia", "estado desconocido: la relectura no trae status")
     despues = _normal(op.campo, crudo.get(op.campo))
-    status_antes = vv.status(op.id)
+    status_antes = (status_confirmados or {}).get(op.id, vv.status(op.id))
     status_despues = crudo.get("status")
     pausada = (op.entidad in _ESTADOS and op.campo != "status" and status_antes == "ACTIVE"
                and status_despues == "PAUSED")
@@ -330,7 +341,9 @@ def _sin_meta(p: Propuesta, auditoria: Auditoria, detalle: str) -> Resultado:
     """``noop``/``alerta``: nada que hacer en Meta; un único ``ejecucion`` final."""
     if p.operaciones:
         return _rechazo(p, auditoria, f"{p.tipo} no lleva operaciones")
-    _anotar(auditoria, p, False, True, detalle)
+    if not _anotar(auditoria, p, False, True, detalle) and p.tipo == "noop":
+        # noop prueba el circuito entero, auditoría incluida: si no se pudo anotar, el circuito falla.
+        return Resultado("fallida", "auditoría no disponible: el circuito no está bien", error="otro")
     return Resultado("ejecutada", detalle)
 
 
@@ -342,15 +355,20 @@ def _limite_ejecutor(p: Propuesta, auditoria: Auditoria) -> Resultado:
     if len(p.operaciones) != 1:
         return _rechazo(p, auditoria, "limite_ejecutor lleva exactamente una operación")
     op = p.operaciones[0]
-    if op.entidad != "ejecutor" or not isinstance(op.campo, str) or op.campo == "offset":
+    if op.entidad != "ejecutor" or not isinstance(op.id, str) or not (
+            op.id == "global" or re.fullmatch(r"act_[0-9]+", op.id)):
+        return _rechazo(p, auditoria, f"{_desc(op)}: el id debe ser global o una cuenta act_…")
+    if op.campo not in CLAVES_LIMITE_CUENTA and op.campo not in CLAVES_LIMITE_GLOBALES:
         return _rechazo(p, auditoria, f"{_desc(op)}: no es una clave de límite del ejecutor")
     if not (_es_importe_valido(op.de_esperado) and _es_importe_valido(op.a)):
         return _rechazo(p, auditoria, f"{_desc(op)}: de_esperado y a deben ser enteros > 0")
     cambio: dict = {"clave": op.campo, "id": op.id, "de": op.de_esperado, "a": op.a}
-    if op.moneda is not None or op.unidad is not None:
-        if op.unidad != "minima" or op.moneda is None:
-            return _rechazo(p, auditoria, f"{_desc(op)}: unidad debe ser \"minima\" con moneda")
+    if op.campo in CLAVES_LIMITE_CUENTA:
+        if op.unidad != "minima" or not isinstance(op.moneda, str) or not re.fullmatch(r"[A-Z]{3}", op.moneda):
+            return _rechazo(p, auditoria, f"{_desc(op)}: importe con unidad \"minima\" y moneda de 3 letras")
         cambio.update(moneda=op.moneda, unidad=op.unidad)
+    elif op.unidad is not None or op.moneda is not None:
+        return _rechazo(p, auditoria, f"{_desc(op)}: una clave global no lleva unidad ni moneda")
     detalle = f"límite {op.id} {op.campo}: {op.de_esperado} → {op.a}; nada cambió en Meta"
     if not _anotar(auditoria, p, False, True, detalle):
         return Resultado("fallida", "auditoría no disponible: no se cambia el límite",
@@ -409,17 +427,18 @@ def ejecutar(p: Propuesta, graph, almacen: Almacen, auditoria: Auditoria, *,
         return _rechazo(p, auditoria, f"cambió desde que se envió: {motivo}", estado="obsoleta", error=None, vv=vv)
 
     resultados: list[ResultadoOp] = []
+    confirmados: dict[str, str] = {}  # status confirmados por ops anteriores del lote
     for i, op in enumerate(p.operaciones):
-        ro = _ejecutar_op(op, p, vv, graph, almacen, auditoria, ahora)
+        ro = _ejecutar_op(op, p, vv, graph, almacen, auditoria, ahora, confirmados)
         resultados.append(ro)
         if p.tipo == "lote":
-            # Lote: op por op; una fallida o en discrepancia no se reintenta y el lote sigue. Solo token
-            # y STOP detienen: las restantes quedan no_intentada sin llamar.
+            # Lote: op por op; una fallida o en discrepancia no se reintenta y el lote sigue. Solo token,
+            # STOP y limite_meta detienen: las restantes quedan no_intentada sin llamar.
+            if ro.estado == "ejecutada" and op.campo == "status" and isinstance(ro.despues, str):
+                confirmados[op.id] = ro.despues
             if ro.estado == "no_intentada" or ro.error in _DETIENEN_LOTE:
-                resto = p.operaciones[i + 1:]
-                nota = ("STOP: no se intentó" if ro.estado == "no_intentada" or ro.error == "stop"
-                        else "no se intentó: token caducado")
-                resultados.extend(_no_intentadas(resto, vv, nota))
+                motivo_corte = "stop" if ro.estado == "no_intentada" else ro.error
+                resultados.extend(_no_intentadas(p.operaciones[i + 1:], vv, _NOTA_DETENIDO[motivo_corte]))
                 break
             continue
         if ro.estado != "ejecutada":
@@ -448,11 +467,13 @@ def _cerrar(p: Propuesta, ops: list[ResultadoOp], vv: ValoresVivos, almacen: Alm
         estado = "ejecutada"
     if p.tipo == "lote":
         # (extra) en un lote la discrepancia no detiene: el error conserva STOP/token aunque el estado sea
-        # discrepancia, y token manda sobre el primer error si el lote se cortó por él.
+        # discrepancia, token manda sobre el primer error, y si no, el primer error de una op fallida.
         if stop:
             error = "stop"
         elif any(o.error == "token" for o in ops):
             error = "token"
+        elif "fallida" in estados:
+            error = next(o.error for o in ops if o.estado == "fallida") or "otro"
     partes = [o.detalle for o in ops if o.estado != "no_intentada"] or [ops[0].detalle]
     if p.tipo == "lote":
         aplicadas = estados.count("ejecutada")
@@ -470,7 +491,8 @@ def _cerrar(p: Propuesta, ops: list[ResultadoOp], vv: ValoresVivos, almacen: Alm
             aviso = f"no se pudo preparar la propuesta de reactivar ({_texto_error(e)}): crea la propuesta a mano"
         if aviso:
             detalle = f"{detalle} | {aviso}"
-    desde = ahora() + _ESPERA_LIMITE_META if error == "limite_meta" else None
+    # Reintentable solo si no se aplicó nada: con algo aplicado, repetir la propuesta no es seguro.
+    desde = ahora() + _ESPERA_LIMITE_META if error == "limite_meta" and "ejecutada" not in estados else None
     resultado = Resultado(estado, detalle, tuple(ops), parcial=parcial, nueva_propuesta=nueva, error=error,
                           reintentable_desde=desde)
     _anotar(auditoria, p, False, estado == "ejecutada", f"{estado}: {detalle}")
