@@ -195,15 +195,21 @@ def aplicar_verificacion(vault: Path, id_: str, r: ResultadoVerificacion) -> Pas
     return _cambiar(vault, pasos, p, antes, r.motivo)
 
 
+# Decisión del usuario (2026-11-12, «hecho y ya está»): en la fase 0 un paso «hecho» cuenta como completado
+# igual que uno «verificado»; los verificadores con navegador solo se lanzan si el usuario lo pide.
+_COMPLETOS_FASE0 = ("verificado", "hecho")
+
+
 def _cobro_verificado(pasos: list[Paso]) -> bool:
-    return any(p.id in _COBRO and p.estado == "verificado" for p in pasos)
+    return any(p.id in _COBRO and p.estado in _COMPLETOS_FASE0 for p in pasos)
 
 
 def porcentaje_fase(pasos: list[Paso], fase: int = 0) -> float:
-    """Fracción (0–1) de pasos verificados; en la fase 0 el cobro cuenta como uno (denominador 12)."""
+    """Fracción (0–1) de pasos completados; en la fase 0 cuentan «verificado» y «hecho» (decisión del usuario) y
+    el cobro cuenta como uno (denominador 12). En las demás fases solo cuenta «verificado»."""
     if fase == 0:
         por_id = {p.id: p for p in pasos}
-        hechos = sum(1 for i in _BASE_FASE0 + ["16"] if i in por_id and por_id[i].estado == "verificado")
+        hechos = sum(1 for i in _BASE_FASE0 + ["16"] if i in por_id and por_id[i].estado in _COMPLETOS_FASE0)
         hechos += 1 if _cobro_verificado(pasos) else 0
         return hechos / (len(_BASE_FASE0) + 2)
     de_fase = [p for p in pasos if p.fase == fase]

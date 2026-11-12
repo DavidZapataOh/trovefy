@@ -102,7 +102,7 @@ def test_cli(tmp_path, capsys):
     capsys.readouterr()
     assert main(["arranque", "estado", "--vault", v]) == 0
     out = capsys.readouterr().out
-    assert "Fase 0: 0/12 verificados (0 %)" in out and "bloqueado" in out
+    assert "Fase 0: 1/12 completados, hechos o verificados (8 %)" in out and "bloqueado" in out
     assert main(["arranque", "siguiente", "--vault", v]) == 0
     assert "Siguiente: 02" in capsys.readouterr().out  # 00 hecho y 01 bloqueado se saltan
     assert main(["arranque", "hecho", "99", "--vault", v]) == 2
@@ -193,7 +193,8 @@ def test_verificado_a_mano_sin_evidencia_cuenta_como_hecho(tmp_path):
     ruta.write_text(yaml.safe_dump(d, allow_unicode=True))
     por = {p.id: p for p in cargar(tmp_path)}
     assert por["00"].estado == "hecho" and por["01"].estado == "verificado"
-    assert porcentaje_fase(list(por.values())) == pytest.approx(1 / 12)
+    # «hecho» cuenta en la fase 0 (decisión del usuario, 2026-11-12)
+    assert porcentaje_fase(list(por.values())) == pytest.approx(2 / 12)
 
 
 def test_estado_cli_muestra_la_nota_truncada(tmp_path, capsys):
@@ -249,3 +250,14 @@ def test_siguiente_ofrece_hotmart_solo_con_whop_bloqueado(tmp_path):
     assert siguiente(cargar(tmp_path)).id == "10"
     marcar_bloqueado(tmp_path, "10", "Whop no paga a Colombia")
     assert siguiente(cargar(tmp_path)).id == "10b"
+
+
+def test_hecho_cuenta_como_verificado_en_la_fase_0(tmp_path):
+    # Decisión del usuario (2026-11-12): «hecho y ya está»; la salida de la fase 0 cuenta hecho y verificado.
+    for i in ["00", "01", "02"]:
+        aplicar_verificacion(tmp_path, i, _ok())
+    for i in ["03", "04", "10"]:
+        marcar_hecho(tmp_path, i)
+    assert porcentaje_fase(cargar(tmp_path)) == pytest.approx(6 / 12)
+    marcar_bloqueado(tmp_path, "05", "Meta restringió la página")
+    assert porcentaje_fase(cargar(tmp_path)) == pytest.approx(6 / 12)
