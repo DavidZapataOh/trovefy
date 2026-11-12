@@ -202,3 +202,160 @@ def test_rotulo_del_limite_sin_cantidad_es_sin_limite_y_sin_rotulo_es_none():
     assert leer_ajustes_cuenta(base)["limite_gasto"] is None
     r = evaluar_cuenta({**BIEN, "limite_gasto": None}, "Europe/Bucharest", 250)
     assert r.ok is None and "límite" in r.motivo
+
+
+# --- Fallos reales del 2026-11-11: cuenta en COP (decisión del usuario), facturación sin zona, intersticial ---
+
+FACT = (RAIZ / "tests/fixtures/arranque/facturacion_cop.txt").read_text()
+ZONA_BOG = "Zona horaria\n(GMT-05:00) America/Bogota\n"
+LIMITE_COP = "Límite de gasto de la cuenta\n\u200b\nCOP$ 1.000.000\n"
+COP = {"moneda": "COP", "zona": "America/Bogota", "limite_gasto": "1000000"}
+
+
+def test_lee_la_facturacion_real_en_cop():
+    assert leer_ajustes_cuenta(FACT) == {"moneda": "COP", "zona": None, "limite_gasto": "sin_limite"}
+
+
+@pytest.mark.parametrize(
+    "texto,moneda",
+    [
+        ("Divisa\nPeso colombiano COP\n", "COP"),
+        ("Divisa\n\u200b\nDólar estadounidense USD\n", "USD"),
+        ("Currency\nUS Dollar (USD)\n", "USD"),
+        ("Moneda: Peso colombiano (COP)\n", "COP"),
+        ("Currency and time zone\nUSD · (GMT+02:00) Europe/Bucharest\n", "USD"),
+        ("Divisa\nEditar\n", None),
+    ],
+)
+def test_moneda_con_rotulo_en_su_linea(texto, moneda):
+    assert leer_ajustes_cuenta(texto)["moneda"] == moneda
+
+
+@pytest.mark.parametrize(
+    "texto,zona",
+    [
+        ("Zona horaria\n(GMT-05:00) America/Bogota\n", "America/Bogota"),
+        ("Time zone\nAmerica/Bogota\n", "America/Bogota"),
+        ("Zona horaria de la cuenta publicitaria\n(GMT-05:00) Bogotá\n", "GMT-05:00"),
+        ("Currency and time zone\nUSD · (GMT+02:00) Europe/Bucharest\n", "Europe/Bucharest"),
+        ("Zona horaria\nEditar\n", None),
+    ],
+)
+def test_zona_con_rotulo_en_su_linea(texto, zona):
+    assert leer_ajustes_cuenta(texto)["zona"] == zona
+
+
+def test_limite_en_cop_con_rotulo_en_su_linea():
+    assert leer_ajustes_cuenta("Divisa\nPeso colombiano COP\n" + LIMITE_COP)["limite_gasto"] == "1000000"
+    assert leer_ajustes_cuenta("Límite de gasto de la cuenta: COP$ 200.000")["limite_gasto"] == "200000"
+    # el límite diario que pone Meta no es el límite de gasto de la cuenta
+    assert leer_ajustes_cuenta("Límite de gasto diario (establecido por Meta): COP$ 164.150")["limite_gasto"] is None
+
+
+def test_cop_sin_decision_falla_y_ofrece_guardar_la_decision():
+    r = evaluar_cuenta(COP, "Europe/Sofia", 250)
+    assert r.ok is False and "COP" in r.motivo and "USD" in r.motivo
+    assert any("--dato moneda=COP" in a for a in r.arreglos)
+
+
+def test_cop_con_decision_del_usuario_pasa_y_lo_dice():
+    r = evaluar_cuenta(COP, "Europe/Sofia", 250, moneda_decidida="COP", zona_decidida="America/Bogota")
+    assert r.ok is True
+    texto = "\n".join(r.lineas)
+    assert "decisión del usuario: moneda COP (la guía pide USD)" in texto
+    assert "decisión del usuario: zona America/Bogota (el mercado elegido pide Europe/Sofia)" in texto
+    assert "límite en COP; equivalencia en USD no medida" in texto
+    assert "COP" in r.motivo
+
+
+def test_decision_guardada_distinta_de_la_pantalla_falla():
+    r = evaluar_cuenta({**COP, "moneda": "USD"}, None, 250, moneda_decidida="COP", zona_decidida="America/Bogota")
+    assert r.ok is False and "COP" in r.motivo
+    r = evaluar_cuenta({**COP, "zona": "Europe/Sofia"}, None, 250, moneda_decidida="COP", zona_decidida="America/Bogota")
+    assert r.ok is False and "America/Bogota" in r.motivo
+
+
+def test_zona_decidida_sin_mercado_no_pide_auditar():
+    r = evaluar_cuenta(COP, None, 250, moneda_decidida="COP", zona_decidida="America/Bogota")
+    assert r.ok is True and "aún no hay mercado elegido" in "\n".join(r.lineas)
+
+
+def test_zona_no_visible_es_no_medido():
+    r = evaluar_cuenta({**COP, "zona": None}, None, 250, moneda_decidida="COP", zona_decidida="America/Bogota")
+    assert r.ok is None and "zona horaria" in r.motivo
+
+
+def test_zona_solo_con_desfase_se_compara_con_la_esperada():
+    assert evaluar_cuenta({**COP, "zona": "GMT-05:00"}, None, 250, moneda_decidida="COP", zona_decidida="America/Bogota").ok is True
+    r = evaluar_cuenta({**COP, "zona": "GMT+02:00"}, None, 250, moneda_decidida="COP", zona_decidida="America/Bogota")
+    assert r.ok is False
+
+
+def test_cop_sin_limite_o_limite_cero():
+    r = evaluar_cuenta({**COP, "limite_gasto": "sin_limite"}, None, 250, moneda_decidida="COP", zona_decidida="America/Bogota")
+    assert r.ok is False and any("COP" in a for a in r.arreglos)
+    r = evaluar_cuenta({**COP, "limite_gasto": "0"}, None, 250, moneda_decidida="COP", zona_decidida="America/Bogota")
+    assert r.ok is False and "inválido" in r.motivo
+
+
+def _decision(v, **extra):
+    marcar_hecho(v, "06", datos={"act_id": "1135291526146760", "moneda": "COP", "zona": "America/Bogota", **extra})
+
+
+def test_06_abre_facturacion_y_ajustes_de_la_cuenta(tmp_path):
+    v = _vault(tmp_path)
+    _decision(v)
+    cap = falso(url_final="https://business.facebook.com/latest/billing_hub/accounts/details/", texto=FACT + ZONA_BOG + LIMITE_COP)
+    r = verificar_cuenta(v, capturar=cap, confirmacion=CONF)
+    assert [u for _s, u in cap.llamadas] == [
+        "https://www.facebook.com/ads/manager/account_settings/account_billing/?act=1135291526146760",
+        "https://www.facebook.com/ads/manager/account_settings/information/?act=1135291526146760",
+    ]
+    assert r.ok is True and r.datos == {"act_id": "1135291526146760"}
+    import json
+
+    ajustes = json.loads(next((v / e).read_text() for e in r.evidencia if e.endswith(".json")))
+    assert ajustes["moneda"] == "COP" and ajustes["decision_usuario"] == {"moneda": "COP", "zona": "America/Bogota"}
+
+
+def test_06_facturacion_real_sin_zona_ni_limite(tmp_path):
+    v = _vault(tmp_path)
+    _decision(v)
+    r = verificar_cuenta(v, capturar=falso(texto=FACT), confirmacion=CONF)
+    assert r.ok is None and "zona horaria" in r.motivo
+
+
+def test_06_intersticial_de_seguridad_real_es_no_medido(tmp_path):
+    v = _vault(tmp_path)
+    _decision(v)
+    texto = FACT + "Verificación necesaria\nPara mantener la seguridad de esta cuenta, necesitamos que la verifiques antes de continuar.\nVerificar cuenta\n"
+    for conf in (CONF, CONFIRMACION_06):
+        r = verificar_cuenta(v, capturar=falso(texto=texto), confirmacion=conf)
+        assert r.ok is None and r.motivo.startswith("no medido: Meta pide una verificación de seguridad")
+
+
+def test_06_sin_confirmar_guarda_las_dos_pantallas(tmp_path):
+    from trovefy.arranque.verificadores.base import (
+        leer_texto_provisional,
+        ultimo_texto_provisional,
+    )
+
+    v = _vault(tmp_path)
+    _decision(v)
+    r = verificar_cuenta(v, capturar=falso(texto=FACT + ZONA_BOG + LIMITE_COP))
+    assert r.ok is None
+    textos = leer_texto_provisional(ultimo_texto_provisional(v, "06"))
+    assert set(textos) == {"facturacion", "cuenta"}
+
+
+def test_cli_guarda_la_decision_de_moneda_y_zona(tmp_path):
+    from trovefy.arranque.estado import cargar
+    from trovefy.cli import main
+
+    args = ["arranque", "hecho", "06", "--vault", str(tmp_path)]
+    assert main([*args, "--dato", "moneda=cop", "--dato", "zona=America/Bogota"]) == 0
+    datos = next(p for p in cargar(tmp_path) if p.id == "06").datos
+    assert datos["moneda"] == "COP" and datos["zona"] == "America/Bogota"
+    assert main([*args, "--dato", "moneda=pesos"]) == 2
+    assert main([*args, "--dato", "zona=Bogota"]) == 2
+    assert main([*args, "--dato", "zona=America/Narnia"]) == 2
