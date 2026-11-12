@@ -135,7 +135,7 @@ def test_permisos_600_y_persistencia(tmp_path):
 
 def _limite():
     d = presupuesto(id="P-20261112-006", tipo="limite_ejecutor", operaciones=[
-        {"entidad": "ejecutor", "id": "global", "campo": "max_ops_hora", "de_esperado": 10, "a": 20}])
+        {"entidad": "ejecutor", "id": "global", "campo": "paso_max_pct", "de_esperado": 50, "a": 40}])
     del d["cuenta"]
     return d
 

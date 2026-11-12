@@ -5,7 +5,12 @@ import pytest
 from fabricas import ADSET, CUENTA, alerta, estructura, operacion, pausar, presupuesto
 from trovefy_ejecutor.esquema import cargar_propuesta
 from trovefy_ejecutor.estado import Almacen
-from trovefy_ejecutor.limites import ContextoVivo, comprobar, contexto_para
+from trovefy_ejecutor.limites import (
+    CLAVES_CUENTA,
+    ContextoVivo,
+    comprobar,
+    contexto_para,
+)
 
 AHORA = datetime(2026, 11, 12, 19, 10, tzinfo=UTC)
 OTRO = "120245000000000102"
@@ -27,9 +32,11 @@ def con_pagina(limites):
     return replace(limites, cuentas={CUENTA: replace(lc, paginas_permitidas=frozenset({PAGINA}))})
 
 
-def limite_ejecutor(id_, campo, cuenta=None):
-    d = presupuesto(tipo="limite_ejecutor", operaciones=[
-        {"entidad": "ejecutor", "id": id_, "campo": campo, "de_esperado": None, "a": 40}])
+def limite_ejecutor(id_, campo, cuenta=None, a=40, moneda="COP"):
+    op = {"entidad": "ejecutor", "id": id_, "campo": campo, "de_esperado": 30, "a": a}
+    if campo in CLAVES_CUENTA:  # resolución 22: las claves de dinero llevan unidad y moneda
+        op |= {"unidad": "minima", "moneda": moneda}
+    d = presupuesto(tipo="limite_ejecutor", operaciones=[op])
     if cuenta is None:
         d.pop("cuenta")
     else:
@@ -306,3 +313,26 @@ def test_bajar_presupuesto_fuera_de_activos_pasa_sin_status(limites_cop):
     d = presupuesto(operaciones=[operacion(id=PAUSADO, de_esperado=60000, a=50000)])
     v = comprobar(cargar_propuesta(d), limites_cop, _ctx_pausado(valores={(PAUSADO, "daily_budget"): 60000}))
     assert v == []
+
+
+# --- I2 / M2: limite_ejecutor (resolución 22) --------------------------------------------------
+def test_limite_ejecutor_moneda_de_la_cuenta(limites_cop, limites_cop_sin_offset):
+    v = comprobar(cargar_propuesta(limite_ejecutor(CUENTA, "tope_gasto_diario_total", moneda="USD")),
+                  limites_cop, ctx())
+    assert codigos(v) == ["moneda_distinta"]
+    v = comprobar(cargar_propuesta(limite_ejecutor(CUENTA, "tope_gasto_diario_total")), limites_cop_sin_offset, ctx())
+    assert codigos(v) == ["moneda_no_configurada"]
+    # Una clave entera no lleva moneda: el offset sin confirmar no la bloquea.
+    assert comprobar(cargar_propuesta(limite_ejecutor("global", "paso_max_pct")), limites_cop_sin_offset, ctx()) == []
+
+
+@pytest.mark.parametrize("a,pasa", [(100, True), (101, False)])
+def test_limite_ejecutor_respeta_las_cotas_del_cargador(limites_cop, a, pasa):
+    v = comprobar(cargar_propuesta(limite_ejecutor("global", "paso_max_pct", a=a)), limites_cop, ctx())
+    assert v == [] if pasa else codigos(v) == ["limite_fuera_de_cota"]
+
+
+def test_limite_cuenta_pasa(limites_cop):
+    d = presupuesto(tipo="limite_cuenta", operaciones=[operacion(entidad="account", id=CUENTA, campo="spend_cap",
+                                                                 de_esperado=None, a=500000)])
+    assert comprobar(cargar_propuesta(d), limites_cop, ctx()) == []

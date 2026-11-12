@@ -35,6 +35,15 @@ RANGO_CLAUDE = range(1, 800)
 RANGO_EJECUTOR = range(800, 900)
 RANGO_USUARIO = range(900, 1000)
 
+# (extra) Claves que cambia ``limite_ejecutor`` (resolución 22). Las de cuenta son importes en unidades
+# mínimas de la moneda de la cuenta y llevan ``unidad``/``moneda``; las globales son enteros sin unidad.
+# El ``offset`` no está: solo lo fija el ejecutor al confirmar la moneda de la cuenta.
+CLAVES_LIMITE_GLOBALES: frozenset[str] = frozenset({
+    "paso_max_pct", "cadencia_min_presupuesto_min", "enfriamiento_puja_estructura_h", "max_cambios_hora_conjunto"})
+CLAVES_LIMITE_CUENTA: frozenset[str] = frozenset({
+    "tope_gasto_diario_total", "max_presupuesto_conjunto", "max_presupuesto_campana_cbo",
+    "spend_cap_test", "spend_cap_test_prorroga"})
+
 TIPOS_CON_OPERACIONES = TIPOS - {"noop", "alerta", "crear_estructura_pausada"}
 COMUNES = {"version", "id", "tipo", "creada", "origen"}
 OPCIONALES = {"producto", "pais", "evidencia", "reinicia_aprendizaje", "prioridad", "expira_en_min"}
@@ -73,7 +82,7 @@ REGLAS: dict[str, list[ReglaOp]] = {
     "puja": [ReglaOp(("adset", "campaign"), "bid_amount", "importe_o_null", "importe")],
     "spend_cap": [ReglaOp(("campaign",), "spend_cap", "importe_o_null", "importe")],
     "limite_cuenta": [ReglaOp(("account",), "spend_cap", "importe_o_null", "importe")],
-    "limite_ejecutor": [ReglaOp(("ejecutor",), "re:^[a-z_]+$", "int_o_null", "int_pos")],
+    "limite_ejecutor": [ReglaOp(("ejecutor",), "re:^[a-z_]+$", "int_pos", "int_pos")],
     "agenda": [ReglaOp(("adset", "campaign"), "budget_schedules", "null", "null", True)],
     "regla_meta": [ReglaOp(("account",), "adrules", "null", "null", True)],
 }
@@ -146,11 +155,13 @@ def _validar_op(n: int, op: Any, tipo: str, cuenta: str | None) -> Operacion:
         raise _err(f"{pre}: entidad {op['entidad']!r} no permitida para {tipo}")
     # id de la entidad
     if op["entidad"] == "account":
-        if cuenta is None or op["id"] != cuenta.removeprefix("act_"):
-            raise _err(f"{pre}: el id de la cuenta debe ser el número de la cuenta de la propuesta")
+        if cuenta is None or op["id"] != cuenta:
+            raise _err(f"{pre}: el id de la cuenta debe ser la cuenta de la propuesta (act_…)")
     elif op["entidad"] == "ejecutor":
         if op["id"] != "global" and not re.fullmatch(CUENTA_RE, op["id"]):
             raise _err(f"{pre}: el id debe ser global o una cuenta act_…")
+        if op["campo"] == "offset":
+            raise _err(f"{pre}: el offset no se cambia con limite_ejecutor; lo fija el ejecutor al confirmar la moneda")
     elif not re.fullmatch(ENTIDAD_ID_RE, op["id"]):
         raise _err(f"{pre}: id de entidad inválido")
     candidatas = [r for r in reglas if _cumple(r, op)]
@@ -167,7 +178,8 @@ def _validar_op(n: int, op: Any, tipo: str, cuenta: str | None) -> Operacion:
     unidad = op.get("unidad")
     moneda = op.get("moneda")
     parametros = op.get("parametros")
-    if regla.es_importe:
+    lleva_importe = regla.es_importe or (tipo == "limite_ejecutor" and op["campo"] in CLAVES_LIMITE_CUENTA)
+    if lleva_importe:
         if unidad != "minima":
             raise _err(f"{pre}: unidad debe ser \"minima\"")
         if not isinstance(moneda, str) or not re.fullmatch(r"[A-Z]{3}", moneda):

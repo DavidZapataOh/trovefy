@@ -63,23 +63,49 @@ def test_rangos_de_id():
 def test_cuenta_y_account():
     with pytest.raises(PropuestaInvalida, match="cuenta"):
         cargar_propuesta(presupuesto(cuenta="act_x"))
-    ok = presupuesto(tipo="limite_cuenta", operaciones=[operacion(entidad="account", id="0000000000000000",
+    # Resolución 22: el id de la operación es la cuenta CON act_ e igual a la de la propuesta.
+    ok = presupuesto(tipo="limite_cuenta", operaciones=[operacion(entidad="account", id="act_0000000000000000",
                                                                   campo="spend_cap", de_esperado=None)])
-    assert cargar_propuesta(ok).operaciones[0].de_esperado is None
-    mal = presupuesto(tipo="limite_cuenta", operaciones=[operacion(entidad="account", id="123",
-                                                                   campo="spend_cap")])
-    with pytest.raises(PropuestaInvalida, match="cuenta"):
-        cargar_propuesta(mal)
+    p = cargar_propuesta(ok)
+    assert p.operaciones[0].de_esperado is None and p.operaciones[0].id == p.cuenta
+    assert (p.operaciones[0].unidad, p.operaciones[0].moneda) == ("minima", "COP")
+    for id_ in ("0000000000000000", "act_123", "123"):
+        mal = presupuesto(tipo="limite_cuenta", operaciones=[operacion(entidad="account", id=id_,
+                                                                       campo="spend_cap")])
+        with pytest.raises(PropuestaInvalida, match="cuenta"):
+            cargar_propuesta(mal)
+    sin_moneda = presupuesto(tipo="limite_cuenta", operaciones=[
+        {"entidad": "account", "id": "act_0000000000000000", "campo": "spend_cap", "de_esperado": None, "a": 1}])
+    with pytest.raises(PropuestaInvalida, match="unidad"):
+        cargar_propuesta(sin_moneda)
+
+def _lim_ej(op: dict) -> dict:
+    d = presupuesto(tipo="limite_ejecutor", operaciones=[{"entidad": "ejecutor", **op}])
+    del d["cuenta"]
+    return d
 
 def test_limite_ejecutor_sin_cuenta():
-    d = presupuesto(tipo="limite_ejecutor", operaciones=[
-        {"entidad": "ejecutor", "id": "global", "campo": "max_ops_hora", "de_esperado": 10, "a": 20}])
-    del d["cuenta"]
+    d = _lim_ej({"id": "global", "campo": "paso_max_pct", "de_esperado": 50, "a": 60})
     p = cargar_propuesta(d)
     assert p.clase == "limite" and p.cuenta is None
-    d["operaciones"][0]["a"] = 0
-    with pytest.raises(PropuestaInvalida):
-        cargar_propuesta(d)
+    for malo in ({"a": 0}, {"de_esperado": None}, {"de_esperado": 0}):
+        with pytest.raises(PropuestaInvalida):
+            cargar_propuesta(_lim_ej({"id": "global", "campo": "paso_max_pct", "de_esperado": 50, "a": 60} | malo))
+
+def test_limite_ejecutor_unidad_y_moneda_segun_la_clave():
+    cuenta = "act_0000000000000000"
+    dinero = {"id": cuenta, "campo": "tope_gasto_diario_total", "de_esperado": 165000, "a": 150000}
+    p = cargar_propuesta(_lim_ej(dinero | {"unidad": "minima", "moneda": "COP"}))
+    assert (p.operaciones[0].unidad, p.operaciones[0].moneda) == ("minima", "COP")
+    for falta in ({}, {"unidad": "minima"}, {"moneda": "COP"}, {"unidad": "centavos", "moneda": "COP"}):
+        with pytest.raises(PropuestaInvalida, match="unidad|moneda"):
+            cargar_propuesta(_lim_ej(dinero | falta))
+    entera = {"id": "global", "campo": "paso_max_pct", "de_esperado": 50, "a": 60}
+    for sobra in ({"unidad": "minima"}, {"moneda": "COP"}, {"unidad": "minima", "moneda": "COP"}):
+        with pytest.raises(PropuestaInvalida, match="unidad y moneda"):
+            cargar_propuesta(_lim_ej(entera | sobra))
+    with pytest.raises(PropuestaInvalida, match="offset"):
+        cargar_propuesta(_lim_ej({"id": cuenta, "campo": "offset", "de_esperado": 1, "a": 100}))
 
 def test_agenda_y_lote():
     ag = presupuesto(tipo="agenda", operaciones=[

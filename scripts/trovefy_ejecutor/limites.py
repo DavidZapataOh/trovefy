@@ -20,7 +20,7 @@ from .dinero import (
     formatear,
     moneda_configurada,
 )
-from .esquema import CUENTA_RE
+from .esquema import CLAVES_LIMITE_CUENTA, CLAVES_LIMITE_GLOBALES, CUENTA_RE
 from .modelo import TIPOS, Operacion, Propuesta
 
 if TYPE_CHECKING:
@@ -28,11 +28,11 @@ if TYPE_CHECKING:
 
 _OFFSETS = (1, 10, 100, 1000)
 
-CLAVES_GLOBALES: frozenset[str] = frozenset({
-    "paso_max_pct", "cadencia_min_presupuesto_min", "enfriamiento_puja_estructura_h", "max_cambios_hora_conjunto"})
-CLAVES_CUENTA: frozenset[str] = frozenset({
-    "tope_gasto_diario_total", "max_presupuesto_conjunto", "max_presupuesto_campana_cbo",
-    "spend_cap_test", "spend_cap_test_prorroga"})
+CLAVES_GLOBALES: frozenset[str] = CLAVES_LIMITE_GLOBALES
+CLAVES_CUENTA: frozenset[str] = CLAVES_LIMITE_CUENTA
+# Cotas superiores de las claves enteras (además de > 0). Las comparten cargar_limites y comprobar,
+# para que un limite_ejecutor aceptado nunca deje un limites.yaml que no carga.
+COTAS_MAX: Mapping[str, int] = MappingProxyType({"paso_max_pct": 100})
 
 _GLOBALES = {"version", "cuentas_permitidas", "acciones_permitidas", "montaje_status_forzado", "cuentas"} | CLAVES_GLOBALES
 _CUENTA = {"moneda", "offset", "zona_horaria", "paginas_permitidas", "datasets_permitidos"} | CLAVES_CUENTA
@@ -139,7 +139,7 @@ def _cuenta(cid: str, d: object) -> LimitesCuenta:
         ZoneInfo(zona)
     except (ZoneInfoNotFoundError, ValueError, OSError) as e:
         raise LimitesInvalidos(f"{donde}zona_horaria: {zona!r} no es una zona conocida") from e
-    importes = {k: _entero(d, k, donde) for k in sorted(CLAVES_CUENTA)}
+    importes = {k: _entero(d, k, donde, COTAS_MAX.get(k)) for k in sorted(CLAVES_CUENTA)}
     return LimitesCuenta(cuenta=cid, moneda_codigo=moneda, offset=off, zona_horaria=zona,
                          paginas_permitidas=_lista_ids(d, "paginas_permitidas", donde),
                          datasets_permitidos=_lista_ids(d, "datasets_permitidos", donde), **importes)
@@ -158,7 +158,7 @@ def cargar_limites(ruta: Path, *, exigir_0600: bool = True) -> Limites:
     _revisar_claves(crudo, _GLOBALES, "")
     if type(crudo["version"]) is not int or crudo["version"] != 1:
         raise LimitesInvalidos("version: debe ser 1")
-    nums = {k: _entero(crudo, k, "", 100 if k == "paso_max_pct" else None) for k in sorted(CLAVES_GLOBALES)}
+    nums = {k: _entero(crudo, k, "", COTAS_MAX.get(k)) for k in sorted(CLAVES_GLOBALES)}
     if crudo["montaje_status_forzado"] != "PAUSED":
         raise LimitesInvalidos("montaje_status_forzado: debe ser PAUSED")
     acc = crudo["acciones_permitidas"]
@@ -311,7 +311,26 @@ def _tiene_importes(c: _Caso) -> bool:
     return False
 
 
+def _moneda_limite_ejecutor(c: _Caso) -> list[str]:
+    """Cada clave de dinero va en la moneda de la cuenta que cambia (su ``id``), con offset confirmado."""
+    v: list[str] = []
+    for op in c.p.operaciones:
+        lc = c.lim.cuentas.get(op.id)
+        if op.unidad is None or lc is None:
+            continue  # clave entera, o cuenta desconocida (lo dice clave_limite_desconocida)
+        try:
+            lc.moneda()
+        except MonedaNoConfigurada:
+            v.append(f"moneda_no_configurada: {lc.moneda_codigo} sin offset confirmado (P-21)")
+            continue
+        if op.moneda != lc.moneda_codigo:
+            v.append(f"moneda_distinta: {op.campo} de {op.id} en {op.moneda}; la cuenta usa {lc.moneda_codigo}")
+    return v
+
+
 def _r_moneda(c: _Caso) -> list[str]:
+    if c.p.tipo == "limite_ejecutor":
+        return _moneda_limite_ejecutor(c)
     if not _tiene_importes(c):
         return []
     if c.lc is None:
@@ -395,6 +414,9 @@ def _r_operaciones(c: _Caso) -> list[str]:
                   or (op.id in c.lim.cuentas_permitidas and op.campo in CLAVES_CUENTA))
             if not ok:
                 v.append(f"clave_limite_desconocida: {op.campo} no es una clave de límite de {op.id}")
+            elif type(op.a) is not int or op.a <= 0 or op.a > COTAS_MAX.get(op.campo, op.a):
+                extra = f" y <= {COTAS_MAX[op.campo]}" if op.campo in COTAS_MAX else ""
+                v.append(f"limite_fuera_de_cota: {op.campo} = {op.a!r}; debe ser un entero > 0{extra}")
     return v
 
 
