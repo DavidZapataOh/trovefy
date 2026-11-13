@@ -298,14 +298,14 @@ class GraphSimulado:
         self.escrituras.append(("subir_imagen", act_id, nombre))
         return hashlib.sha256(contenido).hexdigest()[:32]
 
-    def subir_video(self, act_id: str, ruta: Path) -> str:
+    def subir_video(self, act_id: str, contenido: bytes, nombre: str) -> str:
         _seg(act_id)
-        if ruta.stat().st_size > _MAX_VIDEO:
+        if len(contenido) > _MAX_VIDEO:
             raise ValueError("vídeo > 100 MB: subida por partes no soportada")
         vid = str(self._siguiente_video)
         self._siguiente_video += 1
         self._videos.add(vid)
-        self.escrituras.append(("subir_video", act_id, ruta.name))
+        self.escrituras.append(("subir_video", act_id, nombre))
         return vid
 
     def cuenta(self, act_id: str) -> InfoCuenta:

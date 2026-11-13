@@ -16,8 +16,11 @@ funciona antes de la primera escritura); ``_crear`` la repite justo antes de la 
 """
 from __future__ import annotations
 
+import errno
 import hashlib
+import os
 import re
+import stat
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -111,7 +114,7 @@ class _Archivo:
     ruta: str  # relativa al vault, como viene en la propuesta
     real: Path
     video: bool
-    contenido: bytes | None  # bytes verificados (solo imágenes)
+    contenido: bytes  # bytes leídos una sola vez: se verifican y se suben estos mismos (TOCTOU)
     sha256: str
 
 
@@ -146,12 +149,44 @@ class _Ids:
 
 
 # -- preparación (sin escribir) ---------------------------------------------------------------
-def _sha256_archivo(ruta: Path) -> str:
-    h = hashlib.sha256()
-    with ruta.open("rb") as f:
-        for bloque in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(bloque)
-    return h.hexdigest()
+def _leer_medio(real: Path, ruta: str) -> bytes:
+    """Lee ``real`` (ya resuelta, sin enlaces) una sola vez, sin seguir ningún enlace en ningún componente:
+    cadena de ``O_PATH|O_NOFOLLOW`` desde ``/`` (``O_PATH`` basta con permiso de paso ``--x``) y el archivo
+    con ``O_NOFOLLOW``. Si alguien cambia un componente por un enlace tras ``_resolver``, falla (ELOOP/ENOTDIR).
+    ``fstat`` sobre el fd: archivo regular y ≤ ``MAX_VIDEO``; se lee como mucho ``MAX_VIDEO`` + 1 bytes."""
+    partes = real.parts
+    fd = fd_dir = -1
+    try:
+        fd_dir = os.open("/", os.O_PATH | os.O_DIRECTORY | os.O_CLOEXEC)
+        for nombre in partes[1:-1]:
+            nuevo = os.open(nombre, os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd_dir)
+            os.close(fd_dir)
+            fd_dir = nuevo
+        fd = os.open(partes[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=fd_dir)
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise _Fallo(f"el medio no es un archivo: {ruta}")
+        if st.st_size > MAX_VIDEO:
+            raise _Fallo(f"medio > 100 MB (subida por partes no soportada): {ruta}")
+        trozos: list[bytes] = []
+        leidos = 0
+        while leidos <= MAX_VIDEO:
+            b = os.read(fd, min(1024 * 1024, MAX_VIDEO + 1 - leidos))
+            if not b:
+                break
+            trozos.append(b)
+            leidos += len(b)
+        if leidos > MAX_VIDEO:
+            raise _Fallo(f"medio > 100 MB (subida por partes no soportada): {ruta}")
+        return b"".join(trozos)
+    except OSError as e:
+        if e.errno in (errno.ELOOP, errno.ENOTDIR):
+            raise _Fallo(f"el medio cambió por un enlace tras verificar la ruta: {ruta}") from None
+        raise _Fallo(f"no se puede leer el medio ({errno.errorcode.get(e.errno or 0, 'OSError')}): {ruta}") from None
+    finally:
+        for f in (fd, fd_dir):
+            if f >= 0:
+                os.close(f)
 
 
 def _resolver(vault: Path, ruta: str) -> Path:
@@ -178,16 +213,11 @@ def _preparar_medios(e: Estructura, vault: Path) -> dict[str, _Archivo]:
             raise _Fallo(f"ref de medio repetida: {m.ref}")
         real = _resolver(vault, m.ruta)
         ext = real.suffix.lower()
-        if ext in EXT_IMAGEN:
-            contenido = real.read_bytes()  # se lee una vez: se verifica y se suben estos mismos bytes
-            sha = hashlib.sha256(contenido).hexdigest()
-            video = False
-        elif ext in EXT_VIDEO:
-            if real.stat().st_size > MAX_VIDEO:
-                raise _Fallo(f"vídeo > 100 MB (subida por partes no soportada): {m.ruta}")
-            contenido, sha, video = None, _sha256_archivo(real), True
-        else:
+        if ext not in EXT_IMAGEN and ext not in EXT_VIDEO:
             raise _Fallo(f"tipo de medio no soportado ({ext or 'sin extensión'}): {m.ruta}")
+        video = ext in EXT_VIDEO
+        contenido = _leer_medio(real, m.ruta)  # una sola lectura: se verifican y se suben estos mismos bytes
+        sha = hashlib.sha256(contenido).hexdigest()
         if sha != m.sha256:
             raise _Fallo(f"sha256 distinto en {m.ruta}: el archivo no es el aprobado")
         archivos[m.ref] = _Archivo(m.ref, m.ruta, real, video, contenido, sha)
@@ -381,10 +411,7 @@ class _Montaje:
         desc = f"medio {a.ref} ({a.ruta})"
         try:
             if a.video:
-                # subir_video toma la ruta: se vuelve a verificar el sha256 justo antes (ventana mínima).
-                if _sha256_archivo(a.real) != a.sha256:
-                    raise _Fallo(f"sha256 distinto en {a.ruta}: el archivo cambió tras verificarlo")
-                medio = self.graph.subir_video(self.p.cuenta, a.real)
+                medio = self.graph.subir_video(self.p.cuenta, a.contenido, a.real.name)
             else:
                 medio = self.graph.subir_imagen(self.p.cuenta, a.contenido, a.real.name)
         except _Fallo:

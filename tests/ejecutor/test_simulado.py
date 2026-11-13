@@ -152,9 +152,7 @@ def test_montaje_soporte(tmp_path):
     g = GraphSimulado()
     h = g.subir_imagen("act_0000000000000000", b"png", "a.png")
     assert len(h) == 32
-    f = tmp_path / "v.mp4"
-    f.write_bytes(b"vid")
-    vid = g.subir_video("act_0000000000000000", f)
+    vid = g.subir_video("act_0000000000000000", b"vid", "v.mp4")
     assert g.leer(vid, ["status"])["status"]["video_status"] == "ready"
     th = g.leer(vid, ["thumbnails{uri,is_preferred}"])["thumbnails"]["data"]
     assert th[0]["uri"].startswith("https://")

@@ -184,9 +184,9 @@ class GraphConStop:
         self._parar()
         return self._graph.subir_imagen(act_id, contenido, nombre)
 
-    def subir_video(self, act_id: str, ruta: Path) -> str:
+    def subir_video(self, act_id: str, contenido: bytes, nombre: str) -> str:
         self._parar()
-        return self._graph.subir_video(act_id, ruta)
+        return self._graph.subir_video(act_id, contenido, nombre)
 
     def leer(self, id: str, campos) -> dict:
         return self._graph.leer(id, campos)

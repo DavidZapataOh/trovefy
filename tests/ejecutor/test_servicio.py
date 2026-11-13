@@ -426,7 +426,7 @@ def test_graph_con_stop(tmp_path):
                     lambda: gs.escribir(S1, {"daily_budget": 1}),
                     lambda: gs.crear(CUENTA, "campaigns", {"name": "x"}, validate_only=True),
                     lambda: gs.subir_imagen(CUENTA, b"x", "x.jpg"),
-                    lambda: gs.subir_video(CUENTA, tmp_path / "v.mp4")):
+                    lambda: gs.subir_video(CUENTA, b"v", "v.mp4")):
         with pytest.raises(DetenidoPorStop):
             llamada()
     assert g.escrituras() == [] and not [x for x in g.llamadas if x.metodo != "leer"]
@@ -1070,3 +1070,16 @@ def test_segundo_motivo_con_vault_caido_no_se_pierde(montaje):
     base = m.vault / "raw/telegram/motivos"
     textos = sorted(f.read_text() for f in base.glob("*.md"))
     assert len(textos) == 2 and any("> primero" in t for t in textos) and any("> segundo" in t for t in textos)
+
+
+def test_graph_con_stop_misma_interfaz_que_cliente():
+    import inspect
+
+    from trovefy_ejecutor.graph import ClienteGraph
+    from trovefy_ejecutor.servicio import GraphConStop
+    for nombre in ("leer", "buscar", "escribir", "crear", "subir_imagen", "subir_video", "cuenta"):
+        real = list(inspect.signature(getattr(ClienteGraph, nombre)).parameters)
+        envuelto = list(inspect.signature(getattr(GraphConStop, nombre)).parameters)
+        assert real == envuelto, nombre
+    # subir_video recibe los bytes verificados, nunca una ruta que se pueda releer (TOCTOU)
+    assert list(inspect.signature(ClienteGraph.subir_video).parameters) == ["self", "act_id", "contenido", "nombre"]

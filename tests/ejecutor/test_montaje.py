@@ -291,18 +291,102 @@ def test_video_en_error_es_fallida(entorno_montaje):
     assert r.estado == "fallida" and _reales(g) == []
 
 
-def test_video_cambiado_tras_verificar(entorno_montaje, monkeypatch):
+def _capturar_video(g, monkeypatch, antes=lambda: None) -> list[bytes]:
+    """Envuelve ``subir_video``: ejecuta ``antes`` (el ataque) y guarda los bytes que de verdad saldrían
+    hacia Meta (si recibe una ruta, la lee como hacía ``ClienteGraph``)."""
+    real = g.subir_video
+    subidos: list[bytes] = []
+
+    def subir(act, *args):
+        antes()
+        dato = args[0]
+        subidos.append(dato.read_bytes() if isinstance(dato, os.PathLike) else bytes(dato))
+        return real(act, *args)
+
+    monkeypatch.setattr(g, "subir_video", subir)
+    return subidos
+
+
+def test_video_cambiado_tras_verificar_sube_los_bytes_verificados(entorno_montaje, monkeypatch):
+    from ejecutor.fabricas_graph import BYTES_VID, RUTA_VID
     g, alm, aud, vault = entorno_montaje
-    real = g.subir_imagen
-
-    def subir_y_cambiar(act, contenido, nombre):
-        (vault / "productos/p-0001/creativos/RO/t1/vid01.mp4").write_bytes(b"otro")
-        return real(act, contenido, nombre)
-
-    monkeypatch.setattr(g, "subir_imagen", subir_y_cambiar)
+    subidos = _capturar_video(g, monkeypatch, lambda: (vault / RUTA_VID).write_bytes(b"otro"))
     r = montar(estructura(), g, alm, aud, vault, esperar=NADA)
-    assert r.estado == "fallida" and "sha256" in r.detalle
-    assert not [l for l in g.llamadas if l.metodo == "subir_video"]
+    assert subidos == [BYTES_VID], r.detalle
+
+
+def test_enlace_cambiado_tras_verificar_nunca_sube_el_secreto(entorno_montaje, monkeypatch):
+    """TOCTOU: tras verificar el sha256, el vídeo se cambia por un enlace a un secreto del ejecutor."""
+    from ejecutor.fabricas_graph import BYTES_VID, RUTA_VID
+    g, alm, aud, vault = entorno_montaje
+    secreto = vault.parent / "secretos.env"
+
+    def cambiar_por_enlace():
+        (vault / RUTA_VID).unlink()
+        (vault / RUTA_VID).symlink_to(secreto)
+
+    subidos = _capturar_video(g, monkeypatch, cambiar_por_enlace)
+    montar(estructura(), g, alm, aud, vault, esperar=NADA)
+    assert all(secreto.read_bytes() not in b for b in subidos)
+    assert subidos == [BYTES_VID]
+
+
+def test_enlace_entre_resolver_y_abrir_se_rechaza(entorno_montaje, monkeypatch):
+    from ejecutor.fabricas_graph import RUTA_VID
+    g, alm, aud, vault = entorno_montaje
+    secreto = vault.parent / "secretos.env"
+    resolver = montaje._resolver
+
+    def resolver_y_cambiar(v, ruta):
+        real = resolver(v, ruta)
+        if ruta == RUTA_VID:
+            real.unlink()
+            real.symlink_to(secreto)
+        return real
+
+    monkeypatch.setattr(montaje, "_resolver", resolver_y_cambiar)
+    subidos = _capturar_video(g, monkeypatch)
+    r = montar(estructura(), g, alm, aud, vault, esperar=NADA)
+    assert r.estado == "fallida" and _sin_escritura(g) and subidos == []
+    assert "enlace" in r.detalle
+
+
+def test_directorio_cambiado_por_enlace_se_rechaza(entorno_montaje, monkeypatch, tmp_path):
+    from ejecutor.fabricas_graph import BYTES_VID, RUTA_VID
+    g, alm, aud, vault = entorno_montaje
+    resolver = montaje._resolver
+    fuera = tmp_path / "fuera"
+    fuera.mkdir()
+    (fuera / "vid01.mp4").write_bytes(BYTES_VID)
+
+    def resolver_y_cambiar(v, ruta):
+        real = resolver(v, ruta)
+        if ruta == RUTA_VID:
+            carpeta = real.parent
+            carpeta.rename(carpeta.with_name("t1-aparte"))
+            carpeta.symlink_to(fuera)
+        return real
+
+    monkeypatch.setattr(montaje, "_resolver", resolver_y_cambiar)
+    r = montar(estructura(), g, alm, aud, vault, esperar=NADA)
+    assert r.estado == "fallida" and _sin_escritura(g)
+
+
+def test_medio_que_no_es_archivo_regular_se_rechaza(entorno_montaje, monkeypatch):
+    from ejecutor.fabricas_graph import RUTA_VID
+    g, alm, aud, vault = entorno_montaje
+    resolver = montaje._resolver
+
+    def resolver_y_cambiar(v, ruta):
+        real = resolver(v, ruta)
+        if ruta == RUTA_VID:
+            real.unlink()
+            os.mkfifo(real)
+        return real
+
+    monkeypatch.setattr(montaje, "_resolver", resolver_y_cambiar)
+    r = montar(estructura(), g, alm, aud, vault, esperar=NADA)
+    assert r.estado == "fallida" and _sin_escritura(g)
 
 
 # -- resultado --------------------------------------------------------------------------------------
