@@ -177,3 +177,10 @@ def test_stop_formas_de_depositar(guardia, correr_hook, vault_tmp, cmd):
 def test_file_path_no_texto_deniega(guardia):
     assert guardia(ev("Write", file_path=123, content="{}"))[0] == "deny"
     assert guardia(ev("NotebookEdit", notebook_path=["x"], new_source="x"))[0] == "deny"
+
+
+@pytest.mark.parametrize("stop", [False, True])
+def test_lectura_con_la_ruta_por_defecto(guardia, stop):
+    assert guardia(ev("Bash", command="ls /var/spool/trovefy/entrada"), stop=stop)[0] == "allow"
+    assert guardia(ev("Bash", command="cat /var/spool/trovefy/estado/latido.json"), stop=stop)[0] == "allow"
+    assert guardia(ev("Bash", command="rm /var/spool/trovefy/entrada/a.json"), stop=stop)[0] == "deny"

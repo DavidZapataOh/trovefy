@@ -7,6 +7,9 @@ Protege ``$TROVEFY_SPOOL`` (por defecto ``/var/spool/trovefy``): un ``Write`` so
 si el esquema no se puede importar o algo se tuerce, deny.
 Capa de mejor esfuerzo: las barreras reales son los permisos del spool (instalador) y la validación
 propia del ejecutor más el Aceptar del usuario.
+Evasiones residuales conocidas y aceptadas (el ejecutor revalida cada archivo: origen, nombre,
+``cargar_propuesta``, límites, y exige Aceptar humano): globs sin palabra clave (``cd /var; cd s*;
+cp x t*/e*/a``) y rutas ofuscadas (base64 vía xargs).
 """
 from __future__ import annotations
 
@@ -160,6 +163,8 @@ def decidir(
         return _decidir_escritura(tool_name, tool_input, spool, spool_res, vault, cwd)
     if tool_name == "Bash":
         comando = _cadena(tool_input.get("command"))
+        if solo_lectura(comando):
+            return "allow", ""
         if es_deposito(comando):
             if stop_activo(vault):
                 return "deny", MOTIVO_STOP
@@ -167,8 +172,6 @@ def decidir(
                 return "allow", ""
             return "deny", "`trovefy buzon depositar` debe ir solo, sin encadenar ni redirigir"
         if _menciona_spool(comando, spool, spool_res, cwd):
-            if solo_lectura(comando):
-                return "allow", ""
             motivo = MOTIVO_STOP if stop_activo(vault) else "el buzón no se toca por shell: usa `trovefy buzon depositar`"
             return "deny", motivo
     return "allow", ""
