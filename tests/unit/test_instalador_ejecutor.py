@@ -21,7 +21,7 @@ EXTERNOS = [
     "groupadd", "useradd", "usermod", "id", "getent", "install", "chmod", "chown", "chgrp", "mkdir",
     "systemctl", "sudo", "uv", "openssl", "setfacl", "getfacl", "apt-get", "stat", "cmp", "cp", "mv",
     "rm", "mktemp", "cat", "grep", "sed", "dirname", "readlink", "realpath", "python3", "touch", "ls",
-    "find", "tee", "env", "awk", "cut", "head", "basename", "wsl.exe", "nano",
+    "find", "tee", "env", "awk", "cut", "head", "basename", "wsl.exe", "nano", "git", "sha256sum",
 ]
 
 
@@ -42,7 +42,7 @@ def test_unidad_endurecida():
         "PrivateDevices=yes", "ProtectKernelTunables=yes", "ProtectKernelModules=yes",
         "ProtectControlGroups=yes", "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX",
         "RestrictNamespaces=yes", "LockPersonality=yes", "SystemCallArchitectures=native",
-        "WantedBy=multi-user.target",
+        "WantedBy=multi-user.target", "RestartPreventExitStatus=2 4",
     ]:
         assert linea in u.splitlines(), linea
     assert "CapabilityBoundingSet=" in u.splitlines()
@@ -73,7 +73,7 @@ def test_instalador_simulado_lista_los_pasos():
         "uv tool install --force --python 3.12 --constraints",
         'zoneinfo.ZoneInfo("America/Bogota")', "apt-get install -y tzdata",
         "openssl rand -hex 32", "trovefy_ejecutor.instalacion cuenta",
-        "install -m 0600 -o trovefy-exec -g trovefy-exec /tmp/v/config/arranque.yaml",
+        "/tmp/v/config/arranque.yaml",
         "trovefy_ejecutor.instalacion limites",
         "setfacl -m u:trovefy-exec:--x /home/david", "setfacl -m u:trovefy-exec:rwx",
         "d:u:david:rwx", "/tmp/v/raw/telegram/motivos",
@@ -173,3 +173,51 @@ def test_doc_windows():
               'schtasks /Create /SC ONLOGON /TN TrovefyWSL /TR "wsl.exe -d Ubuntu --exec /bin/true"']:
         assert s in d
     assert "no se ejecuta nada" in d
+    assert "systemctl edit trovefy-ejecutor" in d
+
+
+# -- separación de privilegios (fix round 1): root solo actúa en /etc y /var/spool --------------------------
+_RUTAS_AJENAS = ("/home/david", "/home/trovefy-exec", "/tmp/v")
+
+
+def _lineas_root(salida: str) -> list[str]:
+    """Tramos de las líneas «+ » que ejecutaría root (los que no empiezan por «sudo -u»)."""
+    tramos = []
+    for ln in salida.splitlines():
+        if not ln.startswith("+ "):
+            continue
+        for tramo in ln[2:].split(" | "):
+            if not tramo.startswith("sudo -u "):
+                tramos.append(tramo)
+    return tramos
+
+
+def test_root_no_toca_rutas_de_otros_usuarios():
+    r = _simular("--vault", "/tmp/v")
+    assert r.returncode == 0, r.stderr
+    for tramo in _lineas_root(r.stdout):
+        if tramo.startswith("useradd ") or "/etc/systemd/system/" in tramo:
+            continue  # crear el usuario es de root; la unidad la escribe root en /etc
+        assert not any(x in tramo for x in _RUTAS_AJENAS), tramo
+
+
+def test_simular_muestra_las_formas_sudo_u():
+    r = _simular("--vault", "/tmp/v")
+    out = r.stdout
+    for s in [
+        "+ sudo -u david -H git -C ", "describe --dirty --always",
+        "+ sudo -u david -H setfacl -m u:trovefy-exec:--x /home/david",
+        "+ sudo -u david -H setfacl -m u:trovefy-exec:rwx,d:u:trovefy-exec:rwx,d:u:david:rwx /tmp/v/propuestas",
+        "? sudo -u david -H getfacl",
+        "+ sudo -u david -H cat -- /home/david/.local/bin/uv",
+        "mktemp /usr/local/bin/",
+        "+ sudo -u trovefy-exec -H install -d -m 0700 /home/trovefy-exec/.config/trovefy-ejecutor",
+        "+ sudo -u trovefy-exec -H install -m 0600 /dev/null /home/trovefy-exec/.config/trovefy-ejecutor/secretos.env",
+        "| sudo -u trovefy-exec -H tee -a -- /home/trovefy-exec/.config/trovefy-ejecutor/secretos.env",
+        "+ sudo -u david -H cat -- /tmp/v/config/arranque.yaml | sudo -u trovefy-exec -H tee -- ",
+        "| sudo -u trovefy-exec -H tee -- /home/trovefy-exec/.config/trovefy-ejecutor/limites.yaml.nuevo",
+        "+ sudo -u trovefy-exec -H mv -- /home/trovefy-exec/.config/trovefy-ejecutor/limites.yaml.nuevo",
+    ]:
+        assert s in out, s
+    assert out.index("describe --dirty --always") < out.index("[1/13]")
+    assert "+ setfacl" not in out and "+ install -m 0600 -o" not in out and "+ chown" not in out

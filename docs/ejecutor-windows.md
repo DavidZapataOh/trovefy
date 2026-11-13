@@ -48,9 +48,22 @@ systemctl status trovefy-ejecutor   # debe decir «active (running)»
 trovefy buzon estado                # latido reciente del servicio
 ```
 
-Si el servicio no arranca con `status=226/NAMESPACE`, edita `/etc/systemd/system/trovefy-ejecutor.service`
-y quita `PrivateDevices=yes`; si sigue fallando, quita también `RestrictNamespaces=yes`. Después:
-`sudo systemctl daemon-reload && sudo systemctl restart trovefy-ejecutor`. (Si vuelves a ejecutar el
-instalador, la unidad se reescribe desde la plantilla del repo.)
+Si el servicio no arranca con `status=226/NAMESPACE`, no edites el archivo de la unidad (el instalador lo
+reescribe). Crea un *drop-in*, que sobrevive a cada reinstalación:
+
+```bash
+sudo systemctl edit trovefy-ejecutor
+```
+
+En el editor que se abre, escribe:
+
+```ini
+[Service]
+PrivateDevices=no
+```
+
+Guarda y ejecuta `sudo systemctl restart trovefy-ejecutor`. Si sigue fallando, vuelve a
+`sudo systemctl edit trovefy-ejecutor` y añade debajo `RestrictNamespaces=no`. Para deshacerlo:
+`sudo systemctl revert trovefy-ejecutor`.
 
 Antes de reparar la auditoría del ejecutor, para el servicio: `sudo systemctl stop trovefy-ejecutor`.
