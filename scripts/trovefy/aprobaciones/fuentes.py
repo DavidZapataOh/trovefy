@@ -18,7 +18,7 @@ ZONA_COT = timezone(timedelta(hours=-5))
 SPOOL_POR_DEFECTO = "/var/spool/trovefy"
 ESTADOS = ("latido", "stop", "limites", "meta", "emparejamiento")
 _MAX_BYTES = 1 << 20
-_ACT = re.compile(r"act_(\d+)")
+_ACT = re.compile(r"\bact_(\d+)")
 
 
 def enmascarar_cuentas(texto: str) -> str:
