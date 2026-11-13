@@ -38,7 +38,7 @@ def _no_medido(motivo: str) -> Lectura:
 
 
 def leer_estado(nombre: str, spool: Path | None = None, cuenta: str | None = None) -> Lectura:
-    """Lee ``estado/<nombre>.json``. Con ``cuenta``, un ``meta.json`` de otra cuenta cuenta como ausente."""
+    """Lee ``estado/<nombre>.json``. ``meta.json`` exige ``cuenta``; sin ella o de otra cuenta cuenta como ausente."""
     if nombre not in ESTADOS:
         raise ValueError(f"estado desconocido: {nombre}")
     carpeta = (Path(spool) if spool is not None else ruta_spool()) / "estado"
@@ -64,8 +64,11 @@ def leer_estado(nombre: str, spool: Path | None = None, cuenta: str | None = Non
         os.close(fd)
     if not isinstance(datos, dict):
         return _no_medido(f"{nombre}.json ilegible")
-    if nombre == "meta" and cuenta is not None and datos.get("cuenta") != cuenta:
-        return _no_medido("meta.json es de otra cuenta")
+    if nombre == "meta":
+        if cuenta is None:
+            return _no_medido("falta la cuenta de config/caja.yaml para comprobar meta.json")
+        if datos.get("cuenta") != cuenta:
+            return _no_medido("meta.json es de otra cuenta")
     return Lectura(datos, None)
 
 

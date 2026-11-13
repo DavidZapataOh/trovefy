@@ -155,3 +155,10 @@ def test_oserror_otro(tmp_path, spool, buzon_falso):
     m.depositar = dep
     with pytest.raises(BuzonNoDisponible, match="disco lleno"):
         depositar(tmp_path, {})
+
+
+def test_meta_sin_cuenta_falla_cerrado(spool):
+    (spool / "estado/meta.json").write_text(json.dumps({"cuenta": CUENTA, "currency": "COP", "offset": 100}))
+    r = leer_estado("meta")
+    assert r.datos is None
+    assert r.motivo == "no medido: falta la cuenta de config/caja.yaml para comprobar meta.json"
