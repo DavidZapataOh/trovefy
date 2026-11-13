@@ -20,10 +20,11 @@ from trovefy_ejecutor import ejecutar as _ejecutar
 from trovefy_ejecutor.config import RutasEjecutor
 from trovefy_ejecutor.ejecutar import NO_SOPORTADO_P07
 from trovefy_ejecutor.reloj import ZONA_COT
+from trovefy_ejecutor.render import RECIBIDO, STOP_ACTIVO, texto_ya_procesada
 from trovefy_ejecutor.secretos import Secretos
 from trovefy_ejecutor.servicio import Ejecutor
 from trovefy_ejecutor.simulado import TelegramSimulado
-from trovefy_ejecutor.stop import activar_stop
+from trovefy_ejecutor.stop import activar_stop, stop_activo
 
 CUENTA = "act_0000000000000000"
 C1, S1, S2, A1 = "100000001", "100000011", "100000012", "100000021"
@@ -442,3 +443,349 @@ def test_ejecutor_sin_tokens_en_repr_ni_auditoria(montaje):
     assert TOKEN_META not in repr(m.ej) and TOKEN_TG not in repr(m.ej)
     crudo = m.rutas.auditoria.read_text()
     assert TOKEN_META not in crudo and TOKEN_TG not in crudo
+
+
+# == Parte 2: toques, ejecución y resultados ======================================================
+
+def _enviar(m: Montaje, d: dict) -> str:
+    m.depositar(d)
+    m.ej.ciclo()
+    assert m.estado(d["id"]) == "enviada", m.ej.almacen.obtener(d["id"]).datos
+    return d["id"]
+
+
+def test_noop_aceptar_queda_registrado(montaje):
+    m = montaje
+    id = _enviar(m, noop())
+    cb = m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    assert m.estado(id) == "ejecutada"
+    assert m.tg.respuestas_callback[0] == (cb, RECIBIDO)
+    assert m.eventos("transicion", id=id, tipo="noop", de="enviada", a="aceptada")
+    assert m.eventos("ejecucion", id=id, ok=True)
+    fila = m.ej.almacen.obtener(id)
+    assert fila.datos["callback_id"] == cb
+    msg = m.mensaje_de(id)
+    assert "EJECUTADA 15:00" in msg["texto"] and not msg["botones"]
+    assert (m.vault / f"propuestas/{id}.md").exists() and m.ej.auditoria.verificar()
+    assert f"callback_id: {cb}" in (m.vault / f"propuestas/{id}.md").read_text()
+
+
+def test_doble_toque_ejecuta_una_vez(montaje):
+    m = montaje
+    id = _enviar(m, presupuesto())
+    m.tg.tocar(id, "A", m.clave)
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    assert m.estado(id) == "ejecutada"
+    assert len(m.graph.escrituras()) == 1 and m.graph.objetos[S1]["daily_budget"] == "26000"
+    assert m.textos()[1] == texto_ya_procesada("ejecutada")
+    assert [r[1] for r in m.tg.respuestas_callback] == [RECIBIDO, RECIBIDO]
+    m.tg.tocar(id, "A", m.clave)  # y en otro ciclo, tampoco
+    m.ej.ciclo()
+    assert len(m.graph.escrituras()) == 1
+
+
+def test_rechazar_con_motivo(montaje):
+    m = montaje
+    id = _enviar(m, presupuesto(id="P-20261112-002"))
+    m.tg.tocar(id, "R", m.clave)
+    m.ej.ciclo()
+    assert m.estado(id) == "rechazada" and m.graph.escrituras() == []
+    msg = m.mensaje_de(id)
+    assert "RECHAZADA 15:00" in msg["texto"] and not msg["botones"]
+    pregunta = next(k for k, v in m.tg.mensajes.items() if "¿Motivo?" in v["texto"])
+    assert m.ej.almacen.obtener(id).datos["pregunta_motivo"] == pregunta
+    m.tg.escribir("pico puntual", responde_a=pregunta)
+    m.ej.ciclo()
+    nota = m.vault / "raw/telegram/motivos/2026-11-12-P-20261112-002.md"
+    assert nota.exists() and "> pico puntual" in nota.read_text()
+    assert m.eventos("motivo_rechazo", id=id)
+    m.tg.escribir("otra cosa", responde_a=pregunta)  # segunda nota: -2, nunca pisa la primera
+    m.ej.ciclo()
+    assert (m.vault / "raw/telegram/motivos/2026-11-12-P-20261112-002-2.md").exists()
+    assert "> pico puntual" in nota.read_text()
+
+
+def test_motivo_solo_si_la_propuesta_esta_rechazada(montaje):
+    m = montaje
+    id = _enviar(m, presupuesto(id="P-20261112-002"))
+    pregunta = m.ej.almacen.obtener(id).message_id
+    m.tg.mensajes[pregunta]["texto"] = "P-20261112-002 · ¿Motivo? (responde a este mensaje, opcional)"
+    m.tg.escribir("intento", responde_a=pregunta)
+    m.ej.ciclo()
+    assert not (m.vault / "raw/telegram/motivos").exists()
+    assert m.estado(id) == "enviada"
+
+
+def test_firma_falsa_y_user_ajeno(montaje):
+    m = montaje
+    id = _enviar(m, presupuesto())
+    from trovefy_ejecutor.callbacks import firmar
+    data = firmar(id, "A", 42, m.clave)
+    m.tg.tocar(id, "A", m.clave, data=data[:-1] + ("x" if data[-1] != "x" else "y"))
+    m.tg.tocar(id, "A", m.clave, user_id=99)
+    m.tg.tocar(id, "A", b"otra-clave" * 4)
+    m.ej.ciclo()
+    assert m.estado(id) == "enviada" and m.graph.escrituras() == []
+    motivos = [e["motivo"] for e in m.eventos("callback_invalido")]
+    assert motivos == ["callback_firma", "callback_usuario_ajeno", "callback_firma"]
+
+
+def test_stop_activo_no_ejecuta(montaje):
+    m = montaje
+    id = _enviar(m, presupuesto())
+    activar_stop(m.rutas, "prueba", T0)
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    assert m.estado(id) == "enviada" and m.graph.escrituras() == []
+    assert m.mensaje_de(id)["texto"].endswith(STOP_ACTIVO)
+    assert m.tg.respuestas_callback[0][1] == RECIBIDO
+
+
+def test_caducada_al_tocar_no_ejecuta(montaje):
+    m = montaje
+    id = _enviar(m, presupuesto())  # caduca a los 45 min de creada
+    m.reloj.avanzar(hours=1)
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    assert m.estado(id) == "caducada" and m.graph.escrituras() == []
+    msg = m.mensaje_de(id)
+    assert msg["texto"].endswith("CADUCADA, no se ejecutó nada") and not msg["botones"]
+
+
+def test_callback_futuro_no_ejecuta(montaje):
+    m = montaje
+    id = _enviar(m, presupuesto())
+    m.tg.tocar(id, "A", m.clave, fecha=T0 + timedelta(minutes=10))
+    m.ej.ciclo()
+    assert m.estado(id) == "enviada" and m.graph.escrituras() == []
+    assert m.eventos("callback_invalido", motivo="callback_futuro")
+
+
+def test_desfase_grande_bloquea_ejecucion(montaje):
+    m = montaje
+    id = _enviar(m, presupuesto())
+    m.tg._ahora = lambda: m.reloj() - timedelta(seconds=400)
+    m.tg.escribir("/estado")
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    assert m.estado(id) == "aceptada" and m.graph.escrituras() == []
+    assert any("hwclock -s" in t for t in m.textos())
+
+
+def test_stop_a_mitad_de_lote(montaje):
+    m = montaje
+    id = _enviar(m, lote())
+    m.graph.al_escribir = lambda: activar_stop(m.rutas, "prueba", T0)
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    assert len(m.graph.escrituras()) == 1
+    fila = m.ej.almacen.obtener(id)
+    assert fila.estado == "fallida" and fila.datos["parcial"] is True and fila.datos["error"] == "stop"
+    texto = m.mensaje_de(id)["texto"]
+    assert "no se cambió nada" not in texto and "se aplicó una parte" in texto
+
+
+def test_discrepancia_crea_nueva_propuesta(montaje):
+    m = montaje
+    id = _enviar(m, presupuesto())
+    m.graph.forzar_pausa = {S1}
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    fila = m.ej.almacen.obtener(id)
+    assert fila.estado == "discrepancia" and fila.datos["nueva_propuesta"] == "P-20261112-800"
+    assert m.estado("P-20261112-800") == "enviada"
+    assert "nueva propuesta P-20261112-800" in m.mensaje_de(id)["texto"]
+    assert m.mensaje_de("P-20261112-800")["texto"].startswith("P-20261112-800 · ACTIVAR")
+
+
+def test_obsoleta_al_ejecutar(montaje):
+    m = montaje
+    id = _enviar(m, presupuesto())
+    m.graph.cambiar(S1, daily_budget=21000)
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    assert m.estado(id) == "obsoleta" and m.graph.escrituras() == []
+    assert "OBSOLETA" in m.mensaje_de(id)["texto"]
+
+
+def test_limites_se_comprueban_otra_vez_antes_de_ejecutar(montaje):
+    m = montaje
+    id = _enviar(m, presupuesto())
+    m.limites(1, paso_max_pct=10)
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    fila = m.ej.almacen.obtener(id)
+    assert fila.estado == "fallida" and "paso_excesivo" in fila.datos["motivo"]
+    assert m.graph.escrituras() == []
+
+
+@pytest.mark.parametrize("fallo", ["red", "moneda", "limites_rotos"])
+def test_fallo_antes_de_ejecutar_es_fallida_sin_escribir(montaje, fallo):
+    m = montaje
+    id = _enviar(m, presupuesto())
+    if fallo == "red":
+        m.graph.red_al_leer = True
+    elif fallo == "moneda":
+        m.graph.cuentas[CUENTA]["currency"] = "USD"
+    else:
+        m.rutas.limites.write_text("version: 1\n")
+        os.utime(m.rutas.limites, ns=(0, m.rutas.limites.stat().st_mtime_ns + 5_000_000))
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    assert m.estado(id) == "fallida" and m.graph.escrituras() == []
+
+
+def test_token_caducado_avisa_y_bloquea_el_gasto(montaje):
+    from trovefy_ejecutor.graph import ErrorGraph
+
+    m = montaje
+    id = _enviar(m, presupuesto())
+    id2 = _enviar(m, pausar())
+    m.graph.errores_reales[S1] = ErrorGraph(190, 463, "token caducado")
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    fila = m.ej.almacen.obtener(id)
+    assert fila.estado == "fallida" and fila.datos["error"] == "token"
+    assert any("/arranque paso 13" in t for t in m.textos())
+    escrituras = len(m.graph.escrituras())
+    m.tg.tocar(id2, "A", m.clave)
+    m.ej.ciclo()
+    assert m.estado(id2) == "fallida" and len(m.graph.escrituras()) == escrituras
+    assert "token" in m.ej.almacen.obtener(id2).datos["motivo"]
+
+
+def test_pausar_alta_con_gasto_activo_se_envia_y_ejecuta(montaje):
+    m = montaje
+    m.reloj.t = datetime(2026, 11, 12, 23, 30, tzinfo=ZONA_COT)
+    id = _enviar(m, pausar(prioridad="alta", creada=(m.reloj.t - timedelta(minutes=1)).isoformat()))
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    assert m.estado(id) == "ejecutada" and m.graph.objetos[S1]["status"] == "PAUSED"
+
+
+def test_montaje_solo_validar(montaje):
+    m = montaje
+    m.depositar(estructura(solo_validar=True))
+    m.ej.ciclo()
+    assert m.estado("P-20261112-002") == "ejecutada"
+    assert [x for x in m.graph.llamadas if x.metodo == "crear" and not x.validate_only] == []
+    assert m.graph.escrituras() == []
+    ev = m.eventos("ejecucion", id="P-20261112-002")
+    assert ev[-1]["validate_only"] is True and ev[-1]["ok"] is True
+    assert m.ej.almacen.en_estado("recibida", "enviada") == []
+    assert any(t.startswith("P-20261112-002") and "EJECUTADA" in t for t in m.textos())
+
+
+def test_montaje_crea_en_pausa_y_propone_activar(montaje):
+    m = montaje
+    crear = m.graph.crear
+
+    def crear_con_cuenta(padre, arista, datos, *, validate_only=False):  # como Meta: lo creado es de la cuenta
+        r = crear(padre, arista, datos, validate_only=validate_only)
+        if not validate_only:
+            m.graph.objetos[r["id"]]["account_id"] = CUENTA.removeprefix("act_")
+        return r
+
+    m.graph.crear = crear_con_cuenta
+    m.depositar(estructura())
+    m.ej.ciclo()
+    fila = m.ej.almacen.obtener("P-20261112-002")
+    assert fila.estado == "ejecutada" and fila.datos["ids_creados"]["campana"]
+    assert fila.datos["nueva_propuesta"] == "P-20261112-800"
+    assert m.estado("P-20261112-800") == "enviada"
+    assert m.mensaje_de("P-20261112-800")["texto"].startswith("P-20261112-800 · ACTIVAR")
+    assert len(m.graph.escrituras()) > 0 and all(o["status"] == "PAUSED" for k, o in m.graph.objetos.items()
+                                                 if k.startswith("900") and "status" in o)
+
+
+def test_montaje_sin_vault_es_fallida(tmp_path):
+    m = _montaje(tmp_path, vault=False)
+    m.depositar(estructura(solo_validar=True))
+    m.ej.ciclo()
+    fila = m.ej.almacen.obtener("P-20261112-002")
+    assert fila.estado == "fallida" and "sin vault configurado" in fila.datos["motivo"]
+    assert m.graph.escrituras() == []
+    m.ej.almacen.cerrar()
+
+
+def test_montaje_con_stop_se_rechaza(montaje):
+    m = montaje
+    activar_stop(m.rutas, "prueba", T0)
+    m.depositar(estructura())
+    m.ej.ciclo()
+    assert m.estado("P-20261112-002") == "rechazada" and m.graph.llamadas == []
+
+
+def test_montaje_fuera_de_limites_se_rechaza(montaje):
+    m = montaje
+    m.depositar(estructura(pagina_id="999"))
+    m.ej.ciclo()
+    fila = m.ej.almacen.obtener("P-20261112-002")
+    assert fila.estado == "rechazada" and "pagina_no_permitida" in fila.datos["motivo"]
+    assert [x for x in m.graph.llamadas if x.metodo == "crear"] == []
+
+
+def test_error_inesperado_al_ejecutar_es_discrepancia(montaje, monkeypatch):
+    from trovefy_ejecutor import servicio
+
+    def roto(*a, **k):
+        raise RuntimeError("boom")
+
+    m = montaje
+    id = _enviar(m, presupuesto())
+    monkeypatch.setattr(servicio, "ejecutar", roto)
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    assert m.estado(id) == "discrepancia"
+
+
+def test_cambio_de_limite_que_no_se_puede_escribir_es_fallida(montaje, monkeypatch):
+    m = montaje
+
+    def no_puedo(cambio, cuenta):
+        raise OSError("disco lleno")
+
+    monkeypatch.setattr(m.ej, "_aplicar_cambio_limite", no_puedo)
+    d = {"version": 1, "id": "P-20261112-006", "tipo": "limite_ejecutor", "creada": _creada(),
+         "origen": "/limites", "cuenta": CUENTA, "motivo": "subir tope",
+         "operaciones": [{"entidad": "ejecutor", "id": CUENTA, "campo": "tope_gasto_diario_total",
+                          "de_esperado": 165000, "a": 150000, "unidad": "minima", "moneda": "COP"}]}
+    id = _enviar(m, d)
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    fila = m.ej.almacen.obtener(id)
+    assert fila.estado == "fallida" and "limites.yaml" in fila.datos["detalle"]
+    assert not m.eventos("limite_cambiado")
+    assert m.eventos("ejecucion", id=id, ok=False)
+
+
+def test_cambio_de_limite_aplicado_se_audita(montaje, monkeypatch):
+    m = montaje
+    aplicados = []
+    monkeypatch.setattr(m.ej, "_aplicar_cambio_limite", lambda c, cuenta: aplicados.append((c, cuenta)))
+    d = {"version": 1, "id": "P-20261112-006", "tipo": "limite_ejecutor", "creada": _creada(),
+         "origen": "/limites", "motivo": "más pasos",
+         "operaciones": [{"entidad": "ejecutor", "id": "global", "campo": "paso_max_pct",
+                          "de_esperado": 50, "a": 40}]}
+    id = _enviar(m, d)
+    assert "paso_max_pct (global): 50 → 40" in m.mensaje_de(id)["texto"]
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    assert m.estado(id) == "ejecutada" and aplicados[0][0]["a"] == 40
+    assert m.eventos("limite_cambiado", clave="paso_max_pct", de=50, a=40)
+
+
+def test_stop_activo_inexistente_por_defecto(montaje):
+    assert not stop_activo(montaje.rutas)
+
+
+def test_token_caducado_al_leer_tambien_bloquea(montaje):
+    m = montaje
+    m.graph.token_caduca_tras = 0
+    m.depositar(presupuesto())
+    m.ej.ciclo()
+    assert m.estado("P-20261112-003") == "rechazada"
+    assert m.ej.almacen.leer_kv("token_caducado")
+    assert any("/arranque paso 13" in t for t in m.textos())

@@ -22,6 +22,8 @@ from typing import Any, Literal
 
 from .auditoria import (
     EV_CALLBACK_INVALIDO,
+    EV_EJECUCION,
+    EV_LIMITE_CAMBIADO,
     EV_MENSAJE_IGNORADO,
     EV_RECIBIDA,
     EV_TRANSICION,
@@ -30,15 +32,23 @@ from .auditoria import (
     redactar,
 )
 from .buzon import Buzon
-from .comandos import Ignorar, Responder, interpretar_update
+from .comandos import (
+    GuardarMotivo,
+    Ignorar,
+    Responder,
+    ResponderToque,
+    Toque,
+    interpretar_update,
+    nota_motivo,
+)
 from .config import RutasEjecutor
 from .deposito import DepositoRechazado, comprobar_origen
 from .dinero import Moneda, MonedaNoConfigurada
-from .ejecutar import NO_SOPORTADO_P07, TIPOS_SOPORTADOS
+from .ejecutar import NO_SOPORTADO_P07, TIPOS_SOPORTADOS, Resultado, ejecutar
 from .emparejar import Emparejamiento
 from .esquema import RANGO_CLAUDE, PropuestaInvalida, cargar_propuesta
 from .estado import Almacen, FilaPropuesta, IdDuplicado
-from .graph import OFFSETS_META, DetenidoPorStop
+from .graph import OFFSETS_META, DetenidoPorStop, ErrorGraph, clasificar
 from .limites import (
     CLAVES_CUENTA,
     CLAVES_GLOBALES,
@@ -49,8 +59,20 @@ from .limites import (
     contexto_para,
 )
 from .modelo import Propuesta
+from .montaje import montar
 from .reloj import base_caducidad, caducidad
-from .render import DatosRender, botones_propuesta, render_alerta, render_propuesta
+from .render import (
+    PREGUNTA_MOTIVO,
+    RECIBIDO,
+    STOP_ACTIVO,
+    DatosRender,
+    Desenlace,
+    botones_propuesta,
+    render_alerta,
+    render_propuesta,
+    render_resultado,
+    texto_ya_procesada,
+)
 from .ritmo import Ritmo
 from .secretos import Secretos
 from .stop import stop_activo
@@ -62,6 +84,14 @@ TIPOS_INGERIBLES: frozenset[str] = TIPOS_SOPORTADOS | {"crear_estructura_pausada
 ZONA_POR_DEFECTO = "America/Bogota"
 _SIN_LECTURA_VIVA = frozenset({"noop", "limite_ejecutor"})
 _ERRORES_TELEGRAM = (ErrorTelegram, ErrorRedTelegram, ValueError)
+_TOCA_META = frozenset(TIPOS_INGERIBLES - {"noop", "limite_ejecutor", "alerta"})
+DESFASE_MAX_S = 300
+AVISO_DESFASE = ("{id}: reloj desfasado ({s} s): ejecuta `sudo hwclock -s`. No se ejecutó nada; la propuesta "
+                 "queda aceptada y se reintenta al reiniciar el servicio.")
+AVISO_TOKEN = ("Token de Meta caducado: renuévalo en /arranque paso 13. No se ejecuta nada en Meta hasta que "
+               "comprobar-meta vuelva a dar ok.")
+MOTIVO_TOKEN = "token de Meta caducado: renuévalo en /arranque paso 13"
+CLAVE_TOKEN = "token_caducado"
 
 
 class GraphConStop:
@@ -133,6 +163,9 @@ class Ejecutor:
         self._DESPACHO: dict[type, Callable[[Any], None]] = {
             Ignorar: self._ignorar,
             Responder: self._responder,
+            ResponderToque: self._responder_toque_invalido,
+            Toque: self._toque,
+            GuardarMotivo: self._guardar_motivo,
         }
 
     def __repr__(self) -> str:
@@ -164,6 +197,12 @@ class Ejecutor:
             self.auditoria.anotar("error", donde=donde, detalle=self._texto_error(e))
         except Exception:  # noqa: BLE001, S110 — la auditoría rota no puede tumbar el ciclo
             pass
+
+    def _vigilar_token(self, e: BaseException) -> None:
+        """Un 190/102 de Meta al leer: se marca el token como caducado (no más gasto) y se avisa una vez."""
+        if isinstance(e, ErrorGraph) and clasificar(e) == "token" and not self.almacen.leer_kv(CLAVE_TOKEN):
+            self.almacen.poner_kv(CLAVE_TOKEN, self.reloj().isoformat())
+            self._decir(AVISO_TOKEN)
 
     def _decir(self, texto: str, botones: list[list[Boton]] | None = None, *, sonido: bool = True) -> int | None:
         """Envía un mensaje al chat emparejado; un fallo de Telegram se audita y devuelve None."""
@@ -392,6 +431,7 @@ class Ejecutor:
             vv = self._leer_vivo(p)
             obsoleta = self._obsoleta(p, vv)
         except Exception as e:  # noqa: BLE001 — EntidadAjena, LecturaIncompleta, ErrorRed… = rechazo
+            self._vigilar_token(e)
             return self._rechazar_recibida(id, f"no se pudo leer Meta: {self._texto_error(e)}")
         if obsoleta:
             if self._transicion(id, "recibida", "obsoleta", motivo=obsoleta):
@@ -448,7 +488,273 @@ class Ejecutor:
             self._copiar(fila.id, None, texto)
 
     def _despachar_montaje(self, fila: FilaPropuesta) -> None:
-        self._rechazar_recibida(fila.id, "montaje aún no disponible")
+        """``crear_estructura_pausada`` no gasta (todo en PAUSED; su ``activar`` pide Aceptar): se monta sin
+        botones, pero antes pasa STOP, token, moneda viva y ``comprobar`` (páginas, datasets, topes)."""
+        id, p = fila.id, fila.propuesta
+        if stop_activo(self.rutas):
+            return self._rechazar_recibida(id, "STOP activo")
+        if self.almacen.leer_kv(CLAVE_TOKEN):
+            return self._rechazar_recibida(id, MOTIVO_TOKEN)
+        motivo = self._validar(p, None)
+        if motivo:
+            return self._rechazar_recibida(id, motivo)
+        if not self._transicion(id, "recibida", "ejecutando"):
+            return
+        if self.rutas.vault is None:
+            if self._transicion(id, "ejecutando", "fallida", motivo="sin vault configurado"):
+                self._editar_desenlace(id, None, Desenlace("fallida", self.reloj(), codigo="sin vault configurado"))
+            return
+        try:
+            r = montar(p, GraphConStop(self.graph, self.rutas), self.almacen, self.auditoria, self.rutas.vault,
+                       ahora=self.reloj)
+        except Exception as e:  # noqa: BLE001 — montar no debería lanzar; si lo hace, no se sabe qué creó
+            r = Resultado("discrepancia", f"error inesperado en el montaje ({self._texto_error(e)}): puede "
+                                          "haberse creado algo; revisa Ads Manager", error="otro")
+        self._cerrar(id, r, None)
+
+    # -- toques y ejecución ---------------------------------------------------------------------------
+    def _responder_toque(self, callback_id: str, texto: str) -> None:
+        try:
+            self.telegram.responder_callback(callback_id, texto)
+        except _ERRORES_TELEGRAM as e:
+            self._anotar_error("telegram", e)
+
+    def _editar(self, mid: int, texto: str, botones: list[list[Boton]] | None = None) -> bool:
+        if self._chat is None:
+            return False
+        try:
+            self.telegram.editar(self._chat, mid, self._limpio(texto), botones)
+            return True
+        except _ERRORES_TELEGRAM as e:
+            self._anotar_error("telegram", e)
+            return False
+
+    def _editar_desenlace(self, id: str, mid: int | None, d: Desenlace,
+                          botones: list[list[Boton]] | None = None) -> str:
+        """Reescribe el mensaje de la propuesta con su desenlace (sin botones salvo que se pidan).
+        Si no hay mensaje (montaje) o no se puede editar, envía uno nuevo. Devuelve el texto final."""
+        fila = self.almacen.obtener(id)
+        original = fila.datos.get("texto") if fila is not None else None
+        if not isinstance(original, str):
+            original = f"{id} · {fila.tipo if fila is not None else '?'}"
+        final = render_resultado(original, d)
+        propio = fila.message_id if fila is not None else None
+        if fila is not None and (fila.datos.get("resumen") or (mid is not None and propio is not None
+                                                               and mid != propio)):
+            self._editar_en_resumen(fila, mid, d, final)
+            return final
+        destino = mid if mid is not None else propio
+        if destino is None or not self._editar(destino, final, botones):
+            self._decir(final, botones)
+        return final
+
+    def _editar_en_resumen(self, fila: FilaPropuesta, mid: int | None, d: Desenlace, final: str) -> None:
+        """Gancho de la Tarea 5 (resúmenes): reescribir solo el bloque de esta propuesta. Mientras tanto no
+        se toca el resumen (pisarlo borraría las demás) y el desenlace va en un mensaje aparte."""
+        self._decir(final)
+
+    def _caducada(self, fila: FilaPropuesta) -> bool:
+        try:
+            return self.reloj() >= self._caduca(fila)
+        except Exception:  # noqa: BLE001 — sin poder calcularla, se da por caducada (falla cerrada)
+            return True
+
+    def _toque(self, a: Toque) -> None:
+        self._responder_toque(a.callback_id, RECIBIDO)  # antes de nada más
+        fila = self.almacen.obtener(a.id)
+        if fila is None:
+            self._decir(f"{a.id}: propuesta desconocida; no se hizo nada")
+            return
+        ahora = self.reloj()
+        if a.accion == "R":
+            if not self._transicion(a.id, "enviada", "rechazada", callback_id=a.callback_id,
+                                    motivo="rechazada en Telegram"):
+                return self._ya_procesada(a.id)
+            self._editar_desenlace(a.id, a.message_id, Desenlace("rechazada", ahora))
+            pregunta = self._decir(PREGUNTA_MOTIVO.format(id=a.id), sonido=False)
+            if pregunta is not None:
+                self.almacen.actualizar_datos(a.id, "rechazada", pregunta_motivo=pregunta)
+            self._copiar(a.id)
+            return
+        if stop_activo(self.rutas):
+            if fila.estado == "enviada" and self._chat is not None and self.secretos.hmac_clave:
+                # La fila sigue enviada: se conservan los botones para cuando se quite el STOP.
+                self._editar_desenlace(a.id, a.message_id, Desenlace("stop", ahora),
+                                       botones_propuesta(a.id, self._chat, self.secretos.hmac_clave))
+            else:
+                self._decir(STOP_ACTIVO)
+            return
+        if fila.estado == "enviada" and self._caducada(fila):
+            if self._transicion(a.id, "enviada", "caducada", motivo="caducada al tocar Aceptar"):
+                self._editar_desenlace(a.id, a.message_id, Desenlace("caducada", ahora))
+                self._copiar(a.id)
+            return
+        if not self._transicion(a.id, "enviada", "aceptada", callback_id=a.callback_id,
+                                aceptada_en=ahora.isoformat()):
+            return self._ya_procesada(a.id)
+        self._ejecutar(a.id, a.message_id)
+
+    def _ya_procesada(self, id: str) -> None:
+        fila = self.almacen.obtener(id)
+        self._decir(texto_ya_procesada(fila.estado) if fila is not None else f"{id}: propuesta desconocida")
+
+    def _fallar_aceptada(self, id: str, mid: int | None, motivo: str, desenlace: str = "fallida") -> None:
+        motivo = self._limpio(motivo)[:500]
+        if self._transicion(id, "aceptada", "fallida", motivo=motivo):
+            d = (Desenlace("stop", self.reloj()) if desenlace == "stop"
+                 else Desenlace("fallida", self.reloj(), codigo=motivo))
+            self._copiar(id, None, self._editar_desenlace(id, mid, d))
+
+    def _ejecutar(self, id: str, mid: int | None) -> None:
+        """Orden (resolución 9 y notas del plan 11): desfase → STOP → token → valores_vivos → obsoleta →
+        moneda → comprobar → ``aceptada→ejecutando`` → ``ejecutar``. Sin ``ejecutando`` no hay Meta."""
+        fila = self.almacen.obtener(id)
+        if fila is None or fila.estado != "aceptada":
+            return
+        p, ahora = fila.propuesta, self.reloj()
+        if self.desfase_s is not None and abs(self.desfase_s) > DESFASE_MAX_S:
+            self._decir(AVISO_DESFASE.format(id=id, s=int(self.desfase_s)))
+            self.auditoria.anotar("reloj_desfasado", id=id, desfase_s=int(self.desfase_s))
+            return
+        if stop_activo(self.rutas):
+            return self._fallar_aceptada(id, mid, "STOP activo", desenlace="stop")
+        if p.tipo in _TOCA_META and self.almacen.leer_kv(CLAVE_TOKEN):
+            return self._fallar_aceptada(id, mid, MOTIVO_TOKEN)
+        try:
+            vv = self._leer_vivo(p)
+            obsoleta = self._obsoleta(p, vv)
+        except Exception as e:  # noqa: BLE001 — cualquier fallo de lectura = no se ejecuta
+            self._vigilar_token(e)
+            return self._fallar_aceptada(id, mid, f"no se pudo leer Meta: {self._texto_error(e)}")
+        if obsoleta:
+            if self._transicion(id, "aceptada", "obsoleta", motivo=obsoleta):
+                self._copiar(id, None, self._editar_desenlace(id, mid, Desenlace("obsoleta", ahora,
+                                                                                  relectura=obsoleta)))
+            return
+        motivo = self._validar(p, vv)
+        if motivo:
+            return self._fallar_aceptada(id, mid, motivo)
+        if not self._transicion(id, "aceptada", "ejecutando"):
+            return  # otro ya la ejecuta o ejecutó: nunca hay segunda ejecución
+        self._editar_desenlace(id, mid, Desenlace("ejecutando", ahora))
+        try:
+            r = ejecutar(p, GraphConStop(self.graph, self.rutas), self.almacen, self.auditoria, ahora=self.reloj)
+        except Exception as e:  # noqa: BLE001 — ejecutar no debería lanzar; si lo hace, estado desconocido
+            r = Resultado("discrepancia", f"error inesperado al ejecutar ({self._texto_error(e)}): puede "
+                                          "haberse aplicado algo; revísalo en Ads Manager", error="otro")
+        self._cerrar(id, r, mid)
+
+    def _comprobar_cambio_limite(self, cambio: dict, p: Propuesta) -> None:
+        actual = self._limite_actual(cambio["id"], cambio["clave"])
+        if actual is None or actual != cambio["de"]:
+            raise ValueError(f"{cambio['clave']} de {cambio['id']} vale {actual}, no {cambio['de']}")
+        if "moneda" in cambio:
+            lc = self.limites.cuentas[cambio["id"]]
+            if cambio["moneda"] != lc.moneda_codigo:
+                raise ValueError(f"moneda {cambio['moneda']} distinta de la de la cuenta ({lc.moneda_codigo})")
+
+    def _aplicar_cambio_limite(self, cambio: dict, cuenta: str | None) -> None:
+        """Escribe ``limites.yaml`` (Tarea 5). Hasta entonces falla cerrado: el resultado es ``fallida``."""
+        raise NotImplementedError("escritura de limites.yaml pendiente (Tarea 5)")
+
+    @staticmethod
+    def _hay_creados(r: Resultado) -> bool:
+        return bool(r.ids_creados) and any(bool(v) for v in r.ids_creados.values())
+
+    def _cerrar(self, id: str, r: Resultado, mid: int | None) -> None:
+        fila = self.almacen.obtener(id)
+        if fila is None:
+            return
+        p, ahora = fila.propuesta, self.reloj()
+        # ejecutando → {ejecutada, fallida, discrepancia}: una obsoleta de ejecutar() es una fallida.
+        estado = r.estado if r.estado in ("ejecutada", "fallida", "discrepancia") else "fallida"
+        detalle = r.detalle
+        if r.cambio_limite is not None and estado == "ejecutada":
+            try:
+                self._comprobar_cambio_limite(r.cambio_limite, p)
+                self._aplicar_cambio_limite(r.cambio_limite, p.cuenta)
+                self._limites_mtime = None
+                self._recargar_limites()
+                c = r.cambio_limite
+                self.auditoria.anotar(EV_LIMITE_CAMBIADO, clave=c["clave"], de=c["de"], a=c["a"], id=c["id"],
+                                      propuesta=id)
+            except Exception as e:  # noqa: BLE001 — sin escribir limites.yaml no hay cambio
+                estado = "fallida"
+                detalle = f"{detalle} | no se pudo escribir limites.yaml: {self._texto_error(e)}"
+                self.auditoria.anotar(EV_EJECUCION, id=id, tipo=p.tipo, validate_only=False, ok=False,
+                                      detalle=self._limpio(detalle)[:500])
+        nueva_id: str | None = None
+        aviso: str | None = None
+        if r.nueva_propuesta is not None:
+            try:
+                nueva = cargar_propuesta(r.nueva_propuesta)
+                self.almacen.registrar(nueva)
+                self.auditoria.anotar(EV_RECIBIDA, id=nueva.id, tipo=nueva.tipo, origen=id)
+                nueva_id = nueva.id
+            except sqlite3.OperationalError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                aviso = f"no se pudo registrar la propuesta nueva: {self._texto_error(e)}; créala a mano"
+        datos: dict[str, Any] = {"detalle": self._limpio(detalle)[:2000], "parcial": r.parcial}
+        if r.error:
+            datos["error"] = r.error
+        if r.ids_creados:
+            datos["ids_creados"] = r.ids_creados
+        if r.reintentable_desde is not None:
+            datos["reintentable_desde"] = r.reintentable_desde.isoformat()  # solo se guarda; nunca se reintenta
+        if nueva_id:
+            datos["nueva_propuesta"] = nueva_id
+        if aviso:
+            datos["aviso"] = aviso
+        if estado != r.estado:
+            datos["motivo"] = self._limpio(detalle)[:500]
+        self._transicion(id, "ejecutando", estado, **datos)
+        if r.error == "token":
+            self.almacen.poner_kv(CLAVE_TOKEN, ahora.isoformat())
+            self._decir(AVISO_TOKEN)
+        final = self._editar_desenlace(id, mid, self._desenlace(estado, r, detalle, nueva_id, aviso, ahora))
+        self._copiar(id, r, final)
+        if nueva_id:
+            try:
+                self._despachar(nueva_id)
+            except sqlite3.OperationalError:
+                raise
+            except Exception as e:  # noqa: BLE001
+                self._anotar_error("despachar", e)
+
+    def _desenlace(self, estado: str, r: Resultado, detalle: str, nueva_id: str | None, aviso: str | None,
+                   ahora: datetime) -> Desenlace:
+        lineas: tuple[str, ...] = ()
+        if len(r.operaciones) > 1:
+            lineas = tuple(f"{o.entidad_id} {o.campo}: {o.estado} ({o.antes} → {o.despues})" for o in r.operaciones)
+        if aviso:
+            lineas += (aviso,)
+        if r.estado == "obsoleta":
+            return Desenlace("obsoleta", ahora, relectura=detalle, lineas_lote=lineas)
+        if estado == "ejecutada":
+            leido = "; ".join(f"{o.entidad_id[-4:]} {o.campo} {o.despues}" for o in r.operaciones
+                              if o.estado == "ejecutada")
+            return Desenlace("ejecutada", ahora, relectura=leido or detalle, lineas_lote=lineas)
+        if estado == "discrepancia":
+            return Desenlace("discrepancia", ahora, relectura=detalle, nueva_propuesta=nueva_id, lineas_lote=lineas)
+        aplicado = (r.parcial or self._hay_creados(r)
+                    or any(o.estado in ("ejecutada", "discrepancia") for o in r.operaciones))
+        return Desenlace("fallida", ahora, codigo=f"{r.error or 'otro'}: {detalle}", aplicado=aplicado,
+                         lineas_lote=lineas)
+
+    def _guardar_motivo(self, a: GuardarMotivo) -> None:
+        m = a.motivo
+        fila = self.almacen.obtener(m.id)
+        if fila is None or fila.estado != "rechazada":
+            self.auditoria.anotar(EV_MENSAJE_IGNORADO, motivo="motivo_sin_rechazo", id=m.id)
+            return
+        n = 1
+        nota = nota_motivo(m, fila.propuesta, n)
+        while self.rutas.vault is not None and os.path.lexists(self.rutas.vault / nota.ruta_relativa):
+            n += 1
+            nota = nota_motivo(m, fila.propuesta, n)
+        guardado = self.copia.motivo(nota)
+        self.auditoria.anotar("motivo_rechazo", id=m.id, n=n, guardado=guardado)
 
     # -- Telegram -----------------------------------------------------------------------------------
     def atender_updates(self) -> int:
@@ -490,6 +796,10 @@ class Ejecutor:
 
     def _responder(self, a: Responder) -> None:
         self._decir(a.texto)
+
+    def _responder_toque_invalido(self, a: ResponderToque) -> None:
+        self._responder_toque(a.callback_id, a.texto)
+        self.auditoria.anotar(EV_CALLBACK_INVALIDO, motivo=a.motivo)
 
     # -- ciclo ----------------------------------------------------------------------------------------
     def ciclo(self) -> None:
