@@ -13,7 +13,7 @@ from pathlib import Path
 
 from trovefy_ejecutor import auditoria as _aud
 
-from trovefy.aprobaciones.fuentes import leer_estado
+from trovefy.aprobaciones.fuentes import enmascarar_cuentas, leer_estado
 from trovefy.vault import frontmatter
 
 ID_PROPUESTA = re.compile(r"^P-\d{8}-\d{3}$")
@@ -181,6 +181,11 @@ def listar(vault: Path) -> tuple[list[FilaAprobacion], list[str]]:
 
 
 def explicar(vault: Path, id: str) -> str:
+    """Texto para el usuario, con los ids de cuenta enmascarados."""
+    return enmascarar_cuentas(_explicar(vault, id))
+
+
+def _explicar(vault: Path, id: str) -> str:
     if not isinstance(id, str) or not ID_PROPUESTA.match(id):
         raise ValueError(f"id inválido (formato P-AAAAMMDD-NNN): {id!r}")
     eventos, _ = _leer_auditoria(vault)
@@ -338,13 +343,6 @@ def resumen_estado(vault: Path, ahora: datetime, spool: Path | None = None) -> l
                     out.append(f"Límites cuenta {n} (solo lectura): {_s(c.get('moneda'))} "
                                f"tope diario {_s(c.get('tope_gasto_diario_total'))}, "
                                f"máx. conjunto {_s(c.get('max_presupuesto_conjunto'))}")
-        lectura = vault / "config" / "limites_ejecutor.lectura.yaml"
-        if lectura.is_file() and not lectura.is_symlink():
-            try:
-                out.append("Copia de lectura config/limites_ejecutor.lectura.yaml:")
-                out += [f"  {x}" for x in lectura.read_text(encoding="utf-8").splitlines()[:20]]
-            except (OSError, UnicodeDecodeError):
-                out.append("  no medido: ilegible")
     eventos, avisos = _leer_auditoria(vault)
     rech = [e for e in eventos if e["evento"] == "validacion_rechazada"][-5:]
     if rech:
@@ -357,7 +355,7 @@ def resumen_estado(vault: Path, ahora: datetime, spool: Path | None = None) -> l
                 for e in camb]
     out += [f"Aviso: {a}" for a in avisos]
     out += _verificar_cadena(vault) or ["Auditoría: la copia cuadra"]
-    return out
+    return [enmascarar_cuentas(x) for x in out]
 
 
 def propuesta_noop(ahora: datetime) -> dict:

@@ -65,3 +65,14 @@ def test_probar_sin_buzon(entorno, monkeypatch, capsys):
     monkeypatch.setitem(sys.modules, "trovefy.buzon", None)
     assert cli.main(["aprobaciones", "probar"]) == 1
     assert "plan 12" in capsys.readouterr().err
+
+
+def test_listar_enmascara_la_cuenta(entorno, capsys):
+    import json
+    with (entorno / "ledger" / "auditoria" / "2026-11-13.jsonl").open("a") as f:
+        f.write(json.dumps({"n": 11, "ts": "2026-11-13T15:00:00+00:00", "evento": "recibida",
+                            "datos": {"id": "P-20261113-004", "tipo": "noop",
+                                      "motivo": "límite de act_1234567890123456"}}) + "\n")
+    assert cli.main(["aprobaciones", "listar"]) == 0
+    out = capsys.readouterr().out
+    assert "act_1234567890123456" not in out and "límite de act_…3456" in out

@@ -29,6 +29,7 @@ def _ejecutar(args: argparse.Namespace) -> int:
             texto += "\nAlerta propuesta por el buzón.\n"
         except fuentes.BuzonNoDisponible as e:
             texto += f"\nno medido: aviso por Telegram ({e})\n"
+    texto = fuentes.enmascarar_cuentas(texto)
     print(texto, end="")
     if args.rutina:
         registrar_ejecucion(vault, "vigia", ahora.date(), texto, ok=True, ahora=ahora)

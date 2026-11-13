@@ -62,7 +62,7 @@ def test_explicar_muestra_motivo_y_eventos(vault):
     t = explicar(vault, "P-20261112-002")
     assert "pausar" in t and "ejecutada" in t
     assert "recibida" in t and "sin cambios" in t
-    assert "act_0000000000000000 status" in t
+    assert "act_…0000 status" in t
     t3 = explicar(vault, "P-20261112-003")
     assert "campo no permitido: x" in t3
 
@@ -253,3 +253,28 @@ def test_orden_por_fecha_real_y_espejo_sin_auditoria_dice_actualizada(vault):
     f = _por_id(filas)["P-20261113-007"]
     assert f.creada == "actualizada 2026-11-13T09:45:00-05:00"
     assert "Actualizada: 2026-11-13T09:45:00-05:00" in explicar(vault, "P-20261113-007")
+
+
+# --- máscara de ids de cuenta ---
+
+LARGA = "act_1234567890123456"
+
+
+def test_explicar_y_estado_enmascaran_la_cuenta(vault, tmp_path):
+    ruta = vault / "propuestas" / "P-20261112-002.md"
+    ruta.write_text(ruta.read_text().replace("act_0000000000000000", LARGA))
+    _evento(vault, "2026-11-13", n=11, ts="2026-11-13T15:00:00+00:00", evento="validacion_rechazada",
+            datos={"id": "P-20261113-004", "motivo": f"cuenta {LARGA} no permitida"})
+    t = explicar(vault, "P-20261112-002")
+    assert LARGA not in t and "act_…3456 status" in t
+    assert LARGA not in explicar(vault, "P-20261113-004")
+    s = _spool(tmp_path, limites={"cuentas": {LARGA: {"moneda": "COP"}}}, latido={"fecha": AHORA.isoformat()})
+    out = "\n".join(resumen_estado(vault, AHORA, s))
+    assert LARGA not in out and "cuenta act_…3456 no permitida" in out
+
+
+def test_estado_no_lee_la_copia_de_lectura_muerta(vault, tmp_path):
+    (vault / "config").mkdir()
+    (vault / "config" / "limites_ejecutor.lectura.yaml").write_text("secreto: 1\n")
+    s = _spool(tmp_path, latido={"fecha": AHORA.isoformat()})
+    assert "limites_ejecutor.lectura" not in "\n".join(resumen_estado(vault, AHORA, s))

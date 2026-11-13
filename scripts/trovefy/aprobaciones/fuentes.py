@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib
 import json
 import os
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,12 @@ ZONA_COT = timezone(timedelta(hours=-5))
 SPOOL_POR_DEFECTO = "/var/spool/trovefy"
 ESTADOS = ("latido", "stop", "limites", "meta", "emparejamiento")
 _MAX_BYTES = 1 << 20
+_ACT = re.compile(r"act_(\d+)")
+
+
+def enmascarar_cuentas(texto: str) -> str:
+    """``act_1234567890123456`` → ``act_…3456``: el número real de la cuenta nunca sale por pantalla ni por Telegram."""
+    return _ACT.sub(lambda m: f"act_…{m.group(1)[-4:]}", texto)
 
 
 class BuzonNoDisponible(Exception):

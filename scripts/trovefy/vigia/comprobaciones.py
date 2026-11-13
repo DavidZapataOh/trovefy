@@ -14,7 +14,12 @@ from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Literal
 
-from trovefy.aprobaciones.fuentes import Lectura, leer_estado, ruta_spool
+from trovefy.aprobaciones.fuentes import (
+    Lectura,
+    enmascarar_cuentas,
+    leer_estado,
+    ruta_spool,
+)
 from trovefy.arranque.verificadores.apimart import BASE_POR_DEFECTO, consultar_saldo
 from trovefy.caja.config import cargar_caja
 from trovefy.rutinas import TIMER_CAZA, directorio_unidades
@@ -265,8 +270,8 @@ def alerta(comprobaciones: list[Comprobacion]) -> dict | None:
         return None
     nivel = "urgente" if any(x.nivel == "urgente" for x in malas) else "aviso"
     return {"tipo": "alerta", "origen": "/vigia", "nivel": nivel, "titulo": f"Vigía: {len(malas)} avisos",
-            "texto": "\n".join(f"{x.nombre}: {x.texto}" for x in malas)[:3000]}
+            "texto": enmascarar_cuentas("\n".join(f"{x.nombre}: {x.texto}" for x in malas))[:3000]}
 
 
 def informe(comprobaciones: list[Comprobacion]) -> str:
-    return "\n".join(f"- {_ICONO[x.nivel]} · {x.nombre}: {x.texto}" for x in comprobaciones) + "\n"
+    return enmascarar_cuentas("\n".join(f"- {_ICONO[x.nivel]} · {x.nombre}: {x.texto}" for x in comprobaciones)) + "\n"

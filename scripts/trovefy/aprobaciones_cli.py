@@ -29,7 +29,7 @@ def _vault():
 def _listar(args: argparse.Namespace) -> int:
     filas, avisos = listado.listar(_vault())
     for a in avisos:
-        print(f"Aviso: {a}", file=sys.stderr)
+        print(fuentes.enmascarar_cuentas(f"Aviso: {a}"), file=sys.stderr)
     if not filas:
         print("No hay propuestas.")
         return 0
@@ -39,7 +39,7 @@ def _listar(args: argparse.Namespace) -> int:
         sel = [f for f in filas if listado.grupo_de(f.estado) == grupo]
         print(f"{grupo} ({len(sel)})")
         for f in sel:
-            print(f"  {f.id}  {f.tipo}  {f.estado}  {f.creada}  {f.origen}  {f.motivo}")
+            print(fuentes.enmascarar_cuentas(f"  {f.id}  {f.tipo}  {f.estado}  {f.creada}  {f.origen}  {f.motivo}"))
     if not args.todas:
         resto = sum(1 for f in filas if listado.grupo_de(f.estado) != "pendientes")
         if resto:
@@ -58,7 +58,7 @@ def _probar(_args: argparse.Namespace) -> int:
     try:
         id_ = fuentes.depositar(_vault(), listado.propuesta_noop(ahora), lambda: ahora)
     except fuentes.BuzonNoDisponible as e:
-        print(f"No se pudo depositar la prueba: {e}", file=sys.stderr)
+        print(fuentes.enmascarar_cuentas(f"No se pudo depositar la prueba: {e}"), file=sys.stderr)
         return 1
     print(f"Prueba depositada: {id_}. Debería llegarte a Telegram; pulsa Aceptar o Rechazar. No cambia nada en Meta.")
     return 0

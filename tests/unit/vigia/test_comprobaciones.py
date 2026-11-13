@@ -225,3 +225,15 @@ def test_vigilar_completo(tmp_path):
     res = c.vigilar(vault, AHORA, fu)
     assert any("El ejecutor avisa: x" in x.texto for x in res)
     assert c.alerta(res)["titulo"] == "Vigía: 1 avisos"
+
+
+LARGA = "act_1234567890123456"
+
+
+def test_vigia_enmascara_ids_de_cuenta_en_informe_y_alerta():
+    res = [Comprobacion("tokens", "urgente", f"el token de Meta falla: (#200) {LARGA} sin permiso"),
+           Comprobacion("stop", "info", f"STOP del ejecutor activo ({LARGA})")]
+    t = c.informe(res)
+    a = c.alerta(res)
+    assert LARGA not in t and LARGA not in a["texto"]
+    assert "act_…3456" in t and "act_…3456" in a["texto"]
