@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
+import os
+import secrets as _secrets
+from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -25,6 +27,7 @@ from trovefy_ejecutor.graph import (
     _valor,
 )
 from trovefy_ejecutor.montaje import IDIOMAS_META
+from trovefy_ejecutor.secretos import Secretos
 from trovefy_ejecutor.telegram import MAX_TEXTO, Boton, ErrorTelegram, largo_telegram
 
 _IMPORTES = ("daily_budget", "lifetime_budget", "bid_amount", "spend_cap")
@@ -317,3 +320,318 @@ class GraphSimulado:
             account_status=_entero(r.get("account_status")) or 0,
             amount_spent=_entero(r.get("amount_spent")),
         )
+
+
+# == Simulacro de extremo a extremo ===============================================================
+_CUENTA = "act_0000000000000000"
+_PAGINA, _DATASET = "1357661930771909", "8877665544"
+_C1, _S1, _A1 = "100000001", "100000011", "100000021"
+_RUTA_IMG, _BYTES_IMG = "productos/p-0001/creativos/BG/t1/img01.jpg", b"\xff\xd8\xff imagen de prueba"
+_ESPERA_MOTIVO = "¿Motivo?"
+
+
+class _Reloj:
+    def __init__(self, t: datetime) -> None:
+        self.t = t
+
+    def __call__(self) -> datetime:
+        return self.t
+
+    def avanzar(self, **kw: float) -> None:
+        self.t += timedelta(**kw)
+
+
+def _limites_simulacro() -> dict:
+    return {
+        "version": 1, "cuentas_permitidas": [_CUENTA], "paso_max_pct": 50,
+        "cadencia_min_presupuesto_min": 120, "enfriamiento_puja_estructura_h": 48, "max_cambios_hora_conjunto": 4,
+        "acciones_permitidas": ["noop", "alerta", "crear_estructura_pausada", "activar", "pausar", "presupuesto",
+                                "lote", "spend_cap", "limite_cuenta", "limite_ejecutor", "puja"],
+        "montaje_status_forzado": "PAUSED",
+        "cuentas": {_CUENTA: {
+            "moneda": "COP", "offset": 1, "zona_horaria": "America/Bogota",
+            "tope_gasto_diario_total": 165000, "max_presupuesto_conjunto": 99000,
+            "max_presupuesto_campana_cbo": 132000, "spend_cap_test": 99000, "spend_cap_test_prorroga": 181500,
+            "paginas_permitidas": [_PAGINA], "datasets_permitidos": [_DATASET]}},
+    }
+
+
+def _graph_numerico() -> GraphSimulado:
+    """``GraphSimulado`` con los ids numéricos que exige el esquema (§5.2)."""
+    g = GraphSimulado(_CUENTA, "COP")
+    ren = {"c1": _C1, "s1": _S1, "a1": _A1}
+    objetos = {}
+    for k, v in g.objetos.items():
+        v = dict(v)
+        for campo in ("campaign_id", "adset_id"):
+            if campo in v:
+                v[campo] = ren[v[campo]]
+        objetos[ren[k]] = v
+    g.objetos = objetos
+    g._hijos = {ren[k]: (ar, {ren.get(x, x) for x in padres}) for k, (ar, padres) in g._hijos.items()}
+    return g
+
+
+class _Mundo:
+    """Un ejecutor real con Telegram y Graph en proceso, todo dentro de ``carpeta`` (un mundo por paso)."""
+
+    def __init__(self, carpeta: Path, secretos: Secretos, ahora: datetime) -> None:
+        from trovefy_ejecutor import ejecutar as _ejecutar
+        from trovefy_ejecutor.config import RutasEjecutor
+        from trovefy_ejecutor.servicio import Ejecutor
+
+        _ejecutar._EMITIDOS.clear()  # memoria de ids emitidos por proceso: cada paso parte limpio
+        carpeta.mkdir(parents=True)
+        datos = carpeta / "datos"
+        vault = carpeta / "vault"
+        img = vault / _RUTA_IMG
+        img.parent.mkdir(parents=True)
+        img.write_bytes(_BYTES_IMG)
+        self.rutas = RutasEjecutor(
+            secretos=carpeta.parent / "secretos.env", limites=carpeta / "limites.yaml",
+            base=datos / "estado.sqlite", auditoria=datos / "auditoria.jsonl", stop=datos / "STOP",
+            spool=carpeta / "spool", vault=vault)
+        import yaml
+        self.rutas.limites.write_text(yaml.safe_dump(_limites_simulacro()), encoding="utf-8")
+        os.chmod(self.rutas.limites, 0o600)
+        self.secretos = secretos
+        self.clave = secretos.hmac_clave or b""
+        self.reloj = _Reloj(ahora)
+        self.tg = TelegramSimulado(42, 42, ahora=self.reloj)
+        self.graph = _graph_numerico()
+        self.ej = Ejecutor(self.rutas, self.tg, self.graph, secretos, reloj=self.reloj, modo="simulado")
+        self._ejecutar = _ejecutar
+        self._Ejecutor = Ejecutor
+
+    def reiniciar(self) -> None:
+        self.ej.almacen.cerrar()
+        self.ej = self._Ejecutor(self.rutas, self.tg, self.graph, self.secretos, reloj=self.reloj, modo="simulado")
+
+    def cerrar(self) -> None:
+        self.ej.almacen.cerrar()
+        self._ejecutar._EMITIDOS.clear()
+
+    def id(self, n: int) -> str:
+        return f"P-{self.reloj():%Y%m%d}-{n:03d}"
+
+    def creada(self) -> str:
+        return (self.reloj() - timedelta(minutes=1)).isoformat()
+
+    def depositar(self, d: dict) -> None:
+        ruta = self.rutas.spool / "entrada" / f"{d['id']}.json"
+        ruta.write_text(json.dumps(d), encoding="utf-8")
+        viejo = self.reloj().timestamp() - 60
+        os.utime(ruta, (viejo, viejo))
+
+    def enviar(self, d: dict) -> str:
+        self.depositar(d)
+        self.ej.ciclo()
+        _exigir(self.estado(d["id"]) == "enviada", f"{d['id']} no llegó a enviada ({self.estado(d['id'])})")
+        return d["id"]
+
+    def estado(self, id: str) -> str:
+        fila = self.ej.almacen.obtener(id)
+        return "inexistente" if fila is None else fila.estado
+
+    def eventos(self, nombre: str) -> list[dict]:
+        return [x["datos"] for x in map(json.loads, self.rutas.auditoria.read_text(encoding="utf-8").splitlines())
+                if x["evento"] == nombre]
+
+    def mensaje_de(self, id: str) -> dict:
+        fila = self.ej.almacen.obtener(id)
+        assert fila is not None and fila.message_id is not None
+        return self.tg.mensajes[fila.message_id]
+
+    def escrituras(self) -> list[tuple]:
+        return list(self.graph.escrituras)
+
+    # propuestas (§5.2)
+    def noop(self, n: int = 1) -> dict:
+        return {"version": 1, "id": self.id(n), "tipo": "noop", "creada": self.creada(), "origen": "/probar",
+                "motivo": "Prueba de extremo a extremo", "prioridad": "normal", "expira_en_min": 30}
+
+    def presupuesto(self, n: int = 3) -> dict:
+        return {"version": 1, "id": self.id(n), "tipo": "presupuesto", "creada": self.creada(),
+                "origen": "/leer --intradia", "producto": "p-0001-herramientas", "pais": "BG", "cuenta": _CUENTA,
+                "operaciones": [{"entidad": "adset", "id": _S1, "campo": "daily_budget", "de_esperado": 20000,
+                                 "a": 26000, "unidad": "minima", "moneda": "COP"}],
+                "motivo": "ROAS neto acum. 2,6", "reinicia_aprendizaje": False, "prioridad": "normal",
+                "expira_en_min": 45}
+
+    def estructura(self, n: int = 2) -> dict:
+        return {"version": 1, "id": self.id(n), "tipo": "crear_estructura_pausada", "creada": self.creada(),
+                "origen": "/montar", "producto": "p-0001", "pais": "BG", "cuenta": _CUENTA, "pagina_id": _PAGINA,
+                "dataset_id": _DATASET,
+                "medios": [{"ref": "img01", "ruta": _RUTA_IMG, "sha256": hashlib.sha256(_BYTES_IMG).hexdigest()}],
+                "campana": {"nombre": "PRUEBA BG | ABO", "objetivo": "OUTCOME_SALES", "tipo_presupuesto": "ABO",
+                            "spend_cap": 90000, "bid_strategy": "LOWEST_COST_WITHOUT_CAP"},
+                "conjuntos": [{"nombre": "01 IMG", "daily_budget": 20000, "paises": ["BG"], "idiomas": ["bg"],
+                               "evento": "PURCHASE", "ubicaciones_excluidas": ["audience_network"],
+                               "anuncios": [{"nombre": "AD01", "medio": "img01", "texto": "Texto",
+                                             "titulo": "Titulo", "descripcion": "Descripcion",
+                                             "cta": "LEARN_MORE", "url": "https://example.com/bg"}]}],
+                "unidad": "minima", "moneda": "COP"}
+
+
+def _exigir(cond: object, motivo: str) -> None:
+    if not cond:
+        raise AssertionError(motivo)
+
+
+def _paso_noop(m: _Mundo) -> None:
+    id = m.enviar(m.noop())
+    cb = m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    _exigir(m.estado(id) == "ejecutada", f"estado {m.estado(id)}")
+    _exigir(any(c == cb for c, _ in m.tg.respuestas_callback), "el toque no se respondió")
+    _exigir("EJECUTADA" in m.mensaje_de(id)["texto"] and not m.mensaje_de(id)["botones"], "mensaje sin cerrar")
+    _exigir((m.rutas.vault / f"propuestas/{id}.md").exists(), "sin registro en el vault")  # type: ignore[operator]
+    _exigir(m.ej.auditoria.verificar(), "cadena de auditoría rota")
+
+
+def _paso_rechazo(m: _Mundo) -> None:
+    id = m.enviar(m.presupuesto())
+    m.tg.tocar(id, "R", m.clave)
+    m.ej.ciclo()
+    _exigir(m.estado(id) == "rechazada" and not m.escrituras(), "no quedó rechazada sin escribir")
+    pregunta = next((k for k, v in m.tg.mensajes.items() if _ESPERA_MOTIVO in v["texto"]), None)
+    _exigir(pregunta is not None, "no preguntó el motivo")
+    m.tg.escribir("pico puntual", responde_a=pregunta)
+    m.ej.ciclo()
+    nota = m.rutas.vault / f"raw/telegram/motivos/{m.reloj():%Y-%m-%d}-{id}.md"  # type: ignore[operator]
+    _exigir(nota.exists() and "> pico puntual" in nota.read_text(encoding="utf-8"), "motivo no guardado")
+    _exigir(bool(m.eventos("motivo_rechazo")), "motivo sin auditar")
+
+
+def _paso_doble_toque(m: _Mundo) -> None:
+    id = m.enviar(m.presupuesto())
+    m.tg.tocar(id, "A", m.clave)
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    _exigir(m.estado(id) == "ejecutada", f"estado {m.estado(id)}")
+    _exigir(len(m.escrituras()) == 1, f"{len(m.escrituras())} escrituras en vez de 1")
+    _exigir(m.graph.objetos[_S1]["daily_budget"] == "26000", "presupuesto sin cambiar")
+
+
+def _paso_tardio(m: _Mundo) -> None:
+    id = m.enviar(m.presupuesto())  # caduca a los 45 min
+    m.reloj.avanzar(hours=1)
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    _exigir(m.estado(id) == "caducada" and not m.escrituras(), f"estado {m.estado(id)}")
+
+
+def _paso_stop(m: _Mundo) -> None:
+    from trovefy_ejecutor.render import STOP_ACTIVO
+    from trovefy_ejecutor.stop import activar_stop, stop_activo
+
+    id = m.enviar(m.presupuesto())
+    activar_stop(m.rutas, "simulacro", m.reloj())
+    _exigir(stop_activo(m.rutas), "el STOP no quedó activo")
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    _exigir(m.estado(id) == "enviada" and not m.escrituras(), f"estado {m.estado(id)}")
+    _exigir(m.mensaje_de(id)["texto"].endswith(STOP_ACTIVO), "el mensaje no avisa del STOP")
+
+
+def _paso_falsificado(m: _Mundo) -> None:
+    id = m.enviar(m.presupuesto())
+    data = firmar(id, "A", m.tg.chat_id, m.clave)
+    m.tg.tocar(id, "A", m.clave, data=data[:-1] + ("x" if data[-1] != "x" else "y"))
+    m.tg.tocar(id, "A", m.clave, user_id=99)
+    m.tg.tocar(id, "A", _secrets.token_bytes(32))
+    m.ej.ciclo()
+    _exigir(m.estado(id) == "enviada" and not m.escrituras(), f"estado {m.estado(id)}")
+    motivos = [e["motivo"] for e in m.eventos("callback_invalido")]
+    _exigir(motivos == ["callback_firma", "callback_usuario_ajeno", "callback_firma"], f"motivos {motivos}")
+
+
+def _paso_montaje(m: _Mundo) -> None:
+    d = m.estructura(2)
+    m.depositar(d)
+    m.ej.ciclo()
+    id = d["id"]
+    _exigir(m.estado(id) == "ejecutada", f"estado {m.estado(id)}: {m.ej.almacen.obtener(id).datos}")  # type: ignore[union-attr]
+    fila = m.ej.almacen.obtener(id)
+    nueva = fila.datos.get("nueva_propuesta")  # type: ignore[union-attr]
+    _exigir(nueva == m.id(800), f"propuesta de activación {nueva}")
+    _exigir(m.estado(m.id(800)) == "enviada", "la propuesta de activar no se envió")
+    _exigir(m.mensaje_de(m.id(800))["texto"].startswith(f"{m.id(800)} · ACTIVAR"), "texto de activar")
+    creados = [o for k, o in m.graph.objetos.items() if k.startswith("900") and "status" in o]
+    _exigir(len(creados) >= 3, f"{len(creados)} objetos creados")
+    _exigir(all(o.get("status") == "PAUSED" for o in creados), "algún objeto creado no está en PAUSED")
+
+
+def _paso_pausar_todo(m: _Mundo) -> None:
+    m.tg.escribir("/stop")
+    m.tg.escribir("/pausar_todo")
+    m.ej.ciclo()
+    _exigir(m.estado(m.id(900)) == "rechazada" and not m.escrituras(), f"estado {m.estado(m.id(900))}")
+    ultimo = m.tg.mensajes[max(m.tg.mensajes)]["texto"]
+    _exigir(ultimo.endswith("STOP activo: primero /reanudar y luego /pausar_todo"), "respuesta distinta")
+
+
+def _paso_reinicio(m: _Mundo) -> None:
+    id = m.enviar(m.presupuesto())
+    _exigir(m.ej.almacen.transicion(id, "enviada", "aceptada", callback_id="1"), "no pasó a aceptada")
+    _exigir(m.ej.almacen.transicion(id, "aceptada", "ejecutando"), "no pasó a ejecutando")
+    m.graph.objetos[_S1]["daily_budget"] = "26000"  # la escritura llegó a Meta antes de la caída
+    m.reiniciar()
+    m.ej.recuperar()
+    fila = m.ej.almacen.obtener(id)
+    _exigir(fila is not None and fila.estado == "ejecutada", f"estado {m.estado(id)}")
+    _exigir(not m.escrituras(), "el reinicio volvió a escribir en Meta")
+    _exigir("relectura tras reinicio" in str(fila.datos.get("detalle")), "sin la relectura")  # type: ignore[union-attr]
+
+
+_PASOS: tuple[tuple[str, Callable[[_Mundo], None]], ...] = (
+    ("noop → Aceptar → registro", _paso_noop),
+    ("presupuesto → Rechazar con motivo", _paso_rechazo),
+    ("doble toque", _paso_doble_toque),
+    ("toque tardío", _paso_tardio),
+    ("STOP activo", _paso_stop),
+    ("callback falsificado", _paso_falsificado),
+    ("crear_estructura_pausada", _paso_montaje),
+    ("STOP y luego /pausar_todo responde", _paso_pausar_todo),
+    ("reinicio en ejecutando no reescribe", _paso_reinicio),
+)
+
+
+def simulacro(raiz: Path, salida: Callable[[str], None]) -> list[tuple[str, bool]]:
+    """Recorre el ``Ejecutor`` real con Telegram y Graph en proceso. Sin red ni token reales.
+
+    Todo vive dentro de ``raiz`` (rutas, vault, spool, ``limites.yaml``, ``secretos.env`` 0600 con una clave
+    HMAC aleatoria y tokens ficticios): nunca lee el ``secretos.env`` real. Cada paso usa su propio mundo.
+    Imprime ``OK``/``FALLO`` por paso (sin secretos) y devuelve ``[(nombre, ok)]``.
+    """
+    from trovefy_ejecutor.auditoria import redactar
+    from trovefy_ejecutor.secretos import cargar_secretos, guardar_secretos
+
+    raiz = Path(raiz)
+    raiz.mkdir(parents=True, exist_ok=True)
+    env = raiz / "secretos.env"
+    guardar_secretos(env, {
+        "META_TOKEN": "EAA" + _secrets.token_hex(16),
+        "TELEGRAM_BOT_TOKEN": f"{_secrets.randbelow(900000) + 100000}:{_secrets.token_urlsafe(26)[:35]}",
+        "HMAC_CLAVE": _secrets.token_bytes(32).hex(),
+        "TELEGRAM_USER_ID": "42", "TELEGRAM_CHAT_ID": "42", "CLAUDE_UID": str(os.geteuid()),
+    }, sobrescribir=True)
+    os.chmod(env, 0o600)
+    secretos = cargar_secretos(env)
+    ahora = datetime(2026, 11, 12, 15, 0, tzinfo=timezone(timedelta(hours=-5)))
+    pasos: list[tuple[str, bool]] = []
+    for n, (nombre, fn) in enumerate(_PASOS, 1):
+        mundo = None
+        try:
+            mundo = _Mundo(raiz / f"paso{n}", secretos, ahora)
+            fn(mundo)
+        except Exception as e:  # noqa: BLE001  (un fallo del paso es un resultado, no una caída)
+            salida(redactar(f"FALLO {nombre}: {type(e).__name__}: {e}"))
+            pasos.append((nombre, False))
+        else:
+            salida(f"OK    {nombre}")
+            pasos.append((nombre, True))
+        finally:
+            if mundo is not None:
+                mundo.cerrar()
+    return pasos
