@@ -129,3 +129,51 @@ def test_sin_esquema_importable_deniega(spool, tmp_path):
                           env={"PATH": os.environ.get("PATH", ""), "TROVEFY_SPOOL": str(spool),
                                "TROVEFY_VAULT": str(tmp_path / "v")})
     assert proc.returncode == 0 and "deny" in proc.stdout and "esquema" in proc.stdout
+
+
+@pytest.mark.parametrize("cmd", [
+    "cd /var && cp x spool/trovefy/entrada/P-20261112-001.json",
+    "pushd /var/ && cp x spool/trovefy/entrada/P-20261112-001.json",
+    "cp x //var//spool/trovefy/entrada/P-20261112-001.json",
+    "cp x /var/./spool/trovefy/entrada/P-20261112-001.json",
+    "cp x /var/sp*/trovefy/entrada/P-20261112-001.json",
+    "cp x /v*/s*/trovefy/e*/P-20261112-001.json",
+    "cp x /var/{spool}/trovefy/entrada/a.json",
+    "cp x $D/trovefy/entrada/a.json",
+    "python3 -c \"open('/var/'+'spool/trovefy/entrada/a.json','w')\"",
+    "ln -s /var/spool/trovefy/entrada /tmp/e",
+    "cd /var/spool && cp x trovefy/entrada/a.json",
+    "cd /tmp && cp x /var/SPOOL/trovefy/entrada/a.json",
+    "trovefy buzon depositar x.json && rm /tmp/y",
+    "trovefy buzon depositar x.json; echo hola",
+    "trovefy buzon depositar x.json | cat",
+    "trovefy buzon depositar x.json > /tmp/o",
+    "trovefy buzon depositar $(echo x)",
+    "echo ok; trovefy buzon depositar x.json",
+])
+def test_bypasses_de_bash(guardia, cmd):
+    assert guardia(ev("Bash", command=cmd))[0] == "deny"
+
+
+@pytest.mark.parametrize("cmd", [
+    "echo entrada", "grep entrada notas.md", "ls /var/log", "trovefy buzon estado",
+    "trovefy buzon depositar propuesta.json", "python3 -m trovefy buzon depositar /tmp/p.json",
+])
+def test_sin_falsos_positivos(guardia, cmd):
+    assert guardia(ev("Bash", command=cmd))[0] == "allow"
+
+
+@pytest.mark.parametrize("cmd", [
+    "python3 -m trovefy buzon depositar x.json", "python -m trovefy.cli buzon depositar x.json",
+    "'trovefy' \"buzon\" 'depositar' x.json", "trovefy  buzon\tdepositar x.json",
+])
+def test_stop_formas_de_depositar(guardia, correr_hook, vault_tmp, cmd):
+    (vault_tmp / ".trovefy/STOP").write_text("")
+    e = ev("Bash", command=cmd)
+    assert guardia(e)[0] == "deny"
+    assert correr_hook("meta_guard", e, vault_tmp)[0] == "deny"
+
+
+def test_file_path_no_texto_deniega(guardia):
+    assert guardia(ev("Write", file_path=123, content="{}"))[0] == "deny"
+    assert guardia(ev("NotebookEdit", notebook_path=["x"], new_source="x"))[0] == "deny"

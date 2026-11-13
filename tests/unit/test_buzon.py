@@ -86,12 +86,26 @@ def test_id_de_claude_duplicado_o_fuera_de_rango(spool, tmp_path):
         depositar(noop_sin_id(id="P-20261112-850"), **kw)
 
 
-def test_no_sigue_enlaces_simbolicos(spool, tmp_path):
+def test_tmp_viejo_no_bloquea_y_enlaces_no_se_siguen(spool, tmp_path):
     objetivo = tmp_path / "otro.json"
-    (spool / "entrada/.P-20261112-001.json.tmp").symlink_to(objetivo)
-    with pytest.raises(OSError):
-        depositar(noop_sin_id(), spool=spool, vault=tmp_path / "v", ahora=AHORA)
-    assert not objetivo.exists()
+    (spool / "entrada/.P-20261112-001.json.tmp").write_text("viejo")
+    (spool / "entrada/P-20261112-001.json").symlink_to(objetivo)
+    ruta = depositar(noop_sin_id(), spool=spool, vault=tmp_path / "v", ahora=AHORA)
+    assert ruta.name == "P-20261112-002.json" and not objetivo.exists()
+
+
+def test_tmp_unico_por_deposito(spool, tmp_path, monkeypatch):
+    nombres = []
+    real = os.open
+
+    def espia(p, *a, **k):
+        if str(p).endswith(".tmp"):
+            nombres.append(os.path.basename(p))
+        return real(p, *a, **k)
+
+    monkeypatch.setattr(os, "open", espia)
+    depositar(noop_sin_id(), spool=spool, vault=tmp_path / "v", ahora=AHORA)
+    assert len(nombres) == 1 and nombres[0] != ".P-20261112-001.json.tmp" and str(os.getpid()) in nombres[0]
 
 
 def test_estado_latido_viejo(spool):
@@ -132,8 +146,22 @@ def test_cli_stop_codigo_3_e_invalida_1(spool, tmp_path, monkeypatch, capsys):
 def test_cli_estado_no_imprime_chat_id(spool, tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("TROVEFY_SPOOL", str(spool))
     monkeypatch.setenv("TROVEFY_VAULT", str(tmp_path / "v"))
+    (spool / "estado/limites.json").write_text(json.dumps(
+        {"cuentas": {"act_1234567890": {"moneda": "COP", "tope_gasto_diario_total": 5}}}))
     (spool / "estado/emparejamiento.json").write_text(json.dumps({"emparejado": True, "fecha": "x", "chat_id": 987654321}))
     assert main(["buzon", "estado"]) == 0
     salida = capsys.readouterr().out
+    assert "1234567890" not in salida and "cuenta 1" in salida and "COP" in salida
     assert "987654321" not in salida and "ejecutor parado" in salida
     assert os.environ["TROVEFY_SPOOL"] == str(spool)
+
+
+def test_cli_stop_codigo_3(spool, tmp_path, monkeypatch, capsys):
+    import io
+    monkeypatch.setenv("TROVEFY_SPOOL", str(spool))
+    monkeypatch.setenv("TROVEFY_VAULT", str(tmp_path / "v"))
+    (tmp_path / "v/.trovefy").mkdir(parents=True)
+    (tmp_path / "v/.trovefy/STOP").write_text("")
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(noop_sin_id())))
+    assert main(["buzon", "depositar", "-"]) == 3
+    assert "STOP" in capsys.readouterr().err

@@ -5,6 +5,8 @@ Protege ``$TROVEFY_SPOOL`` (por defecto ``/var/spool/trovefy``): un ``Write`` so
 ``unidad: "minima"`` y ``id`` igual al nombre. Todo lo demás que escriba en el spool se deniega; con
 ``<vault>/.trovefy/STOP`` no se deposita nada. Solo biblioteca estándar (sin PyYAML); falla cerrado:
 si el esquema no se puede importar o algo se tuerce, deny.
+Capa de mejor esfuerzo: las barreras reales son los permisos del spool (instalador) y la validación
+propia del ejecutor más el Aceptar del usuario.
 """
 from __future__ import annotations
 
@@ -17,6 +19,7 @@ import sys
 from _comun import (
     _CD,
     ejecutar_guardia,
+    es_deposito,
     herramienta,
     resolver,
     solo_lectura,
@@ -87,6 +90,9 @@ def _decidir_escritura(
     tool_name: str, tool_input: dict, spool: pathlib.Path, spool_res: pathlib.Path, vault: pathlib.Path,
     cwd: str | None,
 ) -> tuple[str, str]:
+    for clave in ("file_path", "notebook_path"):
+        if clave in tool_input and not isinstance(tool_input[clave], str):
+            return "deny", f"{clave} no es texto"
     ruta = _cadena(tool_input.get("file_path")) or _cadena(tool_input.get("notebook_path"))
     if not ruta:
         return "allow", ""
@@ -108,19 +114,36 @@ def _decidir_escritura(
     return ("deny", motivo) if motivo else ("allow", "")
 
 
+_ULTIMOS = ("trovefy/entrada", "trovefy/procesadas", "trovefy/estado")
+_EXPANSION = re.compile(r"[*?\[{$]")
+_DEPOSITO_SOLO = re.compile(r"^\s*(?:python3?\s+-m\s+)?trovefy\s+buzon\s+depositar(?:\s+[^;&|`$<>()\n\\]*)?\s*$")
+
+
+def _normalizar(comando: str) -> str:
+    limpio = re.sub(r"[\"']", "", comando)
+    limpio = re.sub(r"/(?:\./)+", "/", limpio)
+    return re.sub(r"/{2,}", "/", limpio)
+
+
 def _menciona_spool(comando: str, spool: pathlib.Path, spool_res: pathlib.Path, cwd: str | None) -> bool:
-    sin_comillas = re.sub(r"[\"']", "", comando)
-    marcas = {str(spool), str(spool_res), SPOOL_POR_DEFECTO, "$TROVEFY_SPOOL", "${TROVEFY_SPOOL}"}
+    sin_comillas = _normalizar(comando)
+    bajo = sin_comillas.lower()
+    if "spool" in bajo or any(u in bajo for u in _ULTIMOS):
+        return True
+    marcas = {str(spool), str(spool_res)}
     if any(m.rstrip("/") in sin_comillas for m in marcas if m.rstrip("/")):
         return True
+    for ficha in bajo.split():
+        if _EXPANSION.search(ficha) and ("var" in ficha or "trovefy" in ficha):
+            return True
     actual = resolver(cwd, None) if cwd else None
     if actual is not None and _dentro(actual, spool_res):
         return True
     for m in _CD.finditer(sin_comillas):
         destino = m.group(1)
-        if destino.startswith("$") or destino == "-":
-            if destino.startswith("$"):
-                return True  # destino no resoluble: se asume lo peor
+        if destino.startswith("$"):
+            return True  # destino no resoluble: se asume lo peor
+        if destino == "-":
             continue
         actual = resolver(destino, str(actual) if actual else cwd)
         if _dentro(actual, spool_res):
@@ -137,14 +160,17 @@ def decidir(
         return _decidir_escritura(tool_name, tool_input, spool, spool_res, vault, cwd)
     if tool_name == "Bash":
         comando = _cadena(tool_input.get("command"))
-        if _menciona_spool(comando, spool, spool_res, cwd):
-            if stop_activo(vault) and not solo_lectura(comando):
+        if es_deposito(comando):
+            if stop_activo(vault):
                 return "deny", MOTIVO_STOP
+            if _DEPOSITO_SOLO.match(comando):
+                return "allow", ""
+            return "deny", "`trovefy buzon depositar` debe ir solo, sin encadenar ni redirigir"
+        if _menciona_spool(comando, spool, spool_res, cwd):
             if solo_lectura(comando):
                 return "allow", ""
-            return "deny", "el buzón no se toca por shell: usa `trovefy buzon depositar`"
-        if stop_activo(vault) and re.search(r"\btrovefy\s+buzon\s+depositar\b", comando):
-            return "deny", MOTIVO_STOP
+            motivo = MOTIVO_STOP if stop_activo(vault) else "el buzón no se toca por shell: usa `trovefy buzon depositar`"
+            return "deny", motivo
     return "allow", ""
 
 

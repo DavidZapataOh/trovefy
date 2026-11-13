@@ -88,10 +88,11 @@ def _estado(_args: argparse.Namespace) -> int:
     if lim is None:
         print("Límites: no medido")
     else:
-        for cid, c in sorted((lim.get("cuentas") or {}).items()) if isinstance(lim.get("cuentas"), dict) else []:
+        cuentas = lim.get("cuentas") if isinstance(lim.get("cuentas"), dict) else {}
+        for n, (_cid, c) in enumerate(sorted(cuentas.items()), 1):
             if not isinstance(c, dict):
                 continue
-            print(f"Límites {cid}: {c.get('moneda')} tope diario {c.get('tope_gasto_diario_total')}, "
+            print(f"Límites cuenta {n}: {c.get('moneda')} tope diario {c.get('tope_gasto_diario_total')}, "
                   f"máx. conjunto {c.get('max_presupuesto_conjunto')} (unidades mínimas)")
     p = e["pendientes"]
     print(f"Propuestas pendientes en entrada: {p if p is not None else 'no medido'}")

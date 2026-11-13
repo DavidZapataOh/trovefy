@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -71,12 +72,12 @@ def _comprobar_unidades(datos: dict) -> None:
 
 def _escribir(spool: Path, id_: str, datos: dict) -> Path:
     entrada = Path(spool) / "entrada"
-    tmp = entrada / f".{id_}.json.tmp"
+    tmp = entrada / f".{id_}.{os.getpid()}.{secrets.token_hex(6)}.tmp"
     destino = entrada / f"{id_}.json"
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640)
     except FileExistsError:
-        raise OSError(f"temporal ya existente o enlace en el buzón: {tmp.name}") from None
+        raise OSError(f"temporal ya existente en el buzón: {tmp.name}") from None
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             os.fchmod(f.fileno(), 0o640)

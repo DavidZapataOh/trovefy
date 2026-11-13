@@ -273,3 +273,11 @@ def solo_lectura(comando: str) -> bool:
         if fichas[0] == "find" and _FIND_PELIGROSO.search(segmento):
             return False
     return True
+
+
+_DEPOSITO = re.compile(r"\btrovefy\b[\w\s./-]*?\bbuzon\s+depositar\b|/var/spool/trovefy/entrada", re.IGNORECASE)
+
+
+def es_deposito(comando: str) -> bool:
+    """¿El comando invoca ``trovefy buzon depositar`` (también ``python -m trovefy …``, con comillas)?"""
+    return bool(_DEPOSITO.search(re.sub(r"[\"'\\]", "", comando)))
