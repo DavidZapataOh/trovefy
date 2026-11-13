@@ -1578,8 +1578,9 @@ def servir(rutas: RutasEjecutor | None = None, *, graph_simulado: bool = False,
     SIGTERM/SIGINT solo marcan ``parar``: el ciclo en curso termina entero (nunca se corta una ejecución a
     medias) y luego se sale. Peor caso hasta atender un ``/stop`` o salir tras SIGTERM: un ``getUpdates``
     de ``TIMEOUT_UPDATES_S`` (10 s) + 10 s de margen de red; con 429 de Telegram el cliente duerme hasta
-    3×60 s antes de devolver el control (≈ 200 s). El STOP por archivo (``trovefy-ejecutor stop``) no
-    depende de Telegram: se mira justo antes de cada escritura en Meta (``GraphConStop``)."""
+    3×60 s antes de devolver el control (≈ 200 s). El STOP por archivo no depende de Telegram (CLI
+    ``trovefy-ejecutor stop``, respaldo si Telegram cae): se mira justo antes de cada escritura en Meta
+    (``GraphConStop``), así que corta también la ejecución en curso entre una escritura y la siguiente."""
     rutas = rutas or rutas_por_defecto()
     parar = parar or threading.Event()
     try:

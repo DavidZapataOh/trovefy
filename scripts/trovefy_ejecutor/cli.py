@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .auditoria import (
     EV_LIMITE_CAMBIADO,
+    EV_STOP,
     Auditoria,
     AuditoriaCorrupta,
     redactar,
@@ -34,7 +35,7 @@ from .limites import Limites, LimitesInvalidos, cargar_limites, limites_a_dict
 from .secretos import Secretos, SecretosInseguros, borrar_secretos, cargar_secretos
 from .servicio import servir
 from .simulado import simulacro
-from .stop import stop_activo
+from .stop import activar_stop, quitar_stop, stop_activo
 from .telegram import ClienteTelegram, ErrorRedTelegram, ErrorTelegram
 
 _ESTADOS = ("recibida", "enviada", "aceptada", "ejecutando", "ejecutada", "fallida", "discrepancia",
@@ -206,6 +207,44 @@ def _cmd_estado(_a: argparse.Namespace, rutas: RutasEjecutor) -> int:
     return 0 if ok else 1
 
 
+# -- stop / reanudar (respaldo si Telegram no responde) ----------------------------------------------
+def _anotar_stop(rutas: RutasEjecutor, activo: bool, motivo: str) -> bool:
+    try:
+        Auditoria(rutas.auditoria).anotar(EV_STOP, activo=activo, motivo=motivo)
+    except Exception as e:  # noqa: BLE001 — el interruptor ya cambió: se avisa, no se deshace
+        _salida(f"Aviso: no se pudo anotar en la auditoría ({type(e).__name__})", err=True)
+        return False
+    return True
+
+
+def _cmd_stop(a: argparse.Namespace, rutas: RutasEjecutor) -> int:
+    """``stop [motivo]``: inmediato, sin candado (funciona con el servicio en marcha). No pausa campañas."""
+    if stop_activo(rutas):
+        print("STOP ya estaba activo")
+        return 0
+    motivo = "CLI: " + _limpio(" ".join(a.motivo)).strip()[:200] if a.motivo else "CLI stop"
+    activar_stop(rutas, motivo, _ahora())
+    print("STOP activo: no se escribe nada en Meta. No pausa campañas. Para quitarlo: trovefy-ejecutor reanudar")
+    return 0 if _anotar_stop(rutas, True, motivo) else 1
+
+
+def _cmd_reanudar(a: argparse.Namespace, rutas: RutasEjecutor) -> int:
+    if not stop_activo(rutas):
+        print("STOP no estaba activo")
+        return 0
+    if not a.si:
+        try:
+            resp = input("Quitar el STOP permite volver a escribir en Meta. Escribe «sí» para seguir: ")
+        except EOFError:
+            resp = ""
+        if resp.strip().lower() not in ("sí", "si"):
+            print("No se quitó el STOP.")
+            return 1
+    quitar_stop(rutas)
+    print("STOP quitado.")
+    return 0 if _anotar_stop(rutas, False, "CLI reanudar") else 1
+
+
 # -- auditoria reparar ------------------------------------------------------------------------------
 def _cmd_auditoria(a: argparse.Namespace, rutas: RutasEjecutor) -> int:
     """``auditoria reparar``: aparta el archivo roto (``.roto-<fecha>``, nunca se borra) y abre una cadena
@@ -283,6 +322,10 @@ def _parser() -> argparse.ArgumentParser:
     si = sub.add_parser("simular", help="recorre el ejecutor con Telegram y Meta simulados")
     si.add_argument("--raiz", help="carpeta de trabajo (por defecto, temporal)")
     sub.add_parser("limites", help="muestra los límites por cuenta")
+    st = sub.add_parser("stop", help="STOP inmediato sin Telegram (no pausa campañas)")
+    st.add_argument("motivo", nargs="*", help="motivo (queda en la auditoría)")
+    re_ = sub.add_parser("reanudar", help="quita el STOP (pide escribir «sí»)")
+    re_.add_argument("--si", action="store_true", help="no preguntar")
     au = sub.add_parser("auditoria", help="mantenimiento de la auditoría (con el servicio parado)")
     au_sub = au.add_subparsers(dest="accion", required=True)
     au_sub.add_parser("reparar", help="aparta el archivo roto y empieza una cadena nueva")
@@ -291,7 +334,7 @@ def _parser() -> argparse.ArgumentParser:
 
 _ORDENES = {"emparejar": _cmd_emparejar, "comprobar-meta": _cmd_comprobar_meta, "servir": _cmd_servir,
             "estado": _cmd_estado, "simular": _cmd_simular, "limites": _cmd_limites,
-            "auditoria": _cmd_auditoria}
+            "auditoria": _cmd_auditoria, "stop": _cmd_stop, "reanudar": _cmd_reanudar}
 
 
 def main(argv: list[str] | None = None) -> int:

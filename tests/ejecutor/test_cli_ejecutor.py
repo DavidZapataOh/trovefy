@@ -241,3 +241,55 @@ def test_auditoria_reparar_integra_no_hace_nada(mundo, capsys):
     assert main(["auditoria", "reparar"]) == 0
     assert not list(mundo.auditoria.parent.glob("*.roto-*"))
     assert "íntegra" in capsys.readouterr().out
+
+
+def _eventos_stop(r) -> list[dict]:
+    if not r.auditoria.exists():
+        return []
+    lineas = [json.loads(x) for x in r.auditoria.read_text().splitlines()]
+    return [ln["datos"] for ln in lineas if ln["evento"] == "stop"]
+
+
+def test_stop_cli_activa_y_audita(mundo, capsys):
+    from trovefy_ejecutor.stop import stop_activo
+    assert main(["stop", "Telegram", "caído"]) == 0
+    assert stop_activo(mundo)
+    assert json.loads(mundo.stop.read_text())["motivo"] == "CLI: Telegram caído"
+    assert _eventos_stop(mundo) == [{"activo": True, "motivo": "CLI: Telegram caído"}]
+    assert "STOP activo" in capsys.readouterr().out
+    assert main(["stop"]) == 0  # ya activo: no se duplica
+    assert len(_eventos_stop(mundo)) == 1
+    assert "ya estaba activo" in capsys.readouterr().out
+
+
+def test_stop_cli_funciona_con_el_servicio_en_marcha(mundo):
+    from trovefy_ejecutor.stop import stop_activo
+    with candado(mundo.base.with_suffix(".lock")):
+        assert main(["stop"]) == 0
+    assert stop_activo(mundo)
+
+
+def test_reanudar_pide_si(mundo, monkeypatch, capsys):
+    from trovefy_ejecutor.stop import stop_activo
+    main(["stop", "prueba"])
+    monkeypatch.setattr("builtins.input", lambda *_: "no")
+    assert main(["reanudar"]) == 1
+    assert stop_activo(mundo) and len(_eventos_stop(mundo)) == 1
+    monkeypatch.setattr("builtins.input", lambda *_: (_ for _ in ()).throw(EOFError()))
+    assert main(["reanudar"]) == 1
+    assert stop_activo(mundo)
+    monkeypatch.setattr("builtins.input", lambda *_: "sí")
+    assert main(["reanudar"]) == 0
+    assert not stop_activo(mundo)
+    assert _eventos_stop(mundo)[-1] == {"activo": False, "motivo": "CLI reanudar"}
+
+
+def test_reanudar_con_si_no_pregunta(mundo, monkeypatch, capsys):
+    from trovefy_ejecutor.stop import stop_activo
+    main(["stop"])
+    monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("no debe preguntar"))
+    assert main(["reanudar", "--si"]) == 0
+    assert not stop_activo(mundo)
+    assert main(["reanudar", "--si"]) == 0
+    assert "no estaba activo" in capsys.readouterr().out
+    assert len(_eventos_stop(mundo)) == 2
