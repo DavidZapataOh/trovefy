@@ -1083,3 +1083,12 @@ def test_graph_con_stop_misma_interfaz_que_cliente():
         assert real == envuelto, nombre
     # subir_video recibe los bytes verificados, nunca una ruta que se pueda releer (TOCTOU)
     assert list(inspect.signature(ClienteGraph.subir_video).parameters) == ["self", "act_id", "contenido", "nombre"]
+
+
+def test_deposito_de_claude_con_origen_telegram_no_responde_en_telegram(montaje):
+    """La respuesta en Telegram al rechazar se decide por el rango del id (900–999), no por ``origen``."""
+    m = montaje
+    activar_stop(m.rutas, "prueba", T0)
+    m.depositar(pausar(origen="telegram:x"))
+    m.ej.ciclo()
+    assert m.estado("P-20261112-005") == "rechazada" and m.tg.mensajes == {}

@@ -71,7 +71,13 @@ from .deposito import DepositoRechazado, comprobar_origen
 from .dinero import Moneda, MonedaNoConfigurada, formatear
 from .ejecutar import NO_SOPORTADO_P07, TIPOS_SOPORTADOS, Resultado, ejecutar
 from .emparejar import Emparejamiento
-from .esquema import RANGO_CLAUDE, PropuestaInvalida, cargar_propuesta, volcar_propuesta
+from .esquema import (
+    RANGO_CLAUDE,
+    RANGO_USUARIO,
+    PropuestaInvalida,
+    cargar_propuesta,
+    volcar_propuesta,
+)
 from .estado import Almacen, FilaPropuesta, IdDuplicado
 from .graph import OFFSETS_META, ClienteGraph, DetenidoPorStop, ErrorGraph, clasificar
 from .limites import (
@@ -500,9 +506,11 @@ class Ejecutor:
             self._avisar_si_telegram(id, motivo)
 
     def _avisar_si_telegram(self, id: str, motivo: str) -> None:
-        """Lo pedido desde Telegram y rechazado al recibir se responde con el motivo (lo de Claude, no)."""
-        fila = self.almacen.obtener(id)
-        if fila is None or not fila.propuesta.origen.startswith("telegram:"):
+        """Lo pedido desde Telegram y rechazado al recibir se responde con el motivo (lo de Claude, no).
+
+        Se decide por el rango del id (900–999 solo los crea este proceso desde Telegram), nunca por
+        ``origen``, que en un depósito de Claude es texto libre."""
+        if int(id[-3:]) not in RANGO_USUARIO or self.almacen.obtener(id) is None:
             return
         texto = AVISO_STOP_TELEGRAM if motivo == "STOP activo" else motivo
         self._decir(f"{id}: rechazada, no se hizo nada. {texto}")
