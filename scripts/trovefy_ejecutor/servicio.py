@@ -73,19 +73,22 @@ from .limites import (
 )
 from .modelo import Propuesta
 from .montaje import montar
-from .reloj import ZONA_COT, base_caducidad, caducidad
+from .reloj import ZONA_COT, base_caducidad, caducidad, en_silencio, recordatorios
 from .render import (
+    MAX_RESUMEN,
     PREGUNTA_MOTIVO,
     RECIBIDO,
     STOP_ACTIVO,
     DatosRender,
     Desenlace,
+    ItemResumen,
     ResumenEstado,
     botones_propuesta,
     render_alerta,
     render_estado,
     render_propuesta,
     render_resultado,
+    render_resumen,
     texto_ya_procesada,
 )
 from .ritmo import Ritmo
@@ -115,6 +118,9 @@ MOTIVO_TOKEN = "token de Meta caducado: renuévalo en /arranque paso 13"
 CLAVE_TOKEN = "token_caducado"
 AVISO_STOP_TELEGRAM = "STOP activo: primero /reanudar y luego /pausar_todo"
 CONFIRMACION_USADA = "Esta confirmación ya se usó: no se hizo nada"
+TITULO_RESUMEN = "En espera"
+RECORDATORIO = "Recordatorio: {id} sigue pendiente; el dinero sigue corriendo"
+_LINEAS_FUERA_DEL_RESUMEN = ("Por qué:", "Reinicia aprendizaje:", "Caduca", "Gasto diario")
 
 
 class GraphConStop:
@@ -671,9 +677,40 @@ class Ejecutor:
         return final
 
     def _editar_en_resumen(self, fila: FilaPropuesta, mid: int | None, d: Desenlace, final: str) -> None:
-        """Gancho de la Tarea 5 (resúmenes): reescribir solo el bloque de esta propuesta. Mientras tanto no
-        se toca el resumen (pisarlo borraría las demás) y el desenlace va en un mensaje aparte."""
-        self._decir(final)
+        """Toque desde un resumen: se reescribe solo el bloque de esta propuesta (su estado, sin sus botones;
+        los de las demás siguen) y el desenlace completo va en un mensaje aparte (salvo «ejecutando», que es
+        de paso). Si el toque llegó desde otro mensaje que no es un resumen, solo el mensaje aparte."""
+        if fila.datos.get("resumen") and fila.message_id is not None:
+            self._reescribir_resumen(fila)
+        if d.estado != "ejecutando":
+            self._decir(final, sonido=False)
+
+    def _item_resumen(self, f: FilaPropuesta, estado=None) -> ItemResumen:
+        texto = f.datos.get("texto")
+        lineas = [ln for ln in (texto.splitlines() if isinstance(texto, str) else [])
+                  if ln and not ln.startswith(_LINEAS_FUERA_DEL_RESUMEN)]
+        primera = lineas[0].removeprefix(f"{f.id} · ") if lineas else f.tipo
+        try:
+            cad = self._caduca(f)
+        except Exception:  # noqa: BLE001 — solo es lo que se muestra; el toque vuelve a comprobarla
+            cad = self.reloj()
+        return ItemResumen(id=f.id, linea=" · ".join([primera, *lineas[1:2]]), motivo=f.propuesta.motivo or "",
+                           caduca=cad, estado=estado or f.estado)
+
+    def _reescribir_resumen(self, fila: FilaPropuesta) -> None:
+        chat, clave = self._chat, self.secretos.hmac_clave
+        if chat is None or not clave or fila.message_id is None:
+            return
+        ids = fila.datos.get("resumen_ids")
+        ids = ids if isinstance(ids, list) and fila.id in ids else [fila.id]
+        filas = [self.almacen.obtener(i) for i in ids[:MAX_RESUMEN]]
+        try:
+            texto, botones = render_resumen([self._item_resumen(f) for f in filas if f is not None], TITULO_RESUMEN,
+                                            chat, clave)
+        except Exception as e:  # noqa: BLE001 — el resumen queda como estaba; el desenlace va aparte
+            self._anotar_error("resumen", e)
+            return
+        self._editar(fila.message_id, texto, botones)
 
     def _caducada(self, fila: FilaPropuesta) -> bool:
         try:
@@ -1087,9 +1124,91 @@ class Ejecutor:
         if creadas == 0:
             self._decir("No hay campañas activas")
 
+    # -- barrido -------------------------------------------------------------------------------------
+    def barrer(self) -> None:
+        """Caducidad (también de una ``aceptada`` que nunca llegó a ejecutarse), recordatorios de ``pausar``
+        y cola (alertas cuando el ritmo lo permite; propuestas en resúmenes de ≤ 5)."""
+        ahora = self.reloj()
+        for fila in self.almacen.en_estado("recibida", "enviada", "aceptada"):
+            try:
+                self._barrer_una(fila, ahora)
+            except sqlite3.OperationalError:
+                raise
+            except Exception as e:  # noqa: BLE001 — una fila nunca tumba el barrido
+                self._anotar_error("barrer", e)
+        try:
+            self._enviar_cola(ahora)
+        except sqlite3.OperationalError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            self._anotar_error("cola", e)
+
+    def _barrer_una(self, fila: FilaPropuesta, ahora: datetime) -> None:
+        try:
+            vencida = self._caduca(fila) <= ahora
+        except Exception:  # noqa: BLE001 — sin poder calcularla, caducada (falla cerrada)
+            vencida = True
+        if vencida:
+            if fila.estado == "aceptada":
+                return self._fallar_aceptada(fila.id, None, "caducó antes de ejecutarse")
+            if self._transicion(fila.id, fila.estado, "caducada", motivo="caducó sin respuesta"):
+                if fila.datos.get("resumen"):  # solo su bloque: sin un mensaje aparte por cada una
+                    nueva = self.almacen.obtener(fila.id)
+                    if nueva is not None:
+                        self._reescribir_resumen(nueva)
+                elif fila.message_id is not None:
+                    self._editar_desenlace(fila.id, None, Desenlace("caducada", ahora))
+                self._copiar(fila.id)
+            return
+        if fila.estado == "enviada" and fila.tipo == "pausar":
+            self._recordar(fila, ahora)
+
+    def _recordar(self, fila: FilaPropuesta, ahora: datetime) -> None:
+        """Un ``pausar`` sin respuesta: a +1 h y +3 h se responde a su mensaje. Si el servicio estuvo parado
+        y ya pasaron varios instantes, un solo mensaje los cubre. Se anota solo si se envió."""
+        p = fila.propuesta
+        hechos = {x for x in fila.datos.get("recordatorios") or [] if isinstance(x, str)}
+        nuevos = {r.isoformat() for r in recordatorios(p, base_caducidad(p, fila.recibida), self._zona(p))
+                  if r <= ahora} - hechos
+        if not nuevos or self._chat is None or fila.message_id is None:
+            return
+        try:
+            self._tg_enviar(self._chat, self._limpio(RECORDATORIO.format(id=fila.id)), None,
+                            sonido=not en_silencio(ahora), responde_a=fila.message_id)
+        except _ERRORES_TELEGRAM as e:
+            self._anotar_error("telegram", e)
+            return
+        self._transicion(fila.id, "enviada", "enviada", recordatorios=sorted(hechos | nuevos))
+
+    def _enviar_cola(self, ahora: datetime) -> None:
+        cola = [f for f in self.almacen.en_estado("recibida") if f.datos.get("en_cola")]
+        for f in cola:
+            if f.tipo == "alerta":
+                self._despachar_alerta(f)  # decide el ritmo, como al recibirla
+        props = [f for f in cola if f.tipo != "alerta" and isinstance(f.datos.get("texto"), str)]
+        chat, clave = self._chat, self.secretos.hmac_clave
+        if not props or chat is None or not clave or stop_activo(self.rutas):
+            return
+        if not self.ritmo.toca_resumen(ahora, len(props)):
+            return
+        lote = props[:MAX_RESUMEN]
+        texto, botones = render_resumen([self._item_resumen(f, "enviada") for f in lote], TITULO_RESUMEN, chat, clave)
+        try:
+            mid = self._tg_enviar(chat, self._limpio(texto), botones, sonido=True)
+        except _ERRORES_TELEGRAM as e:
+            self._anotar_error("telegram", e)
+            return
+        self.ritmo.anotar_envio(ahora)  # un resumen cuenta como un envío
+        ids = [f.id for f in lote]
+        for f in lote:
+            self.almacen.guardar_mensaje(f.id, chat, mid)
+            self._transicion(f.id, "recibida", "enviada", en_cola=False, resumen=True, resumen_ids=ids,
+                             enviada_en=ahora.isoformat())
+
     # -- ciclo ----------------------------------------------------------------------------------------
     def ciclo(self) -> None:
-        """Provisional (Tarea 5 añade latido, barrido y copia de la auditoría)."""
+        """Provisional (Tarea 5 añade latido y copia de la auditoría)."""
         self._recargar_limites()
         self.ingerir()
         self.atender_updates()
+        self.barrer()
