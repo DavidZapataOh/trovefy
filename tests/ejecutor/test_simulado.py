@@ -73,8 +73,20 @@ def test_editar_responder_y_escribir_respondiendo():
     assert t.obtener_updates(0)[0]["message"]["reply_to_message"]["message_id"] == mid
 
 
+def test_simulado_fecha_y_respuesta():
+    reloj = [T]
+    t = TelegramSimulado(ahora=lambda: reloj[0])
+    mid = t.enviar(42, "uno")
+    assert t.tomar_fecha() == int(T.timestamp()) and t.tomar_fecha() is None
+    otro = t.enviar(42, "dos", responde_a=mid)
+    assert t.mensajes[otro]["responde_a"] == mid
+    t.tomar_fecha()
+    t.editar(42, mid, "tres")
+    assert t.tomar_fecha() == int(T.timestamp())
+
+
 def test_telegram_misma_interfaz_que_cliente():
-    for nombre in ("obtener_updates", "enviar", "editar", "responder_callback"):
+    for nombre in ("obtener_updates", "enviar", "editar", "responder_callback", "tomar_fecha"):
         real = inspect.signature(getattr(ClienteTelegram, nombre))
         sim = inspect.signature(getattr(TelegramSimulado, nombre))
         assert list(real.parameters) == list(sim.parameters), nombre

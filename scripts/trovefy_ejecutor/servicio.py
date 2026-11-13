@@ -13,6 +13,7 @@ Invariantes (no negociables):
 """
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from collections.abc import Callable
@@ -100,8 +101,14 @@ _SIN_LECTURA_VIVA = frozenset({"noop", "limite_ejecutor"})
 _ERRORES_TELEGRAM = (ErrorTelegram, ErrorRedTelegram, ValueError)
 _TOCA_META = frozenset(TIPOS_INGERIBLES - {"noop", "limite_ejecutor", "alerta"})
 DESFASE_MAX_S = 300
+VIGENCIA_DESFASE = timedelta(minutes=10)  # una medida más vieja no vale para ejecutar
+CLAVE_DESFASE = "desfase_reloj"
 AVISO_DESFASE = ("{id}: reloj desfasado ({s} s): ejecuta `sudo hwclock -s`. No se ejecutó nada; la propuesta "
                  "queda aceptada y se reintenta al reiniciar el servicio.")
+AVISO_SIN_MEDIDA = ("{id}: no se pudo comprobar la hora con Telegram. No se ejecutó nada; la propuesta queda "
+                    "aceptada y se reintenta al reiniciar el servicio. Si el reloj de WSL va mal, ejecuta "
+                    "`sudo hwclock -s`.")
+AVISO_RELOJ = "reloj sin comprobar o desfasado: ejecuta `sudo hwclock -s` y reinicia el servicio"
 AVISO_TOKEN = ("Token de Meta caducado: renuévalo en /arranque paso 13. No se ejecuta nada en Meta hasta que "
                "comprobar-meta vuelva a dar ok.")
 MOTIVO_TOKEN = "token de Meta caducado: renuévalo en /arranque paso 13"
@@ -176,6 +183,9 @@ class Ejecutor:
         self._limites_mtime: int | None = rutas.limites.stat().st_mtime_ns
         self._limites_error: str | None = None
         self.desfase_s: float | None = None
+        self._desfase_medido: datetime | None = None
+        self._aviso_reloj: str | None = None
+        self._cargar_desfase()
         self._DESPACHO: dict[type, Callable[[Any], None]] = {
             Ignorar: self._ignorar,
             Responder: self._responder,
@@ -232,10 +242,69 @@ class Ejecutor:
         if self._chat is None:
             return None
         try:
-            return self.telegram.enviar(self._chat, self._limpio(texto), botones, sonido=sonido)
+            return self._tg_enviar(self._chat, self._limpio(texto), botones, sonido=sonido)
         except _ERRORES_TELEGRAM as e:
             self._anotar_error("telegram", e)
             return None
+
+    def _tg_enviar(self, chat: int, texto: str, botones: list[list[Boton]] | None, *, sonido: bool,
+                   responde_a: int | None = None) -> int:
+        """``telegram.enviar`` + medida del desfase con la hora que devuelve el servidor. Lanza si falla."""
+        extra = {"responde_a": responde_a} if responde_a is not None else {}
+        mid = self.telegram.enviar(chat, texto, botones, sonido=sonido, **extra)
+        self._tomar_fecha()
+        return mid
+
+    # -- desfase de reloj -------------------------------------------------------------------------------
+    def _cargar_desfase(self) -> None:
+        """La última medida sobrevive al reinicio (kv), con su hora: ``_desfase_fresco`` decide si vale."""
+        try:
+            d = json.loads(self.almacen.leer_kv(CLAVE_DESFASE) or "null")
+            s, medido = float(d["s"]), datetime.fromisoformat(d["medido"])
+            if medido.utcoffset() is None:
+                return
+            self.desfase_s, self._desfase_medido = s, medido
+        except (TypeError, ValueError, KeyError):
+            return
+
+    def _anotar_desfase(self, s: float) -> None:
+        ahora = self.reloj()
+        self.desfase_s, self._desfase_medido = s, ahora
+        self.almacen.poner_kv(CLAVE_DESFASE, json.dumps({"s": s, "medido": ahora.isoformat()}))
+
+    def _tomar_fecha(self) -> None:
+        """Mide con la hora del servidor de la última respuesta de ``sendMessage``/``editMessageText``."""
+        tomar = getattr(self.telegram, "tomar_fecha", None)
+        if not callable(tomar):
+            return
+        try:
+            f = tomar()
+        except Exception:  # noqa: BLE001 — sin medida: _ejecutar falla cerrado
+            return
+        if type(f) is int and f > 0:
+            self._anotar_desfase(self.reloj().timestamp() - f)
+
+    def _desfase_fresco(self) -> float | None:
+        """La última medida si tiene ≤ 10 min (en cualquier sentido: un salto del reloj la invalida)."""
+        if self.desfase_s is None or self._desfase_medido is None:
+            return None
+        if abs(self.reloj() - self._desfase_medido) > VIGENCIA_DESFASE:
+            return None
+        return self.desfase_s
+
+    def _medir_ahora(self, fila: FilaPropuesta, mid: int | None) -> None:
+        """Pide a Telegram una hora fresca editando el mensaje de la propuesta (o con un mensaje nuevo si
+        es un resumen o no hay mensaje): la respuesta trae ``edit_date``/``date`` del servidor."""
+        propio = fila.message_id
+        destino = mid if mid is not None else propio
+        aviso = f"ACEPTADA {self._hora()}: comprobando la hora antes de ejecutar…"
+        if (destino is None or fila.datos.get("resumen")
+                or (mid is not None and propio is not None and mid != propio)):
+            self._decir(f"{fila.id}: {aviso}", sonido=False)
+            return
+        original = fila.datos.get("texto")
+        original = original if isinstance(original, str) else f"{fila.id} · {fila.tipo}"
+        self._editar(destino, f"{original[:3800]}\n\n{aviso}")
 
     def _transicion(self, id: str, de, a, **datos) -> bool:
         """Única vía de transición del servicio: ``Almacen.transicion`` + ``EV_TRANSICION`` si cambió."""
@@ -511,8 +580,7 @@ class Ejecutor:
             self.almacen.actualizar_datos(id, "recibida", en_cola=True, texto=texto)
             return
         try:
-            mid = self.telegram.enviar(chat, texto, botones_propuesta(id, chat, clave),
-                                       sonido=decision.sonido)
+            mid = self._tg_enviar(chat, texto, botones_propuesta(id, chat, clave), sonido=decision.sonido)
         except _ERRORES_TELEGRAM as e:
             self._anotar_error("telegram", e)
             self.almacen.actualizar_datos(id, "recibida", en_cola=True, texto=texto)
@@ -529,7 +597,7 @@ class Ejecutor:
             return
         texto = self._limpio(render_alerta(p))
         try:
-            mid = self.telegram.enviar(self._chat, texto, None, sonido=decision.sonido)
+            mid = self._tg_enviar(self._chat, texto, None, sonido=decision.sonido)
         except _ERRORES_TELEGRAM as e:
             self._anotar_error("telegram", e)
             self.almacen.actualizar_datos(fila.id, "recibida", en_cola=True)
@@ -577,6 +645,7 @@ class Ejecutor:
             return False
         try:
             self.telegram.editar(self._chat, mid, self._limpio(texto), botones)
+            self._tomar_fecha()
             return True
         except _ERRORES_TELEGRAM as e:
             self._anotar_error("telegram", e)
@@ -665,10 +734,21 @@ class Ejecutor:
         if fila is None or fila.estado != "aceptada":
             return
         p, ahora = fila.propuesta, self.reloj()
-        if self.desfase_s is not None and abs(self.desfase_s) > DESFASE_MAX_S:
-            self._decir(AVISO_DESFASE.format(id=id, s=int(self.desfase_s)))
-            self.auditoria.anotar("reloj_desfasado", id=id, desfase_s=int(self.desfase_s))
+        desfase = self._desfase_fresco()
+        if desfase is None:
+            self._medir_ahora(fila, mid)
+            desfase = self._desfase_fresco()
+        if desfase is None:  # sin medida fresca no se sabe si el reloj miente: no se ejecuta
+            self._aviso_reloj = AVISO_RELOJ
+            self._decir(AVISO_SIN_MEDIDA.format(id=id))
+            self.auditoria.anotar("reloj_sin_medida", id=id)
             return
+        if abs(desfase) > DESFASE_MAX_S:
+            self._aviso_reloj = AVISO_RELOJ
+            self._decir(AVISO_DESFASE.format(id=id, s=int(desfase)))
+            self.auditoria.anotar("reloj_desfasado", id=id, desfase_s=int(desfase))
+            return
+        self._aviso_reloj = None
         if stop_activo(self.rutas):
             return self._fallar_aceptada(id, mid, "STOP activo", desenlace="stop")
         if p.tipo in _TOCA_META and self.almacen.leer_kv(CLAVE_TOKEN):
@@ -839,7 +919,7 @@ class Ejecutor:
         m = u.get("message")
         fecha = m.get("date") if isinstance(m, dict) else None
         if type(fecha) is int and fecha > 0:
-            self.desfase_s = self.reloj().timestamp() - fecha
+            self._anotar_desfase(self.reloj().timestamp() - fecha)
 
     def _ignorar(self, a: Ignorar) -> None:
         if a.motivo.startswith("callback_"):

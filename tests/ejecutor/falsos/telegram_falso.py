@@ -160,7 +160,8 @@ class TelegramFalso:
                         "reply markup are exactly the same as a current content and reply markup",
                     )
                 m["texto"], m["botones"] = p.get("text"), botones
-                return 200, {"ok": True, "result": {"message_id": p["message_id"]}}
+                return 200, {"ok": True, "result": {"message_id": p["message_id"], "date": m["date"],
+                                                    "edit_date": int(time.time())}}
             if metodo == "answerCallbackQuery":
                 return 200, {"ok": True, "result": True}
         return self._error(404, "Not Found")
@@ -173,8 +174,11 @@ class TelegramFalso:
             "texto": p.get("text"),
             "botones": self._datos_boton(p.get("reply_markup")),
             "sonido": not p.get("disable_notification", False),
+            "responde_a": (p.get("reply_parameters") or {}).get("message_id"),
+            "date": int(time.time()),
         }
-        return {"message_id": mid, "chat": {"id": p.get("chat_id")}, "text": p.get("text")}
+        return {"message_id": mid, "chat": {"id": p.get("chat_id")}, "text": p.get("text"),
+                "date": self.mensajes[mid]["date"]}
 
     def _get_updates(self, p: dict) -> tuple[int, dict]:
         offset = int(p.get("offset", 0))

@@ -66,6 +66,7 @@ class TelegramSimulado:
         self._siguiente_update = 1
         self._siguiente_mensaje = 1
         self._siguiente_callback = 1
+        self._ultima_fecha: int | None = None
 
     def __repr__(self) -> str:
         return f"TelegramSimulado(chat_id={self.chat_id}, mensajes={len(self.mensajes)})"
@@ -75,11 +76,14 @@ class TelegramSimulado:
         return [dict(u) for u in self._updates if u["update_id"] >= offset]
 
     def enviar(self, chat_id: int, texto: str, botones: list[list[Boton]] | None = None, *,
-               sonido: bool = True) -> int:
+               sonido: bool = True, responde_a: int | None = None) -> int:
         _validar_largo(texto)
         mid = self._siguiente_mensaje
         self._siguiente_mensaje += 1
         self.mensajes[mid] = {"chat_id": chat_id, "texto": texto, "botones": botones, "sonido": sonido}
+        if responde_a is not None:
+            self.mensajes[mid]["responde_a"] = responde_a
+        self._ultima_fecha = int(self._ahora().timestamp())
         return mid
 
     def editar(self, chat_id: int, message_id: int, texto: str,
@@ -88,6 +92,11 @@ class TelegramSimulado:
         if message_id not in self.mensajes:
             raise ErrorTelegram(400, "Bad Request: message to edit not found")
         self.mensajes[message_id].update(texto=texto, botones=botones)
+        self._ultima_fecha = int(self._ahora().timestamp())
+
+    def tomar_fecha(self) -> int | None:
+        f, self._ultima_fecha = self._ultima_fecha, None
+        return f
 
     def responder_callback(self, callback_id: str, texto: str = "") -> None:
         self.respuestas_callback.append((callback_id, texto))

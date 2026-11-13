@@ -97,9 +97,20 @@ class ClienteTelegram:
         self._dormir = dormir
         self._reloj = reloj
         self.ultimo_envio: dict[int, float] = {}
+        self._ultima_fecha: int | None = None
 
     def __repr__(self) -> str:
         return f"ClienteTelegram(base={self._base!r})"
+
+    def tomar_fecha(self) -> int | None:
+        """(extra, plan 12) Hora del servidor (epoch) de la última respuesta de ``sendMessage``
+        (``date``) o ``editMessageText`` (``edit_date``). Se consume al leerla: nunca se reutiliza."""
+        f, self._ultima_fecha = self._ultima_fecha, None
+        return f
+
+    def _guardar_fecha(self, res: Any, campo: str) -> None:
+        f = res.get(campo) if isinstance(res, dict) else None
+        self._ultima_fecha = f if type(f) is int and f > 0 else None
 
     def _limpiar(self, texto: str) -> str:
         return redactar(str(texto).replace(self._token, "***"))
@@ -204,6 +215,7 @@ class ClienteTelegram:
         botones: list[list[Boton]] | None = None,
         *,
         sonido: bool = True,
+        responde_a: int | None = None,
     ) -> int:
         params: dict[str, Any] = {
             "chat_id": chat_id,
@@ -213,10 +225,14 @@ class ClienteTelegram:
         }
         if botones:
             params["reply_markup"] = _teclado(botones)
+        if responde_a is not None:
+            params["reply_parameters"] = {"message_id": responde_a, "allow_sending_without_reply": True}
         self._validar_largo(texto)
+        self._ultima_fecha = None
         res = self._con_429("sendMessage", params, _TIMEOUT_NORMAL, chat_id)
         if not isinstance(res, dict) or not isinstance(res.get("message_id"), int):
             raise ErrorRedTelegram("sendMessage con forma inesperada")
+        self._guardar_fecha(res, "date")
         return res["message_id"]
 
     def editar(
@@ -234,8 +250,9 @@ class ClienteTelegram:
             "link_preview_options": {"is_disabled": True},
             "reply_markup": _teclado(botones),
         }
+        self._ultima_fecha = None
         try:
-            self._con_429("editMessageText", params, _TIMEOUT_NORMAL, chat_id)
+            self._guardar_fecha(self._con_429("editMessageText", params, _TIMEOUT_NORMAL, chat_id), "edit_date")
         except ErrorTelegram as e:
             if e.codigo == 400 and "message is not modified" in e.descripcion.lower():
                 return

@@ -105,6 +105,30 @@ def test_repr_del_cliente_sin_token():
     assert TOKEN_PRUEBA not in repr(c) and "AAAA" not in repr(c)
 
 
+def test_fecha_del_servidor_al_enviar_y_editar_se_consume():
+    with TelegramFalso() as tg:
+        c = ClienteTelegram(TOKEN_PRUEBA, tg.base)
+        assert c.tomar_fecha() is None
+        mid = c.enviar(42, "hola")
+        assert c.tomar_fecha() == tg.mensajes[mid]["date"]
+        assert c.tomar_fecha() is None  # se consume: nunca se reutiliza una medida vieja
+        c.editar(42, mid, "otro")
+        assert isinstance(c.tomar_fecha(), int)
+        c.editar(42, mid, "otro")  # «not modified»: sin fecha
+        assert c.tomar_fecha() is None
+
+
+def test_enviar_respondiendo_a_un_mensaje():
+    with TelegramFalso() as tg:
+        c = ClienteTelegram(TOKEN_PRUEBA, tg.base)
+        mid = c.enviar(42, "propuesta")
+        otro = c.enviar(42, "recordatorio", responde_a=mid)
+        assert tg.mensajes[otro]["responde_a"] == mid
+        assert tg.llamadas[-1].params["reply_parameters"] == {"message_id": mid, "allow_sending_without_reply": True}
+        c.enviar(42, "sin respuesta")
+        assert "reply_parameters" not in tg.llamadas[-1].params
+
+
 @pytest.mark.parametrize("caso", ["401", "429"])
 def test_error_telegram_sin_contexto_con_el_token(caso):
     with TelegramFalso() as tg:
