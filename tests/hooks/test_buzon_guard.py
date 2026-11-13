@@ -156,6 +156,8 @@ def test_bypasses_de_bash(guardia, cmd):
 
 
 @pytest.mark.parametrize("cmd", [
+    "grep -n x scripts/trovefy/foo/*.py", "grep -c '^trovefy$' notas.txt", "sed 's/act_[0-9]*//' notas.txt",
+    "grep -rn x /home/david/trovefy/wt/scripts/*.py", "ruff check scripts/trovefy/*.py",
     "echo entrada", "grep entrada notas.md", "ls /var/log", "trovefy buzon estado",
     "trovefy buzon depositar propuesta.json", "python3 -m trovefy buzon depositar /tmp/p.json",
 ])
