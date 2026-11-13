@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import UTC, datetime
 
 import pytest
 from ejecutor.fabricas_graph import (
@@ -392,7 +393,9 @@ def test_medio_que_no_es_archivo_regular_se_rechaza(entorno_montaje, monkeypatch
 # -- resultado --------------------------------------------------------------------------------------
 def test_genera_activar_valida(entorno_montaje):
     g, alm, aud, vault = entorno_montaje
-    r = montar(estructura(origen="/montar"), g, alm, aud, vault, esperar=NADA)
+    # Reloj fijo: el id del activar lleva la fecha del día de la cuenta (D-37), no la del sistema.
+    fijo = datetime(2026, 11, 12, 17, 0, tzinfo=UTC)
+    r = montar(estructura(origen="/montar"), g, alm, aud, vault, ahora=lambda: fijo, esperar=NADA)
     act = cargar_propuesta(r.nueva_propuesta)
     ids = r.ids_creados
     assert r.estado == "ejecutada" and act.tipo == "activar" and act.cuenta == "act_0000000000000000"

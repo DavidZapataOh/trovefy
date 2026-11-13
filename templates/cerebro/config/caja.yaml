@@ -1,0 +1,10 @@
+# Caja: sobres de efectivo en USD (el dinero real se guarda en centavos al cargarlo).
+capital_usd: 500                 # [U]
+sobres_usd: {herramientas: 20, tests: 280, reserva: 200}   # §4.17
+test: {techo_usd: 30, prorroga_hasta_usd: 55, diario_usd: 25}   # D-09, PU-01
+prescala_diario_usd: 20          # D-36
+tope_diario_ejecutor_usd: 50     # D-36 (el ejecutor lo aplica en COP por cuenta, D-37)
+reserva_desbloqueada: false      # true solo tras CANDIDATO → PRE_ESCALA (§4.17)
+apimart_aviso_usd: 1.00          # §5.2 ejemplo de alerta
+cuenta: {id: null, moneda: null}   # la llena `trovefy caja iniciar` desde el paso 06; el offset lo confirma meta.json (resolución 1)
+tests: []                        # provisional hasta la máquina de estados (§4.13, Fase 3): {producto, pais, campana_id, estado, prorroga, ventas, diario_usd}

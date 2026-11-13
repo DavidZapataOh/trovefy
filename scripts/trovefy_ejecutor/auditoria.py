@@ -7,7 +7,7 @@ import json
 import os
 import re
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
@@ -86,28 +86,48 @@ def _cabeza_de(ruta: Path) -> Path:
     return ruta.with_name(ruta.name + ".cabeza")
 
 
-def _recorrer(ruta: Path) -> tuple[str | None, int, str, bool]:
-    """(primer fallo, líneas válidas, hash de la última válida, existe cabeza-consistente)."""
-    n_ok, ultimo = 0, GENESIS
-    if not ruta.exists():
-        return None, 0, GENESIS, True
-    datos = ruta.read_bytes()
-    trozos = datos.split(b"\n")
-    cola = trozos.pop()  # vacío si el archivo termina en salto de línea
-    for i, cruda in enumerate(trozos, start=1):
+def _recorrer_lineas(
+    lineas: Iterable[bytes | str | Mapping[str, Any]], n0: int, hash_prev: str
+) -> tuple[str | None, int, str]:
+    """(primer fallo, última n válida, hash de la última válida); las posiciones del fallo son relativas."""
+    n_ok, ultimo = n0 - 1, hash_prev
+    for i, cruda in enumerate(lineas, start=1):
         try:
-            linea = json.loads(cruda.decode("utf-8"))
+            if isinstance(cruda, Mapping):
+                linea: Any = cruda
+            else:
+                texto = cruda.decode("utf-8") if isinstance(cruda, bytes) else cruda
+                linea = json.loads(texto)
             ok = (
-                isinstance(linea, dict)
-                and linea.get("n") == i
+                isinstance(linea, Mapping)
+                and linea.get("n") == n_ok + 1
                 and linea.get("hash_prev") == ultimo
                 and linea.get("hash") == _hash(linea)
             )
-        except (ValueError, UnicodeDecodeError):
+        except (ValueError, UnicodeDecodeError, TypeError):
             ok = False
         if not ok:
-            return f"línea {i}: cadena rota", n_ok, ultimo, False
-        n_ok, ultimo = i, linea["hash"]
+            return f"línea {i}: cadena rota", n_ok, ultimo
+        n_ok, ultimo = n_ok + 1, linea["hash"]
+    return None, n_ok, ultimo
+
+
+def verificar_lineas(
+    lineas: Iterable[bytes | str | Mapping[str, Any]], n0: int = 1, hash_prev: str = GENESIS
+) -> str | None:
+    """Comprueba un tramo de cadena que empieza en ``n0`` tras ``hash_prev``. None = cuadra; si no, el motivo."""
+    return _recorrer_lineas(lineas, n0, hash_prev)[0]
+
+
+def _recorrer(ruta: Path) -> tuple[str | None, int, str, bool]:
+    """(primer fallo, líneas válidas, hash de la última válida, existe cabeza-consistente)."""
+    if not ruta.exists():
+        return None, 0, GENESIS, True
+    trozos = ruta.read_bytes().split(b"\n")
+    cola = trozos.pop()  # vacío si el archivo termina en salto de línea
+    fallo, n_ok, ultimo = _recorrer_lineas(trozos, 1, GENESIS)
+    if fallo:
+        return fallo, n_ok, ultimo, False
     if cola:
         return f"línea {n_ok + 1}: incompleta", n_ok, ultimo, False
     return None, n_ok, ultimo, True
