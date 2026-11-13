@@ -48,7 +48,7 @@ def estado(spool, **meta):
     d.mkdir(parents=True, exist_ok=True)
     (d / "meta.json").write_text(
         json.dumps({"cuenta": ACT, "currency": "COP", "offset": 1, "amount_spent": 0,
-                    "spend_cap": 1000000, **meta}),
+                    "spend_cap": 1000000, "fecha": "2026-11-12T13:00:00+00:00", **meta}),
         encoding="utf-8",
     )
     (d / "limites.json").write_text(

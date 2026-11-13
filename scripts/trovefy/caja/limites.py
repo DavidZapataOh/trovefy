@@ -6,7 +6,7 @@ Importes de la caja en centavos de USD; las propuestas, en unidades mínimas de 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, time, timedelta
 
 from trovefy_ejecutor.dinero import Moneda, formatear
 
@@ -14,6 +14,7 @@ from trovefy.aprobaciones.fuentes import Lectura
 from trovefy.caja.calculo import EstadoCaja
 from trovefy.caja.config import ConfigCaja
 from trovefy.trm import FUENTE, Trm, usd_centavos_a_cop
+from trovefy.vault.escritura import ZONA_NEGOCIO
 
 _USD = Moneda("USD", 100)
 _SOLO_COP = "no medido: el límite de la cuenta solo se propone en COP hasta confirmar la unidad (P-21)"
@@ -53,8 +54,26 @@ def _entero(v: object) -> int | None:
     return v if type(v) is int else None
 
 
+_META_VIGENCIA = timedelta(hours=24)
+_DESFASE = timedelta(minutes=5)  # reloj del ejecutor algo adelantado
+
+
+def _fecha_meta(v: object, ahora: datetime) -> tuple[datetime | None, str]:
+    """(fecha si meta.json tiene ≤ 24 h, texto de la fecha para mostrar)."""
+    try:
+        f = datetime.fromisoformat(str(v)) if isinstance(v, str) else None
+    except ValueError:
+        f = None
+    if f is None or f.tzinfo is None:
+        return None, "— (sin fecha válida)"
+    texto = f"{f.astimezone(ZONA_NEGOCIO):%Y-%m-%d %H:%M}"
+    edad = ahora - f
+    return (f if -_DESFASE <= edad <= _META_VIGENCIA else None), texto
+
+
 def propuestas_de_limites(
-    rec: Recomendacion, config: ConfigCaja, trm: Trm | None, hoy: date, limites: Lectura, meta: Lectura
+    rec: Recomendacion, config: ConfigCaja, trm: Trm | None, hoy: date, limites: Lectura, meta: Lectura,
+    ahora: datetime | None = None,
 ) -> tuple[list[dict], list[str]]:
     """Dicts sin ``id``/``creada`` (los asigna el buzón) y la lista de «no medido»."""
     nm: list[str] = list(rec.motivos) if (rec.tope_diario is None or rec.limite_cuenta_restante is None) else []
@@ -98,13 +117,18 @@ def propuestas_de_limites(
                 "motivo": f"{motivo} ({etiqueta})", "evidencia": dict(evidencia), "operaciones": [op]}
 
     props: list[dict] = []
+    if ahora is None:
+        ahora = datetime.combine(hoy, time.max, ZONA_NEGOCIO)
 
     # -- limite_ejecutor: tope diario total ---------------------------------------------------------
     viva = None
+    offset_lim: object = None
     if limites.datos is None:
         nm.append(limites.motivo or "no medido: limites.json sin leer")
     else:
         cuenta_l = (limites.datos.get("cuentas") or {}).get(act)
+        if isinstance(cuenta_l, dict):
+            offset_lim = cuenta_l.get("offset")
         if not isinstance(cuenta_l, dict):
             nm.append("no medido: la cuenta no figura en limites.json")
         elif cuenta_l.get("moneda") != moneda_c or cuenta_l.get("offset") != offset:
@@ -124,8 +148,15 @@ def propuestas_de_limites(
                  "a": a, "unidad": "minima", "moneda": moneda_c}))
 
     # -- limite_cuenta: spend_cap de Meta, acumulado ------------------------------------------------
+    fecha_meta, fecha_txt = _fecha_meta(m.get("fecha"), ahora)
     if offset != 1:
         nm.append(_SOLO_COP)
+    elif type(offset_lim) is not int or offset_lim != offset:
+        nm.append(f"no medido: el límite de la cuenta necesita limites.json con el mismo offset que meta.json "
+                  f"({offset}); limites.json dice {offset_lim if offset_lim is not None else '—'}")
+    elif fecha_meta is None:
+        nm.append(f"no medido: gasto acumulado de la cuenta del {fecha_txt} "
+                  "(repite trovefy-ejecutor comprobar-meta)")
     else:
         gastado = _entero(m.get("amount_spent"))
         if gastado is None:
@@ -145,8 +176,11 @@ def propuestas_de_limites(
                 else:
                     motivo = (f"Límite de gasto de la cuenta: ya gastado {formatear(gastado, moneda)} + restante "
                               f"{texto(restante, a - gastado)} = {formatear(a, moneda)}")
-                props.append(base(
+                motivo += f"; gasto acumulado de la cuenta del {fecha_txt}"
+                p = base(
                     "limite_cuenta", motivo,
                     {"entidad": "account", "id": act, "campo": "spend_cap", "de_esperado": actual,
-                     "a": a, "unidad": "minima", "moneda": moneda_c}))
+                     "a": a, "unidad": "minima", "moneda": moneda_c})
+                p["evidencia"]["meta_fecha"] = m.get("fecha")
+                props.append(p)
     return props, nm

@@ -123,6 +123,7 @@ def _limites(vault: Path, cfg: ConfigCaja, estado: EstadoCaja, ahora: datetime):
         rec, cfg, trm, dia,
         fuentes.leer_estado("limites"),
         fuentes.leer_estado("meta", cuenta=cfg.cuenta.id),
+        ahora=ahora,
     )  # fmt: skip
     return trm, rec, props, list(dict.fromkeys(nm))
 

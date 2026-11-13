@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from ejemplos_caja import CFG, TRM, con_test
 from trovefy.aprobaciones.fuentes import Lectura
@@ -9,10 +9,14 @@ from trovefy_ejecutor.esquema import cargar_propuesta
 
 ACT = "act_0000000000000000"
 HOY = date(2026, 11, 12)
+COT = timezone(timedelta(hours=-5))
+AHORA = datetime(2026, 11, 12, 10, 0, tzinfo=COT)
+FECHA_META = "2026-11-12T13:30:00+00:00"  # 08:30 COT, hace 1 h 30
 
 
 def meta(**kw):
-    d = {"cuenta": ACT, "currency": "COP", "offset": 1, "amount_spent": 0, "spend_cap": 1000000}
+    d = {"cuenta": ACT, "currency": "COP", "offset": 1, "amount_spent": 0, "spend_cap": 1000000,
+         "fecha": FECHA_META}
     d.update(kw)
     return Lectura(d, None)
 
@@ -28,8 +32,8 @@ def rec(cfg=CFG, gastos=()):
     return recomendar(calcular(cfg, [], list(gastos)), cfg)
 
 
-def prop(rec_, cfg=CFG, trm=TRM, limites=None, m=None):
-    return propuestas_de_limites(rec_, cfg, trm, HOY, limites or lim(), m or meta())
+def prop(rec_, cfg=CFG, trm=TRM, limites=None, m=None, ahora=AHORA):
+    return propuestas_de_limites(rec_, cfg, trm, HOY, limites or lim(), m or meta(), ahora=ahora)
 
 
 def test_recomendacion_por_defecto():
@@ -130,14 +134,17 @@ def test_sin_gasto_acumulado_no_propone_limite_cuenta():
 
 def test_monedas_distintas_no_propone():
     props, nm = prop(rec(), limites=lim("USD", 100, 6000))
-    assert [p["tipo"] for p in props] == ["limite_cuenta"]
+    assert props == []  # limite_cuenta también exige el mismo offset en limites.json
     assert any("moneda" in n for n in nm)
 
 
 def test_sin_valor_vivo_en_limites():
     props, nm = prop(rec(), limites=Lectura(None, "no medido: el ejecutor no ha escrito limites.json"))
-    assert [p["tipo"] for p in props] == ["limite_cuenta"]
+    assert props == []
     assert "no medido: el ejecutor no ha escrito limites.json" in nm
+    props, nm = prop(rec(), limites=Lectura({"cuentas": {ACT: {"moneda": "COP", "offset": 1}}}, None))
+    assert [p["tipo"] for p in props] == ["limite_cuenta"]
+    assert "no medido: limites.json sin tope_gasto_diario_total vivo" in nm
 
 
 def test_recomendacion_sin_datos_no_propone():
@@ -182,3 +189,44 @@ def test_sobregasto_sin_gasto_no_propone_cero():
 def test_spend_cap_cero_es_sin_limite():
     props, _ = prop(rec(), m=meta(spend_cap=0))
     assert next(p for p in props if p["tipo"] == "limite_cuenta")["operaciones"][0]["de_esperado"] is None
+
+
+# --- meta.json fresco (≤ 24 h) y offset de limites.json para limite_cuenta ---
+
+def _tipos(props):
+    return [p["tipo"] for p in props]
+
+
+def test_limite_cuenta_lleva_la_fecha_de_meta_en_motivo_y_evidencia():
+    props, _ = prop(rec())
+    c = next(p for p in props if p["tipo"] == "limite_cuenta")
+    assert "gasto acumulado de la cuenta del 2026-11-12 08:30" in c["motivo"]
+    assert c["evidencia"]["meta_fecha"] == FECHA_META
+
+
+def test_meta_de_hace_mas_de_24h_no_propone_limite_cuenta():
+    props, nm = prop(rec(), m=meta(fecha="2026-11-11T14:59:00+00:00"))  # 25 h antes
+    assert _tipos(props) == ["limite_ejecutor"]
+    assert ("no medido: gasto acumulado de la cuenta del 2026-11-11 09:59 "
+            "(repite trovefy-ejecutor comprobar-meta)") in nm
+
+
+def test_meta_de_justo_24h_vale():
+    props, _ = prop(rec(), m=meta(fecha="2026-11-11T15:00:00+00:00"))
+    assert "limite_cuenta" in _tipos(props)
+
+
+def test_meta_sin_fecha_o_futura_no_propone_limite_cuenta():
+    for f in (None, "ayer", "2026-11-12T10:00:00", "2026-11-13T15:00:00+00:00"):
+        props, nm = prop(rec(), m=meta(fecha=f))
+        assert _tipos(props) == ["limite_ejecutor"], f
+        assert any("repite trovefy-ejecutor comprobar-meta" in x for x in nm), f
+
+
+def test_limite_cuenta_exige_offset_de_limites_igual_a_meta():
+    props, nm = prop(rec(), limites=Lectura({"cuentas": {ACT: {"moneda": "COP", "offset": 100,
+                                                                 "tope_gasto_diario_total": 5000000}}}, None))
+    assert "limite_cuenta" not in _tipos(props)
+    props, nm = prop(rec(), limites=Lectura(None, "no medido: el ejecutor no ha escrito limites.json"))
+    assert "limite_cuenta" not in _tipos(props)
+    assert any("offset" in x and "limites.json" in x for x in nm)
