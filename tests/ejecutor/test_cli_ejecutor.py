@@ -187,3 +187,17 @@ def test_no_importa_trovefy():
               "print(any(m == 'trovefy' or m.startswith('trovefy.') for m in sys.modules))")
     r = subprocess.run([sys.executable, "-c", codigo], capture_output=True, text=True, check=True)
     assert r.stdout.strip() == "False"
+
+
+def test_comprobar_meta_lectura_fallida_no_toca_limites(mundo, monkeypatch):
+    g = mundo_basico()
+
+    def mal(act):
+        raise RuntimeError("sin cuenta")
+
+    g.cuenta = mal
+    monkeypatch.setattr(cli, "ClienteGraph", lambda token: g)
+    llamadas = []
+    monkeypatch.setattr(cli, "fijar_offset", lambda *a: llamadas.append(a))
+    assert main(["comprobar-meta"]) == 1
+    assert llamadas == []

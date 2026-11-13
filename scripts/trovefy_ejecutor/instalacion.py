@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 import sys
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -99,12 +100,27 @@ def limites_para_cuenta(plantilla: str, act_id: str, moneda: str, zona: str) -> 
     return "\n".join(lineas)
 
 
+def _leer_regular(ruta: Path) -> str:
+    """Lee sin seguir enlaces y solo si es un archivo regular."""
+    try:
+        fd = os.open(ruta, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as e:
+        raise ValueError(f"limites.yaml: no se puede abrir de forma segura ({type(e).__name__})") from None
+    with os.fdopen(fd, "r", encoding="utf-8") as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise ValueError("limites.yaml: no es un archivo regular")
+        return f.read()
+
+
 def fijar_offset(limites_yaml: Path, meta: dict) -> int | None:
     """Escribe el offset confirmado por Meta si coincide la moneda. Devuelve el offset escrito o ``None``.
 
     No toca nada si la moneda no coincide, si el offset ya es ese, o si Meta no lo da. Si ya hay otro
     offset distinto, lanza ``OffsetDistinto`` (no se sobrescribe nunca)."""
     limites_yaml = Path(limites_yaml)
+    # Sin candado propio: ``limites.yaml`` solo se escribe con reemplazo atómico (rename) y no existe ningún
+    # ``.lock`` de límites; leer y reemplazar el archivo entero no puede dejar una escritura a medias.
+    texto = _leer_regular(limites_yaml)
     lim = cargar_limites(limites_yaml, exigir_0600=False)
     act = meta.get("cuenta")
     if not isinstance(act, str):
@@ -121,7 +137,7 @@ def fijar_offset(limites_yaml: Path, meta: dict) -> int | None:
         return None
     if cuenta.offset is not None:
         raise OffsetDistinto("offset distinto del instalado: revisa (P-21)")
-    lineas = limites_yaml.read_text(encoding="utf-8").split("\n")
+    lineas = texto.split("\n")
     i = _linea_del_bloque(lineas, act, "offset")
     sangria = lineas[i][: len(lineas[i]) - len(lineas[i].lstrip())]
     lineas[i] = f"{sangria}offset: {offset}"

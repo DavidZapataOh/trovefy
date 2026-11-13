@@ -152,7 +152,7 @@ def _cmd_comprobar_meta(a: argparse.Namespace, rutas: RutasEjecutor) -> int:
         _salida(f"- {p}", secretos)
     codigo = 0 if informe.ok else 1
     try:
-        nuevo = fijar_offset(rutas.limites, d)
+        nuevo = fijar_offset(rutas.limites, d) if informe.cuenta is not None else None
     except OffsetDistinto:
         _salida("offset distinto del instalado: revisa (P-21)", err=True)
         return 1

@@ -97,3 +97,12 @@ def test_cli_instalacion(tmp_path):
     r = subprocess.run([sys.executable, "-I", "-m", "trovefy_ejecutor.instalacion", "limites", str(PLANTILLA),
                         "act_999000111", "COP", "America/Bogota"], capture_output=True, text=True, check=True)
     assert "act_999000111" in r.stdout and ACT not in r.stdout
+
+
+def test_fijar_offset_no_sigue_enlaces(tmp_path):
+    f = _limites(tmp_path)
+    enlace = tmp_path / "enlace.yaml"
+    enlace.symlink_to(f)
+    with pytest.raises(ValueError, match="limites.yaml"):
+        fijar_offset(enlace, {"currency": "COP", "offset": 1})
+    assert "offset: null" in f.read_text()
