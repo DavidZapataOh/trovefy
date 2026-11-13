@@ -597,7 +597,7 @@ _PASOS: tuple[tuple[str, Callable[[_Mundo], None]], ...] = (
 )
 
 
-def simulacro(raiz: Path, salida: Callable[[str], None]) -> list[tuple[str, bool]]:
+def simulacro(raiz: Path, salida: Callable[[str], None] = print) -> list[tuple[str, bool]]:
     """Recorre el ``Ejecutor`` real con Telegram y Graph en proceso. Sin red ni token reales.
 
     Todo vive dentro de ``raiz`` (rutas, vault, spool, ``limites.yaml``, ``secretos.env`` 0600 con una clave
