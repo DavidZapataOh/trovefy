@@ -170,3 +170,54 @@ def test_ejecutar_extremo_a_extremo(tmp_path):
         assert g.escrituras == [("escribir", "s1", {"daily_budget": 26000})]
     finally:
         alm.cerrar()
+
+
+# -- ronda de fidelidad 1 ---------------------------------------------------------------
+def test_editar_inexistente_error_telegram():
+    from trovefy_ejecutor.telegram import ErrorTelegram
+    with pytest.raises(ErrorTelegram) as e:
+        TelegramSimulado().editar(42, 99, "x")
+    assert e.value.codigo == 400
+
+
+def test_largo_maximo_en_enviar_y_editar():
+    t = TelegramSimulado()
+    with pytest.raises(ValueError):
+        t.enviar(42, "x" * 4097)
+    mid = t.enviar(42, "ok")
+    with pytest.raises(ValueError):
+        t.editar(42, mid, "x" * 4097)
+
+
+def test_importe_no_entero_error_graph():
+    g = GraphSimulado()
+    with pytest.raises(ErrorGraph) as e:
+        g.escribir("s1", {"daily_budget": "abc"})
+    assert e.value.codigo == 100
+    with pytest.raises(ErrorGraph):
+        g.escribir("s1", {"daily_budget": 1.5})
+
+
+def test_status_refleja_effective_status():
+    g = GraphSimulado()
+    g.escribir("s1", {"status": "PAUSED"})
+    assert g.leer("s1", ["effective_status"])["effective_status"] == "PAUSED"
+
+
+def test_crear_pone_cuenta_y_padres():
+    g = GraphSimulado()
+    nuevo = g.crear("c1", "adsets", {"name": "n", "status": "PAUSED"})["id"]
+    o = g.leer(nuevo, ["account_id", "campaign_id"])
+    assert o["account_id"] == "0000000000000000" and o["campaign_id"] == "c1"
+    ad = g.crear("s1", "ads", {"name": "n"})["id"]
+    assert g.leer(ad, ["adset_id", "account_id"])["adset_id"] == "s1"
+    camp = g.crear("act_0000000000000000", "campaigns", {"name": "c", "is_adset_budget_sharing_enabled": False})["id"]
+    assert g.leer(camp, ["account_id"])["account_id"] == "0000000000000000"
+
+
+def test_listar_filtro_str_normalizado():
+    g = GraphSimulado()
+    cu = "act_0000000000000000"
+    assert [x["id"] for x in g.listar(cu, "adsets", ["id"], filtros={"effective_status": "ACTIVE"})] == ["s1"]
+    assert g.listar(cu, "adsets", ["id"], filtros={"effective_status": "ACTI"}) == []
+    assert [x["id"] for x in g.listar(cu, "adsets", ["id"], filtros={"effective_status": '["ACTIVE"]'})] == ["s1"]

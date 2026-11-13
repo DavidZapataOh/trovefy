@@ -8,6 +8,7 @@ interfaz pública que ``ClienteTelegram`` y ``ClienteGraph``. El mundo de Graph 
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,7 +25,7 @@ from trovefy_ejecutor.graph import (
     _valor,
 )
 from trovefy_ejecutor.montaje import IDIOMAS_META
-from trovefy_ejecutor.telegram import Boton
+from trovefy_ejecutor.telegram import MAX_TEXTO, Boton, ErrorTelegram, largo_telegram
 
 _IMPORTES = ("daily_budget", "lifetime_budget", "bid_amount", "spend_cap")
 _MAX_VIDEO = 100 * 1024 * 1024
@@ -32,6 +33,24 @@ _MAX_VIDEO = 100 * 1024 * 1024
 
 def _ahora() -> datetime:
     return datetime.now(UTC)
+
+
+def _validar_largo(texto: str) -> None:
+    n = largo_telegram(texto)
+    if n > MAX_TEXTO:
+        raise ValueError(f"texto de {n} > {MAX_TEXTO}")
+
+
+def _lista_estados(v: object) -> list[str]:
+    """Normaliza un filtro de estados: lista, cadena JSON o cadena suelta (nunca subcadenas)."""
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except ValueError:
+            return [v]
+    if isinstance(v, (list, tuple, set, frozenset)):
+        return [str(x) for x in v]
+    return [str(v)]
 
 
 class TelegramSimulado:
@@ -57,6 +76,7 @@ class TelegramSimulado:
 
     def enviar(self, chat_id: int, texto: str, botones: list[list[Boton]] | None = None, *,
                sonido: bool = True) -> int:
+        _validar_largo(texto)
         mid = self._siguiente_mensaje
         self._siguiente_mensaje += 1
         self.mensajes[mid] = {"chat_id": chat_id, "texto": texto, "botones": botones, "sonido": sonido}
@@ -64,8 +84,9 @@ class TelegramSimulado:
 
     def editar(self, chat_id: int, message_id: int, texto: str,
                botones: list[list[Boton]] | None = None) -> None:
+        _validar_largo(texto)
         if message_id not in self.mensajes:
-            raise KeyError("mensaje inexistente")
+            raise ErrorTelegram(400, "Bad Request: message to edit not found")
         self.mensajes[message_id].update(texto=texto, botones=botones)
 
     def responder_callback(self, callback_id: str, texto: str = "") -> None:
@@ -137,7 +158,7 @@ class GraphSimulado:
         # id -> (arista, padres)
         self._hijos: dict[str, tuple[str, set[str]]] = {
             "c1": ("campaigns", {cuenta}), "s1": ("adsets", {cuenta, "c1"}), "a1": ("ads", {cuenta, "s1"})}
-        self._videos: dict[str, int] = {}
+        self._videos: set[str] = set()
         self._siguiente_id = 9000001
         self._siguiente_video = 7000001
 
@@ -149,7 +170,12 @@ class GraphSimulado:
         salida: dict[str, object] = {}
         for k, v in datos.items():
             _valor(v)  # mismo ValueError que el cliente real ante None
-            salida[k] = str(int(str(v))) if k in _IMPORTES else v
+            if k in _IMPORTES:
+                try:
+                    v = str(int(str(v)))
+                except ValueError:
+                    raise ErrorGraph(100, None, f"Invalid parameter: {k}") from None
+            salida[k] = v
         for k, v in salida.items():
             if k in _IMPORTES and int(str(v)) < 0:
                 raise ErrorGraph(100, None, f"Invalid parameter: {k} must not be negative")
@@ -174,7 +200,6 @@ class GraphSimulado:
         for c in campos:
             base = c.split("{")[0]
             if base == "status":
-                self._videos[id] += 1
                 salida["status"] = {"video_status": "ready"}
             elif base == "thumbnails":
                 salida["thumbnails"] = {"data": [{"uri": "https://scontent.example/miniatura.jpg",
@@ -188,6 +213,8 @@ class GraphSimulado:
         for v in (filtros or {}).values():
             _valor(v)
         permitidos = (filtros or {}).get("effective_status")
+        if permitidos is not None:
+            permitidos = _lista_estados(permitidos)
         salida = []
         for oid, (ar, padres) in self._hijos.items():
             if ar != arista or padre not in padres or oid not in self.objetos:
@@ -215,7 +242,10 @@ class GraphSimulado:
         self._existe(id)
         if validate_only:
             return {"success": True}
-        self.objetos.get(id, self.cuentas.get(id, {})).update(normal)
+        destino = self.objetos.get(id, self.cuentas.get(id, {}))
+        destino.update(normal)
+        if "status" in normal and id in self.objetos:
+            destino["effective_status"] = normal["status"]
         self.escrituras.append(("escribir", id, dict(datos)))
         return {"success": True}
 
@@ -234,6 +264,16 @@ class GraphSimulado:
         nuevo = str(self._siguiente_id)
         self._siguiente_id += 1
         obj = dict(normal)
+        if padre in self.cuentas:
+            obj["account_id"] = padre.removeprefix("act_")
+        else:
+            obj["account_id"] = self.objetos[padre].get("account_id", self._cuenta.removeprefix("act_"))
+            if arista == "adsets":
+                obj.setdefault("campaign_id", padre)
+            elif arista == "ads":
+                obj.setdefault("adset_id", padre)
+                if "campaign_id" in self.objetos[padre]:
+                    obj.setdefault("campaign_id", self.objetos[padre]["campaign_id"])
         if "status" in obj:
             obj["effective_status"] = obj["status"]
         self.objetos[nuevo] = obj
@@ -252,7 +292,7 @@ class GraphSimulado:
             raise ValueError("vídeo > 100 MB: subida por partes no soportada")
         vid = str(self._siguiente_video)
         self._siguiente_video += 1
-        self._videos[vid] = 0
+        self._videos.add(vid)
         self.escrituras.append(("subir_video", act_id, ruta.name))
         return vid
 
