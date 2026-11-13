@@ -5,6 +5,7 @@ carpetas permitidas. Se recorre desde la raíz con descriptores de directorio y 
 """
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -21,6 +22,9 @@ from .reloj import ZONA_COT
 
 CARPETAS = ("propuestas", "ledger/auditoria", "raw/telegram")
 _FLAGS_DIR = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+_ENLACE = (errno.ELOOP, errno.ENOTDIR)
+_PERMANENTES = (errno.EISDIR, errno.ENAMETOOLONG, errno.ENOTDIR)
+MAX_INTENTOS = 20
 _SIMPLE = re.compile(r"[A-Za-z0-9_.:/-]+")
 
 
@@ -51,18 +55,20 @@ def _abrir_sub(fd_padre: int, nombre: str, crear: bool) -> int:
     except FileNotFoundError:
         if not crear:
             raise
-    except OSError as e:  # ELOOP / ENOTDIR: enlace simbólico o no es carpeta
-        raise _Enlace(nombre) from e
+    except OSError as e:
+        if e.errno in _ENLACE:  # ELOOP / ENOTDIR: enlace simbólico o no es carpeta
+            raise _Enlace(nombre) from e
+        raise
     try:
         os.mkdir(nombre, 0o750, dir_fd=fd_padre)
     except FileExistsError:
         pass
     try:
         return os.open(nombre, _FLAGS_DIR, dir_fd=fd_padre)
-    except FileNotFoundError:
-        raise
     except OSError as e:
-        raise _Enlace(nombre) from e
+        if e.errno in _ENLACE:
+            raise _Enlace(nombre) from e
+        raise
 
 
 def _vacio(s: str | None) -> str:
@@ -113,7 +119,9 @@ class CopiaVault:
             for f in fds:
                 os.close(f)
 
-    def _intentar(self, partes: tuple[str, ...], texto: str, nuevo: bool) -> Literal["ok", "reintentar", "descartar"]:
+    def _intentar(
+        self, partes: tuple[str, ...], texto: str, nuevo: bool
+    ) -> Literal["ok", "reintentar", "descartar", "roto"]:
         try:
             self._escribir_ya(partes, texto, nuevo)
         except _Existe:
@@ -121,16 +129,23 @@ class CopiaVault:
         except _Enlace:
             self._ok = False
             return "descartar"
-        except OSError:
+        except OSError as e:
             self._ok = False
-            return "reintentar"
+            return "roto" if e.errno in _PERMANENTES else "reintentar"
         self._ok = True
         return "ok"
 
     def escribir(self, relativa: str, texto: str, *, nuevo: bool = False) -> bool:
+        return self._escribir(relativa, redactar(texto), nuevo)
+
+    def _escribir(self, relativa: str, texto: str, nuevo: bool) -> bool:
         partes = _normalizar(relativa)
         if self.vault is None:
             return True
+        if self._numeros() and self.reintentar():
+            # la cola sigue bloqueada: detrás de ella, para que nada viejo pise a lo nuevo
+            self._encolar(relativa, texto, nuevo)
+            return False
         r = self._intentar(partes, texto, nuevo)
         if r == "reintentar":
             self._encolar(relativa, texto, nuevo)
@@ -143,21 +158,33 @@ class CopiaVault:
         except OSError:
             return []
 
+    def _guardar(self, n: int, relativa: str, texto: str, nuevo: bool, intentos: int) -> None:
+        tmp = self.pendientes / f"{n}.json.{uuid.uuid4().hex}.tmp"
+        datos = json.dumps({"relativa": relativa, "texto": texto, "nuevo": nuevo,
+                            "intentos": intentos}).encode("utf-8")
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            try:
+                vista = memoryview(datos)
+                while vista:
+                    vista = vista[os.write(fd, vista):]
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            os.replace(tmp, self.pendientes / f"{n}.json")
+        except OSError:
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+            raise
+
     def _encolar(self, relativa: str, texto: str, nuevo: bool) -> None:
         try:
             self.pendientes.mkdir(parents=True, exist_ok=True, mode=0o700)
             os.chmod(self.pendientes, 0o700)
             nums = self._numeros()
-            n = (nums[-1] + 1) if nums else 0
-            tmp = self.pendientes / f"{n}.json.{uuid.uuid4().hex}.tmp"
-            datos = json.dumps({"relativa": relativa, "texto": texto, "nuevo": nuevo}).encode("utf-8")
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            try:
-                os.write(fd, datos)
-                os.fsync(fd)
-            finally:
-                os.close(fd)
-            os.replace(tmp, self.pendientes / f"{n}.json")
+            self._guardar((nums[-1] + 1) if nums else 0, relativa, texto, nuevo, 0)
         except OSError:
             pass  # sin cola no hay nada más que hacer; estado() ya dice «no escribible»
 
@@ -165,7 +192,7 @@ class CopiaVault:
         try:
             rotos = self.pendientes / "rotos"
             rotos.mkdir(exist_ok=True, mode=0o700)
-            os.replace(ruta, rotos / ruta.name)
+            os.replace(ruta, rotos / f"{uuid.uuid4().hex[:8]}-{ruta.name}")
         except OSError:
             pass
 
@@ -181,6 +208,7 @@ class CopiaVault:
                 d = json.loads(ruta.read_text(encoding="utf-8"))
                 partes = _normalizar(d["relativa"])
                 texto, nuevo = d["texto"], bool(d["nuevo"])
+                intentos = int(d.get("intentos", 0))
                 if not isinstance(texto, str):
                     raise TypeError("texto")
             except (OSError, ValueError, KeyError, TypeError):
@@ -188,7 +216,17 @@ class CopiaVault:
                 continue
             r = self._intentar(partes, texto, nuevo)
             if r == "reintentar":
+                intentos += 1
+                if intentos > MAX_INTENTOS:
+                    self._apartar(ruta)
+                    continue
+                try:
+                    self._guardar(n, d["relativa"], texto, nuevo, intentos)
+                except OSError:
+                    pass
                 bloqueado = True  # se conserva el orden: no se aplica nada posterior
+            elif r == "roto":
+                self._apartar(ruta)
             else:
                 try:
                     ruta.unlink()
@@ -251,7 +289,7 @@ class CopiaVault:
         if not mias:
             return True
         texto = b"\n".join(mias).decode("utf-8") + "\n"
-        return self.escribir(f"ledger/auditoria/{dia.isoformat()}.jsonl", texto)
+        return self._escribir(f"ledger/auditoria/{dia.isoformat()}.jsonl", texto, False)
 
     def motivo(self, nota: NotaMotivo) -> bool:
         return self.escribir(nota.ruta_relativa, nota.contenido, nuevo=True)

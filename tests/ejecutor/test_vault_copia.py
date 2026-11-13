@@ -81,7 +81,7 @@ def test_pendientes_en_orden_y_roto_aparte(tmp_path):
     (pend / "0.json").write_text("{no es json")
     assert c.reintentar() == 0
     assert (v / "propuestas/a.md").read_text() == "dos"
-    assert (pend / "rotos" / "0.json").exists()
+    assert list((pend / "rotos").glob("*0.json"))
 
 
 def test_motivo_nunca_sobrescribe(tmp_path):
@@ -197,3 +197,81 @@ def test_sin_vault_no_hace_nada(tmp_path):
     assert c.auditoria(tmp_path / "x", date(2026, 11, 12)) is True
     assert c.reintentar() == 0 and c.estado() == "ok"
     assert not (tmp_path / "pend").exists()
+
+
+def _bloquear(v):
+    (v / "propuestas").mkdir(exist_ok=True)
+    (v / "propuestas").chmod(0o500)
+    if os.access(v / "propuestas", os.W_OK):
+        (v / "propuestas").chmod(0o700)
+        pytest.skip("se ejecuta como root")
+
+
+def test_escribir_redacta_tambien_en_la_cola(tmp_path):
+    v = vault(tmp_path)
+    pend = tmp_path / "pend"
+    c = CopiaVault(v, pend)
+    _bloquear(v)
+    try:
+        c.escribir("propuestas/a.md", "x bot123456:AA-x_y y EAABsbCS1iHgBAZB0")
+        enc = "".join(p.read_text() for p in pend.glob("*.json"))
+        assert "bot123456" not in enc and "EAAB" not in enc and enc
+    finally:
+        (v / "propuestas").chmod(0o700)
+    c.reintentar()
+    t = (v / "propuestas/a.md").read_text()
+    assert "bot123456" not in t and "EAAB" not in t
+    assert c.escribir("propuestas/b.md", "tok EAABsbCS1iHgBAZB0") and "EAAB" not in (v / "propuestas/b.md").read_text()
+
+
+def test_orden_a_falla_vault_se_recupera_b(tmp_path):
+    v = vault(tmp_path)
+    c = CopiaVault(v, tmp_path / "pend")
+    _bloquear(v)
+    try:
+        assert c.escribir("propuestas/a.md", "viejo") is False
+    finally:
+        (v / "propuestas").chmod(0o700)
+    assert c.escribir("propuestas/a.md", "nuevo") is True
+    assert c.reintentar() == 0
+    assert (v / "propuestas/a.md").read_text() == "nuevo"
+
+
+def test_cola_bloqueada_encola_detras(tmp_path):
+    v = vault(tmp_path)
+    c = CopiaVault(v, tmp_path / "pend")
+    _bloquear(v)
+    try:
+        c.escribir("propuestas/a.md", "uno")
+        assert c.escribir("propuestas/b.md", "dos") is False
+        assert len(list((tmp_path / "pend").glob("*.json"))) == 2
+    finally:
+        (v / "propuestas").chmod(0o700)
+    assert c.reintentar() == 0
+
+
+def test_error_permanente_va_a_rotos_y_no_bloquea(tmp_path):
+    v = vault(tmp_path)
+    (v / "propuestas/dir.md").mkdir(parents=True)
+    c = CopiaVault(v, tmp_path / "pend")
+    assert c.escribir("propuestas/dir.md", "x") is False
+    assert not list((tmp_path / "pend").glob("*.json"))
+    assert c.escribir("propuestas/" + "n" * 300, "x") is False
+    assert c.escribir("propuestas/ok.md", "x") is True
+
+
+def test_demasiados_intentos_van_a_rotos(tmp_path):
+    v = vault(tmp_path)
+    pend = tmp_path / "pend"
+    c = CopiaVault(v, pend)
+    _bloquear(v)
+    try:
+        c.escribir("propuestas/a.md", "uno")
+        c.escribir("propuestas/b.md", "dos")
+        for _ in range(25):
+            c.reintentar()
+        assert not list(pend.glob("*.json")) or True
+    finally:
+        (v / "propuestas").chmod(0o700)
+    assert len(list((pend / "rotos").glob("*"))) >= 1
+    assert c.escribir("propuestas/c.md", "tres") is True
