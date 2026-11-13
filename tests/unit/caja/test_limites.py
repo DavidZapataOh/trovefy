@@ -155,3 +155,30 @@ def test_evidencia():
     props, _ = prop(rec())
     ev = props[0]["evidencia"]
     assert ev["trm_fecha"] == "2026-11-11" and ev["huecos"] == 9 and "TRM" in ev["trm"]
+
+
+def test_sobregasto_fija_el_limite_en_lo_gastado():
+    r = Recomendacion(5000, -1000, ())
+    props, _ = prop(r, m=meta(amount_spent=500000, spend_cap=1000000))
+    c = next(p for p in props if p["tipo"] == "limite_cuenta")
+    assert c["operaciones"][0]["a"] == 500000
+    assert c["motivo"].startswith(
+        "Sobregasto: los sobres no tienen saldo; el límite se fija en lo ya gastado y la cuenta deja de gastar")
+    assert "500.000 COP" in c["motivo"]
+    cargar_propuesta({**c, "version": 1, "id": "P-20261112-001", "creada": "2026-11-12T10:00:00-05:00"})
+
+
+def test_sobregasto_nunca_por_debajo_de_lo_gastado():
+    r = Recomendacion(5000, -999999999, ())
+    props, _ = prop(r, m=meta(amount_spent=500000, spend_cap=None))
+    assert next(p for p in props if p["tipo"] == "limite_cuenta")["operaciones"][0]["a"] == 500000
+
+
+def test_sobregasto_sin_gasto_no_propone_cero():
+    props, nm = prop(Recomendacion(5000, -1, ()), m=meta(amount_spent=0))
+    assert all(p["tipo"] != "limite_cuenta" for p in props) and nm
+
+
+def test_spend_cap_cero_es_sin_limite():
+    props, _ = prop(rec(), m=meta(spend_cap=0))
+    assert next(p for p in props if p["tipo"] == "limite_cuenta")["operaciones"][0]["de_esperado"] is None

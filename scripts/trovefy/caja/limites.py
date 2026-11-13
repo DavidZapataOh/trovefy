@@ -131,14 +131,22 @@ def propuestas_de_limites(
         if gastado is None:
             nm.append("no medido: el ejecutor aún no informa el gasto acumulado de la cuenta")
         elif rec.limite_cuenta_restante is not None:
-            actual = m.get("spend_cap")
-            actual = _entero(actual) if actual is not None else None
-            a = gastado + unidades(rec.limite_cuenta_restante)
-            if a > 0 and a != actual:
+            actual = _entero(m.get("spend_cap")) or None  # 0 = sin límite
+            restante = rec.limite_cuenta_restante
+            sobregasto = restante < 0
+            a = gastado if sobregasto else gastado + unidades(restante)
+            if a <= 0:
+                nm.append("no medido: sobregasto sin gasto acumulado; no se puede fijar un límite de 0")
+            elif a != actual:
+                if sobregasto:
+                    motivo = ("Sobregasto: los sobres no tienen saldo; el límite se fija en lo ya gastado y la "
+                              f"cuenta deja de gastar (gastado {formatear(gastado, moneda)}, restante "
+                              f"{formatear(restante, _USD)})")
+                else:
+                    motivo = (f"Límite de gasto de la cuenta: ya gastado {formatear(gastado, moneda)} + restante "
+                              f"{texto(restante, a - gastado)} = {formatear(a, moneda)}")
                 props.append(base(
-                    "limite_cuenta",
-                    f"Límite de gasto de la cuenta: ya gastado {formatear(gastado, moneda)} + restante "
-                    f"{texto(rec.limite_cuenta_restante, a - gastado)} = {formatear(a, moneda)}",
+                    "limite_cuenta", motivo,
                     {"entidad": "account", "id": act, "campo": "spend_cap", "de_esperado": actual,
                      "a": a, "unidad": "minima", "moneda": moneda_c}))
     return props, nm
