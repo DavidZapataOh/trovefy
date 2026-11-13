@@ -46,6 +46,21 @@ def test_montaje_minimo_valido_con_imagen_y_su_sha(vault):
     assert p.estructura.solo_validar is True
 
 
+def test_imagen_y_propuesta_son_0640(vault):
+    import os
+    import stat
+
+    pasos(vault)
+    old = os.umask(0o077)  # umask estricta: no puede depender de ella
+    try:
+        ruta = preparar_montaje(vault, AHORA)
+    finally:
+        os.umask(old)
+    (imagen,) = ruta.parent.glob("*.png")
+    for f in (ruta, imagen):
+        assert stat.S_IMODE(f.stat().st_mode) == 0o640, f
+
+
 def test_dataset_de_config_o_relleno_marcado(vault):
     pasos(vault)
     d = json.loads(preparar_montaje(vault, AHORA).read_text())

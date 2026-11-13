@@ -198,6 +198,7 @@ def preparar_montaje(vault: Path, ahora: datetime) -> Path:
     imagen = carpeta / NOMBRE_IMAGEN
     fd, tmp = tempfile.mkstemp(dir=carpeta, prefix=f".{NOMBRE_IMAGEN}.", suffix=".tmp")  # nunca sigue un enlace plantado
     try:
+        os.fchmod(fd, 0o640)  # mkstemp da 0600 y eso pone a cero la máscara de la ACL del vault: el ejecutor no lo leería
         with os.fdopen(fd, "wb") as f:
             f.write(_png_minimo())
         os.replace(tmp, imagen)
@@ -206,4 +207,5 @@ def preparar_montaje(vault: Path, ahora: datetime) -> Path:
         raise
     ruta = carpeta / NOMBRE_PROPUESTA
     escribir_atomico(ruta, json.dumps(datos, ensure_ascii=False, indent=2) + "\n")
+    os.chmod(ruta, 0o640)  # legible por el usuario del ejecutor a través de la ACL del vault
     return ruta
