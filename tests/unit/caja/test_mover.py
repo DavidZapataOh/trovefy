@@ -1,5 +1,4 @@
-
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -84,7 +83,7 @@ def test_anotar_cop_con_trm(tmp_path):
 
 
 def test_anotar_cop_sin_trm_falla(tmp_path):
-    with pytest.raises(MovimientoInvalido, match="no medido: sin TRM; no se anota"):
+    with pytest.raises(MovimientoInvalido, match="no medido: sin TRM vigente del 2026-11-12; no se anota"):
         anotar_herramienta(tmp_path, Decimal(100000), "COP", "x", None, AHORA)
     assert leer_movimientos(tmp_path) == []
 
@@ -93,3 +92,19 @@ def test_anotar_invalidos(tmp_path):
     for imp, mon in ((Decimal(0), "USD"), (Decimal(-1), "USD"), (Decimal(1), "EUR")):
         with pytest.raises(MovimientoInvalido):
             anotar_herramienta(tmp_path, imp, mon, "x", TRM, AHORA)
+
+
+def test_anotar_cop_con_trm_no_vigente_el_dia_de_ahora(tmp_path):
+    from pathlib import Path
+
+    from trovefy.trm import _parsear
+    fix = Path(__file__).resolve().parents[2] / "fixtures" / "trm" / "2026-11-11.json"
+    trm = _parsear(fix.read_bytes())
+    assert trm is not None and trm.hasta == date(2026, 11, 12)
+    el_13 = datetime(2026, 11, 13, 10, 0, tzinfo=COT)
+    with pytest.raises(MovimientoInvalido, match="no medido: sin TRM vigente del 2026-11-13; no se anota"):
+        anotar_herramienta(tmp_path, Decimal(100000), "COP", "x", trm, el_13)
+    assert leer_movimientos(tmp_path) == []
+    # el día de negocio manda: 2026-11-13 03:00 UTC es aún 2026-11-12 en Bogotá
+    m = anotar_herramienta(tmp_path, Decimal(100000), "COP", "x", trm, datetime(2026, 11, 13, 3, 0, tzinfo=UTC))
+    assert m.trm_fecha == "2026-11-11"

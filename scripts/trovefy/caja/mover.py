@@ -105,8 +105,9 @@ def anotar_herramienta(
         centavos = int((importe * 100).to_integral_value(rounding="ROUND_CEILING"))
         trm_txt = trm_fecha = ""
     elif moneda == "COP":
-        if trm is None:
-            raise MovimientoInvalido("no medido: sin TRM; no se anota")
+        dia = ahora.astimezone(ZONA_NEGOCIO).date()
+        if trm is None or not trm.vigente(dia):
+            raise MovimientoInvalido(f"no medido: sin TRM vigente del {dia.isoformat()}; no se anota")
         centavos = cop_a_usd_centavos(importe, trm)
         trm_txt, trm_fecha = str(trm.cop_por_usd), trm.desde.isoformat()
     else:

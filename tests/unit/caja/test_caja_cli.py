@@ -98,7 +98,7 @@ def test_cli_anotar_cop_sin_trm(entorno, monkeypatch, capsys):
     con_caja(vault)
     monkeypatch.setattr("trovefy.trm._abrir_seguro", lambda url, timeout=15: (_ for _ in ()).throw(OSError()))
     assert cli.main(["caja", "anotar", "--importe", "1000", "--moneda", "COP", "--nota", "x"]) == 2
-    assert "no medido: sin TRM; no se anota" in capsys.readouterr().err
+    assert "no medido: sin TRM vigente del 2026-11-12; no se anota" in capsys.readouterr().err
 
 
 def test_cli_proponer_deposita(entorno, monkeypatch, capsys):
