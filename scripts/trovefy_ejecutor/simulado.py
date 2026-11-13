@@ -26,7 +26,6 @@ from trovefy_ejecutor.graph import (
     _seg,
     _valor,
 )
-from trovefy_ejecutor.montaje import IDIOMAS_META
 from trovefy_ejecutor.secretos import Secretos
 from trovefy_ejecutor.telegram import MAX_TEXTO, Boton, ErrorTelegram, largo_telegram
 
@@ -242,10 +241,7 @@ class GraphSimulado:
             raise ValueError("tipo de búsqueda inválido")
         if not isinstance(q, str) or not 1 <= len(q) <= 100:
             raise ValueError("texto de búsqueda inválido")
-        if tipo != "adlocale":
-            return []
-        filas = [{"key": 1000 + i, "name": n} for i, n in enumerate(sorted(IDIOMAS_META.values()))]
-        return [{k: v for k, v in f.items() if k in campos} for f in filas if f["name"] == q]
+        return []  # el montaje usa claves de idioma fijadas: el simulado no tiene nada que buscar
 
     # -- escritura ----------------------------------------------------------------------
     def escribir(self, id: str, datos: Mapping[str, object], *, validate_only: bool = False) -> dict:

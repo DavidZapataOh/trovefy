@@ -49,14 +49,13 @@ MAX_VIDEO = 100 * 1024 * 1024  # igual que ClienteGraph.subir_video (subida simp
 EXT_IMAGEN = frozenset({".jpg", ".jpeg", ".png", ".gif", ".webp"})
 EXT_VIDEO = frozenset({".mp4", ".mov", ".m4v"})
 _ID_META = re.compile(r"[0-9]{1,20}")
-# Idioma (código de 2 letras de la propuesta) → nombre exacto del ``adlocale`` de Meta. Se busca por nombre
-# (``GET /search?type=adlocale&q=<nombre>``, que casa por subcadena) y se exige exactamente una fila con ese
-# nombre exacto y clave entera. Resolución del controlador (fix 1 de la Tarea 6). Los nombres están por
-# confirmar en el ensayo del paso 18 (plan 14): ``tests/vivo/test_idiomas_meta_vivo.py`` los comprueba.
-IDIOMAS_META: dict[str, str] = {
-    "bg": "Bulgarian", "ro": "Romanian", "ru": "Russian", "uk": "Ukrainian", "es": "Spanish (All)",
-    "en": "English (All)", "pt": "Portuguese (All)", "fr": "French (All)", "de": "German", "it": "Italian",
-    "pl": "Polish",
+# Idioma (código de 2 letras de la propuesta) → clave de ``adlocale`` de Meta. Se fijan las claves y no se busca
+# por nombre: ``GET /search?type=adlocale`` devuelve los nombres en el idioma de la cuenta («Búlgaro»), así que
+# casar «Bulgarian» falla siempre. Claves confirmadas con la cuenta del usuario el 2026-11-13 mediante búsqueda
+# de adlocale; es=1002 («Español (todos)») queda por confirmar, el resto están confirmadas.
+IDIOMAS_META: dict[str, int] = {
+    "bg": 37, "ro": 32, "ru": 17, "uk": 52, "en": 1001, "pt": 1005, "fr": 1003, "de": 5, "it": 10,
+    "pl": 15, "es": 1002,
 }
 _SIN_NUMERO = "sin número libre 800–899 hoy: crea la propuesta a mano"
 _REVISA = "puede haberse creado: revísalo en Ads Manager antes de volver a montar"
@@ -87,21 +86,6 @@ def _texto_error(e: BaseException) -> str:
 def _ambiguo(e: ErrorGraph) -> str:
     return f"Meta devolvió un error ambiguo ({e.codigo}): estado desconocido, {_REVISA}"
 
-
-def filas_exactas(filas: list, nombre: str) -> list[int]:
-    """Claves enteras de las filas cuyo ``name`` es exactamente ``nombre``."""
-    claves: list[int] = []
-    for f in filas:
-        if not isinstance(f, dict) or f.get("name") != nombre:
-            continue
-        k = f.get("key")
-        if type(k) is int and k > 0:
-            claves.append(k)
-        elif isinstance(k, str) and _ID_META.fullmatch(k):
-            claves.append(int(k))
-        else:
-            claves.append(-1)  # fila exacta con clave ilegible: cuenta, y hace fallar
-    return claves
 
 
 def _importe(v: object) -> bool:
@@ -294,13 +278,7 @@ def _preparar_meta(p: Propuesta, graph) -> dict[str, int]:
     locales: dict[str, int] = {}
     for cj in e.conjuntos:
         for codigo in cj.idiomas:
-            if codigo in locales:
-                continue
-            nombre = IDIOMAS_META[codigo]
-            claves = filas_exactas(graph.buscar("adlocale", nombre, ["key", "name"]), nombre)
-            if len(claves) != 1 or claves[0] <= 0:
-                raise _Fallo(f"idioma sin resolver: {codigo} ({nombre})")
-            locales[codigo] = claves[0]
+            locales[codigo] = IDIOMAS_META[codigo]  # clave fijada: sin búsqueda (_preparar_forma ya exigió la tabla)
     return locales
 
 

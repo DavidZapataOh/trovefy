@@ -12,7 +12,6 @@ from trovefy_ejecutor.callbacks import firmar, verificar
 from trovefy_ejecutor.ejecutar import ejecutar
 from trovefy_ejecutor.estado import Almacen
 from trovefy_ejecutor.graph import ClienteGraph, ErrorGraph
-from trovefy_ejecutor.montaje import IDIOMAS_META, filas_exactas
 from trovefy_ejecutor.render import botones_propuesta
 from trovefy_ejecutor.simulado import GraphSimulado, TelegramSimulado
 from trovefy_ejecutor.telegram import ClienteTelegram
@@ -156,9 +155,6 @@ def test_montaje_soporte(tmp_path):
     assert g.leer(vid, ["status"])["status"]["video_status"] == "ready"
     th = g.leer(vid, ["thumbnails{uri,is_preferred}"])["thumbnails"]["data"]
     assert th[0]["uri"].startswith("https://")
-    for nombre in IDIOMAS_META.values():
-        filas = g.buscar("adlocale", nombre, ["key", "name"])
-        assert len(filas_exactas(filas, nombre)) == 1
     assert g.buscar("otro", "x", ["key"]) == []
     assert [e[0] for e in g.escrituras] == ["subir_imagen", "subir_video"]
 
