@@ -30,14 +30,14 @@ def trm_fijo(dia: date) -> Trm | None:
     return TRM if dia in (date(2026, 11, 11), date(2026, 11, 12)) else None
 
 
-def test_caja(
+def un_test(
     estado="vivo", prorroga=False, campana="c1", producto="p1", pais="CO"
 ) -> TestCaja:
     return TestCaja(producto, pais, campana, estado, prorroga, None, 2500)
 
 
 def con_test(estado="vivo", prorroga=False, campana="c1") -> ConfigCaja:
-    return replace(CFG, tests=(test_caja(estado, prorroga, campana),))
+    return replace(CFG, tests=(un_test(estado, prorroga, campana),))
 
 
 def g(centavos, producto="p1", pais="CO") -> GastoTest:
