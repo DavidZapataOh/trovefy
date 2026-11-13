@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 from trovefy_ejecutor import auditoria as _aud
@@ -111,49 +111,73 @@ def _espejos(vault: Path) -> dict[str, tuple[dict, str]]:
     return sal
 
 
+def _fecha(v: object) -> datetime | None:
+    if isinstance(v, datetime):
+        return v if v.tzinfo else None
+    try:
+        f = datetime.fromisoformat(str(v))
+    except ValueError:
+        return None
+    return f if f.tzinfo else None
+
+
+_SIN_FECHA = datetime.min.replace(tzinfo=UTC)
+
+
 def listar(vault: Path) -> tuple[list[FilaAprobacion], list[str]]:
+    """Estado = el más reciente entre el espejo (``fecha``) y la última transición de la auditoría (``ts``)."""
     eventos, avisos = _leer_auditoria(vault)
     espejos = _espejos(vault)
-    campos: dict[str, dict[str, str]] = {}
+    campos: dict[str, dict] = {}
 
-    def fila(id_: str) -> dict[str, str]:
+    def fila(id_: str) -> dict:
         return campos.setdefault(id_, {})
+
+    def poner_estado(f: dict, estado: str, cuando: datetime | None) -> None:
+        previo = f.get("_cuando")
+        if "estado" not in f or (cuando is not None and (previo is None or cuando >= previo)):
+            f["estado"], f["_cuando"] = estado, cuando
 
     for id_, (meta, _cuerpo) in espejos.items():
         f = fila(id_)
         f["tipo"] = _s(meta.get("tipo_propuesta"))
-        f["estado"] = _s(meta.get("estado"))
-        f["creada"] = VACIO
         f["_fecha"] = _s(meta.get("fecha"))
+        poner_estado(f, _s(meta.get("estado")), _fecha(meta.get("fecha")))
     for e in eventos:
         d, ev = e["datos"], e["evento"]
         id_ = d.get("id")
         if not isinstance(id_, str) or not ID_PROPUESTA.match(id_):
             continue
         f = fila(id_)
+        ts = _fecha(e.get("ts"))
         if ev == "recibida":
             f.setdefault("tipo", _s(d.get("tipo")))
-            f.setdefault("estado", "recibida")
+            if "estado" not in f:
+                f["estado"], f["_cuando"] = "recibida", ts
             f["creada"] = _s(e.get("ts"))
             for k in ("origen", "motivo"):
                 if d.get(k):
                     f[k] = str(d[k])
         elif ev == "transicion":
-            f["estado"] = _s(d.get("a"))
+            poner_estado(f, _s(d.get("a")), ts)
             if f.get("tipo", VACIO) == VACIO:
                 f["tipo"] = _s(d.get("tipo"))
         elif ev == "validacion_rechazada":
-            f["estado"] = "rechazada al validar"
+            poner_estado(f, "rechazada al validar", ts)
             f["motivo"] = _s(d.get("motivo"))
-    filas = []
+    filas: list[tuple[datetime, FilaAprobacion]] = []
     for id_, f in campos.items():
-        creada = f.get("creada", VACIO)
-        if creada == VACIO:
-            creada = f.get("_fecha", VACIO)
-        filas.append(FilaAprobacion(id_, f.get("tipo", VACIO), f.get("estado", VACIO), creada,
-                                    f.get("origen") or origen_de(id_), f.get("motivo", VACIO)))
-    filas.sort(key=lambda r: (r.creada if r.creada != VACIO else "", r.id), reverse=True)
-    return filas, avisos
+        if "creada" in f:
+            creada, cuando = f["creada"], _fecha(f["creada"])
+        elif f.get("_fecha", VACIO) != VACIO:
+            creada, cuando = f"actualizada {f['_fecha']}", _fecha(f["_fecha"])
+        else:
+            creada, cuando = VACIO, None
+        origen = origen_de(id_) if int(id_[-3:]) >= 800 else (f.get("origen") or origen_de(id_))
+        filas.append((cuando or _SIN_FECHA, FilaAprobacion(
+            id_, f.get("tipo", VACIO), f.get("estado", VACIO), creada, origen, f.get("motivo", VACIO))))
+    filas.sort(key=lambda x: (x[0], x[1].id), reverse=True)
+    return [r for _, r in filas], avisos
 
 
 def explicar(vault: Path, id: str) -> str:
@@ -168,7 +192,9 @@ def explicar(vault: Path, id: str) -> str:
     f = next((r for r in filas if r.id == id), None)
     out = [id]
     if f is not None:
-        out += [f"Tipo: {f.tipo}", f"Estado: {f.estado}", f"Creada: {f.creada}",
+        cuando = (f"Actualizada: {f.creada.removeprefix('actualizada ')}" if f.creada.startswith("actualizada ")
+                  else f"Creada: {f.creada}")
+        out += [f"Tipo: {f.tipo}", f"Estado: {f.estado}", cuando,
                 f"Origen: {f.origen}", f"Motivo: {f.motivo}"]
     if espejo is not None:
         cuerpo = espejo[1].strip().splitlines()

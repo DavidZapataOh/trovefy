@@ -202,3 +202,54 @@ def test_reinicio_sin_cadena_reanudada_no_cuadra(tmp_path):
 def test_listado_no_usa_privadas_del_ejecutor():
     src = Path(listado.__file__).read_text(encoding="utf-8")
     assert "_recorrer" not in src and "tempfile" not in src
+
+
+# --- estado más reciente, origen 8NN/9NN, orden por fecha real ---
+
+def _evento(vault, dia, **e):
+    ruta = vault / "ledger" / "auditoria" / f"{dia}.jsonl"
+    with ruta.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(e) + "\n")
+
+
+def _espejo(vault, id_, estado, fecha, tipo="noop"):
+    (vault / "propuestas" / f"{id_}.md").write_text(
+        f"---\ntipo: propuesta-resultado\nid: {id_}\ntipo_propuesta: {tipo}\nestado: {estado}\n"
+        f"fecha: '{fecha}'\n---\n\nTexto.\n", encoding="utf-8")
+
+
+def test_espejo_mas_nuevo_que_la_ultima_transicion_manda(vault):
+    _espejo(vault, "P-20261112-001", "obsoleta", "2026-11-13T10:00:00-05:00")  # 15:00 UTC > 14:01 UTC
+    assert _por_id(listar(vault)[0])["P-20261112-001"].estado == "obsoleta"
+
+
+def test_transicion_mas_nueva_que_el_espejo_manda(vault):
+    _espejo(vault, "P-20261112-001", "aceptada", "2026-11-13T09:00:00-05:00")  # 14:00 UTC < 14:01 UTC
+    assert _por_id(listar(vault)[0])["P-20261112-001"].estado == "caducada"
+
+
+def test_origen_de_ids_8nn_y_9nn_no_lo_dice_el_que_deposita(vault):
+    _evento(vault, "2026-11-13", n=11, ts="2026-11-13T15:00:00+00:00", evento="recibida",
+            datos={"id": "P-20261113-801", "tipo": "noop", "origen": "/caja"})
+    _evento(vault, "2026-11-13", n=12, ts="2026-11-13T15:01:00+00:00", evento="recibida",
+            datos={"id": "P-20261113-902", "tipo": "noop", "origen": "/caja"})
+    _evento(vault, "2026-11-13", n=13, ts="2026-11-13T15:02:00+00:00", evento="recibida",
+            datos={"id": "P-20261113-004", "tipo": "noop", "origen": "/caja"})
+    f = _por_id(listar(vault)[0])
+    assert f["P-20261113-801"].origen == "ejecutor"
+    assert f["P-20261113-902"].origen == "tú, por Telegram"
+    assert f["P-20261113-004"].origen == "/caja"
+
+
+def test_orden_por_fecha_real_y_espejo_sin_auditoria_dice_actualizada(vault):
+    _evento(vault, "2026-11-13", n=11, ts="2026-11-13T10:00:00-05:00", evento="recibida",
+            datos={"id": "P-20261113-005", "tipo": "noop"})  # 15:00 UTC
+    _evento(vault, "2026-11-13", n=12, ts="2026-11-13T14:30:00+00:00", evento="recibida",
+            datos={"id": "P-20261113-006", "tipo": "noop"})  # 14:30 UTC
+    _espejo(vault, "P-20261113-007", "enviada", "2026-11-13T09:45:00-05:00")  # 14:45 UTC
+    filas = listar(vault)[0]
+    ids = [x.id for x in filas]
+    assert ids[:3] == ["P-20261113-005", "P-20261113-007", "P-20261113-006"]
+    f = _por_id(filas)["P-20261113-007"]
+    assert f.creada == "actualizada 2026-11-13T09:45:00-05:00"
+    assert "Actualizada: 2026-11-13T09:45:00-05:00" in explicar(vault, "P-20261113-007")
