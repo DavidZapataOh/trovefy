@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import re
-import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -196,29 +195,63 @@ def explicar(vault: Path, id: str) -> str:
     return "\n".join(out)
 
 
-def _verificar_cadena(vault: Path) -> str | None:
-    """None si cuadra; texto si no cuadra o no se pudo medir."""
+NO_CUADRA = "Auditoría: la copia de la auditoría no cuadra: avisa"
+
+
+def _dia_cot(ts: object) -> str:
+    try:
+        f = datetime.fromisoformat(str(ts))
+        return (f.astimezone(COT) if f.tzinfo else f).date().isoformat()
+    except ValueError:
+        return VACIO
+
+
+def _verificar_cadena(vault: Path) -> list[str]:
+    """Verifica la copia por tramos. [] si cuadra; si no, líneas «Auditoría: …» (aviso, hueco o reanudación)."""
     carpeta = Path(vault) / "ledger" / "auditoria"
     dias = sorted(p for p in carpeta.glob("*.jsonl") if p.is_file() and not p.is_symlink()) if carpeta.is_dir() else []
     if not dias:
-        return "Auditoría: no medido: no hay copia en ledger/auditoria/"
-    try:
-        crudo = b"".join(p.read_bytes() for p in dias)
-        primera = crudo.split(b"\n", 1)[0]
-        ini = json.loads(primera)
-    except (OSError, ValueError):
-        return "Auditoría: la copia de la auditoría no cuadra: avisa"
-    if not isinstance(ini, dict) or ini.get("n") != 1 or ini.get("hash_prev") != _aud.GENESIS:
-        if isinstance(ini, dict) and isinstance(ini.get("n"), int) and ini.get("n") > 1:
-            return "Auditoría: no medido: la copia no empieza en el origen de la cadena"
-        return "Auditoría: la copia de la auditoría no cuadra: avisa"
-    with tempfile.TemporaryDirectory() as t:
-        tmp = Path(t) / "cadena.jsonl"
-        tmp.write_bytes(crudo)
-        fallo = _aud._recorrer(tmp)[0]
-    if fallo:
-        return "Auditoría: la copia de la auditoría no cuadra: avisa"
-    return None
+        return ["Auditoría: no medido: no hay copia en ledger/auditoria/"]
+    info: list[str] = []
+    tramos: list[tuple[int, str, list[dict]]] = []  # (n0, hash_prev, líneas)
+    sig: tuple[int, str] | None = None  # (n esperada, hash previo) para continuar
+    dia_prev = ""
+    for ruta in dias:
+        try:
+            crudas = [x for x in ruta.read_bytes().split(b"\n") if x.strip()]
+            lineas = [json.loads(x) for x in crudas]
+        except (OSError, ValueError):
+            return [NO_CUADRA]
+        if not all(isinstance(x, dict) and isinstance(x.get("n"), int) for x in lineas):
+            return [NO_CUADRA]
+        for i, ln in enumerate(lineas):
+            reanuda = ln["n"] == 1 and ln.get("hash_prev") == _aud.GENESIS and ln.get("evento") == _aud.EV_CADENA_REANUDADA
+            if sig is None or reanuda:
+                if reanuda:
+                    info.append(f"cadena reanudada el {_dia_cot(ln.get('ts'))}")
+                    tramos.append((1, _aud.GENESIS, [ln]))
+                elif ln["n"] == 1:
+                    tramos.append((1, _aud.GENESIS, [ln]))
+                else:
+                    info.append("no medido: la copia no empieza en el origen de la cadena")
+                    tramos.append((ln["n"], str(ln.get("hash_prev")), [ln]))
+            elif i == 0 and ln["n"] > sig[0] and ln.get("hash_prev") != sig[1]:
+                info.append(f"no medido: la copia tiene un hueco entre {dia_prev} y {ruta.stem}")
+                tramos.append((ln["n"], str(ln.get("hash_prev")), [ln]))
+            else:
+                tramos[-1][2].append(ln)
+            sig = (ln["n"] + 1, str(ln.get("hash")))
+        if lineas:
+            dia_prev = ruta.stem
+    if any(_aud.verificar_lineas(ls, n0, prev) for n0, prev, ls in tramos):
+        return [NO_CUADRA]
+    if not info:
+        return []
+    medidas = [x for x in info if x.startswith("no medido")]
+    reanudadas = [x for x in info if not x.startswith("no medido")]
+    if medidas:
+        return [f"Auditoría: {x}" for x in medidas] + [f"Auditoría: {x}" for x in reanudadas]
+    return [f"Auditoría: la copia cuadra ({'; '.join(reanudadas)})"]
 
 
 def _latido(vault: Path, ahora: datetime, spool: Path | None) -> tuple[list[str], bool]:
@@ -297,8 +330,7 @@ def resumen_estado(vault: Path, ahora: datetime, spool: Path | None = None) -> l
         out += [f"  {_s(e['datos'].get('clave'))}: {_s(e['datos'].get('de'))} -> {_s(e['datos'].get('a'))}"
                 for e in camb]
     out += [f"Aviso: {a}" for a in avisos]
-    problema = _verificar_cadena(vault)
-    out.append(problema or "Auditoría: la copia cuadra")
+    out += _verificar_cadena(vault) or ["Auditoría: la copia cuadra"]
     return out
 
 

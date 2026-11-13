@@ -128,3 +128,77 @@ def test_estado_rechazadas_y_limites_cambiados_sin_secretos(vault, tmp_path):
 def test_propuesta_noop():
     p = listado.propuesta_noop(AHORA)
     assert p["tipo"] == "noop" and p["version"] == 1
+
+
+# --- verificación de la copia por tramos (sin falsas alarmas) ---
+
+def _cadena(tmp_path, dias, reparar_el=None):
+    """Escribe la auditoría real con un reloj por día y devuelve {día: [líneas]} como la copia del ejecutor."""
+    from trovefy_ejecutor.auditoria import Auditoria, reparar
+    ruta = tmp_path / "datos" / "auditoria.jsonl"
+    copias: dict[str, list[str]] = {}
+    for dia, n in dias:
+        reloj = (lambda d=dia: datetime.fromisoformat(f"{d}T10:00:00-05:00"))
+        if dia == reparar_el:
+            reparar(ruta, reloj=reloj)
+        a = Auditoria(ruta, reloj=reloj)
+        for i in range(n):
+            a.anotar("transicion", id=f"P-{dia.replace('-', '')}-00{i}", tipo="noop", de="recibida", a="enviada")
+        copias[dia] = [x for x in ruta.read_text(encoding="utf-8").splitlines()
+                       if json.loads(x)["ts"].startswith(dia) or dia == reparar_el]
+    return copias
+
+
+def _vault_con(tmp_path, copias):
+    v = tmp_path / "v"
+    (v / "ledger" / "auditoria").mkdir(parents=True)
+    for dia, ls in copias.items():
+        (v / "ledger" / "auditoria" / f"{dia}.jsonl").write_text("\n".join(ls) + "\n", encoding="utf-8")
+    return v
+
+
+def _auditoria(vault):
+    return [x for x in resumen_estado(vault, AHORA, vault / "sin-spool") if x.startswith("Auditoría")]
+
+
+def test_copia_completa_cuadra(tmp_path):
+    v = _vault_con(tmp_path, _cadena(tmp_path, [("2026-11-11", 3), ("2026-11-12", 2)]))
+    assert _auditoria(v) == ["Auditoría: la copia cuadra"]
+
+
+def test_copia_de_un_dia_sin_sus_ultimas_lineas_es_hueco(tmp_path):
+    copias = _cadena(tmp_path, [("2026-11-11", 4), ("2026-11-12", 2)])
+    copias["2026-11-11"] = copias["2026-11-11"][:2]
+    out = _auditoria(_vault_con(tmp_path, copias))
+    assert out == ["Auditoría: no medido: la copia tiene un hueco entre 2026-11-11 y 2026-11-12"]
+
+
+def test_cadena_reanudada_por_reparar_es_informativa(tmp_path):
+    copias = _cadena(tmp_path, [("2026-11-11", 3), ("2026-11-12", 2)], reparar_el="2026-11-12")
+    assert json.loads(copias["2026-11-12"][0])["evento"] == "cadena_reanudada"
+    out = _auditoria(_vault_con(tmp_path, copias))
+    assert not any("no cuadra" in x for x in out)
+    assert out == ["Auditoría: la copia cuadra (cadena reanudada el 2026-11-12)"]
+
+
+def test_linea_alterada_dentro_de_un_dia_no_cuadra(tmp_path):
+    copias = _cadena(tmp_path, [("2026-11-11", 3), ("2026-11-12", 2)])
+    copias["2026-11-11"][1] = copias["2026-11-11"][1].replace("enviada", "aceptada")
+    assert _auditoria(_vault_con(tmp_path, copias)) == ["Auditoría: la copia de la auditoría no cuadra: avisa"]
+
+
+def test_linea_del_medio_borrada_no_cuadra(tmp_path):
+    copias = _cadena(tmp_path, [("2026-11-11", 4)])
+    del copias["2026-11-11"][1]
+    assert _auditoria(_vault_con(tmp_path, copias)) == ["Auditoría: la copia de la auditoría no cuadra: avisa"]
+
+
+def test_reinicio_sin_cadena_reanudada_no_cuadra(tmp_path):
+    a = _cadena(tmp_path / "a", [("2026-11-11", 3)])
+    b = _cadena(tmp_path / "b", [("2026-11-12", 2)])
+    assert _auditoria(_vault_con(tmp_path, {**a, **b})) == ["Auditoría: la copia de la auditoría no cuadra: avisa"]
+
+
+def test_listado_no_usa_privadas_del_ejecutor():
+    src = Path(listado.__file__).read_text(encoding="utf-8")
+    assert "_recorrer" not in src and "tempfile" not in src
