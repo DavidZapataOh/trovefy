@@ -71,7 +71,7 @@ from .deposito import DepositoRechazado, comprobar_origen
 from .dinero import Moneda, MonedaNoConfigurada, formatear
 from .ejecutar import NO_SOPORTADO_P07, TIPOS_SOPORTADOS, Resultado, ejecutar
 from .emparejar import Emparejamiento
-from .esquema import RANGO_CLAUDE, PropuestaInvalida, cargar_propuesta
+from .esquema import RANGO_CLAUDE, PropuestaInvalida, cargar_propuesta, volcar_propuesta
 from .estado import Almacen, FilaPropuesta, IdDuplicado
 from .graph import OFFSETS_META, ClienteGraph, DetenidoPorStop, ErrorGraph, clasificar
 from .limites import (
@@ -112,6 +112,7 @@ from .stop import activar_stop, quitar_stop, stop_activo
 from .telegram import Boton, ClienteTelegram, ErrorRedTelegram, ErrorTelegram
 from .vault_copia import CopiaVault
 from .vivo import ValoresVivos, presupuestos_activos_cuenta, valores_vivos
+from .vivo import _normalizar as _normalizar_vivo
 
 TIPOS_INGERIBLES: frozenset[str] = TIPOS_SOPORTADOS | {"crear_estructura_pausada"}
 ZONA_POR_DEFECTO = "America/Bogota"
@@ -223,6 +224,7 @@ class Ejecutor:
         self.desfase_s: float | None = None
         self._desfase_medido: datetime | None = None
         self._aviso_reloj: str | None = None
+        self._pista_desfase: tuple[float, datetime] | None = None
         self._cargar_desfase()
         self.parar = threading.Event()  # servir() pone el suyo: corta las esperas del ciclo
         self.espera_red_s: float = 5
@@ -351,7 +353,20 @@ class Ejecutor:
             return
         original = fila.datos.get("texto")
         original = original if isinstance(original, str) else f"{fila.id} · {fila.tipo}"
+        antes = self._desfase_medido
         self._editar(destino, f"{original[:3800]}\n\n{aviso}")
+        if self._desfase_medido == antes:  # edición sin fecha («message is not modified») o fallida
+            self._decir(f"{fila.id}: {aviso}", sonido=False)
+
+    def _pista_alarma(self) -> bool:
+        """Un mensaje entrante reciente (más nuevo que la última medida propia) sugiere un desfase > 300 s.
+        Es solo una pista: obliga a volver a medir, nunca autoriza ni bloquea por sí sola."""
+        if self._pista_desfase is None:
+            return False
+        s, cuando = self._pista_desfase
+        if abs(self.reloj() - cuando) > VIGENCIA_DESFASE or abs(s) <= DESFASE_MAX_S:
+            return False
+        return self._desfase_medido is None or cuando > self._desfase_medido
 
     def _transicion(self, id: str, de, a, **datos) -> bool:
         """Única vía de transición del servicio: ``Almacen.transicion`` + ``EV_TRANSICION`` si cambió."""
@@ -411,7 +426,7 @@ class Ejecutor:
             try:
                 self._ingerir_una(ruta)
                 n += 1
-            except sqlite3.OperationalError:
+            except (sqlite3.OperationalError, AuditoriaCorrupta):
                 raise
             except Exception as e:  # noqa: BLE001 — una propuesta nunca tumba el ciclo
                 self._anotar_error("ingerir", e)
@@ -449,6 +464,11 @@ class Ejecutor:
         try:
             self.almacen.registrar(p)
         except IdDuplicado:
+            previa = self.almacen.obtener(p.id)
+            if previa is not None and volcar_propuesta(previa.propuesta) == volcar_propuesta(p):
+                # El mismo archivo otra vez: se informa del estado real, sin rechazar lo que ya está en curso.
+                self.buzon.procesar(ruta, {"estado": previa.estado, "motivo": "ya recibida (archivo repetido)"})
+                return None
             return self._rechazo_buzon(ruta, p.id, "id duplicado")
         try:
             self.auditoria.anotar(EV_RECIBIDA, id=p.id, tipo=p.tipo)
@@ -813,7 +833,7 @@ class Ejecutor:
             return
         p, ahora = fila.propuesta, self.reloj()
         desfase = self._desfase_fresco()
-        if desfase is None:
+        if desfase is None or self._pista_alarma():
             self._medir_ahora(fila, mid)
             desfase = self._desfase_fresco()
         if desfase is None:  # sin medida fresca no se sabe si el reloj miente: no se ejecuta
@@ -1059,7 +1079,7 @@ class Ejecutor:
                 if manejador is None:
                     raise TypeError(f"acción sin despacho: {type(accion).__name__}")
                 manejador(accion)
-            except sqlite3.OperationalError:
+            except (sqlite3.OperationalError, AuditoriaCorrupta):
                 raise
             except Exception as e:  # noqa: BLE001 — un update nunca tumba el ciclo
                 self._anotar_error("update", e)
@@ -1068,12 +1088,13 @@ class Ejecutor:
         return n
 
     def _medir_desfase(self, u: dict) -> None:
-        """Desfase del reloj con la hora de Telegram. Solo con ``message`` (su ``date`` es el instante del
-        envío); la fecha de un ``callback_query`` es la del mensaje del bot, que puede tener horas."""
+        """Pista de desfase con la ``date`` de un ``message`` entrante (la de un ``callback_query`` es la del
+        mensaje del bot, que puede tener horas). Solo una pista (``_pista_alarma``): para ejecutar vale
+        únicamente la hora que devuelve el servidor a nuestras propias llamadas."""
         m = u.get("message")
         fecha = m.get("date") if isinstance(m, dict) else None
         if type(fecha) is int and fecha > 0:
-            self._anotar_desfase(self.reloj().timestamp() - fecha)
+            self._pista_desfase = (self.reloj().timestamp() - fecha, self.reloj())
 
     def _ignorar(self, a: Ignorar) -> None:
         if a.motivo.startswith("callback_"):
@@ -1306,14 +1327,14 @@ class Ejecutor:
             return "fallida", "interrumpida por un reinicio; no se reintenta"
         try:
             vv = valores_vivos(p, self.graph, ahora=self.reloj)
-            vivos = [(op, vv.valor(op)) for op in p.operaciones]
+            vivos = [(op, _normalizar_vivo(op.campo, vv.valor(op))) for op in p.operaciones]
         except Exception as e:  # noqa: BLE001 — lectura imposible: nunca «no se cambió nada»
             self._vigilar_token(e)
             return "discrepancia", f"estado desconocido tras reinicio ({self._texto_error(e)}): revisa Ads Manager"
         resumen = "; ".join(f"{op.id} {op.campo}={v}" for op, v in vivos)
-        if vivos and all(v == op.a for op, v in vivos):
+        if vivos and all(v == _normalizar_vivo(op.campo, op.a) for op, v in vivos):
             return "ejecutada", f"relectura tras reinicio: {resumen}"
-        if vivos and all(v == op.de_esperado for op, v in vivos):
+        if vivos and all(v == _normalizar_vivo(op.campo, op.de_esperado) for op, v in vivos):
             return "fallida", f"interrumpida por un reinicio antes de llegar a Meta ({resumen}); no se reintenta"
         return "discrepancia", f"estado mezclado tras reinicio ({resumen}): revisa Ads Manager"
 
@@ -1416,7 +1437,7 @@ class Ejecutor:
         avisos: list[str] = []
         if self._limites_error:
             avisos.append(self._limites_error)
-        if self._aviso_reloj or (desfase is not None and abs(desfase) > DESFASE_MAX_S):
+        if self._aviso_reloj or self._pista_alarma() or (desfase is not None and abs(desfase) > DESFASE_MAX_S):
             avisos.append(AVISO_RELOJ)
         if self.almacen.leer_kv(CLAVE_TOKEN):
             avisos.append(MOTIVO_TOKEN)
@@ -1448,8 +1469,12 @@ class Ejecutor:
         return {"activo": True, "motivo": motivo, "fecha": fecha}
 
     def _vigilar_renovacion(self, ahora: datetime) -> None:
-        """Con el token marcado: una comprobación al arrancar (si ya lo estaba) y luego como mucho cada
-        10 min. Si se marca con el servicio en marcha, la primera llega a los 10 min (no al ciclo siguiente)."""
+        """Con el token marcado: una comprobación al arrancar (``servir`` la hace antes de ``recuperar``) y
+        luego como mucho cada 10 min. Si se marca con el servicio en marcha, la primera llega a los 10 min.
+
+        Ojo: los clientes se crean una vez con el token de ``secretos.env``; un token **renovado** solo se usa
+        tras reiniciar el servicio. Esta comprobación en marcha solo sirve para un 190/102 pasajero de Meta
+        con el mismo token."""
         if not self.almacen.leer_kv(CLAVE_TOKEN):
             self._ultima_comprobacion_meta = None
             self._token_al_arrancar = False
@@ -1501,7 +1526,7 @@ class Ejecutor:
         espera ``espera_red_s`` (interrumpible con ``parar``); el barrido sigue (caducar es local)."""
         self._recargar_limites()
         self.latir()
-        self.ingerir()
+        self._aislado("ingerir", self.ingerir)  # un buzón roto nunca deja sin atender /stop
         try:
             self.atender_updates()
             self._telegram_estado = "ok"
@@ -1615,6 +1640,12 @@ def _servir_con_candado(rutas: RutasEjecutor, graph_simulado: bool, parar: threa
         ej = Ejecutor(rutas, telegram, graph, secretos, reloj=reloj or (lambda: datetime.now(UTC)),
                       modo="simulado" if graph_simulado else "real")
         ej.parar = parar
+        if ej.almacen.leer_kv(CLAVE_TOKEN):
+            # El token se acaba de cargar de secretos.env: si se renovó, se desmarca antes de recuperar,
+            # para que una aceptada no acabe fallida por una bandera vieja.
+            ej._token_al_arrancar = False
+            ej._ultima_comprobacion_meta = ej.reloj()
+            ej.comprobar_meta()
         ej.recuperar()
         while not parar.is_set():
             try:

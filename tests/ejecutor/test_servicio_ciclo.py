@@ -36,13 +36,14 @@ from ejecutor.test_servicio import (
 )
 from trovefy_ejecutor import ejecutar as _ejecutar
 from trovefy_ejecutor import servicio
+from trovefy_ejecutor.auditoria import AuditoriaCorrupta
 from trovefy_ejecutor.candado import MENSAJE_OTRO, candado
 from trovefy_ejecutor.esquema import cargar_propuesta
 from trovefy_ejecutor.estado import Almacen
 from trovefy_ejecutor.limites import LimitesInvalidos
 from trovefy_ejecutor.render import texto_ya_procesada
 from trovefy_ejecutor.servicio import Ejecutor
-from trovefy_ejecutor.stop import activar_stop
+from trovefy_ejecutor.stop import activar_stop, stop_activo
 from trovefy_ejecutor.telegram import ErrorRedTelegram
 
 
@@ -705,3 +706,124 @@ def test_servir_crea_estado_y_procesadas_con_setgid(tmp_path, monkeypatch):
             assert stat.S_IMODE((spool / nombre).stat().st_mode) == 0o2750
     finally:
         m.ej.almacen.cerrar()
+
+
+# == Fix round 1 ===================================================================================
+
+def test_servir_comprueba_el_token_antes_de_recuperar(montaje):
+    """Token renovado + reinicio: la bandera se comprueba con el token recién cargado antes de recuperar."""
+    m = montaje
+    _secretos(m)
+    id = _dejar_en(m, presupuesto(), "aceptada")
+    m.ej.almacen.poner_kv("token_caducado", T0.isoformat())
+    parar = threading.Event()
+    parar.set()  # solo recuperar
+    assert _servir(m, parar) == 0
+    assert m.estado(id) == "ejecutada" and len(m.graph.escrituras()) == 1
+    assert m.ej.almacen.leer_kv("token_caducado") is None
+
+
+def test_buzon_roto_no_impide_atender_stop(montaje):
+    m = montaje
+
+    def rota():
+        raise PermissionError("entrada/ sin permiso")
+
+    m.ej.buzon.nuevas = rota
+    m.tg.escribir("/stop")
+    m.ej.ciclo()
+    m.ej.ciclo()
+    assert stop_activo(m.rutas)
+
+
+def test_desfase_de_un_mensaje_entrante_es_solo_una_pista(montaje):
+    """Un mensaje con fecha rara (p. ej. reenviado o retrasado) no bloquea si una medida propia dice que
+    el reloj va bien; y nunca autoriza por sí sola."""
+    m = montaje
+    id = _enviar(m, presupuesto())
+    m.ej.desfase_s = None  # sin medida propia
+    m.ej._desfase_medido = None
+    m.tg.escribir("hola")  # su fecha (= reloj) daría desfase 0
+    m.tg.enviar = m.tg.editar = _sin_red  # y no se puede medir de verdad
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    assert m.estado(id) == "aceptada" and m.graph.escrituras() == []
+
+
+def test_mensaje_entrante_desfasado_vuelve_a_medir_antes_de_bloquear(montaje):
+    m = montaje
+    id = _enviar(m, presupuesto())
+    viejo = m.tg._ahora
+    m.tg._ahora = lambda: m.reloj() - timedelta(seconds=400)
+    m.tg.user_id = 99  # de otro usuario: se ignora sin responder, pero su fecha se mide
+    m.tg.escribir("hola")  # pista: 400 s
+    m.tg.user_id = 42
+    m.tg._ahora = viejo  # pero el servidor, al editar, da la hora buena
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    assert m.estado(id) == "ejecutada"
+    assert m.eventos("transicion", id=id, de="aceptada", a="ejecutando")
+
+
+def test_medir_ahora_con_edicion_sin_cambios_cae_a_un_mensaje(montaje):
+    m = montaje
+    id = _enviar(m, presupuesto())
+    m.reloj.avanzar(minutes=20)
+    editar = m.tg.editar
+
+    def sin_cambios(chat, mid, texto, botones=None):
+        if "comprobando la hora" in texto:
+            return None  # «message is not modified»: sin fecha
+        return editar(chat, mid, texto, botones)
+
+    m.tg.editar = sin_cambios
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    assert m.estado(id) == "ejecutada"
+    assert any("comprobando la hora" in t for t in m.textos())
+
+
+def test_id_duplicado_identico_refleja_el_estado_real(montaje):
+    m = montaje
+    id = _enviar(m, presupuesto())
+    m.depositar(presupuesto())  # Claude reenvía el mismo archivo
+    m.ej.ciclo()
+    res = json.loads((m.rutas.spool / "procesadas" / f"{id}-2.resultado.json").read_text())
+    assert res["estado"] == "enviada" and m.estado(id) == "enviada"
+    assert not m.eventos("validacion_rechazada", id=id)
+
+
+def test_auditoria_corrupta_para_el_servicio(montaje, monkeypatch):
+    m = montaje
+
+    def rota(*a, **k):
+        raise AuditoriaCorrupta("cadena rota")
+
+    m.depositar(presupuesto())
+    monkeypatch.setattr(m.ej.auditoria, "anotar", rota)
+    with pytest.raises(AuditoriaCorrupta):
+        m.ej.ingerir()
+    m.tg.escribir("/stop")
+    with pytest.raises(AuditoriaCorrupta):
+        m.ej.atender_updates()
+
+
+def test_reinicio_compara_valores_normalizados(montaje):
+    m = montaje
+    id = _dejar_en(m, presupuesto(de=20000, a=26000), "ejecutando")
+    m.graph.objetos[S1]["daily_budget"] = "26000"
+    vv_original = servicio.valores_vivos
+
+    def como_texto(p, g, **k):  # Meta devuelve el importe como texto
+        vv = vv_original(p, g, **k)
+        ent = {k2: dict(v) for k2, v in vv.entidades.items()}
+        ent[S1]["daily_budget"] = "26000"
+        return dataclasses.replace(vv, entidades=ent)
+
+    monkeypatch_vv = pytest.MonkeyPatch()
+    monkeypatch_vv.setattr(servicio, "valores_vivos", como_texto)
+    try:
+        _reiniciar(m).recuperar()
+    finally:
+        monkeypatch_vv.undo()
+    assert m.estado(id) == "ejecutada"
