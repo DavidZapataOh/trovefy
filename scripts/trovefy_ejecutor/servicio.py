@@ -469,6 +469,7 @@ class Ejecutor:
 
     def _enviar(self, id: str, texto: str) -> None:
         """Envía la propuesta con sus dos botones si el ritmo lo permite; si no, queda en cola."""
+        texto = self._limpio(texto)
         fila = self.almacen.obtener(id)
         if fila is None:
             return
@@ -479,7 +480,7 @@ class Ejecutor:
             self.almacen.actualizar_datos(id, "recibida", en_cola=True, texto=texto)
             return
         try:
-            mid = self.telegram.enviar(chat, self._limpio(texto), botones_propuesta(id, chat, clave),
+            mid = self.telegram.enviar(chat, texto, botones_propuesta(id, chat, clave),
                                        sonido=decision.sonido)
         except _ERRORES_TELEGRAM as e:
             self._anotar_error("telegram", e)
