@@ -1092,3 +1092,26 @@ def test_deposito_de_claude_con_origen_telegram_no_responde_en_telegram(montaje)
     m.depositar(pausar(origen="telegram:x"))
     m.ej.ciclo()
     assert m.estado("P-20261112-005") == "rechazada" and m.tg.mensajes == {}
+
+
+# == Costura buzón de Claude (trovefy.buzon) → ejecutor ============================================
+
+@pytest.mark.parametrize("fabrica", [noop, presupuesto], ids=["noop", "presupuesto"])
+def test_costura_depositar_de_claude_lo_acepta_ingerir(montaje, fabrica):
+    """Lo que escribe ``trovefy.buzon.depositar`` (id omitido) lo acepta el ``Ejecutor.ingerir`` real."""
+    from trovefy.buzon import depositar
+    m = montaje
+    datos = fabrica()
+    del datos["id"]
+    del datos["version"]
+    ruta = depositar(datos, spool=m.rutas.spool, vault=m.vault, ahora=m.reloj())
+    viejo = m.reloj().timestamp() - 60
+    os.utime(ruta, (viejo, viejo))
+    assert m.ej.ingerir() == 1
+    id = ruta.stem
+    assert id == "P-20261112-001"
+    assert not m.eventos("validacion_rechazada")
+    assert m.eventos("recibida", id=id)
+    res = json.loads((m.rutas.spool / "procesadas" / f"{id}.resultado.json").read_text())
+    assert res["estado"] == "recibida"
+    assert m.estado(id) not in ("rechazada", "recibida")

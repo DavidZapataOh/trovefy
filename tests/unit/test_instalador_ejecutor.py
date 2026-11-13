@@ -48,11 +48,14 @@ def test_unidad_endurecida():
     assert "CapabilityBoundingSet=" in u.splitlines()
     assert "UMask=0027" not in u
     rw = next(ln for ln in u.splitlines() if ln.startswith("ReadWritePaths="))
-    assert rw.split("=", 1)[1].split() == [
-        "/var/spool/trovefy", "/home/trovefy-exec/.local/share/trovefy-ejecutor",
-        "/home/trovefy-exec/.config/trovefy-ejecutor", "{vault}/propuestas", "{vault}/ledger/auditoria",
-        "{vault}/raw/telegram",
-    ]
+    # Derivado del código: si el ejecutor escribe en otra carpeta del vault o cambian sus rutas, falla aquí.
+    from trovefy_ejecutor.config import rutas_por_defecto
+    from trovefy_ejecutor.vault_copia import CARPETAS
+    r = rutas_por_defecto({})
+    esperadas = [str(r.spool), str(r.base.parent), str(r.secretos.parent)]
+    assert r.auditoria.parent == r.base.parent == r.stop.parent and r.limites.parent == r.secretos.parent
+    esperadas += [f"{{vault}}/{c}" for c in CARPETAS]
+    assert rw.split("=", 1)[1].split() == esperadas
     assert "{vault}/wiki" not in u
     assert "226/NAMESPACE" in u and u.index("PrivateDevices") < u.index("RestrictNamespaces")
 
