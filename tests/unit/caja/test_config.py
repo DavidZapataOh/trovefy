@@ -72,3 +72,28 @@ def test_iniciar_no_sobrescribe(tmp_path):
     iniciar_caja(tmp_path, None, None)
     with pytest.raises(FileExistsError):
         iniciar_caja(tmp_path, "act_0000000000000000", "COP")
+
+
+def _con_tests(*items):
+    cuerpo = "".join(
+        f"  - {{producto: {p}, pais: {c}, campana_id: {i}, estado: vivo, diario_usd: 25}}\n"
+        for p, c, i in items
+    )
+    return PLANTILLA.replace("tests: []\n", "tests:\n" + cuerpo)
+
+
+def test_campana_id_duplicado_se_rechaza(tmp_path):
+    v = _vault(tmp_path, _con_tests(("a", "CO", "c1"), ("b", "MX", "c1")))
+    with pytest.raises(CajaInvalida, match="campana_id"):
+        cargar_caja(v)
+
+
+def test_producto_pais_duplicado_se_rechaza(tmp_path):
+    v = _vault(tmp_path, _con_tests(("a", "CO", "c1"), ("a", "CO", "c2")))
+    with pytest.raises(CajaInvalida, match="producto"):
+        cargar_caja(v)
+
+
+def test_campana_null_repetida_es_valida(tmp_path):
+    v = _vault(tmp_path, _con_tests(("a", "CO", "null"), ("b", "CO", "null")))
+    assert len(cargar_caja(v).tests) == 2

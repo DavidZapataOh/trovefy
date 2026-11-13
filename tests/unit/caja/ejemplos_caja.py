@@ -30,7 +30,9 @@ def trm_fijo(dia: date) -> Trm | None:
     return TRM if dia in (date(2026, 11, 11), date(2026, 11, 12)) else None
 
 
-def test_caja(estado="vivo", prorroga=False, campana="c1", producto="p1", pais="CO") -> TestCaja:
+def test_caja(
+    estado="vivo", prorroga=False, campana="c1", producto="p1", pais="CO"
+) -> TestCaja:
     return TestCaja(producto, pais, campana, estado, prorroga, None, 2500)
 
 
@@ -44,7 +46,17 @@ def g(centavos, producto="p1", pais="CO") -> GastoTest:
 
 def mov(origen, destino, centavos, tipo="mover") -> Movimiento:
     return Movimiento(
-        datetime(2026, 11, 12, tzinfo=UTC), tipo, origen, destino, centavos, "", "", "", "", "", ""
+        datetime(2026, 11, 12, tzinfo=UTC),
+        tipo,
+        origen,
+        destino,
+        centavos,
+        "",
+        "",
+        "",
+        "",
+        "",
+        "",
     )
 
 
@@ -52,4 +64,6 @@ def ledger(vault, filas, nombre="2026-11.csv"):
     d = vault / "ledger" / "gasto"
     d.mkdir(parents=True, exist_ok=True)
     cuerpo = "".join(f"{','.join(f)}\n" for f in filas)
-    (d / nombre).write_text("fecha,cuenta,campana,gasto,moneda\n" + cuerpo, encoding="utf-8")
+    (d / nombre).write_text(
+        "fecha,cuenta,campana,gasto,moneda\n" + cuerpo, encoding="utf-8"
+    )

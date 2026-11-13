@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from trovefy.caja.config import SOBRES, ConfigCaja
 from trovefy.caja.gasto import GastoTest
-from trovefy.caja.movimientos import Movimiento
+from trovefy.caja.movimientos import Movimiento, MovimientosCorruptos
 
 
 @dataclass(frozen=True)
@@ -35,10 +35,12 @@ def calcular(
     for m in movimientos:
         if m.tipo != "mover":
             continue
-        if m.destino in asignado:
-            asignado[m.destino] += m.usd_centavos
-        if m.origen in asignado:
-            asignado[m.origen] -= m.usd_centavos
+        if m.origen not in asignado or m.destino not in asignado:
+            raise MovimientosCorruptos(
+                f"mover con sobre desconocido: {m.origen!r} -> {m.destino!r}"
+            )
+        asignado[m.destino] += m.usd_centavos
+        asignado[m.origen] -= m.usd_centavos
     herramientas = sum(m.usd_centavos for m in movimientos if m.tipo == "herramienta")
 
     tests_gastado: int | None = 0
@@ -74,6 +76,10 @@ def calcular(
     restante: dict[str, int | None] = {
         s: asignado[s] - (gastado[s] or 0) for s in SOBRES if s != "tests"
     }
+    for s in ("herramientas", "reserva"):
+        r_s = restante[s]
+        if r_s is not None and r_s < 0:
+            aviso(f"sobregasto de {s}: restante {r_s / 100:.2f} USD")
     huecos = huecos_prorroga = None
     if tests_gastado is None or comprometido is None:
         restante["tests"] = None
@@ -82,10 +88,19 @@ def calcular(
         restante["tests"] = r
         if r < 0:
             aviso(f"sobregasto de tests: restante {r / 100:.2f} USD")
-        if config.techo_test > 0:
+        if config.techo_test <= 0:
+            aviso("no medido: techo_test <= 0, no se pueden contar huecos")
+        else:
             huecos = max(0, r) // config.techo_test
             extra = config.prorroga_hasta - config.techo_test
             huecos_prorroga = max(0, r - extra) // config.techo_test
     return EstadoCaja(
-        asignado, gastado, comprometido, restante, huecos, huecos_prorroga, len(vivos), tuple(motivos)
+        asignado,
+        gastado,
+        comprometido,
+        restante,
+        huecos,
+        huecos_prorroga,
+        len(vivos),
+        tuple(motivos),
     )

@@ -142,6 +142,13 @@ def cargar_caja(vault: Path) -> ConfigCaja:
     tests_raw = raw.get("tests") or []
     if not isinstance(tests_raw, list):
         raise CajaInvalida("tests: debe ser una lista")
+    tests = tuple(_test(t, i) for i, t in enumerate(tests_raw))
+    campanas = [t.campana_id for t in tests if t.campana_id is not None]
+    if len(campanas) != len(set(campanas)):
+        raise CajaInvalida("tests: campana_id repetido")
+    claves = [(t.producto, t.pais) for t in tests]
+    if len(claves) != len(set(claves)):
+        raise CajaInvalida("tests: producto + pais repetido")
     return ConfigCaja(
         capital=capital,
         sobres=sobres,
@@ -161,7 +168,7 @@ def cargar_caja(vault: Path) -> ConfigCaja:
             _req(raw, "apimart_aviso_usd", ""), "apimart_aviso_usd"
         ),
         cuenta=CuentaCaja(cuenta.get("id"), cuenta.get("moneda")),
-        tests=tuple(_test(t, i) for i, t in enumerate(tests_raw)),
+        tests=tests,
     )
 
 

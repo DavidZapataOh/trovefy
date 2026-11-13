@@ -47,10 +47,44 @@ def test_herramientas_y_reserva():
 def test_gasto_no_medido_arrastra_none():
     e = calcular(CFG, [], [GastoTest("p", "CO", None, "no medido: x")])
     assert e.gastado["tests"] is None and e.restante["tests"] is None
-    assert e.huecos is None and e.huecos_con_prorroga is None and "no medido: x" in e.motivos
+    assert (
+        e.huecos is None
+        and e.huecos_con_prorroga is None
+        and "no medido: x" in e.motivos
+    )
 
 
 def test_test_vivo_sin_gasto_no_medido():
     e = calcular(con_test("vivo"), [], [])
     assert e.comprometido is None and e.huecos is None
     assert any("sin gasto registrado de p1 CO" in m for m in e.motivos)
+
+
+def test_techo_cero_no_medido():
+    from dataclasses import replace
+
+    e = calcular(replace(CFG, techo_test=0), [], [])
+    assert e.huecos is None and e.huecos_con_prorroga is None
+    assert any("techo_test" in m for m in e.motivos)
+
+
+def test_sobregasto_de_herramientas_con_motivo():
+    e = calcular(CFG, [mov("", "", 2500, "herramienta")], [])
+    assert e.restante["herramientas"] == -500
+    assert any("sobregasto de herramientas" in m for m in e.motivos)
+
+
+def test_sobregasto_de_reserva_con_motivo():
+    e = calcular(CFG, [mov("reserva", "tests", 25000)], [])
+    assert e.restante["reserva"] == -5000
+    assert any("sobregasto de reserva" in m for m in e.motivos)
+
+
+def test_mover_con_sobre_desconocido_se_rechaza():
+    import pytest
+    from trovefy.caja.movimientos import MovimientosCorruptos
+
+    with pytest.raises(MovimientosCorruptos):
+        calcular(CFG, [mov("reserva", "cajon", 100)], [])
+    with pytest.raises(MovimientosCorruptos):
+        calcular(CFG, [mov("nada", "tests", 100)], [])
