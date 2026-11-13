@@ -25,6 +25,9 @@ _FLAGS_DIR = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 _ENLACE = (errno.ELOOP, errno.ENOTDIR)
 _PERMANENTES = (errno.EISDIR, errno.ENAMETOOLONG, errno.ENOTDIR)
 MAX_INTENTOS = 20
+# Claude es dueño de los P-*.json que deposita y sigue pudiendo reescribirlos tras moverlos a procesadas/.
+NOTA_FUENTE = ("Fuente de verdad: la base del ejecutor y esta copia (y la auditoría). "
+               "`procesadas/P-*.json` del buzón no es prueba: lo escribió quien depositó y puede cambiarlo.")
 _SIMPLE = re.compile(r"[A-Za-z0-9_.:/-]+")
 
 
@@ -267,6 +270,8 @@ class CopiaVault:
             "---",
             "",
             texto_telegram,
+            "",
+            NOTA_FUENTE,
         ]
         if r is not None:
             cabecera += ["", f"Detalle: {r.detalle}"]

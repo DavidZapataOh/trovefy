@@ -288,3 +288,11 @@ def test_ocupada_mira_el_vault_y_la_cola(tmp_path):
     c._encolar(rel, "x", True)
     assert c.ocupada(rel)
     assert not c.ocupada(rel.replace("002", "003"))
+
+
+def test_resultado_dice_que_procesadas_no_es_prueba(tmp_path):
+    v = vault(tmp_path)
+    c = CopiaVault(v, tmp_path / "pend")
+    assert c.resultado(fila(), None, "texto") is True
+    t = (v / "propuestas/P-20261112-010.md").read_text()
+    assert "procesadas/P-*.json" in t and "no es prueba" in t
