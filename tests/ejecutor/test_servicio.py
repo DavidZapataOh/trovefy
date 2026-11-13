@@ -789,3 +789,175 @@ def test_token_caducado_al_leer_tambien_bloquea(montaje):
     assert m.estado("P-20261112-003") == "rechazada"
     assert m.ej.almacen.leer_kv("token_caducado")
     assert any("/arranque paso 13" in t for t in m.textos())
+
+
+# == Parte 3: comandos ===========================================================================
+
+def test_stop_por_telegram_es_inmediato(montaje):
+    m = montaje
+    m.tg.escribir("/stop")
+    m.ej.ciclo()
+    assert stop_activo(m.rutas)
+    assert m.eventos("stop", activo=True)
+    assert m.textos()[-1].startswith("STOP activo desde 15:00. No pausa campañas; para eso, /pausar_todo.")
+    assert not m.tg.mensajes[max(m.tg.mensajes)]["botones"]
+    m.tg.escribir("/stop")
+    m.ej.ciclo()
+    assert m.textos()[-1] == "STOP ya estaba activo" and len(m.eventos("stop", activo=True)) == 1
+    m.tg.escribir("/reanudar")
+    m.ej.ciclo()
+    pide = m.tg.mensajes[max(m.tg.mensajes)]
+    assert "¿Quitar el STOP?" in pide["texto"] and len(pide["botones"][0]) == 2
+    assert stop_activo(m.rutas)  # /reanudar solo pide confirmación
+
+
+def test_reanudar_confirmado_y_q_no_se_reutiliza(montaje):
+    m = montaje
+    m.tg.escribir("/stop")
+    m.tg.escribir("/reanudar")
+    m.ej.ciclo()
+    q = "Q-20261112-150000"
+    m.tg.tocar(q, "A", m.clave)
+    m.ej.ciclo()
+    assert not stop_activo(m.rutas) and m.eventos("stop", activo=False)
+    pide = next(v for v in m.tg.mensajes.values() if "¿Quitar el STOP?" in v["texto"])
+    assert "STOP quitado 15:00" in pide["texto"] and not pide["botones"]
+    m.tg.escribir("/stop")
+    m.ej.ciclo()
+    from trovefy_ejecutor.callbacks import firmar
+    mid = next(k for k, v in m.tg.mensajes.items() if "¿Quitar el STOP?" in v["texto"])
+    m.tg._poner({"callback_query": {  # el mismo botón Q- otra vez (p. ej. un mensaje viejo), en sus 10 min
+        "id": "repetido", "from": {"id": 42, "is_bot": False}, "data": firmar(q, "A", 42, m.clave),
+        "message": {"message_id": mid, "date": int(T0.timestamp()), "chat": {"id": 42, "type": "private"}}}})
+    m.ej.ciclo()
+    assert stop_activo(m.rutas)
+    assert m.eventos("callback_invalido", motivo="callback_confirmacion_usada")
+
+
+def test_reanudar_rechazado_no_quita_stop(montaje):
+    m = montaje
+    m.tg.escribir("/stop")
+    m.tg.escribir("/reanudar")
+    m.ej.ciclo()
+    m.tg.tocar("Q-20261112-150000", "R", m.clave)
+    m.ej.ciclo()
+    assert stop_activo(m.rutas)
+    pide = next(v for v in m.tg.mensajes.values() if "¿Quitar el STOP?" in v["texto"])
+    assert "RECHAZADA 15:00" in pide["texto"] and not pide["botones"]
+
+
+def test_confirmacion_caducada_responde_y_audita(montaje):
+    m = montaje
+    m.tg.escribir("/stop")
+    m.tg.escribir("/reanudar")
+    m.ej.ciclo()
+    m.reloj.avanzar(minutes=11)
+    m.tg.tocar("Q-20261112-150000", "A", m.clave)
+    m.ej.ciclo()
+    assert stop_activo(m.rutas)
+    assert m.eventos("callback_invalido", motivo="callback_caducada")
+    assert m.tg.respuestas_callback[-1][1] == texto_ya_procesada("caducada")
+
+
+def test_estado(montaje):
+    m = montaje
+    _enviar(m, presupuesto())
+    m.tg.escribir("/estado")
+    m.ej.ciclo()
+    t = m.textos()[-1]
+    assert "STOP: no" in t and "35.000 COP" in t and "P-20261112-003 · presupuesto" in t
+
+
+def test_estado_sin_graph_dice_no_medido(montaje):
+    m = montaje
+    m.graph.red_al_leer = True
+    m.tg.escribir("/estado")
+    m.ej.ciclo()
+    assert "no medido" in m.textos()[-1]
+
+
+def test_limites_por_cuenta_y_sin_configurar(tmp_path):
+    m = _montaje(tmp_path)
+    m.tg.escribir("/limites")
+    m.ej.ciclo()
+    t = m.textos()[-1]
+    assert "tope_gasto_diario_total: 165.000 COP" in t and "paso_max_pct: 50" in t
+    m.limites(None)
+    m.tg.escribir("/limites")
+    m.ej.ciclo()
+    assert "sin configurar (P-21)" in m.textos()[-1]
+    m.ej.almacen.cerrar()
+
+
+def test_cambio_de_limite_por_telegram_pide_botones(montaje):
+    m = montaje
+    m.tg.escribir("/limites tope_gasto_diario_total 150.000")
+    m.ej.ciclo()
+    assert m.estado("P-20261112-900") == "enviada"
+    texto = m.mensaje_de("P-20261112-900")["texto"]
+    assert "165.000 COP → 150.000 COP" in texto and "Lo pide: tú (Telegram)" in texto
+    m.tg.escribir("/limites paso_max_pct 40")
+    m.ej.ciclo()
+    assert m.estado("P-20261112-901") == "enviada"
+
+
+def test_cambio_de_limite_invalido_responde_el_error(montaje):
+    m = montaje
+    m.tg.escribir("/limites offset 1")
+    m.tg.escribir("/limites paso_max_pct 50")
+    m.ej.ciclo()
+    assert "no se cambia por Telegram" in m.textos()[0]
+    assert m.textos()[1] == "paso_max_pct ya vale eso: no hay nada que cambiar"
+    assert m.ej.almacen.obtener("P-20261112-900") is None
+
+
+def test_cambio_de_limite_sin_moneda_viva_no_se_propone(montaje):
+    m = montaje
+    m.graph.red_al_leer = True
+    m.tg.escribir("/limites tope_gasto_diario_total 150.000")
+    m.ej.ciclo()
+    assert "no está confirmada" in m.textos()[-1]
+    assert m.ej.almacen.obtener("P-20261112-900") is None
+
+
+def test_pausar_todo(montaje):
+    m = montaje
+    m.graph.objetos["100000002"] = {"account_id": "0000000000000000", "status": "ACTIVE",
+                                    "effective_status": "CAMPAIGN_PAUSED", "name": "otra"}
+    m.graph.hijos["100000002"] = ("campaigns", {CUENTA})
+    m.graph.objetos["100000003"] = {"account_id": "0000000000000000", "status": "PAUSED",
+                                    "effective_status": "PAUSED", "name": "pausada"}
+    m.graph.hijos["100000003"] = ("campaigns", {CUENTA})
+    m.reloj.t = datetime(2026, 11, 12, 23, 30, tzinfo=ZONA_COT)  # prioridad alta: pasa el silencio
+    m.tg._ahora = m.reloj
+    m.tg.escribir("/pausar_todo")
+    m.ej.ciclo()
+    fila = m.ej.almacen.obtener("P-20261112-900")
+    assert fila.estado == "enviada" and fila.propuesta.prioridad == "alta" and fila.tipo == "lote"
+    assert sorted(op.id for op in fila.propuesta.operaciones) == [C1, "100000002"]  # status ACTIVE, en local
+    listados = [x for x in m.graph.llamadas if x.metodo == "listar" and x.ruta == f"{CUENTA}/campaigns"]
+    assert listados[0].datos["filtros"] == {}
+    m.tg.tocar("P-20261112-900", "A", m.clave)
+    m.ej.ciclo()
+    assert m.estado("P-20261112-900") == "ejecutada"
+    assert m.graph.objetos[C1]["status"] == "PAUSED"
+
+
+def test_pausar_todo_sin_campanas_activas(montaje):
+    m = montaje
+    m.graph.objetos[C1]["status"] = "PAUSED"
+    m.tg.escribir("/pausar_todo")
+    m.ej.ciclo()
+    assert m.textos()[-1] == "No hay campañas activas" and m.ej.almacen.obtener("P-20261112-900") is None
+
+
+def test_responder_y_ignorar(montaje):
+    m = montaje
+    m.tg.escribir("hola")
+    m.tg.escribir("/emparejar")
+    m.tg._poner({"message": {"message_id": 99, "from": {"id": 7, "is_bot": False}, "chat": {"id": 7},
+                             "date": int(T0.timestamp()), "text": "/stop"}})
+    m.ej.ciclo()
+    assert m.textos()[0].startswith("Comandos:") and "Ya está emparejado" in m.textos()[1]
+    assert not stop_activo(m.rutas) and m.eventos("mensaje_ignorado", motivo="chat_ajeno")
+    assert m.ej.almacen.ultimo_update() == 3

@@ -26,6 +26,7 @@ from .auditoria import (
     EV_LIMITE_CAMBIADO,
     EV_MENSAJE_IGNORADO,
     EV_RECIBIDA,
+    EV_STOP,
     EV_TRANSICION,
     EV_VALIDACION_RECHAZADA,
     Auditoria,
@@ -33,17 +34,28 @@ from .auditoria import (
 )
 from .buzon import Buzon
 from .comandos import (
+    CONFIRMAR_REANUDAR,
+    ActivarStop,
+    Confirmar,
+    ErrorComando,
     GuardarMotivo,
     Ignorar,
+    PedirCambioLimite,
+    PedirEstado,
+    PedirLimites,
+    PedirPausarTodo,
     Responder,
     ResponderToque,
     Toque,
+    ToqueInterruptor,
+    construir_cambio_limite,
     interpretar_update,
     nota_motivo,
+    nuevo_id_usuario,
 )
 from .config import RutasEjecutor
 from .deposito import DepositoRechazado, comprobar_origen
-from .dinero import Moneda, MonedaNoConfigurada
+from .dinero import Moneda, MonedaNoConfigurada, formatear
 from .ejecutar import NO_SOPORTADO_P07, TIPOS_SOPORTADOS, Resultado, ejecutar
 from .emparejar import Emparejamiento
 from .esquema import RANGO_CLAUDE, PropuestaInvalida, cargar_propuesta
@@ -60,25 +72,27 @@ from .limites import (
 )
 from .modelo import Propuesta
 from .montaje import montar
-from .reloj import base_caducidad, caducidad
+from .reloj import ZONA_COT, base_caducidad, caducidad
 from .render import (
     PREGUNTA_MOTIVO,
     RECIBIDO,
     STOP_ACTIVO,
     DatosRender,
     Desenlace,
+    ResumenEstado,
     botones_propuesta,
     render_alerta,
+    render_estado,
     render_propuesta,
     render_resultado,
     texto_ya_procesada,
 )
 from .ritmo import Ritmo
 from .secretos import Secretos
-from .stop import stop_activo
+from .stop import activar_stop, quitar_stop, stop_activo
 from .telegram import Boton, ErrorRedTelegram, ErrorTelegram
 from .vault_copia import CopiaVault
-from .vivo import ValoresVivos, valores_vivos
+from .vivo import ValoresVivos, presupuestos_activos_cuenta, valores_vivos
 
 TIPOS_INGERIBLES: frozenset[str] = TIPOS_SOPORTADOS | {"crear_estructura_pausada"}
 ZONA_POR_DEFECTO = "America/Bogota"
@@ -166,6 +180,13 @@ class Ejecutor:
             ResponderToque: self._responder_toque_invalido,
             Toque: self._toque,
             GuardarMotivo: self._guardar_motivo,
+            ActivarStop: self._activar_stop,
+            Confirmar: self._confirmar,
+            ToqueInterruptor: self._toque_interruptor,
+            PedirEstado: self._pedir_estado,
+            PedirLimites: self._pedir_limites,
+            PedirCambioLimite: self._pedir_cambio_limite,
+            PedirPausarTodo: self._pedir_pausar_todo,
         }
 
     def __repr__(self) -> str:
@@ -800,6 +821,153 @@ class Ejecutor:
     def _responder_toque_invalido(self, a: ResponderToque) -> None:
         self._responder_toque(a.callback_id, a.texto)
         self.auditoria.anotar(EV_CALLBACK_INVALIDO, motivo=a.motivo)
+
+    # -- comandos ------------------------------------------------------------------------------------
+    def _hora(self) -> str:
+        return self.reloj().astimezone(ZONA_COT).strftime("%H:%M")
+
+    def _activar_stop(self, a: ActivarStop) -> None:
+        """``/stop``: inmediato y sin botones (D-38). No pausa campañas."""
+        if stop_activo(self.rutas):
+            self._decir("STOP ya estaba activo")
+            return
+        activar_stop(self.rutas, "Telegram /stop", self.reloj())
+        self.auditoria.anotar(EV_STOP, activo=True, motivo="Telegram /stop")
+        self._decir(f"STOP activo desde {self._hora()}. No pausa campañas; para eso, /pausar_todo. "
+                    "Para quitarlo: /reanudar")
+
+    def _confirmar(self, a: Confirmar) -> None:
+        if self._chat is None or not self.secretos.hmac_clave:
+            return
+        self._decir(a.texto, botones_propuesta(a.id, self._chat, self.secretos.hmac_clave))
+
+    def _toque_interruptor(self, a: ToqueInterruptor) -> None:
+        self._responder_toque(a.callback_id, RECIBIDO)
+        if not self.almacen.consumir(a.id):  # un Q-/S- vale una sola vez, aunque siga en sus 10 min
+            self.auditoria.anotar(EV_CALLBACK_INVALIDO, motivo="callback_confirmacion_usada", id=a.id)
+            self._decir(texto_ya_procesada("ejecutada"))
+            return
+        original = CONFIRMAR_REANUDAR if not a.activar else "¿Activar el STOP?"
+        if a.accion == "R":
+            self._editar(a.message_id, f"{original}\n\nRECHAZADA {self._hora()}")
+            return
+        if a.activar:  # no debería llegar (/stop es inmediato): idempotente
+            if not stop_activo(self.rutas):
+                activar_stop(self.rutas, "Telegram (confirmación)", self.reloj())
+                self.auditoria.anotar(EV_STOP, activo=True, motivo="Telegram (confirmación)")
+            self._editar(a.message_id, f"{original}\n\nSTOP activo desde {self._hora()}")
+            return
+        quitado = quitar_stop(self.rutas)
+        if quitado:
+            self.auditoria.anotar(EV_STOP, activo=False, motivo="Telegram /reanudar")
+        final = f"STOP quitado {self._hora()}" if quitado else "No había STOP activo"
+        self._editar(a.message_id, f"{original}\n\n{final}")
+
+    def _cuenta_corta(self, c: str) -> str:
+        return f"…{c[-4:]}"
+
+    def _pedir_estado(self, a: PedirEstado) -> None:
+        gasto: dict[str, str] = {}
+        for c in sorted(self.limites.cuentas_permitidas):
+            lc = self.limites.cuentas.get(c)
+            try:
+                moneda = lc.moneda() if lc is not None else None
+            except MonedaNoConfigurada:
+                moneda = None
+            if moneda is None:
+                gasto[self._cuenta_corta(c)] = "sin configurar (P-21)"
+                continue
+            try:
+                suma, _ = presupuestos_activos_cuenta(self.graph, c)
+                gasto[self._cuenta_corta(c)] = formatear(suma, moneda)
+            except Exception as e:  # noqa: BLE001
+                self._vigilar_token(e)
+                gasto[self._cuenta_corta(c)] = "no medido"
+        pendientes = []
+        for f in self.almacen.en_estado("recibida", "enviada", "aceptada"):
+            try:
+                cad = self._caduca(f)
+            except Exception:  # noqa: BLE001
+                cad = self.reloj()
+            pendientes.append((f.id, f.tipo, cad))
+        self._decir(render_estado(ResumenEstado(gasto_hoy=gasto, pendientes=pendientes,
+                                                stop=stop_activo(self.rutas))))
+
+    def _pedir_limites(self, a: PedirLimites) -> None:
+        lim = self.limites
+        lineas = [f"AVISO: {self._limites_error}"] if self._limites_error else []
+        lineas.append("Límites del ejecutor:")
+        lineas += [f"{k}: {getattr(lim, k)}" for k in sorted(CLAVES_GLOBALES)]
+        for c, lc in sorted(lim.cuentas.items()):
+            try:
+                moneda = lc.moneda()
+            except MonedaNoConfigurada:
+                lineas.append(f"Cuenta {self._cuenta_corta(c)} ({lc.moneda_codigo}): sin configurar (P-21)")
+                continue
+            lineas.append(f"Cuenta {self._cuenta_corta(c)} ({lc.moneda_codigo}):")
+            lineas += [f"{k}: {formatear(getattr(lc, k), moneda)}" for k in sorted(CLAVES_CUENTA)]
+        self._decir("\n".join(lineas))
+
+    def _monedas_vivas(self) -> dict[str, Moneda]:
+        """Moneda leída en Meta por cuenta permitida (nunca la de limites.yaml): sin lectura, sin moneda."""
+        monedas: dict[str, Moneda] = {}
+        for c in sorted(self.limites.cuentas_permitidas):
+            try:
+                info = self.graph.cuenta(c)
+                if info.offset is not None:
+                    monedas[c] = Moneda(info.currency, info.offset)
+            except Exception as e:  # noqa: BLE001
+                self._vigilar_token(e)
+        return monedas
+
+    def _registrar_y_despachar(self, datos: dict) -> None:
+        p = cargar_propuesta(datos)
+        self.almacen.registrar(p)
+        self.auditoria.anotar(EV_RECIBIDA, id=p.id, tipo=p.tipo, origen=p.origen)
+        self._despachar(p.id)
+
+    def _nuevo_id(self) -> str:
+        return nuevo_id_usuario(self.reloj(), existe=lambda i: self.almacen.obtener(i) is not None)
+
+    def _pedir_cambio_limite(self, a: PedirCambioLimite) -> None:
+        try:
+            if self._limites_error:
+                raise ErrorComando(self._limites_error)
+            monedas = self._monedas_vivas() if a.clave in CLAVES_CUENTA else {}
+            datos = construir_cambio_limite(a, self.limites, monedas, self._nuevo_id(), self.reloj())
+            self._registrar_y_despachar(datos)
+        except ErrorComando as e:
+            self._decir(str(e))
+
+    def _pedir_pausar_todo(self, a: PedirPausarTodo) -> None:
+        """Un ``lote`` de ``pausar`` (prioridad alta) por cuenta con las campañas con ``status`` ACTIVE.
+
+        Se lista sin filtro de estado en el servidor y se elige en local (no una lista blanca de Meta)."""
+        creadas = 0
+        for c in sorted(self.limites.cuentas_permitidas):
+            try:
+                filas = self.graph.listar(c, "campaigns", ["id", "status", "effective_status"])
+            except Exception as e:  # noqa: BLE001
+                self._vigilar_token(e)
+                self._decir(f"No se pudo leer Meta para {self._cuenta_corta(c)}: {self._texto_error(e)}")
+                continue
+            ids = sorted({f["id"] for f in filas if isinstance(f, dict) and f.get("status") == "ACTIVE"
+                          and isinstance(f.get("id"), str) and f["id"].isdigit()})
+            for i in range(0, len(ids), 40):
+                try:
+                    datos = {"version": 1, "id": self._nuevo_id(), "tipo": "lote",
+                             "creada": self.reloj().astimezone(ZONA_COT).isoformat(timespec="seconds"),
+                             "origen": "telegram:/pausar_todo", "cuenta": c, "prioridad": "alta",
+                             "motivo": "Pedido por el usuario en Telegram: pausar todas las campañas activas",
+                             "operaciones": [{"entidad": "campaign", "id": x, "campo": "status",
+                                              "de_esperado": "ACTIVE", "a": "PAUSED"} for x in ids[i:i + 40]]}
+                    self._registrar_y_despachar(datos)
+                    creadas += 1
+                except ErrorComando as e:
+                    self._decir(str(e))
+                    return
+        if creadas == 0:
+            self._decir("No hay campañas activas")
 
     # -- ciclo ----------------------------------------------------------------------------------------
     def ciclo(self) -> None:
