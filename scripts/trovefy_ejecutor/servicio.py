@@ -16,12 +16,17 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import signal
 import sqlite3
+import sys
+import threading
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from importlib import metadata
 from pathlib import Path
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 import yaml
 
@@ -35,9 +40,11 @@ from .auditoria import (
     EV_TRANSICION,
     EV_VALIDACION_RECHAZADA,
     Auditoria,
+    AuditoriaCorrupta,
     redactar,
 )
 from .buzon import Buzon
+from .candado import MENSAJE_OTRO, OtroEjecutorActivo, candado
 from .comandos import (
     CONFIRMAR_REANUDAR,
     ActivarStop,
@@ -58,19 +65,21 @@ from .comandos import (
     nota_motivo,
     nuevo_id_usuario,
 )
-from .config import RutasEjecutor
+from .comprobar_meta import comprobar_meta, informe_a_dict
+from .config import RutasEjecutor, rutas_por_defecto
 from .deposito import DepositoRechazado, comprobar_origen
 from .dinero import Moneda, MonedaNoConfigurada, formatear
 from .ejecutar import NO_SOPORTADO_P07, TIPOS_SOPORTADOS, Resultado, ejecutar
 from .emparejar import Emparejamiento
 from .esquema import RANGO_CLAUDE, PropuestaInvalida, cargar_propuesta
 from .estado import Almacen, FilaPropuesta, IdDuplicado
-from .graph import OFFSETS_META, DetenidoPorStop, ErrorGraph, clasificar
+from .graph import OFFSETS_META, ClienteGraph, DetenidoPorStop, ErrorGraph, clasificar
 from .limites import (
     CLAVES_CUENTA,
     CLAVES_GLOBALES,
     ContextoVivo,
     Limites,
+    LimitesInvalidos,
     cargar_limites,
     comprobar,
     contexto_para,
@@ -97,9 +106,10 @@ from .render import (
     texto_ya_procesada,
 )
 from .ritmo import Ritmo
-from .secretos import Secretos
+from .secretos import Secretos, SecretosInseguros, cargar_secretos
+from .simulado import GraphSimulado
 from .stop import activar_stop, quitar_stop, stop_activo
-from .telegram import Boton, ErrorRedTelegram, ErrorTelegram
+from .telegram import Boton, ClienteTelegram, ErrorRedTelegram, ErrorTelegram
 from .vault_copia import CopiaVault
 from .vivo import ValoresVivos, presupuestos_activos_cuenta, valores_vivos
 
@@ -126,6 +136,22 @@ CONFIRMACION_USADA = "Esta confirmación ya se usó: no se hizo nada"
 TITULO_RESUMEN = "En espera"
 RECORDATORIO = "Recordatorio: {id} sigue pendiente; el dinero sigue corriendo"
 _LINEAS_FUERA_DEL_RESUMEN = ("Por qué:", "Reinicia aprendizaje:", "Caduca", "Gasto diario")
+AVISO_TOKEN_RENOVADO = "token de Meta renovado: el ejecutor vuelve a operar"
+INTERVALO_LATIDO = timedelta(seconds=30)
+INTERVALO_META = timedelta(minutes=10)
+INTERVALO_COPIA_AUDITORIA = timedelta(minutes=1)
+# Long polling corto: el ciclo vuelve pronto para ver ``parar``/SIGTERM y el buzón (ver ``servir``).
+TIMEOUT_UPDATES_S = 10
+
+
+def _version() -> str:
+    try:
+        return metadata.version("trovefy")
+    except metadata.PackageNotFoundError:
+        return "desconocida"
+
+
+VERSION = _version()
 
 
 class GraphConStop:
@@ -198,6 +224,15 @@ class Ejecutor:
         self._desfase_medido: datetime | None = None
         self._aviso_reloj: str | None = None
         self._cargar_desfase()
+        self.parar = threading.Event()  # servir() pone el suyo: corta las esperas del ciclo
+        self.espera_red_s: float = 5
+        self.timeout_updates_s = TIMEOUT_UPDATES_S
+        self._telegram_estado: Literal["ok", "sin red"] = "sin red"  # hasta el primer getUpdates bueno
+        self._ultimo_latido: datetime | None = None
+        self._ultima_comprobacion_meta: datetime | None = None
+        self._token_al_arrancar = bool(self.almacen.leer_kv(CLAVE_TOKEN))
+        self._auditoria_copiada: datetime | None = None
+        self._dia_auditoria: date | None = None
         self._DESPACHO: dict[type, Callable[[Any], None]] = {
             Ignorar: self._ignorar,
             Responder: self._responder,
@@ -1010,7 +1045,7 @@ class Ejecutor:
 
     # -- Telegram -----------------------------------------------------------------------------------
     def atender_updates(self) -> int:
-        updates = self.telegram.obtener_updates(self.almacen.ultimo_update() + 1, 25)
+        updates = self.telegram.obtener_updates(self.almacen.ultimo_update() + 1, self.timeout_updates_s)
         emparejado, clave = self._emparejado(), self.secretos.hmac_clave or b""
         n = 0
         for u in updates:
@@ -1227,10 +1262,11 @@ class Ejecutor:
                 self._aislado("recuperar", self._despachar, fila.id)
 
     def _aislado(self, donde: str, fn: Callable[..., Any], *args: Any) -> None:
-        """Un fallo en una fila no impide recuperar las demás; SQLite roto sí para el servicio."""
+        """Un fallo en una fila (o en el latido, o en la copia al vault) no impide lo demás; SQLite roto o la
+        auditoría corrupta sí paran el servicio (``servir`` sale con 1)."""
         try:
             fn(*args)
-        except sqlite3.OperationalError:
+        except (sqlite3.OperationalError, AuditoriaCorrupta):
             raise
         except Exception as e:  # noqa: BLE001
             self._anotar_error(donde, e)
@@ -1362,10 +1398,247 @@ class Ejecutor:
             self._transicion(f.id, "recibida", "enviada", en_cola=False, resumen=True, resumen_ids=ids,
                              enviada_en=ahora.isoformat())
 
+    # -- latido y archivos de estado (resolución 12) -------------------------------------------------
+    def latir(self) -> None:
+        """Como mucho cada 30 s escribe ``estado/{latido,stop,emparejamiento}.json`` y, si cambió el ``mtime``
+        de ``limites.yaml``, ``estado/limites.json``. Con el token marcado como caducado, ``comprobar_meta``
+        (al arrancar y luego como mucho cada 10 min). Un fallo al escribir nunca tumba el ciclo."""
+        ahora = self.reloj()
+        self._aislado("token", self._vigilar_renovacion, ahora)
+        if self._ultimo_latido is not None and abs(ahora - self._ultimo_latido) < INTERVALO_LATIDO:
+            return
+        self._ultimo_latido = ahora
+        self._aislado("estado", self._escribir_estados, ahora)
+
+    def _escribir_estados(self, ahora: datetime) -> None:
+        stop = self._estado_stop()
+        desfase = self._desfase_fresco()
+        avisos: list[str] = []
+        if self._limites_error:
+            avisos.append(self._limites_error)
+        if self._aviso_reloj or (desfase is not None and abs(desfase) > DESFASE_MAX_S):
+            avisos.append(AVISO_RELOJ)
+        if self.almacen.leer_kv(CLAVE_TOKEN):
+            avisos.append(MOTIVO_TOKEN)
+        if self.rutas.vault is None:
+            avisos.append("sin vault configurado: no se copian resultados")
+        vault = self.copia.estado() if self.rutas.vault is not None else "no escribible"
+        self.buzon.escribir_estado("latido", {
+            "fecha": ahora.isoformat(), "version": VERSION, "modo": self.modo, "stop": stop["activo"],
+            "telegram": self._telegram_estado,
+            "pendientes": len(self.almacen.en_estado("recibida", "enviada", "aceptada")),
+            "reloj_desfase_s": None if desfase is None else round(desfase, 1), "vault": vault,
+            "avisos": [self._limpio(a)[:300] for a in avisos]})
+        self.buzon.escribir_estado("stop", stop)
+        self.buzon.escribir_estado("emparejamiento", {"emparejado": self._emparejado() is not None,
+                                                      "fecha": ahora.isoformat()})
+        if self._limites_json_mtime is None or self._limites_json_mtime != self._limites_mtime:
+            self._escribir_limites_json()
+
+    def _estado_stop(self) -> dict:
+        if not stop_activo(self.rutas):
+            return {"activo": False, "motivo": None, "fecha": None}
+        motivo = fecha = None
+        try:
+            d = json.loads(self.rutas.stop.read_text(encoding="utf-8"))
+            motivo = self._limpio(d["motivo"])[:200] if isinstance(d.get("motivo"), str) else None
+            fecha = d["desde"] if isinstance(d.get("desde"), str) else None
+        except (OSError, ValueError, AttributeError, KeyError):
+            pass  # un STOP vacío o ilegible sigue siendo STOP
+        return {"activo": True, "motivo": motivo, "fecha": fecha}
+
+    def _vigilar_renovacion(self, ahora: datetime) -> None:
+        """Con el token marcado: una comprobación al arrancar (si ya lo estaba) y luego como mucho cada
+        10 min. Si se marca con el servicio en marcha, la primera llega a los 10 min (no al ciclo siguiente)."""
+        if not self.almacen.leer_kv(CLAVE_TOKEN):
+            self._ultima_comprobacion_meta = None
+            self._token_al_arrancar = False
+            return
+        if self._ultima_comprobacion_meta is None and not self._token_al_arrancar:
+            self._ultima_comprobacion_meta = ahora
+            return
+        if self._ultima_comprobacion_meta is not None and abs(ahora - self._ultima_comprobacion_meta) < INTERVALO_META:
+            return
+        self._token_al_arrancar = False
+        self._ultima_comprobacion_meta = ahora
+        self.comprobar_meta()
+
+    def comprobar_meta(self) -> bool:
+        """``comprobar_meta`` de cada cuenta permitida (lecturas y un ``validate_only``, por ``GraphConStop``)
+        y ``estado/meta.json`` con la primera. Si todas dan ok y el token estaba marcado, se desmarca."""
+        informes = [comprobar_meta(GraphConStop(self.graph, self.rutas), c, ahora=self.reloj)
+                    for c in sorted(self.limites.cuentas_permitidas)]
+        if informes:
+            try:
+                self.buzon.escribir_estado("meta", informe_a_dict(informes[0]))
+            except Exception as e:  # noqa: BLE001
+                self._anotar_error("estado", e)
+        ok = bool(informes) and all(i.ok for i in informes)
+        if ok and self.almacen.leer_kv(CLAVE_TOKEN):
+            self.almacen.borrar_kv(CLAVE_TOKEN)
+            self.auditoria.anotar("token_renovado")
+            self._decir(AVISO_TOKEN_RENOVADO)
+        return ok
+
+    def _copiar_auditoria(self) -> None:
+        """Copia la auditoría del día al vault como mucho cada minuto (lee el archivo entero) y, al cambiar
+        de día, cierra la copia del día anterior."""
+        ahora = self.reloj()
+        hoy = ahora.astimezone(ZONA_COT).date()
+        if (self._auditoria_copiada is not None and self._dia_auditoria == hoy
+                and abs(ahora - self._auditoria_copiada) < INTERVALO_COPIA_AUDITORIA):
+            return
+        if self._dia_auditoria is not None and self._dia_auditoria != hoy:
+            self.copia.auditoria(self.rutas.auditoria, self._dia_auditoria)
+        self.copia.auditoria(self.rutas.auditoria, hoy)
+        self._auditoria_copiada, self._dia_auditoria = ahora, hoy
+
     # -- ciclo ----------------------------------------------------------------------------------------
     def ciclo(self) -> None:
-        """Provisional (Tarea 5 añade latido y copia de la auditoría)."""
+        """``latir`` → ``ingerir`` → ``atender_updates`` → ``barrer`` → copia al vault (pendientes y auditoría).
+
+        Sin red con Telegram (o un error de la API al leer updates): ``telegram: "sin red"`` en el latido y
+        espera ``espera_red_s`` (interrumpible con ``parar``); el barrido sigue (caducar es local)."""
         self._recargar_limites()
+        self.latir()
         self.ingerir()
-        self.atender_updates()
+        try:
+            self.atender_updates()
+            self._telegram_estado = "ok"
+        except (ErrorRedTelegram, ErrorTelegram):
+            self._telegram_estado = "sin red"
+            self.parar.wait(self.espera_red_s)
         self.barrer()
+        self._aislado("vault", self.copia.reintentar)
+        self._aislado("vault", self._copiar_auditoria)
+
+
+# -- servir ---------------------------------------------------------------------------------------------
+def _decir_err(texto: str) -> None:
+    print(redactar(texto), file=sys.stderr)
+
+
+def _preparar_spool(spool: Path) -> None:
+    """``estado/`` y ``procesadas/`` se crean (si faltan) con 2750 y setgid (nota 09·T9): los archivos de
+    estado son 0640 y Claude los lee por el grupo. Los dueños los pone el instalador, nunca este proceso."""
+    for nombre in ("estado", "procesadas"):
+        d = spool / nombre
+        if not d.exists():
+            d.mkdir(parents=True)
+            os.chmod(d, 0o2750)
+
+
+def _instalar_senales(parar: threading.Event) -> dict:
+    if threading.current_thread() is not threading.main_thread():
+        return {}
+    previos = {}
+    for s in (signal.SIGTERM, signal.SIGINT):
+        previos[s] = signal.signal(s, lambda *_: parar.set())
+    return previos
+
+
+def servir(rutas: RutasEjecutor | None = None, *, graph_simulado: bool = False,
+           parar: threading.Event | None = None, fabrica: Callable[[Secretos], tuple[Any, Any]] | None = None,
+           reloj: Callable[[], datetime] | None = None) -> int:
+    """Proceso del servicio. Devuelve el código de salida:
+
+    0 parado con ``parar``/SIGTERM/SIGINT · 1 SQLite roto (``OperationalError``) o auditoría corrupta: se
+    detiene sin ejecutar nada · 2 tzdata, secretos, ``limites.yaml`` o clientes no válidos · 3 otro ejecutor
+    con el candado · 4 Telegram sin emparejar.
+
+    Orden: tzdata → candado → secretos → límites → emparejamiento → ``recuperar()`` → bucle de ``ciclo()``.
+    ``fabrica(secretos) -> (telegram, graph)`` y ``reloj`` permiten inyectar clientes y hora en las pruebas.
+
+    SIGTERM/SIGINT solo marcan ``parar``: el ciclo en curso termina entero (nunca se corta una ejecución a
+    medias) y luego se sale. Peor caso hasta atender un ``/stop`` o salir tras SIGTERM: un ``getUpdates``
+    de ``TIMEOUT_UPDATES_S`` (10 s) + 10 s de margen de red; con 429 de Telegram el cliente duerme hasta
+    3×60 s antes de devolver el control (≈ 200 s). El STOP por archivo (``trovefy-ejecutor stop``) no
+    depende de Telegram: se mira justo antes de cada escritura en Meta (``GraphConStop``)."""
+    rutas = rutas or rutas_por_defecto()
+    parar = parar or threading.Event()
+    try:
+        ZoneInfo(ZONA_POR_DEFECTO)
+    except Exception:  # noqa: BLE001 — ZoneInfoNotFoundError, OSError…
+        _decir_err("Falta tzdata (zona America/Bogota): instala el paquete tzdata y vuelve a arrancar")
+        return 2
+    try:
+        rutas.base.parent.mkdir(parents=True, exist_ok=True)
+        _preparar_spool(rutas.spool)
+    except OSError as e:
+        _decir_err(f"No se pueden preparar las carpetas del ejecutor: {e}")
+        return 2
+    try:
+        with candado(rutas.base.with_suffix(".lock")):
+            return _servir_con_candado(rutas, graph_simulado, parar, fabrica, reloj)
+    except OtroEjecutorActivo:
+        _decir_err(MENSAJE_OTRO)
+        return 3
+
+
+def _servir_con_candado(rutas: RutasEjecutor, graph_simulado: bool, parar: threading.Event,
+                        fabrica: Callable[[Secretos], tuple[Any, Any]] | None,
+                        reloj: Callable[[], datetime] | None) -> int:
+    try:
+        secretos = cargar_secretos(rutas.secretos)
+    except SecretosInseguros as e:
+        _decir_err(f"Secretos inseguros: {e}")
+        return 2
+    except (OSError, ValueError) as e:
+        _decir_err(f"No se pueden leer los secretos ({type(e).__name__}): {e}")
+        return 2
+    try:
+        cargar_limites(rutas.limites)
+    except Exception as e:  # noqa: BLE001 — LimitesInvalidos u otro: no se arranca
+        _decir_err(f"limites.yaml no válido: {e}")
+        return 2
+    if secretos.telegram_chat_id is None or secretos.telegram_user_id is None:
+        _decir_err("Telegram sin emparejar: ejecuta `trovefy-ejecutor emparejar`")
+        return 4
+    if not secretos.hmac_clave or not secretos.telegram_bot_token:
+        _decir_err("Faltan HMAC_CLAVE o TELEGRAM_BOT_TOKEN en secretos.env")
+        return 2
+    try:
+        if fabrica is not None:
+            telegram, graph = fabrica(secretos)
+        else:
+            if not graph_simulado and not secretos.meta_token:
+                _decir_err("Falta META_TOKEN en secretos.env (paso 13 de /arranque)")
+                return 2
+            telegram = ClienteTelegram(secretos.telegram_bot_token)
+            graph = GraphSimulado() if graph_simulado else ClienteGraph(secretos.meta_token)
+    except Exception as e:  # noqa: BLE001 — el texto podría llevar un token: solo el tipo
+        _decir_err(f"No se pudieron crear los clientes de Telegram/Meta ({type(e).__name__})")
+        return 2
+    previos = _instalar_senales(parar)
+    ej: Ejecutor | None = None
+    try:
+        ej = Ejecutor(rutas, telegram, graph, secretos, reloj=reloj or (lambda: datetime.now(UTC)),
+                      modo="simulado" if graph_simulado else "real")
+        ej.parar = parar
+        ej.recuperar()
+        while not parar.is_set():
+            try:
+                ej.ciclo()
+            except (sqlite3.OperationalError, AuditoriaCorrupta):
+                raise
+            except Exception as e:  # noqa: BLE001 — un fallo inesperado no para el /stop ni el barrido
+                _decir_err(f"Error en el ciclo ({type(e).__name__}): {ej._texto_error(e)}")
+                ej._anotar_error("ciclo", e)
+                parar.wait(ej.espera_red_s)
+        return 0
+    except sqlite3.OperationalError as e:
+        _decir_err(f"SQLite no disponible ({e}): el ejecutor se detiene sin ejecutar nada")
+        return 1
+    except AuditoriaCorrupta as e:
+        _decir_err(f"Auditoría corrupta ({e}): para el servicio y repárala con `trovefy-ejecutor auditoria "
+                   "reparar`; no se ejecuta nada")
+        return 1
+    except LimitesInvalidos as e:
+        _decir_err(f"limites.yaml no válido: {e}")
+        return 2
+    finally:
+        for s, h in previos.items():
+            signal.signal(s, h)
+        if ej is not None:
+            with contextlib.suppress(Exception):
+                ej.almacen.cerrar()

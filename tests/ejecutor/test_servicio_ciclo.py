@@ -5,9 +5,15 @@ Reutiliza la fixture ``montaje`` de la Tarea 4: todo en ``tmp_path``; Telegram y
 """
 from __future__ import annotations
 
+import dataclasses
 import json
+import os
+import signal
+import sqlite3
 import stat
+import threading
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfoNotFoundError
 
 import pytest
 import yaml
@@ -16,6 +22,8 @@ from ejecutor.test_servicio import (
     S1,
     S2,
     T0,
+    TOKEN_META,
+    TOKEN_TG,
     Montaje,
     _creada,
     _montaje,
@@ -28,7 +36,9 @@ from ejecutor.test_servicio import (
 )
 from trovefy_ejecutor import ejecutar as _ejecutar
 from trovefy_ejecutor import servicio
+from trovefy_ejecutor.candado import MENSAJE_OTRO, candado
 from trovefy_ejecutor.esquema import cargar_propuesta
+from trovefy_ejecutor.estado import Almacen
 from trovefy_ejecutor.limites import LimitesInvalidos
 from trovefy_ejecutor.render import texto_ya_procesada
 from trovefy_ejecutor.servicio import Ejecutor
@@ -462,3 +472,236 @@ def test_reinicio_aceptada_caducada_es_fallida(montaje):
     fila = m.ej.almacen.obtener(id)
     assert fila.estado == "fallida" and "caducó antes de ejecutarse" in fila.datos["motivo"]
     assert m.graph.escrituras() == []
+
+
+# == Latido y archivos de estado ===================================================================
+
+def _estado_json(m: Montaje, nombre: str) -> dict:
+    return json.loads((m.rutas.spool / "estado" / f"{nombre}.json").read_text())
+
+
+def test_latido_y_estado(montaje):
+    m = montaje
+    m.ej.ciclo()
+    lat = _estado_json(m, "latido")
+    assert lat["modo"] == "simulado" and lat["version"] and lat["fecha"].startswith("2026-11-12")
+    assert lat["stop"] is False and lat["pendientes"] == 0 and lat["vault"] == "ok"
+    assert lat["telegram"] in ("ok", "sin red") and isinstance(lat["avisos"], list) and "reloj_desfase_s" in lat
+    assert _estado_json(m, "stop") == {"activo": False, "motivo": None, "fecha": None}
+    emp = _estado_json(m, "emparejamiento")
+    assert emp["emparejado"] is True and set(emp) == {"emparejado", "fecha"} and "42" not in json.dumps(emp)
+    lim = _estado_json(m, "limites")
+    assert lim["cuentas"][CUENTA]["tope_gasto_diario_total"] == 165000 and lim["paso_max_pct"] == 50
+    for nombre in ("latido", "stop", "emparejamiento", "limites"):
+        assert stat.S_IMODE((m.rutas.spool / "estado" / f"{nombre}.json").stat().st_mode) == 0o640
+    crudo = "".join(p.read_text() for p in (m.rutas.spool / "estado").iterdir())
+    assert TOKEN_META not in crudo and TOKEN_TG not in crudo
+
+
+def test_latido_como_mucho_cada_30_s_y_stop(montaje):
+    m = montaje
+    m.ej.ciclo()
+    primero = _estado_json(m, "latido")["fecha"]
+    activar_stop(m.rutas, "prueba", T0)
+    m.reloj.avanzar(seconds=10)
+    m.ej.ciclo()
+    assert _estado_json(m, "latido")["fecha"] == primero
+    m.reloj.avanzar(seconds=21)
+    m.ej.ciclo()
+    lat, st = _estado_json(m, "latido"), _estado_json(m, "stop")
+    assert lat["fecha"] != primero and lat["stop"] is True
+    assert st["activo"] is True and st["motivo"] == "prueba" and st["fecha"] == T0.isoformat()
+
+
+def test_limites_json_solo_cuando_cambia_limites_yaml(montaje):
+    m = montaje
+    m.ej.ciclo()
+    ruta = m.rutas.spool / "estado" / "limites.json"
+    ruta.unlink()
+    m.reloj.avanzar(seconds=31)
+    m.ej.ciclo()
+    assert not ruta.exists()
+    m.limites(1, paso_max_pct=45)
+    m.reloj.avanzar(seconds=31)
+    m.ej.ciclo()
+    assert json.loads(ruta.read_text())["paso_max_pct"] == 45
+
+
+def test_sin_red_en_el_latido_y_el_barrido_sigue(montaje):
+    m = montaje
+    id = _enviar(m, presupuesto())
+    m.ej.espera_red_s = 0
+    m.tg.obtener_updates = _sin_red
+    m.reloj.avanzar(hours=1)
+    m.ej.ciclo()
+    m.reloj.avanzar(seconds=31)
+    m.ej.ciclo()
+    assert _estado_json(m, "latido")["telegram"] == "sin red"
+    assert m.estado(id) == "caducada"
+
+
+def test_aviso_de_reloj_en_el_latido(montaje):
+    m = montaje
+    m.tg._ahora = lambda: m.reloj() - timedelta(seconds=400)
+    id = _enviar(m, presupuesto())
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    m.reloj.avanzar(seconds=31)
+    m.ej.ciclo()
+    lat = _estado_json(m, "latido")
+    assert any("hwclock -s" in a for a in lat["avisos"]) and round(lat["reloj_desfase_s"]) == 400
+
+
+def test_token_caducado_se_comprueba_y_se_borra_al_renovarse(montaje):
+    m = montaje
+    m.graph.token_caduca_tras = 0
+    m.depositar(presupuesto())
+    m.ej.ciclo()
+    assert m.ej.almacen.leer_kv("token_caducado")
+    m.ej.ciclo()  # recién marcado: la primera comprobación espera 10 min
+    assert not (m.rutas.spool / "estado" / "meta.json").exists()
+    m.reloj.avanzar(minutes=10)
+    m.ej.ciclo()  # primera comprobación: sigue caducado
+    meta = _estado_json(m, "meta")
+    assert meta["validate_only"]["ok"] is False and meta["cuenta"] == CUENTA
+    m.graph.token_caduca_tras = None  # el usuario renueva el token
+    m.reloj.avanzar(minutes=5)
+    m.ej.ciclo()
+    assert m.ej.almacen.leer_kv("token_caducado")  # aún no toca (cada 10 min)
+    m.reloj.avanzar(minutes=6)
+    m.ej.ciclo()
+    assert m.ej.almacen.leer_kv("token_caducado") is None
+    assert _estado_json(m, "meta")["validate_only"]["ok"] is True
+    assert any("token de Meta renovado" in t for t in m.textos())
+    assert m.graph.escrituras() == []  # comprobar-meta solo usa validate_only
+
+
+def test_token_caducado_se_comprueba_al_arrancar(montaje):
+    m = montaje
+    m.ej.almacen.poner_kv("token_caducado", T0.isoformat())
+    _reiniciar(m).ciclo()
+    assert m.ej.almacen.leer_kv("token_caducado") is None
+
+
+# == servir() ======================================================================================
+
+def _secretos(m: Montaje, **sin) -> None:
+    pares = {"META_TOKEN": TOKEN_META, "TELEGRAM_BOT_TOKEN": TOKEN_TG, "HMAC_CLAVE": m.clave.hex(),
+             "TELEGRAM_USER_ID": "42", "TELEGRAM_CHAT_ID": "42", "CLAUDE_UID": str(os.geteuid())}
+    for k in sin:
+        pares.pop(k)
+    m.rutas.secretos.write_text("".join(f"{k}={v}\n" for k, v in pares.items()))
+    os.chmod(m.rutas.secretos, 0o600)
+
+
+def _servir(m: Montaje, parar: threading.Event | None = None, **kw) -> int:
+    return servicio.servir(m.rutas, parar=parar or threading.Event(), fabrica=lambda s: (m.tg, m.graph),
+                           reloj=m.reloj, **kw)
+
+
+def test_servir_sin_emparejar_devuelve_4(montaje, capsys):
+    m = montaje
+    _secretos(m, TELEGRAM_CHAT_ID=1, TELEGRAM_USER_ID=1)
+    assert _servir(m) == 4
+    assert "trovefy-ejecutor emparejar" in capsys.readouterr().err
+
+
+def test_servir_secretos_inseguros_devuelve_2(montaje):
+    m = montaje
+    _secretos(m)
+    os.chmod(m.rutas.secretos, 0o644)
+    assert _servir(m) == 2
+
+
+def test_servir_limites_invalidos_devuelve_2(montaje):
+    m = montaje
+    _secretos(m)
+    m.rutas.limites.write_text("version: 1\n")
+    assert _servir(m) == 2
+
+
+def test_servir_sin_tzdata_devuelve_2(montaje, monkeypatch, capsys):
+    m = montaje
+    _secretos(m)
+
+    def sin_zona(nombre):
+        raise ZoneInfoNotFoundError(nombre)
+
+    monkeypatch.setattr(servicio, "ZoneInfo", sin_zona)
+    assert _servir(m) == 2
+    assert "tzdata" in capsys.readouterr().err
+
+
+def test_servir_con_otro_ejecutor_devuelve_3(montaje, capsys):
+    m = montaje
+    _secretos(m)
+    with candado(m.rutas.base.with_suffix(".lock")):
+        assert _servir(m) == 3
+    assert MENSAJE_OTRO in capsys.readouterr().err
+
+
+def test_sqlite_roto_no_ejecuta(montaje, monkeypatch, capsys):
+    m = montaje
+    _secretos(m)
+    id = _dejar_en(m, presupuesto(), "aceptada")
+
+    def rota(self, *a, **k):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(Almacen, "transicion", rota)
+    assert _servir(m) == 1
+    assert m.graph.escrituras() == [] and m.estado(id) == "aceptada"
+    assert TOKEN_META not in capsys.readouterr().err
+
+
+def test_servir_recupera_y_atiende_hasta_parar(montaje):
+    m = montaje
+    _secretos(m)
+    id = _dejar_en(m, presupuesto(), "aceptada")
+    m.depositar(noop())
+    parar = threading.Event()
+    original = m.tg.obtener_updates
+
+    def y_parar(*a, **k):
+        parar.set()
+        return original(*a, **k)
+
+    m.tg.obtener_updates = y_parar
+    assert _servir(m, parar) == 0
+    assert m.estado(id) == "ejecutada" and len(m.graph.escrituras()) == 1  # recuperar
+    assert m.estado("P-20261112-001") == "enviada"  # un ciclo completo
+    for nombre in ("estado", "procesadas"):
+        assert (m.rutas.spool / nombre).is_dir()
+    assert (m.rutas.spool / "estado" / "latido.json").exists()
+
+
+def test_sigterm_termina_el_ciclo_y_sale_limpio(montaje):
+    m = montaje
+    _secretos(m)
+    m.depositar(noop())
+    original = m.tg.obtener_updates
+
+    def con_sigterm(*a, **k):
+        os.kill(os.getpid(), signal.SIGTERM)  # llega en mitad del ciclo
+        return original(*a, **k)
+
+    m.tg.obtener_updates = con_sigterm
+    previo = signal.getsignal(signal.SIGTERM)
+    assert _servir(m) == 0
+    assert m.estado("P-20261112-001") == "enviada"  # el ciclo en curso terminó
+    assert signal.getsignal(signal.SIGTERM) is previo
+
+
+def test_servir_crea_estado_y_procesadas_con_setgid(tmp_path, monkeypatch):
+    m = _montaje(tmp_path / "otro")
+    try:
+        spool = tmp_path / "spool_nuevo"
+        m.rutas = dataclasses.replace(m.rutas, spool=spool)
+        _secretos(m)
+        parar = threading.Event()
+        parar.set()  # sale tras recuperar, sin ciclos
+        assert _servir(m, parar) == 0
+        for nombre in ("estado", "procesadas"):
+            assert stat.S_IMODE((spool / nombre).stat().st_mode) == 0o2750
+    finally:
+        m.ej.almacen.cerrar()
