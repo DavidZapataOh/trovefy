@@ -13,13 +13,17 @@ Invariantes (no negociables):
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sqlite3
+import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
+
+import yaml
 
 from .auditoria import (
     EV_CALLBACK_INVALIDO,
@@ -70,6 +74,7 @@ from .limites import (
     cargar_limites,
     comprobar,
     contexto_para,
+    limites_a_dict,
 )
 from .modelo import Propuesta
 from .montaje import montar
@@ -188,6 +193,7 @@ class Ejecutor:
         self.limites: Limites = cargar_limites(rutas.limites)  # inválido al arrancar: lo trata servir()
         self._limites_mtime: int | None = rutas.limites.stat().st_mtime_ns
         self._limites_error: str | None = None
+        self._limites_json_mtime: int | None = None
         self.desfase_s: float | None = None
         self._desfase_medido: datetime | None = None
         self._aviso_reloj: str | None = None
@@ -815,17 +821,88 @@ class Ejecutor:
         self._cerrar(id, r, mid)
 
     def _comprobar_cambio_limite(self, cambio: dict, p: Propuesta) -> None:
+        self._recargar_limites()  # lo que hay en disco ahora, no lo de hace un ciclo
+        if self._limites_error:
+            raise ValueError(self._limites_error)
         actual = self._limite_actual(cambio["id"], cambio["clave"])
         if actual is None or actual != cambio["de"]:
-            raise ValueError(f"{cambio['clave']} de {cambio['id']} vale {actual}, no {cambio['de']}")
+            raise ValueError(f"el límite cambió desde la propuesta: {cambio['clave']} de {cambio['id']} vale "
+                             f"{actual}, no {cambio['de']}")
         if "moneda" in cambio:
             lc = self.limites.cuentas[cambio["id"]]
             if cambio["moneda"] != lc.moneda_codigo:
                 raise ValueError(f"moneda {cambio['moneda']} distinta de la de la cuenta ({lc.moneda_codigo})")
 
+    @staticmethod
+    def _valor_limite(lim: Limites, id: str, clave: str) -> object:
+        if id == "global":
+            return getattr(lim, clave, None)
+        lc = lim.cuentas.get(id)
+        return getattr(lc, clave, None) if lc is not None else None
+
     def _aplicar_cambio_limite(self, cambio: dict, cuenta: str | None) -> None:
-        """Escribe ``limites.yaml`` (Tarea 5). Hasta entonces falla cerrado: el resultado es ``fallida``."""
-        raise NotImplementedError("escritura de limites.yaml pendiente (Tarea 5)")
+        """Escribe ``cambio`` (``{clave, id: "global"|"act_…", de, a[, moneda, unidad]}``) en ``limites.yaml``.
+
+        Antes de escribir: ``de`` debe ser el valor que hay ahora en el archivo, la ``moneda`` la de la
+        cuenta, y nunca se cambia el ``offset``. Escribe un temporal 0600 en la misma carpeta, lo valida
+        con ``cargar_limites`` (y que tenga el valor nuevo), hace ``fsync`` y ``os.replace``. Ante cualquier
+        error lanza sin tocar el archivo (el resultado es ``fallida``).
+
+        AVISO: el archivo se reescribe desde su contenido YAML, así que **los comentarios se pierden** (la
+        plantilla del repo y ``/limites`` muestran qué significa cada clave)."""
+        clave, id_, de, a = cambio["clave"], cambio["id"], cambio["de"], cambio["a"]
+        if clave == "offset":
+            raise ValueError("el offset no se cambia por /limites: lo fija el ejecutor con estado/meta.json")
+        if type(a) is not int or a <= 0 or type(de) is not int:
+            raise ValueError(f"{clave}: de y a deben ser enteros > 0")
+        ruta = self.rutas.limites
+        crudo = yaml.safe_load(ruta.read_text(encoding="utf-8"))
+        if not isinstance(crudo, dict):
+            raise TypeError("limites.yaml no es un mapa")
+        if id_ == "global":
+            if clave not in CLAVES_GLOBALES:
+                raise ValueError(f"{clave} no es una clave global")
+            seccion = crudo
+        else:
+            if clave not in CLAVES_CUENTA:
+                raise ValueError(f"{clave} no es una clave de cuenta")
+            seccion = crudo["cuentas"][id_]
+            if not isinstance(seccion, dict) or seccion.get("moneda") != cambio.get("moneda"):
+                raise ValueError(f"moneda {cambio.get('moneda')} distinta de la de la cuenta en limites.yaml")
+        if type(seccion.get(clave)) is not int or seccion[clave] != de:
+            raise ValueError(f"el límite cambió desde la propuesta: {clave} vale {seccion.get(clave)}, no {de}")
+        seccion[clave] = a
+        texto = yaml.safe_dump(crudo, sort_keys=False, allow_unicode=True)
+        tmp = ruta.with_name(f".{ruta.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(texto)
+                f.flush()
+                os.fsync(f.fileno())
+            os.chmod(tmp, 0o600)
+            if self._valor_limite(cargar_limites(tmp), id_, clave) != a:
+                raise ValueError("limites.yaml nuevo sin el valor pedido")
+            os.replace(tmp, ruta)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
+        try:  # el cambio ya está hecho: un fallo aquí no lo deshace ni lo convierte en fallida
+            dfd = os.open(ruta.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except OSError:
+            pass
+
+    def _escribir_limites_json(self) -> None:
+        """``estado/limites.json`` (resolución 12): misma forma que ``limites.yaml``, sin páginas ni datasets."""
+        if self._limites_error:
+            return
+        self.buzon.escribir_estado("limites", limites_a_dict(self.limites))
+        self._limites_json_mtime = self._limites_mtime
 
     @staticmethod
     def _hay_creados(r: Resultado) -> bool:
@@ -848,6 +925,11 @@ class Ejecutor:
                 c = r.cambio_limite
                 self.auditoria.anotar(EV_LIMITE_CAMBIADO, clave=c["clave"], de=c["de"], a=c["a"], id=c["id"],
                                       propuesta=id)
+                try:
+                    self._escribir_limites_json()
+                except Exception as e2:  # noqa: BLE001 — el cambio ya está en limites.yaml; el latido lo reintenta
+                    self._limites_json_mtime = None
+                    self._anotar_error("estado", e2)
             except Exception as e:  # noqa: BLE001 — sin escribir limites.yaml no hay cambio
                 estado = "fallida"
                 detalle = f"{detalle} | no se pudo escribir limites.yaml: {self._texto_error(e)}"

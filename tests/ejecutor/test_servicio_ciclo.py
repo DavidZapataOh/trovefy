@@ -6,11 +6,24 @@ Reutiliza la fixture ``montaje`` de la Tarea 4: todo en ``tmp_path``; Telegram y
 from __future__ import annotations
 
 import json
+import stat
 from datetime import datetime, timedelta
 
 import pytest
-from ejecutor.test_servicio import Montaje, _montaje, alerta, noop, pausar, presupuesto
+import yaml
+from ejecutor.test_servicio import (
+    CUENTA,
+    Montaje,
+    _creada,
+    _montaje,
+    alerta,
+    noop,
+    pausar,
+    presupuesto,
+)
 from trovefy_ejecutor import ejecutar as _ejecutar
+from trovefy_ejecutor import servicio
+from trovefy_ejecutor.limites import LimitesInvalidos
 from trovefy_ejecutor.render import texto_ya_procesada
 from trovefy_ejecutor.servicio import Ejecutor
 from trovefy_ejecutor.telegram import ErrorRedTelegram
@@ -197,6 +210,94 @@ def test_cola_se_envia_en_resumen_y_el_toque_reescribe_solo_su_bloque(montaje):
     resumen = m.tg.mensajes[f7.message_id]
     assert m.estado("P-20261112-007") == "caducada" and "Estado: CADUCADA" in resumen["texto"].split("\n\n")[1]
     assert not resumen["botones"] and len(m.tg.mensajes) == n  # sin un mensaje aparte por la caducada
+
+
+def _yaml(m: Montaje) -> dict:
+    return yaml.safe_load(m.rutas.limites.read_text())
+
+
+def _limite_global(id: str = "P-20261112-006", de: int = 50, a: int = 40) -> dict:
+    return {"version": 1, "id": id, "tipo": "limite_ejecutor", "creada": _creada(), "origen": "/limites",
+            "motivo": "más pasos",
+            "operaciones": [{"entidad": "ejecutor", "id": "global", "campo": "paso_max_pct",
+                             "de_esperado": de, "a": a}]}
+
+
+def test_cambio_de_limite_aceptado(montaje):
+    m = montaje
+    m.tg.escribir("/limites tope_gasto_diario_total 600.000")
+    m.ej.ciclo()
+    id = "P-20261112-900"
+    assert m.estado(id) == "enviada"
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    assert m.estado(id) == "ejecutada"
+    assert _yaml(m)["cuentas"][CUENTA]["tope_gasto_diario_total"] == 600000
+    assert stat.S_IMODE(m.rutas.limites.stat().st_mode) == 0o600
+    assert m.ej.limites.cuentas[CUENTA].tope_gasto_diario_total == 600000
+    assert m.eventos("limite_cambiado", clave="tope_gasto_diario_total", de=165000, a=600000, id=CUENTA)
+    copia = json.loads((m.rutas.spool / "estado" / "limites.json").read_text())
+    assert copia["cuentas"][CUENTA]["tope_gasto_diario_total"] == 600000
+    assert "paginas_permitidas" not in copia["cuentas"][CUENTA]
+    assert [p.name for p in m.rutas.limites.parent.iterdir() if p.name.startswith(".")] == []
+
+
+def test_cambio_de_limite_global(montaje):
+    m = montaje
+    id = _enviar(m, _limite_global())
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    assert m.estado(id) == "ejecutada" and _yaml(m)["paso_max_pct"] == 40
+    assert _yaml(m)["cuentas"][CUENTA]["offset"] == 1  # lo demás, intacto
+
+
+def test_limite_que_cambio_desde_la_propuesta_es_fallida(montaje, monkeypatch):
+    """Entre la validación y la escritura alguien edita limites.yaml: no se pisa su cambio."""
+    m = montaje
+    id = _enviar(m, _limite_global())
+    original = servicio.ejecutar
+
+    def y_alguien_edita(*a, **k):
+        r = original(*a, **k)
+        m.limites(1, paso_max_pct=45)
+        return r
+
+    monkeypatch.setattr(servicio, "ejecutar", y_alguien_edita)
+    m.tg.tocar(id, "A", m.clave)
+    m.ej.ciclo()
+    fila = m.ej.almacen.obtener(id)
+    assert fila.estado == "fallida" and "el límite cambió desde la propuesta" in fila.datos["detalle"]
+    assert _yaml(m)["paso_max_pct"] == 45 and not m.eventos("limite_cambiado")
+
+
+def test_limites_resultante_invalido_no_toca_el_archivo(montaje, monkeypatch):
+    m = montaje
+    antes = m.rutas.limites.read_bytes()
+
+    def rechaza(ruta, **k):
+        raise LimitesInvalidos("forzado")
+
+    monkeypatch.setattr(servicio, "cargar_limites", rechaza)
+    with pytest.raises(LimitesInvalidos):
+        m.ej._aplicar_cambio_limite({"clave": "paso_max_pct", "id": "global", "de": 50, "a": 40}, None)
+    assert m.rutas.limites.read_bytes() == antes
+    assert [p.name for p in m.rutas.limites.parent.iterdir() if p.name.startswith(".")] == []
+
+
+@pytest.mark.parametrize("cambio", [
+    {"clave": "offset", "id": CUENTA, "de": 1, "a": 100},
+    {"clave": "tope_gasto_diario_total", "id": CUENTA, "de": 165000, "a": 1, "moneda": "USD", "unidad": "minima"},
+    {"clave": "tope_gasto_diario_total", "id": CUENTA, "de": 1, "a": 2, "moneda": "COP", "unidad": "minima"},
+    {"clave": "paso_max_pct", "id": CUENTA, "de": 50, "a": 40},
+    {"clave": "tope_gasto_diario_total", "id": "act_1", "de": 1, "a": 2, "moneda": "COP", "unidad": "minima"},
+    {"clave": "paso_max_pct", "id": "global", "de": 50, "a": "40"},
+])
+def test_cambio_de_limite_invalido_lanza_sin_tocar(montaje, cambio):
+    m = montaje
+    antes = m.rutas.limites.read_bytes()
+    with pytest.raises((ValueError, KeyError, LimitesInvalidos)):
+        m.ej._aplicar_cambio_limite(cambio, cambio["id"] if cambio["id"] != "global" else None)
+    assert m.rutas.limites.read_bytes() == antes
 
 
 def test_alerta_en_cola_sale_cuando_el_ritmo_lo_permite(montaje):
