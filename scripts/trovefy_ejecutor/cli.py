@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 from datetime import UTC, datetime
@@ -219,8 +220,22 @@ def _anotar_stop(rutas: RutasEjecutor, activo: bool, motivo: str) -> bool:
     return True
 
 
+def _sin_acceso_al_stop(rutas: RutasEjecutor) -> bool:
+    """``stop_activo`` da «activo» si no puede mirar (falla cerrado); aquí eso sería mentir al usuario."""
+    try:
+        os.lstat(rutas.stop)
+    except FileNotFoundError:
+        return False
+    except PermissionError:
+        _salida("Sin acceso al STOP del ejecutor: ejecútalo con sudo -u trovefy-exec", err=True)
+        return True
+    return False
+
+
 def _cmd_stop(a: argparse.Namespace, rutas: RutasEjecutor) -> int:
     """``stop [motivo]``: inmediato, sin candado (funciona con el servicio en marcha). No pausa campañas."""
+    if _sin_acceso_al_stop(rutas):
+        return 2
     if stop_activo(rutas):
         print("STOP ya estaba activo")
         return 0
@@ -231,6 +246,8 @@ def _cmd_stop(a: argparse.Namespace, rutas: RutasEjecutor) -> int:
 
 
 def _cmd_reanudar(a: argparse.Namespace, rutas: RutasEjecutor) -> int:
+    if _sin_acceso_al_stop(rutas):
+        return 2
     if not stop_activo(rutas):
         print("STOP no estaba activo")
         return 0

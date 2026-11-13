@@ -262,6 +262,19 @@ def test_stop_cli_activa_y_audita(mundo, capsys):
     assert "ya estaba activo" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("orden", [["stop"], ["reanudar", "--si"]])
+def test_stop_y_reanudar_sin_acceso_no_mienten(mundo, capsys, orden):
+    carpeta = mundo.stop.parent
+    carpeta.mkdir(parents=True, exist_ok=True)
+    carpeta.chmod(0o000)
+    try:
+        assert main(orden) == 2
+    finally:
+        carpeta.chmod(0o700)
+    cap = capsys.readouterr()
+    assert "sudo -u trovefy-exec" in cap.err and "ya estaba activo" not in cap.out and "quitado" not in cap.out
+
+
 def test_stop_cli_funciona_con_el_servicio_en_marcha(mundo):
     from trovefy_ejecutor.stop import stop_activo
     with candado(mundo.base.with_suffix(".lock")):
