@@ -199,6 +199,48 @@ class Almacen:
                 c.execute("INSERT OR REPLACE INTO kv(clave,valor) VALUES('ultimo_update',?)", (str(update_id),))
         self._escribir(fn)
 
+    def actualizar_datos(self, id: str, estado: Estado, /, **datos) -> bool:
+        """(extra, plan 12) Fusiona ``datos`` sin cambiar el estado ni el historial; False si el estado
+        actual no es ``estado`` o el id no existe. Nunca es una transición."""
+        ahora = self._ahora()
+
+        def fn(c):
+            fila = c.execute("SELECT datos FROM propuestas WHERE id=? AND estado=?", (id, estado)).fetchone()
+            if fila is None:
+                return False
+            fusion = {**json.loads(fila[0]), **datos}
+            cur = c.execute("UPDATE propuestas SET datos=?, actualizada=? WHERE id=? AND estado=?",
+                            (json.dumps(fusion, ensure_ascii=False), ahora, id, estado))
+            return cur.rowcount == 1
+        return self._escribir(fn)
+
+    _KV_RESERVADAS = frozenset({"ultimo_update"})
+
+    def consumir(self, clave: str) -> bool:
+        """(extra, plan 12) True solo la primera vez para ``clave`` (persistente): p. ej. un ``Q-`` usado."""
+        def fn(c):
+            cur = c.execute("INSERT OR IGNORE INTO kv(clave,valor) VALUES(?,?)",
+                            (f"consumido:{clave}", self._ahora()))
+            return cur.rowcount == 1
+        return self._escribir(fn)
+
+    def _clave_kv(self, clave: str) -> str:
+        if clave in self._KV_RESERVADAS or clave.startswith("consumido:"):
+            raise ValueError(f"clave reservada: {clave}")
+        return f"kv:{clave}"
+
+    def poner_kv(self, clave: str, valor: str) -> None:
+        k = self._clave_kv(clave)
+        self._escribir(lambda c: c.execute("INSERT OR REPLACE INTO kv(clave,valor) VALUES(?,?)", (k, valor)))
+
+    def leer_kv(self, clave: str) -> str | None:
+        r = self._con.execute("SELECT valor FROM kv WHERE clave=?", (self._clave_kv(clave),)).fetchone()
+        return r[0] if r else None
+
+    def borrar_kv(self, clave: str) -> None:
+        k = self._clave_kv(clave)
+        self._escribir(lambda c: c.execute("DELETE FROM kv WHERE clave=?", (k,)))
+
     def registrar_cambio(self, entidad: str, campo: str, cuando: datetime) -> None:
         w = _iso(cuando)
         self._escribir(lambda c: c.execute("INSERT INTO cambios(entidad,campo,cuando) VALUES(?,?,?)",

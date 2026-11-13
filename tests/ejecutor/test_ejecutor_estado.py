@@ -180,3 +180,34 @@ def test_commit_fallido_no_deja_la_transaccion_abierta(tmp_path):
 def test_transicion_de_id_inexistente_devuelve_false(tmp_path):
     a = Almacen(tmp_path / "e.sqlite")
     assert a.transicion("P-20261112-777", "recibida", "enviada") is False
+
+
+def test_actualizar_datos_no_cambia_estado_ni_historial(tmp_path):
+    a = Almacen(tmp_path / "e.sqlite")
+    a.registrar(cargar_propuesta(presupuesto()))
+    assert a.actualizar_datos("P-20261112-004", "recibida", en_cola=True)
+    assert not a.actualizar_datos("P-20261112-004", "enviada", en_cola=False)  # estado distinto: nada
+    assert not a.actualizar_datos("P-20261112-999", "recibida", x=1)
+    f = a.obtener("P-20261112-004")
+    assert f.estado == "recibida" and f.datos == {"en_cola": True}
+    assert [h[1] for h in a.historial("P-20261112-004")] == ["recibida"]
+
+
+def test_consumir_una_sola_vez_y_persistente(tmp_path):
+    a = Almacen(tmp_path / "e.sqlite")
+    assert a.consumir("Q-20261112-140500")
+    assert not a.consumir("Q-20261112-140500")
+    a.cerrar()
+    b = Almacen(tmp_path / "e.sqlite")
+    assert not b.consumir("Q-20261112-140500") and b.consumir("Q-20261112-140501")
+
+
+def test_kv_poner_leer_borrar(tmp_path):
+    a = Almacen(tmp_path / "e.sqlite")
+    assert a.leer_kv("token_caducado") is None
+    a.poner_kv("token_caducado", "2026-11-12T10:00:00+00:00")
+    assert a.leer_kv("token_caducado") == "2026-11-12T10:00:00+00:00"
+    a.borrar_kv("token_caducado")
+    assert a.leer_kv("token_caducado") is None
+    with pytest.raises(ValueError):
+        a.poner_kv("ultimo_update", "5")  # reservada

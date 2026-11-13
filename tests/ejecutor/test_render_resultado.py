@@ -145,3 +145,16 @@ def test_resumen_con_emoji_se_mide_en_utf16():
     assert largo_telegram(txt) <= 4096
     with pytest.raises(MensajeDemasiadoLargo):
         render_resumen([it], "t", 42, K, maximo=300 // 2)  # 2 unidades por emoji
+
+
+def test_fallida_con_algo_aplicado_nunca_dice_no_se_cambio_nada():
+    t = render_resultado(O, Desenlace("fallida", T, codigo="stop", aplicado=True))
+    assert "no se cambió nada" not in t and "se aplicó una parte" in t
+    assert render_resultado(O, Desenlace("fallida", T, codigo="red")).endswith("· no se cambió nada")
+
+
+def test_discrepancia_sin_nueva_propuesta_dice_ninguna():
+    t = render_resultado(O, Desenlace("discrepancia", T, relectura="PAUSED"))
+    assert t.endswith("nueva propuesta ninguna: revísalo")
+    t = render_resultado(O, Desenlace("discrepancia", T, relectura="PAUSED", nueva_propuesta="P-20261112-800"))
+    assert t.endswith("nueva propuesta P-20261112-800")

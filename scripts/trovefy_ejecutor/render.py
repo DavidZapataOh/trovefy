@@ -42,6 +42,7 @@ class DatosRender:
     nombres: Mapping[str, str] = field(default_factory=lambda: _VACIO)
     gasto_cuenta_tras: int | None = None
     tope_cuenta: int | None = None
+    gasto_desconocido: bool = False  # (extra, plan 12) no se sabe cuánto gastaría: «desconocido», nunca 0
 
 
 def _descartable(c: str) -> bool:
@@ -235,10 +236,11 @@ def render_propuesta(p: Propuesta, vivo: DatosRender) -> str:
         lineas += _lineas_limite(p, vivo)
     elif p.tipo != "noop":
         lineas += _lineas_operaciones(p, vivo)
-    if vivo.gasto_cuenta_tras is not None:
+    if vivo.gasto_cuenta_tras is not None or vivo.gasto_desconocido:
         tope = "?" if vivo.tope_cuenta is None else _sin_codigo(vivo.tope_cuenta, vivo.moneda)
-        lineas.append("Gasto diario total de la cuenta tras el cambio: "
-                      f"{_sin_codigo(vivo.gasto_cuenta_tras, vivo.moneda)} / tope {tope}")
+        tras = ("desconocido" if vivo.gasto_desconocido or vivo.gasto_cuenta_tras is None
+                else _sin_codigo(vivo.gasto_cuenta_tras, vivo.moneda))
+        lineas.append(f"Gasto diario total de la cuenta tras el cambio: {tras} / tope {tope}")
     lineas.append("Por qué: " + limpiar_texto(p.motivo or "", MAX_POR_QUE))
     if p.tipo == "noop":
         lineas.append(_caduca(vivo))
@@ -281,6 +283,7 @@ class Desenlace:
     codigo: str | None = None
     nueva_propuesta: str | None = None
     lineas_lote: tuple[str, ...] = ()
+    aplicado: bool = False  # (extra, plan 12) fallida con algo aplicado o creado: nunca «no se cambió nada»
 
 
 def _externo(texto: str | None, maximo: int = 200) -> str:
@@ -294,10 +297,12 @@ def _linea_desenlace(d: Desenlace) -> str:
     if d.estado == "ejecutada":
         return f"EJECUTADA {hora} · relectura OK: {_externo(d.relectura)}"
     if d.estado == "fallida":
+        if d.aplicado:
+            return f"FALLÓ: {_externo(d.codigo)} · se aplicó una parte: revisa el detalle"
         return f"FALLÓ: {_externo(d.codigo)} · no se cambió nada"
     if d.estado == "discrepancia":
-        return (f"DISCREPANCIA: Meta dice {_externo(d.relectura)} → nueva propuesta "
-                f"{_externo(d.nueva_propuesta)}")
+        nueva = _externo(d.nueva_propuesta) if d.nueva_propuesta else "ninguna: revísalo"
+        return f"DISCREPANCIA: Meta dice {_externo(d.relectura)} → nueva propuesta {nueva}"
     if d.estado == "rechazada":
         return f"RECHAZADA {hora}"
     if d.estado == "caducada":
