@@ -220,6 +220,18 @@ def test_cli_encabezado_de_arreglos_coincide_con_la_convencion(tmp_path, capsys,
     assert "con `!`" not in out
 
 
+def test_cli_permission_error_dice_grupo_trovefy(tmp_path, capsys, monkeypatch):
+    def sin_permiso(v):
+        raise PermissionError(13, "Permission denied", "/ruta/falsa/estado")
+
+    _con_verificador(monkeypatch, sin_permiso)
+    assert main(["arranque", "verificar", "03", "--vault", str(tmp_path)]) == 3
+    out = capsys.readouterr().out
+    assert ("no medido: tu usuario no está en el grupo trovefy "
+            "(cierra y abre la terminal y Claude Code tras instalar)") in out
+    assert "error del verificador" not in out
+
+
 def test_cli_excepcion_del_verificador_es_no_medido(tmp_path, capsys, monkeypatch):
     def explota(v):
         raise ValueError("secreto-sk-123")

@@ -289,6 +289,8 @@ def _preparar_meta(p: Propuesta, graph) -> dict[str, int]:
         raise _Fallo(f"moneda sin offset confirmado (P-21): {info.currency or '?'}", error="moneda")
     if info.currency != e.moneda:
         raise _Fallo(f"moneda {e.moneda} distinta de la de la cuenta ({info.currency})", error="moneda")
+    if e.solo_validar:
+        return {}  # los idiomas solo se usan en los conjuntos, que solo_validar nunca construye ni envía
     locales: dict[str, int] = {}
     for cj in e.conjuntos:
         for codigo in cj.idiomas:

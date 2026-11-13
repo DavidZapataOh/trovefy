@@ -75,6 +75,26 @@ def test_solo_validar_no_crea_nada(entorno_montaje):
     assert all(e["validate_only"] is True for e in evs if e["evento"] == "ejecucion")
 
 
+def test_solo_validar_no_resuelve_idiomas(entorno_montaje, monkeypatch):
+    g, alm, aud, vault = entorno_montaje
+
+    def _buscar_roto(*a, **k):
+        raise ErrorGraph(100, None, "adlocale no debe consultarse con solo_validar")
+
+    monkeypatch.setattr(g, "buscar", _buscar_roto)
+    r = montar(estructura(solo_validar=True), g, alm, aud, vault, esperar=NADA)
+    assert r.estado == "ejecutada" and g.escrituras() == []
+    assert [_arista(l) for l in g.llamadas if l.metodo == "crear"] == ["campaigns"]
+    assert any(e["evento"] == "ejecucion" and e["validate_only"] is True and e["ok"] is True for e in _eventos(aud))
+
+
+def test_montaje_real_sigue_fallando_idioma_sin_resolver(entorno_montaje, monkeypatch):
+    g, alm, aud, vault = entorno_montaje
+    monkeypatch.setattr(g, "buscar", lambda *a, **k: [])
+    r = montar(estructura(), g, alm, aud, vault)
+    assert r.estado == "fallida" and "idioma sin resolver" in r.detalle and _sin_escritura(g)
+
+
 def test_solo_validar_con_error_es_fallida(entorno_montaje):
     g, alm, aud, vault = entorno_montaje
     g.fallar_validacion["campaigns"] = ErrorGraph(100, None, "Invalid")
