@@ -5,7 +5,8 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
-from trovefy.trm import Trm, a_usd, cop_a_usd_centavos, trm_del_dia, usd_centavos_a_cop
+from trovefy import trm as trm_mod
+from trovefy.trm import Trm, cop_a_usd_centavos, trm_del_dia, usd_centavos_a_cop
 
 FIX = Path(__file__).parent.parent / "fixtures" / "trm"
 
@@ -129,9 +130,7 @@ def test_conversion_redondeo():
     t = Trm(Decimal("3297.07"), date(2026, 11, 11), date(2026, 11, 12))
     assert cop_a_usd_centavos(Decimal(83700), t) == 2539
     assert usd_centavos_a_cop(28000, t) == Decimal(923179)
-    m = a_usd(Decimal(1000), None, date(2026, 11, 8))
-    assert m.valor is None and m.motivo == "no medido: sin TRM del 2026-11-08"
-    assert a_usd(Decimal("3297.07"), t, date(2026, 11, 11)).valor == pytest.approx(1.0)
+    assert not hasattr(trm_mod, "a_usd")  # sin conversión en float: el dinero va en enteros/Decimal
 
 
 def test_trm_demasiado_vieja_es_none(tmp_path):

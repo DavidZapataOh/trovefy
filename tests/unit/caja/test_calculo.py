@@ -88,3 +88,10 @@ def test_mover_con_sobre_desconocido_se_rechaza():
         calcular(CFG, [mov("reserva", "cajon", 100)], [])
     with pytest.raises(MovimientosCorruptos):
         calcular(CFG, [mov("nada", "tests", 100)], [])
+
+
+def test_sobregasto_formatea_con_usd_sin_floats():
+    e = calcular(CFG, [mov("", "", 2550, "herramienta")], [])
+    assert "sobregasto de herramientas: restante -5,50 USD" in e.motivos
+    e = calcular(CFG, [], [GastoTest("sin-asignar", "—", 30000, None)])
+    assert "sobregasto de tests: restante -20 USD" in e.motivos

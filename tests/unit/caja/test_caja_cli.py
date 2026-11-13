@@ -133,3 +133,23 @@ def test_cli_proponer_sin_buzon(entorno, monkeypatch, capsys):
     monkeypatch.setitem(__import__("sys").modules, "trovefy.buzon", None)
     assert cli.main(["caja", "proponer-limites"]) == 1
     assert "el buzón aún no está instalado (plan 12)" in capsys.readouterr().err
+
+
+def test_cli_iniciar_toma_la_moneda_de_la_decision_del_paso_06(entorno, capsys):
+    from trovefy.arranque.estado import marcar_hecho
+    from trovefy.caja.config import cargar_caja
+    vault, _ = entorno
+    marcar_hecho(vault, "06", datos={"act_id": "0000000000000000", "moneda": "COP", "zona": "America/Bogota"})
+    assert cli.main(["caja", "iniciar"]) == 0
+    assert cargar_caja(vault).cuenta == cargar_caja(vault).cuenta.__class__(ACT, "COP")
+    assert "Moneda: COP (decisión del paso 06)" in capsys.readouterr().out
+
+
+def test_cli_iniciar_sin_decision_ni_moneda(entorno, capsys):
+    from trovefy.arranque.estado import marcar_hecho
+    from trovefy.caja.config import cargar_caja
+    vault, _ = entorno
+    marcar_hecho(vault, "06", datos={"act_id": "0000000000000000"})
+    assert cli.main(["caja", "iniciar"]) == 0
+    assert cargar_caja(vault).cuenta.moneda is None
+    assert "sin confirmar" in capsys.readouterr().out

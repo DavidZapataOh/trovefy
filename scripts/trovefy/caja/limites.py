@@ -84,6 +84,10 @@ def propuestas_de_limites(
     moneda_c, offset = m.get("currency"), m.get("offset")
     if type(offset) is not int or not isinstance(moneda_c, str) or m.get("cuenta") != act:
         return [], [*nm, "no medido: moneda de la cuenta sin confirmar (paso 13, comprobar-meta)"]
+    if config.cuenta.moneda is not None and config.cuenta.moneda != moneda_c:
+        distinta = (f"no medido: la moneda de config/caja.yaml ({config.cuenta.moneda}) no coincide con "
+                    f"la de la cuenta en Meta ({moneda_c})")
+        return [], [*nm, distinta]
     try:
         moneda = Moneda(moneda_c, offset)
     except ValueError:

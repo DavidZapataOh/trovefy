@@ -97,9 +97,13 @@ def _log(vault: Path, que: str, archivos: list[str], ahora: datetime) -> None:
 
 
 def _iniciar(args: argparse.Namespace, vault: Path, ahora: datetime) -> int:
-    from trovefy.arranque.verificadores.cuenta import act_guardado
+    from trovefy.arranque.verificadores.cuenta import _decision_guardada, act_guardado
 
     moneda = args.moneda.strip().upper() if args.moneda else None
+    de_paso_06 = False
+    if moneda is None:
+        moneda = _decision_guardada(vault)[0]
+        de_paso_06 = moneda is not None
     if moneda is not None and (len(moneda) != 3 or not moneda.isalpha()):
         raise _Salida(2, f"--moneda: se esperaba un código de 3 letras ({args.moneda!r})")
     digitos = act_guardado(vault)
@@ -111,7 +115,10 @@ def _iniciar(args: argparse.Namespace, vault: Path, ahora: datetime) -> int:
     _log(vault, "iniciar caja", ["config/caja.yaml"], ahora)
     print(f"Creado {ruta.relative_to(vault)}.")
     print("Cuenta: " + ("la del paso 06." if act else "sin cuenta guardada (paso 06 pendiente)."))
-    print("Moneda: " + (moneda if moneda else "sin confirmar; repite con --moneda cuando el usuario la confirme."))
+    if de_paso_06:
+        print(f"Moneda: {moneda} (decisión del paso 06)")
+    else:
+        print("Moneda: " + (moneda if moneda else "sin confirmar; repite con --moneda cuando el usuario la confirme."))
     return 0
 
 

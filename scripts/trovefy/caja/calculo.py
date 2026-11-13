@@ -25,6 +25,9 @@ class EstadoCaja:
 def calcular(
     config: ConfigCaja, movimientos: list[Movimiento], gastos: list[GastoTest]
 ) -> EstadoCaja:
+    # import local: bloqueos importa EstadoCaja de este módulo
+    from trovefy.caja.bloqueos import usd
+
     motivos: list[str] = []
 
     def aviso(m: str | None) -> None:
@@ -53,6 +56,7 @@ def calcular(
     gastado: dict[str, int | None] = {
         "herramientas": herramientas,
         "tests": tests_gastado,
+        # Provisional hasta la Fase 3: el gasto de la reserva aún no se mide (llega con /cierre y la conciliación).
         "reserva": 0,
     }
 
@@ -79,7 +83,7 @@ def calcular(
     for s in ("herramientas", "reserva"):
         r_s = restante[s]
         if r_s is not None and r_s < 0:
-            aviso(f"sobregasto de {s}: restante {r_s / 100:.2f} USD")
+            aviso(f"sobregasto de {s}: restante {usd(r_s)} USD")
     huecos = huecos_prorroga = None
     if tests_gastado is None or comprometido is None:
         restante["tests"] = None
@@ -87,7 +91,7 @@ def calcular(
         r = asignado["tests"] - tests_gastado - comprometido
         restante["tests"] = r
         if r < 0:
-            aviso(f"sobregasto de tests: restante {r / 100:.2f} USD")
+            aviso(f"sobregasto de tests: restante {usd(r)} USD")
         if config.techo_test <= 0:
             aviso("no medido: techo_test <= 0, no se pueden contar huecos")
         else:

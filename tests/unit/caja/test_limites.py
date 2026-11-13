@@ -81,8 +81,11 @@ def test_limite_ejecutor_cop():
     assert op["entidad"] == "ejecutor" and op["campo"] == "tope_gasto_diario_total" and op["moneda"] == "COP"
 
 
+CFG_USD = replace(CFG, cuenta=replace(CFG.cuenta, moneda="USD"))
+
+
 def test_usd_offset_100_solo_limite_ejecutor():
-    props, nm = prop(rec(), limites=lim("USD", 100, 6000),
+    props, nm = prop(rec(), cfg=CFG_USD, limites=lim("USD", 100, 6000),
                      m=meta(currency="USD", offset=100, amount_spent=0, spend_cap=None), trm=None)
     assert [p["tipo"] for p in props] == ["limite_ejecutor"]
     assert props[0]["operaciones"][0]["a"] == 5000
@@ -97,7 +100,7 @@ def test_valida_con_esquema_del_ejecutor():
 
 
 def test_valida_usd_con_esquema():
-    props, _ = prop(rec(), limites=lim("USD", 100, 6000),
+    props, _ = prop(rec(), cfg=CFG_USD, limites=lim("USD", 100, 6000),
                     m=meta(currency="USD", offset=100, spend_cap=None), trm=None)
     cargar_propuesta({**props[0], "version": 1, "id": "P-20261112-001", "creada": "2026-11-12T10:00:00-05:00"})
 
@@ -230,3 +233,12 @@ def test_limite_cuenta_exige_offset_de_limites_igual_a_meta():
     props, nm = prop(rec(), limites=Lectura(None, "no medido: el ejecutor no ha escrito limites.json"))
     assert "limite_cuenta" not in _tipos(props)
     assert any("offset" in x and "limites.json" in x for x in nm)
+
+
+def test_moneda_de_caja_yaml_distinta_de_meta_no_propone():
+    cfg = replace(CFG, cuenta=replace(CFG.cuenta, moneda="USD"))
+    props, nm = prop(rec(cfg), cfg=cfg)
+    assert props == []
+    assert "no medido: la moneda de config/caja.yaml (USD) no coincide con la de la cuenta en Meta (COP)" in nm
+    cfg = replace(CFG, cuenta=replace(CFG.cuenta, moneda=None))
+    assert len(prop(rec(cfg), cfg=cfg)[0]) == 2  # sin moneda en caja.yaml manda meta.json

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import math
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -13,7 +12,6 @@ from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urlencode, urlparse
 
-from trovefy.caza.senales import Medida
 from trovefy.vault.escritura import escribir_atomico
 
 URL = "https://www.datos.gov.co/resource/32sa-8pi3.json"
@@ -145,12 +143,3 @@ def cop_a_usd_centavos(cop: Decimal, trm: Trm) -> int:
 def usd_centavos_a_cop(centavos: int, trm: Trm) -> Decimal:
     """Centavos de USD → COP en peso entero, a la baja."""
     return (Decimal(centavos) / 100 * trm.cop_por_usd).to_integral_value(rounding=ROUND_FLOOR)
-
-
-def a_usd(cop: Decimal, trm: Trm | None, dia: date) -> Medida:
-    if trm is None:
-        return Medida(None, f"no medido: sin TRM del {dia.isoformat()}")
-    valor = float(cop / trm.cop_por_usd)
-    if not math.isfinite(valor):
-        return Medida(None, f"no medido: importe fuera de rango para la TRM del {dia.isoformat()}")
-    return Medida(valor)

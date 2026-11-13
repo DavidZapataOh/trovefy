@@ -9,6 +9,7 @@ redondeo es al alza: el gasto nunca baja de lo que dice el ledger."""
 from __future__ import annotations
 
 import csv
+import functools
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -71,6 +72,7 @@ def gastos_de_tests(
     vault: Path, config: ConfigCaja, trm_de: Callable[[date], Trm | None]
 ) -> list[GastoTest]:
     por_campana: dict[str, list[tuple[int | None, str | None]]] = {}
+    trm_de = functools.cache(trm_de)  # una consulta de TRM por día, no por fila
     carpeta = Path(vault) / "ledger" / "gasto"
     for ruta in sorted(carpeta.glob("*.csv")) if carpeta.is_dir() else []:
         with open(ruta, encoding="utf-8-sig", newline="") as f:

@@ -122,7 +122,7 @@ Cobrado: — (llega con /cierre y /caja --conciliar, Fase 3)
 - Tope diario total: {tope}
 - Límite de gasto de la cuenta (restante de los sobres): {limite}
 
-## No medido
+## Avisos y no medido
 
 {motivos}
 """

@@ -32,6 +32,6 @@ TRM 3.297,07 COP/USD · Banco de la República · vigente 2026-11-11 a 2026-11-1
 - Tope diario total: 50 USD ≈ 164.853 COP
 - Límite de gasto de la cuenta (restante de los sobres): 280 USD ≈ 923.179 COP
 
-## No medido
+## Avisos y no medido
 
 Nada: todo está medido.

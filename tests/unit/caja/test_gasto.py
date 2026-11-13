@@ -105,3 +105,16 @@ def test_csv_con_bom_y_filas_vacias(tmp_path):
         b"\xef\xbb\xbffecha,cuenta,campana,gasto,moneda\n\n2026-11-11,a,c1,12.00,USD\n,,,,\n\n"
     )
     assert gastos_de_tests(tmp_path, CERRADO, trm_fijo)[0].usd_centavos == 1200
+
+
+def test_trm_se_pide_una_vez_por_dia(tmp_path):
+    ledger(tmp_path, [["2026-11-11", "a", "c1", "100", "COP"], ["2026-11-11", "a", "c1", "200", "COP"],
+                      ["2026-11-12", "a", "c1", "300", "COP"], ["2026-11-11T20:00", "a", "c1", "1", "COP"]])
+    pedidas = []
+
+    def contar(dia):
+        pedidas.append(dia)
+        return trm_fijo(dia)
+
+    gastos_de_tests(tmp_path, CERRADO, contar)
+    assert sorted(pedidas) == sorted({d for d in pedidas}) and len(pedidas) == 2
