@@ -165,3 +165,13 @@ def test_cli_stop_codigo_3(spool, tmp_path, monkeypatch, capsys):
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(noop_sin_id())))
     assert main(["buzon", "depositar", "-"]) == 3
     assert "STOP" in capsys.readouterr().err
+
+
+def test_estado_latido_de_200_s_no_es_viejo(spool):
+    """Con 429 de Telegram el ciclo puede tardar ≈ 200 s: el umbral es 300 s para no dar falsas alarmas."""
+    (spool / "estado/latido.json").write_text(json.dumps(
+        {"fecha": (AHORA - timedelta(seconds=200)).isoformat(), "version": "1", "modo": "real"}))
+    assert estado(spool, AHORA)["latido_viejo"] is False
+    (spool / "estado/latido.json").write_text(json.dumps(
+        {"fecha": (AHORA - timedelta(seconds=301)).isoformat(), "version": "1", "modo": "real"}))
+    assert estado(spool, AHORA)["latido_viejo"] is True

@@ -17,7 +17,8 @@ from trovefy_ejecutor.esquema import PropuestaInvalida, cargar_propuesta
 COT = timezone(timedelta(hours=-5))
 SPOOL_POR_DEFECTO = "/var/spool/trovefy"
 MAX_ID = 799
-LATIDO_MAX_S = 120
+# El ejecutor late cada 30 s antes del long-poll, pero con 429 de Telegram un ciclo puede tardar ≈ 200 s.
+LATIDO_MAX_S = 300
 INTENTOS_ID = 5
 _ID = re.compile(r"^P-([0-9]{8})-([0-9]{3})$")
 _NUM = re.compile(r"^P-([0-9]{8})-([0-9]{3})(?:[.-]|$)")

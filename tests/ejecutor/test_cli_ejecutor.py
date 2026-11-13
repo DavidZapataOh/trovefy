@@ -293,3 +293,12 @@ def test_reanudar_con_si_no_pregunta(mundo, monkeypatch, capsys):
     assert main(["reanudar", "--si"]) == 0
     assert "no estaba activo" in capsys.readouterr().out
     assert len(_eventos_stop(mundo)) == 2
+
+
+def test_estado_latido_de_200_s_no_avisa(mundo, capsys):
+    from datetime import UTC, datetime, timedelta
+    (mundo.spool / "estado").mkdir(parents=True)
+    fecha = (datetime.now(UTC) - timedelta(seconds=200)).isoformat()
+    (mundo.spool / "estado" / "latido.json").write_text(json.dumps({"fecha": fecha}))
+    main(["estado"])
+    assert "no late" not in capsys.readouterr().out

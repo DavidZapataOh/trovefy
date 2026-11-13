@@ -38,6 +38,7 @@ from .simulado import simulacro
 from .stop import activar_stop, quitar_stop, stop_activo
 from .telegram import ClienteTelegram, ErrorRedTelegram, ErrorTelegram
 
+LATIDO_MAX_S = 300  # igual que trovefy.buzon: con 429 de Telegram un ciclo puede tardar ≈ 200 s
 _ESTADOS = ("recibida", "enviada", "aceptada", "ejecutando", "ejecutada", "fallida", "discrepancia",
             "rechazada", "caducada", "obsoleta")
 
@@ -181,7 +182,7 @@ def _edad_latido(rutas: RutasEjecutor) -> str:
         s = int((_ahora() - fecha).total_seconds())
     except (OSError, ValueError, KeyError, TypeError):
         return "sin latido"
-    return f"hace {s} s" + (" (el servicio no late)" if s > 120 else "")
+    return f"hace {s} s" + (" (el servicio no late)" if s > LATIDO_MAX_S else "")
 
 
 def _cmd_estado(_a: argparse.Namespace, rutas: RutasEjecutor) -> int:
