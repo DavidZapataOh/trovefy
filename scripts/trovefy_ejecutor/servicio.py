@@ -1206,6 +1206,81 @@ class Ejecutor:
         if creadas == 0:
             self._decir("No hay campañas activas")
 
+    # -- recuperación tras reinicio ------------------------------------------------------------------
+    def recuperar(self) -> None:
+        """Solo al arrancar. Un reinicio nunca reenvía una escritura a Meta:
+
+        - ``ejecutando`` (pudo llegar a Meta o no): solo se relee; nunca se reintenta (``_recuperar_ejecutando``).
+        - ``aceptada`` caducada → ``fallida`` («caducó antes de ejecutarse»).
+        - ``aceptada`` sin caducar → ``_ejecutar`` entero (desfase fresco, STOP, token, vivo, obsoleta, moneda,
+          ``comprobar``): nunca llegó a Meta, porque ``ejecutando`` se marca antes de escribir.
+        - ``recibida`` sin cola (caída a mitad del despacho) → se despacha otra vez desde el principio."""
+        for fila in self.almacen.en_estado("ejecutando"):
+            self._aislado("recuperar", self._recuperar_ejecutando, fila)
+        for fila in self.almacen.en_estado("aceptada"):
+            if self._caducada(fila):
+                self._fallar_aceptada(fila.id, None, "caducó antes de ejecutarse")
+            else:
+                self._aislado("recuperar", self._ejecutar, fila.id, None)
+        for fila in self.almacen.en_estado("recibida"):
+            if not fila.datos.get("en_cola"):
+                self._aislado("recuperar", self._despachar, fila.id)
+
+    def _aislado(self, donde: str, fn: Callable[..., Any], *args: Any) -> None:
+        """Un fallo en una fila no impide recuperar las demás; SQLite roto sí para el servicio."""
+        try:
+            fn(*args)
+        except sqlite3.OperationalError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            self._anotar_error(donde, e)
+
+    def _recuperar_ejecutando(self, fila: FilaPropuesta) -> None:
+        p, ahora = fila.propuesta, self.reloj()
+        estado, detalle = self._veredicto_reinicio(fila)
+        if not self._transicion(fila.id, "ejecutando", estado, detalle=self._limpio(detalle)[:2000],
+                                motivo=self._limpio(detalle)[:500], tras_reinicio=True):
+            return
+        if estado == "ejecutada":
+            d = Desenlace("ejecutada", ahora, relectura=detalle)
+        elif estado == "discrepancia":
+            d = Desenlace("discrepancia", ahora, relectura=detalle)
+        else:
+            d = Desenlace("fallida", ahora, codigo=detalle)
+        self._copiar(fila.id, None, self._editar_desenlace(fila.id, None, d))
+        if p.tipo == "limite_ejecutor" and estado == "ejecutada":
+            try:
+                self._escribir_limites_json()
+            except Exception as e:  # noqa: BLE001
+                self._anotar_error("estado", e)
+
+    def _veredicto_reinicio(self, fila: FilaPropuesta) -> tuple[str, str]:
+        """(estado, detalle) de una fila que quedó en ``ejecutando``. Ante la duda, ``discrepancia``."""
+        p = fila.propuesta
+        if p.tipo == "crear_estructura_pausada":
+            return "discrepancia", "reinicio a mitad del montaje: puede haberse creado algo; revisa Ads Manager"
+        if p.tipo in ("noop", "alerta"):
+            return "fallida", "interrumpida por un reinicio; no se reintenta"
+        if p.tipo == "limite_ejecutor":
+            self._recargar_limites()
+            hecho = not self._limites_error and all(
+                self._limite_actual(op.id, op.campo) == op.a for op in p.operaciones)
+            if hecho:
+                return "ejecutada", "relectura tras reinicio: limites.yaml ya tiene el valor nuevo"
+            return "fallida", "interrumpida por un reinicio; no se reintenta"
+        try:
+            vv = valores_vivos(p, self.graph, ahora=self.reloj)
+            vivos = [(op, vv.valor(op)) for op in p.operaciones]
+        except Exception as e:  # noqa: BLE001 — lectura imposible: nunca «no se cambió nada»
+            self._vigilar_token(e)
+            return "discrepancia", f"estado desconocido tras reinicio ({self._texto_error(e)}): revisa Ads Manager"
+        resumen = "; ".join(f"{op.id} {op.campo}={v}" for op, v in vivos)
+        if vivos and all(v == op.a for op, v in vivos):
+            return "ejecutada", f"relectura tras reinicio: {resumen}"
+        if vivos and all(v == op.de_esperado for op, v in vivos):
+            return "fallida", f"interrumpida por un reinicio antes de llegar a Meta ({resumen}); no se reintenta"
+        return "discrepancia", f"estado mezclado tras reinicio ({resumen}): revisa Ads Manager"
+
     # -- barrido -------------------------------------------------------------------------------------
     def barrer(self) -> None:
         """Caducidad (también de una ``aceptada`` que nunca llegó a ejecutarse), recordatorios de ``pausar``

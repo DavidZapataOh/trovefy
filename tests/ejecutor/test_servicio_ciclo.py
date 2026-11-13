@@ -13,19 +13,26 @@ import pytest
 import yaml
 from ejecutor.test_servicio import (
     CUENTA,
+    S1,
+    S2,
+    T0,
     Montaje,
     _creada,
     _montaje,
     alerta,
+    estructura,
+    lote,
     noop,
     pausar,
     presupuesto,
 )
 from trovefy_ejecutor import ejecutar as _ejecutar
 from trovefy_ejecutor import servicio
+from trovefy_ejecutor.esquema import cargar_propuesta
 from trovefy_ejecutor.limites import LimitesInvalidos
 from trovefy_ejecutor.render import texto_ya_procesada
 from trovefy_ejecutor.servicio import Ejecutor
+from trovefy_ejecutor.stop import activar_stop
 from trovefy_ejecutor.telegram import ErrorRedTelegram
 
 
@@ -310,3 +317,148 @@ def test_alerta_en_cola_sale_cuando_el_ritmo_lo_permite(montaje):
     m.reloj.avanzar(minutes=61)
     m.ej.ciclo()
     assert m.estado("P-20261112-010") == "ejecutada"
+
+
+# == Recuperación tras reinicio ====================================================================
+
+def _dejar_en(m: Montaje, d: dict, estado: str) -> str:
+    """Propuesta enviada de verdad y llevada a mano a ``aceptada`` o ``ejecutando`` (caída del proceso)."""
+    id = _enviar(m, d)
+    assert m.ej.almacen.transicion(id, "enviada", "aceptada", callback_id="1")
+    if estado == "ejecutando":
+        assert m.ej.almacen.transicion(id, "aceptada", "ejecutando")
+    return id
+
+
+def _reiniciar(m: Montaje) -> Ejecutor:
+    m.ej.almacen.cerrar()
+    m.ej = _otro(m)
+    return m.ej
+
+
+def test_reinicio_en_ejecutando_no_reescribe(montaje):
+    m = montaje
+    id = _dejar_en(m, presupuesto(de=20000, a=26000), "ejecutando")
+    m.graph.objetos[S1]["daily_budget"] = "26000"  # la escritura llegó a Meta antes de la caída
+    _reiniciar(m).recuperar()
+    fila = m.ej.almacen.obtener(id)
+    assert fila.estado == "ejecutada" and m.graph.escrituras() == []
+    assert "relectura tras reinicio" in fila.datos["detalle"]
+    assert "EJECUTADA" in m.mensaje_de(id)["texto"]
+
+
+def test_reinicio_en_ejecutando_sin_cambio_es_fallida(montaje):
+    m = montaje
+    id = _dejar_en(m, presupuesto(de=20000, a=26000), "ejecutando")
+    _reiniciar(m).recuperar()
+    fila = m.ej.almacen.obtener(id)
+    assert fila.estado == "fallida" and "no se reintenta" in fila.datos["detalle"]
+    assert m.graph.escrituras() == [] and "FALLÓ" in m.mensaje_de(id)["texto"]
+
+
+def test_reinicio_lote_a_medias_es_discrepancia(montaje):
+    m = montaje
+    id = _dejar_en(m, lote(), "ejecutando")
+    m.graph.objetos[S1]["daily_budget"] = "15000"  # la primera sí, la segunda no
+    _reiniciar(m).recuperar()
+    fila = m.ej.almacen.obtener(id)
+    assert fila.estado == "discrepancia" and m.graph.escrituras() == []
+    assert "no se cambió nada" not in m.mensaje_de(id)["texto"]
+
+
+def test_reinicio_lote_entero_aplicado_es_ejecutada(montaje):
+    m = montaje
+    id = _dejar_en(m, lote(), "ejecutando")
+    m.graph.objetos[S1]["daily_budget"] = "15000"
+    m.graph.objetos[S2]["daily_budget"] = "10000"
+    _reiniciar(m).recuperar()
+    assert m.estado(id) == "ejecutada" and m.graph.escrituras() == []
+
+
+def test_reinicio_sin_poder_leer_es_discrepancia(montaje):
+    m = montaje
+    id = _dejar_en(m, presupuesto(), "ejecutando")
+    m.graph.red_al_leer = True
+    _reiniciar(m).recuperar()
+    fila = m.ej.almacen.obtener(id)
+    assert fila.estado == "discrepancia" and "estado desconocido tras reinicio" in fila.datos["detalle"]
+
+
+def test_reinicio_montaje_en_ejecutando_es_discrepancia(montaje):
+    m = montaje
+    p = cargar_propuesta(estructura())
+    m.ej.almacen.registrar(p)
+    assert m.ej.almacen.transicion(p.id, "recibida", "ejecutando")
+    _reiniciar(m).recuperar()
+    fila = m.ej.almacen.obtener(p.id)
+    assert fila.estado == "discrepancia" and "puede haberse creado algo" in fila.datos["detalle"]
+    assert m.graph.escrituras() == []
+    assert any("revisa Ads Manager" in t for t in m.textos())
+
+
+def test_reinicio_noop_en_ejecutando_es_fallida(montaje):
+    m = montaje
+    id = _dejar_en(m, noop(), "ejecutando")
+    _reiniciar(m).recuperar()
+    fila = m.ej.almacen.obtener(id)
+    assert fila.estado == "fallida" and "interrumpida" in fila.datos["detalle"]
+
+
+@pytest.mark.parametrize("ya_escrito", [True, False])
+def test_reinicio_limite_ejecutor_en_ejecutando(montaje, ya_escrito):
+    m = montaje
+    id = _dejar_en(m, _limite_global(), "ejecutando")
+    if ya_escrito:
+        m.limites(1, paso_max_pct=40)
+    _reiniciar(m).recuperar()
+    assert m.estado(id) == ("ejecutada" if ya_escrito else "fallida")
+
+
+def test_reinicio_aceptada_se_ejecuta_con_todas_las_comprobaciones(montaje):
+    m = montaje
+    id = _dejar_en(m, presupuesto(), "aceptada")
+    _reiniciar(m).recuperar()  # la medida del envío (kv) aún es fresca
+    assert m.estado(id) == "ejecutada" and len(m.graph.escrituras()) == 1
+
+
+def test_reinicio_aceptada_con_stop_no_ejecuta(montaje):
+    m = montaje
+    id = _dejar_en(m, presupuesto(), "aceptada")
+    activar_stop(m.rutas, "prueba", T0)
+    _reiniciar(m).recuperar()
+    assert m.estado(id) == "fallida" and m.graph.escrituras() == []
+
+
+def test_reinicio_aceptada_obsoleta_no_ejecuta(montaje):
+    m = montaje
+    id = _dejar_en(m, presupuesto(), "aceptada")
+    m.graph.cambiar(S1, daily_budget=21000)
+    _reiniciar(m).recuperar()
+    assert m.estado(id) == "obsoleta" and m.graph.escrituras() == []
+
+
+def test_reinicio_sin_medida_de_reloj_no_ejecuta(montaje):
+    m = montaje
+    id = _dejar_en(m, presupuesto(), "aceptada")
+    m.reloj.avanzar(minutes=20)
+    m.tg.enviar = m.tg.editar = _sin_red
+    _reiniciar(m).recuperar()
+    assert m.estado(id) == "aceptada" and m.graph.escrituras() == []
+
+
+def test_reinicio_con_recibida_a_medias_la_despacha_otra_vez(montaje):
+    m = montaje
+    p = cargar_propuesta(presupuesto())
+    m.ej.almacen.registrar(p)  # caída entre registrar y despachar
+    _reiniciar(m).recuperar()
+    assert m.estado(p.id) == "enviada" and m.graph.escrituras() == []
+
+
+def test_reinicio_aceptada_caducada_es_fallida(montaje):
+    m = montaje
+    id = _dejar_en(m, presupuesto(), "aceptada")
+    m.reloj.avanzar(hours=1)
+    _reiniciar(m).recuperar()
+    fila = m.ej.almacen.obtener(id)
+    assert fila.estado == "fallida" and "caducó antes de ejecutarse" in fila.datos["motivo"]
+    assert m.graph.escrituras() == []
