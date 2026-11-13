@@ -132,3 +132,9 @@ def test_conversion_redondeo():
     m = a_usd(Decimal(1000), None, date(2026, 11, 8))
     assert m.valor is None and m.motivo == "no medido: sin TRM del 2026-11-08"
     assert a_usd(Decimal("3297.07"), t, date(2026, 11, 11)).valor == pytest.approx(1.0)
+
+
+def test_trm_demasiado_vieja_es_none(tmp_path):
+    # la fila vigente hasta el 2026-11-12; 7 días después aún vale, 8 no
+    assert trm_del_dia(tmp_path, date(2026, 11, 19), abrir=fijo("2026-11-11.json")) is not None
+    assert trm_del_dia(tmp_path, date(2026, 11, 20), abrir=fijo("2026-11-11.json")) is None

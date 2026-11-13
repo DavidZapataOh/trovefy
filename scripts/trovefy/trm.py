@@ -22,6 +22,7 @@ _HOST = "www.datos.gov.co"
 _TIMEOUT = 15
 _MAX_BYTES = 1_000_000
 _MIN, _MAX = Decimal(1000), Decimal(10000)
+_MAX_ANTIGUEDAD = 7  # días: una «última publicada» más vieja que esto ya no es una TRM fiable
 
 
 @dataclass(frozen=True)
@@ -125,6 +126,8 @@ def trm_del_dia(vault: Path, dia: date, abrir=_abrir_seguro) -> Trm | None:
         return None
     trm = _parsear(datos)
     if trm is None:
+        return None
+    if not trm.vigente(dia) and (dia - trm.hasta).days > _MAX_ANTIGUEDAD:
         return None
     if trm.vigente(dia):
         try:
