@@ -228,24 +228,19 @@ def test_subir_imagen(respuesta_json):
     assert parse_qs(req.data.decode())["bytes"] == ["iVBORw=="]
 
 
-def test_subir_video(respuesta_json, tmp_path):
-    v = tmp_path / "v.mp4"
-    v.write_bytes(b"datos")
+def test_subir_video(respuesta_json):
     abrir = respuesta_json(200, {"id": "777"})
-    assert ClienteGraph(TOKEN, abrir=abrir).subir_video("act_1", v) == "777"
+    assert ClienteGraph(TOKEN, abrir=abrir).subir_video("act_1", b"datos", 'v"\r\n.mp4') == "777"
     req, timeout = abrir.peticiones[0]
     assert req.full_url.endswith("/v25.0/act_1/advideos") and timeout == 120
     assert req.get_header("Content-type").startswith("multipart/form-data; boundary=")
     assert b'name="source"' in req.data and b"datos" in req.data and TOKEN.encode() not in req.data
 
 
-def test_subir_video_grande(respuesta_json, tmp_path):
-    v = tmp_path / "v.mp4"
-    with v.open("wb") as f:
-        f.truncate(100 * 1024 * 1024 + 1)
+def test_subir_video_grande(respuesta_json):
     abrir = respuesta_json(200, {"id": "1"})
     with pytest.raises(ValueError, match="vídeo > 100 MB"):
-        ClienteGraph(TOKEN, abrir=abrir).subir_video("act_1", v)
+        ClienteGraph(TOKEN, abrir=abrir).subir_video("act_1", bytes(100 * 1024 * 1024 + 1), "v.mp4")
     assert not abrir.peticiones
 
 

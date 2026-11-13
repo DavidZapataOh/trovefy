@@ -83,3 +83,14 @@ def test_servidor_meta_por_token_no_por_subcadena(correr_hook, vault_tmp):
     for nombre in ("mcp__meta-ads__ads_update_entity", "mcp__claude_ai_Meta_Ads__ads_update_entity",
                    "mcp__facebook__x", "mcp__fb__x", "mcp__metaads__x"):
         assert correr_hook("meta_guard", {"tool_name": nombre, "tool_input": {}}, vault_tmp)[0] == "deny", nombre
+
+
+def test_stop_deniega_depositar_en_meta_guard(correr_hook, vault_tmp):
+    cmd = {"tool_name": "Bash", "tool_input": {"command": "trovefy buzon depositar p.json"}}
+    assert correr_hook("meta_guard", cmd, vault_tmp)[0] == "allow"
+    (vault_tmp / ".trovefy" / "STOP").write_text("x")
+    d, m = correr_hook("meta_guard", cmd, vault_tmp)
+    assert d == "deny" and "STOP activo: no se deposita nada" in m
+    cmd2 = {"tool_name": "Bash", "tool_input": {"command": "cp x /var/spool/trovefy/entrada/P-1.json"}}
+    assert correr_hook("meta_guard", cmd2, vault_tmp)[0] == "deny"
+    assert correr_hook("meta_guard", {"tool_name": "Bash", "tool_input": {"command": "ls"}}, vault_tmp)[0] == "allow"

@@ -279,9 +279,15 @@ def _presupuestos_activos(p: Propuesta, graph) -> tuple[int | None, dict[str, in
     pero con ``lifetime_budget`` (su gasto diario no se puede contar en el tope: falla cerrado)."""
     if p.tipo not in _CON_SUMA:
         return None, {}
+    return presupuestos_activos_cuenta(graph, p.cuenta)
+
+
+def presupuestos_activos_cuenta(graph, cuenta: str) -> tuple[int, dict[str, int]]:
+    """(extra, plan 12) Suma diaria activa y presupuestos activos de una cuenta, sin propuesta (``/estado``).
+    Mismas reglas y excepciones que ``_presupuestos_activos``."""
     activos: dict[str, int] = {}
     for arista in ("adsets", "campaigns"):
-        filas = graph.listar(p.cuenta, arista,
+        filas = graph.listar(cuenta, arista,
                              ("id", "status", "effective_status", "daily_budget", "lifetime_budget"),
                              limite=_LIMITE_LISTADO)  # sin filtro de estado en el servidor: lista negra local
         for f in filas:

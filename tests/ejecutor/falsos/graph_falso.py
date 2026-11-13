@@ -9,7 +9,6 @@ from __future__ import annotations
 import hashlib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
 
 from trovefy_ejecutor.graph import (
     _CAMPOS_CUENTA,
@@ -257,12 +256,12 @@ class GraphFalso:
         self._despues_de_escribir(act_id, False)
         return hashlib.sha256(contenido).hexdigest()[:32]
 
-    def subir_video(self, act_id: str, ruta: Path) -> str:
+    def subir_video(self, act_id: str, contenido: bytes, nombre: str) -> str:
         _seg(act_id)
-        if ruta.stat().st_size > _MAX_VIDEO:
+        if len(contenido) > _MAX_VIDEO:
             raise ValueError("vídeo > 100 MB: subida por partes no soportada")
         self._stop(False)
-        self._entrada("subir_video", act_id, {"nombre": ruta.name})
+        self._entrada("subir_video", act_id, {"nombre": nombre, "bytes": len(contenido)})
         self._antes_de_escribir(act_id, False)
         vid = str(self._siguiente_video)
         self._siguiente_video += 1

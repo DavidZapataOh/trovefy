@@ -210,3 +210,34 @@ def _guardar_bloqueado(ruta: Path, pares: dict[str, str], sobrescribir: bool) ->
         except FileNotFoundError:
             pass
         raise
+
+
+def borrar_secretos(ruta: Path, claves: tuple[str, ...]) -> None:
+    """Quita claves de ``secretos.env`` (escritura atómica 0600 bajo el candado). Las ausentes se ignoran."""
+    ruta = Path(ruta)
+    for k in claves:
+        if k not in CLAVES:
+            raise ValueError(f"clave desconocida: {k}")
+    lock = ruta.with_name(ruta.name + ".lock")
+    lfd = os.open(lock, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        fcntl.flock(lfd, fcntl.LOCK_EX)
+        lineas = _lineas(_leer_texto(ruta))
+        nuevas = [ln for ln in lineas
+                  if ln.lstrip().startswith("#") or ln.strip().partition("=")[0].strip() not in claves]
+        tmp = ruta.with_name(f".{ruta.name}.{os.getpid()}.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write("\n".join(nuevas) + "\n")
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, ruta)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except FileNotFoundError:
+                pass
+            raise
+    finally:
+        os.close(lfd)

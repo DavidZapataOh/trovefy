@@ -193,3 +193,9 @@ def test_propuesta_larga_en_utf16_se_rechaza_aunque_len_sea_menor():
     vivo = DatosRender(COP, T(14, 5), T(14, 50), valores, nombres)
     with pytest.raises(MensajeDemasiadoLargo):
         render_propuesta(cargar_propuesta(d.presupuesto_cop(operaciones=ops)), vivo)
+
+
+def test_gasto_tras_desconocido_nunca_cero():
+    vivo = DatosRender(COP, T(14, 5), T(14, 50), V.valores, gasto_desconocido=True, tope_cuenta=200000)
+    lineas = render_propuesta(cargar_propuesta(d.presupuesto_cop()), vivo).splitlines()
+    assert "Gasto diario total de la cuenta tras el cambio: desconocido / tope 200.000" in lineas

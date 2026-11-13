@@ -118,6 +118,12 @@ class Buzon:
         return datos
 
     def procesar(self, ruta: Path, resultado: dict) -> Path:
+        """Mueve ``ruta`` a ``procesadas/`` (sin pisar: ``-2``, ``-3``…) y escribe ``<id>.resultado.json``.
+
+        ``procesadas/P-*.json`` **no es prueba** de lo aprobado ni de lo ejecutado: el archivo sigue siendo
+        de quien lo depositó (Claude), que puede reescribirlo después de moverlo. Lo autoritativo es la
+        base del ejecutor (``estado.sqlite``), la auditoría encadenada y la copia en el vault
+        (``propuestas/<id>.md``). ``*.resultado.json`` es solo un aviso para Claude."""
         ruta = Path(ruta)
         stem, suf = ruta.stem, ruta.suffix
         n = 1

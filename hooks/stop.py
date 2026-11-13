@@ -17,6 +17,7 @@ from _comun import (
     ejecutar_guardia,
     herramienta,
     resolver,
+    solo_lectura,
     stop_activo,
     vault_root,
 )
@@ -30,28 +31,6 @@ def _cadena(valor: object) -> str:
 
 
 _ESCRIBE = re.compile(r"\b(?:touch|mkdir|dd|rsync|tee)\b|>>")
-_SOLO_LECTURA = frozenset(
-    {"ls", "cat", "head", "tail", "less", "wc", "grep", "find", "stat", "pwd", "echo", "cd", "pushd"}
-)
-_REDIRECCION_INOFENSIVA = re.compile(r"\d?>\s*/dev/null|\d>&\d|>&-")
-_FIND_PELIGROSO = re.compile(r"-(?:delete|exec|execdir|ok|okdir|fprint\w*|fls)\b")
-_SEGMENTOS = re.compile(r"&&|\|\||[;|\n]")
-
-
-def _solo_lectura(comando: str) -> bool:
-    """¿Todo el comando es de la lista blanca de solo lectura, sin redirecciones?"""
-    limpio = _REDIRECCION_INOFENSIVA.sub(" ", comando)
-    if any(c in limpio for c in ("<", ">", "`", "$(")) or "&" in limpio.replace("&&", ""):
-        return False
-    for segmento in _SEGMENTOS.split(limpio):
-        fichas = segmento.split()
-        if not fichas:
-            continue
-        if fichas[0] not in _SOLO_LECTURA:
-            return False
-        if fichas[0] == "find" and _FIND_PELIGROSO.search(segmento):
-            return False
-    return True
 
 
 def _bash_menciona(original: str, vault: pathlib.Path, vault_res: pathlib.Path, cwd: str | None) -> bool:
@@ -69,7 +48,7 @@ def _bash_menciona(original: str, vault: pathlib.Path, vault_res: pathlib.Path, 
     )
     if en_propuestas:
         # Con el directorio efectivo dentro de propuestas/ solo se deja pasar lo de solo lectura.
-        return not _solo_lectura(sin_comillas)
+        return not solo_lectura(sin_comillas)
     if not bash_toca_protegidas(original, vault, vault_res, cwd, ("propuestas",)):
         return False
     # Alcanzada por ruta relativa: solo se deniega lo que escribe.

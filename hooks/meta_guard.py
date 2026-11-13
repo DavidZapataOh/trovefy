@@ -9,8 +9,9 @@ import json
 import re
 from urllib.parse import unquote, urlsplit
 
-from _comun import ejecutar_guardia, herramienta
+from _comun import ejecutar_guardia, es_deposito, herramienta, stop_activo, vault_root
 
+MOTIVO_STOP = "STOP activo: no se deposita nada"
 MOTIVO = "escritura en Meta: solo la hace el ejecutor tras Aceptar"
 _TOKENS_SERVIDOR = ("meta", "facebook", "fb")
 _PREFIJOS_LECTURA = ("ads_get_", "ads_insights_")
@@ -69,6 +70,9 @@ def clasificar(tool_name: str, tool_input: dict) -> tuple[str, str]:
         if _menciona_graph(volcado) or _menciona_graph(unquote(volcado)):
             return "deny", MOTIVO
     elif tool_name == "bash":
+        comando = str(tool_input.get("command", ""))
+        if es_deposito(comando) and stop_activo(vault_root()):
+            return "deny", MOTIVO_STOP
         if _menciona_graph(str(tool_input.get("command", "")).lower()):
             return "deny", MOTIVO
     elif tool_name == "webfetch":

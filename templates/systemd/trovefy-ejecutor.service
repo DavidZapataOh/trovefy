@@ -1,0 +1,44 @@
+# Trovefy «ejecutor» (plan 12): servicio que aplica en Meta solo lo que apruebas en Telegram.
+# Plantilla del repo: scripts/instalar-ejecutor.sh sustituye {vault} y la copia a /etc/systemd/system/.
+[Unit]
+Description=Trovefy: ejecutor de propuestas aprobadas (Telegram + Meta)
+After=network-online.target time-sync.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=trovefy-exec
+Group=trovefy-exec
+SupplementaryGroups=trovefy
+Environment=TROVEFY_VAULT={vault}
+Environment=TROVEFY_SPOOL=/var/spool/trovefy
+ExecStart=/home/trovefy-exec/.local/bin/trovefy-ejecutor servir
+Restart=on-failure
+RestartSec=10
+# 2 = secretos o límites inválidos, 4 = Telegram sin emparejar, 5 = auditoría corrupta (se repara con
+# «sudo -u trovefy-exec trovefy-ejecutor auditoria reparar»): requieren intervención, no se reintenta en bucle.
+RestartPreventExitStatus=2 4 5
+# 0077: lo que deben leer Claude y el usuario (estado/, procesadas/, vault) lo crea el código con 0640 explícito.
+UMask=0077
+
+# Endurecimiento
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/spool/trovefy /home/trovefy-exec/.local/share/trovefy-ejecutor /home/trovefy-exec/.config/trovefy-ejecutor {vault}/propuestas {vault}/ledger/auditoria {vault}/raw/telegram
+PrivateTmp=yes
+# Si en WSL el servicio no arranca con «status=226/NAMESPACE», desactiva estas dos en este orden
+# (primero PrivateDevices; si sigue fallando, también RestrictNamespaces) con un drop-in que sobrevive al
+# instalador: «sudo systemctl edit trovefy-ejecutor» → [Service] PrivateDevices=no (RestrictNamespaces=no).
+PrivateDevices=yes
+RestrictNamespaces=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

@@ -184,7 +184,7 @@ def test_subidas():
     h = g.subir_imagen("act_0000000000000000", b"abc", "a.png")
     assert isinstance(h, str) and h
     assert g.subir_imagen("act_0000000000000000", b"abc", "a.png") == h
-    v = g.subir_video("act_0000000000000000", __import__("pathlib").Path(__file__))
+    v = g.subir_video("act_0000000000000000", b"vid", "v.mp4")
     assert isinstance(v, str) and v
     assert [x.metodo for x in g.escrituras()] == ["subir_imagen", "subir_imagen", "subir_video"]
 

@@ -448,3 +448,11 @@ def test_puja_lee_presupuestos_activos():
     p = propuesta(tipo="puja", op={"campo": "bid_amount", "de_esperado": 1500, "a": 2000})
     vv = valores_vivos(p, mundo_basico())
     assert dict(vv.presupuestos_activos) == {"s1": 20000, "s2": 15000} and vv.suma_diaria_activa == 35000
+
+
+def test_presupuestos_activos_cuenta_sin_propuesta():
+    from ejecutor.falsos.graph_falso import mundo_basico
+    from trovefy_ejecutor.vivo import presupuestos_activos_cuenta
+
+    g = mundo_basico()
+    assert presupuestos_activos_cuenta(g, "act_0000000000000000") == (35000, {"s1": 20000, "s2": 15000})

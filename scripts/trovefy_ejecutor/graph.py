@@ -16,7 +16,6 @@ import urllib.request
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlencode
 
@@ -299,15 +298,16 @@ class ClienteGraph:
                     return v["hash"]
         raise ErrorRed("respuesta ilegible") from None
 
-    def subir_video(self, act_id: str, ruta: Path) -> str:
-        if ruta.stat().st_size > _MAX_VIDEO:
+    def subir_video(self, act_id: str, contenido: bytes, nombre: str) -> str:
+        """Sube ``contenido`` (bytes ya verificados por quien llama: nunca relee un archivo)."""
+        if len(contenido) > _MAX_VIDEO:
             raise ValueError("vídeo > 100 MB: subida por partes no soportada")
         borde = uuid.uuid4().hex
-        nombre = ruta.name.replace('"', "").replace("\r", "").replace("\n", "")
+        nombre = nombre.replace('"', "").replace("\r", "").replace("\n", "")
         cuerpo = (
             f'--{borde}\r\nContent-Disposition: form-data; name="source"; filename="{nombre}"\r\n'
             "Content-Type: application/octet-stream\r\n\r\n"
-        ).encode() + ruta.read_bytes() + f"\r\n--{borde}--\r\n".encode()
+        ).encode() + bytes(contenido) + f"\r\n--{borde}--\r\n".encode()
         r = self._enviar("POST", _seg(act_id, "advideos"), cuerpo=cuerpo,
                          tipo=f"multipart/form-data; boundary={borde}", timeout=self._t_subida)
         vid = r.get("id")
