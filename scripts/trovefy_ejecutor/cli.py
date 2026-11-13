@@ -33,7 +33,7 @@ from .graph import ClienteGraph
 from .instalacion import OffsetDistinto, fijar_offset
 from .limites import Limites, LimitesInvalidos, cargar_limites, limites_a_dict
 from .secretos import Secretos, SecretosInseguros, borrar_secretos, cargar_secretos
-from .servicio import servir
+from .servicio import GraphConStop, servir
 from .simulado import simulacro
 from .stop import activar_stop, quitar_stop, stop_activo
 from .telegram import ClienteTelegram, ErrorRedTelegram, ErrorTelegram
@@ -153,7 +153,8 @@ def _cmd_comprobar_meta(a: argparse.Namespace, rutas: RutasEjecutor) -> int:
     if act not in lim.cuentas_permitidas:
         _salida("Esa cuenta no está en cuentas_permitidas de limites.yaml", err=True)
         return 2
-    informe = comprobar_meta(ClienteGraph(secretos.meta_token), act)
+    # Igual que en el servicio: solo lee, pero cualquier escritura quedaría cortada por el STOP.
+    informe = comprobar_meta(GraphConStop(ClienteGraph(secretos.meta_token), rutas), act)
     d = informe_a_dict(informe)
     Buzon(rutas.spool).escribir_estado("meta", d)
     _salida(json.dumps(d, ensure_ascii=False, indent=2), secretos)

@@ -302,3 +302,22 @@ def test_estado_latido_de_200_s_no_avisa(mundo, capsys):
     (mundo.spool / "estado" / "latido.json").write_text(json.dumps({"fecha": fecha}))
     main(["estado"])
     assert "no late" not in capsys.readouterr().out
+
+
+def test_comprobar_meta_usa_graph_con_stop(mundo, monkeypatch):
+    from trovefy_ejecutor.graph import DetenidoPorStop
+    from trovefy_ejecutor.stop import activar_stop
+    vistos = []
+
+    def espia(graph, act):
+        vistos.append(graph)
+        return comprobar_meta(graph, act)
+
+    monkeypatch.setattr(cli, "ClienteGraph", lambda token: mundo_basico())
+    monkeypatch.setattr(cli, "comprobar_meta", espia)
+    from datetime import UTC, datetime
+    activar_stop(mundo, "prueba", datetime.now(UTC))
+    main(["comprobar-meta"])
+    assert len(vistos) == 1
+    with pytest.raises(DetenidoPorStop):
+        vistos[0].escribir("s1", {"daily_budget": 1}, validate_only=True)
