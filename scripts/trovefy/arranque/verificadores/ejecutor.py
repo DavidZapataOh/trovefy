@@ -50,7 +50,7 @@ def _leer(nombre: str, raiz: Path | None, cuenta: str | None = None) -> dict | N
         if motivo.startswith("el ejecutor no ha escrito"):
             return None
         if "sin permiso" in motivo:
-            motivo = "tu usuario no está en el grupo trovefy (sin permiso para leer el estado del ejecutor)"
+            motivo = "tu usuario no está en el grupo trovefy (cierra y abre la terminal y Claude Code tras instalar)"
             raise EstadoNoDisponible(motivo, ["añade tu usuario al grupo trovefy y abre una terminal nueva"])
         if "aún no está instalado" in motivo:
             motivo = "el ejecutor no está instalado (no existe su carpeta de estado)"

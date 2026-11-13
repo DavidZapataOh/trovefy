@@ -50,7 +50,11 @@ def leer_estado(nombre: str, spool: Path | None = None, cuenta: str | None = Non
         raise ValueError(f"estado desconocido: {nombre}")
     carpeta = (Path(spool) if spool is not None else ruta_spool()) / "estado"
     ruta = carpeta / f"{nombre}.json"
-    if not carpeta.is_dir():
+    try:
+        hay_carpeta = carpeta.is_dir()
+    except PermissionError:  # la carpeta padre no es atravesable: el usuario aún no está en el grupo
+        return _no_medido(f"sin permiso para leer {carpeta} (¿estás en el grupo trovefy?)")
+    if not hay_carpeta:
         return _no_medido(f"el ejecutor aún no está instalado (no existe {carpeta})")
     try:
         fd = os.open(ruta, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)

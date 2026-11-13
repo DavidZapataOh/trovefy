@@ -249,6 +249,10 @@ def _verificar(vault: Path, id_: str) -> int:
         return _error(f"el paso {id_} ({cargar_.nombre}) no tiene verificador todavía")
     try:
         r = funcion(vault)
+    except PermissionError:  # leer el estado del ejecutor sin estar aún en el grupo (nunca el texto de la excepción)
+        motivo = ("no medido: tu usuario no está en el grupo trovefy "
+                  "(cierra y abre la terminal y Claude Code tras instalar)")
+        r = ResultadoVerificacion(None, [], motivo, [], {}, [f"? {motivo}"])
     except Exception as exc:  # noqa: BLE001  nunca el texto de la excepción: podría llevar un secreto
         motivo = f"no medido: error del verificador ({type(exc).__name__})"
         r = ResultadoVerificacion(None, [], motivo, [], {}, [f"? {motivo}"])
