@@ -299,7 +299,7 @@ def test_cop_sin_limite_o_limite_cero():
 
 
 def _decision(v, **extra):
-    marcar_hecho(v, "06", datos={"act_id": "1135291526146760", "moneda": "COP", "zona": "America/Bogota", **extra})
+    marcar_hecho(v, "06", datos={"act_id": "1234567890123456", "moneda": "COP", "zona": "America/Bogota", **extra})
 
 
 def test_06_abre_facturacion_y_ajustes_de_la_cuenta(tmp_path):
@@ -308,10 +308,10 @@ def test_06_abre_facturacion_y_ajustes_de_la_cuenta(tmp_path):
     cap = falso(url_final="https://business.facebook.com/latest/billing_hub/accounts/details/", texto=FACT + ZONA_BOG + LIMITE_COP)
     r = verificar_cuenta(v, capturar=cap, confirmacion=CONF)
     assert [u for _s, u in cap.llamadas] == [
-        "https://www.facebook.com/ads/manager/account_settings/account_billing/?act=1135291526146760",
-        "https://www.facebook.com/ads/manager/account_settings/information/?act=1135291526146760",
+        "https://www.facebook.com/ads/manager/account_settings/account_billing/?act=1234567890123456",
+        "https://www.facebook.com/ads/manager/account_settings/information/?act=1234567890123456",
     ]
-    assert r.ok is True and r.datos == {"act_id": "1135291526146760"}
+    assert r.ok is True and r.datos == {"act_id": "1234567890123456"}
     import json
 
     ajustes = json.loads(next((v / e).read_text() for e in r.evidencia if e.endswith(".json")))
