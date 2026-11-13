@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 from datetime import UTC, datetime
@@ -136,6 +137,13 @@ def _emparejar_con_candado(a: argparse.Namespace, rutas: RutasEjecutor) -> int:
     return 0
 
 
+_ACT_COMPLETA = re.compile(r"act_([0-9]{4,})")
+
+
+def _enmascarar_cuentas(texto: str) -> str:
+    return _ACT_COMPLETA.sub(lambda m: f"act_…{m.group(1)[-4:]}", texto)
+
+
 # -- comprobar-meta ----------------------------------------------------------------------------------
 def _cmd_comprobar_meta(a: argparse.Namespace, rutas: RutasEjecutor) -> int:
     secretos = _leer_secretos(rutas)
@@ -158,9 +166,10 @@ def _cmd_comprobar_meta(a: argparse.Namespace, rutas: RutasEjecutor) -> int:
     informe = comprobar_meta(GraphConStop(ClienteGraph(secretos.meta_token), rutas), act)
     d = informe_a_dict(informe)
     Buzon(rutas.spool).escribir_estado("meta", d)
-    _salida(json.dumps(d, ensure_ascii=False, indent=2), secretos)
+    # meta.json guarda la cuenta completa; por pantalla solo sale enmascarada (act_…1234).
+    _salida(_enmascarar_cuentas(json.dumps(d, ensure_ascii=False, indent=2)), secretos)
     for p in informe.problemas:
-        _salida(f"- {p}", secretos)
+        _salida(_enmascarar_cuentas(f"- {p}"), secretos)
     codigo = 0 if informe.ok else 1
     try:
         nuevo = fijar_offset(rutas.limites, d) if informe.cuenta is not None else None

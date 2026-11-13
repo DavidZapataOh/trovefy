@@ -106,6 +106,15 @@ def test_comprobar_meta_escribe_meta_json_y_fija_offset(mundo, monkeypatch, caps
     _sin_tokens(capsys.readouterr())
 
 
+def test_comprobar_meta_stdout_enmascara_la_cuenta_pero_meta_json_no(mundo, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "ClienteGraph", lambda token: mundo_basico())
+    assert main(["comprobar-meta"]) == 0
+    out = capsys.readouterr().out
+    assert CUENTA not in out and CUENTA.removeprefix("act_") not in out
+    assert f"act_…{CUENTA[-4:]}" in out
+    assert json.loads((mundo.spool / "estado" / "meta.json").read_text())["cuenta"] == CUENTA
+
+
 def test_comprobar_meta_offset_distinto_no_se_toca(mundo, monkeypatch, capsys):
     mundo.limites.write_text(mundo.limites.read_text().replace("offset: null", "offset: 1", 1))
     os.chmod(mundo.limites, 0o600)
