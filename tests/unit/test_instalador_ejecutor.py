@@ -42,7 +42,7 @@ def test_unidad_endurecida():
         "PrivateDevices=yes", "ProtectKernelTunables=yes", "ProtectKernelModules=yes",
         "ProtectControlGroups=yes", "RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX",
         "RestrictNamespaces=yes", "LockPersonality=yes", "SystemCallArchitectures=native",
-        "WantedBy=multi-user.target", "RestartPreventExitStatus=2 4",
+        "WantedBy=multi-user.target", "RestartPreventExitStatus=2 4 5",
     ]:
         assert linea in u.splitlines(), linea
     assert "CapabilityBoundingSet=" in u.splitlines()

@@ -201,3 +201,43 @@ def test_comprobar_meta_lectura_fallida_no_toca_limites(mundo, monkeypatch):
     monkeypatch.setattr(cli, "fijar_offset", lambda *a: llamadas.append(a))
     assert main(["comprobar-meta"]) == 1
     assert llamadas == []
+
+
+def _auditoria_rota(r) -> None:
+    from trovefy_ejecutor.auditoria import Auditoria
+    a = Auditoria(r.auditoria)
+    a.anotar("stop", activo=True)
+    a.anotar("stop", activo=False)
+    lineas = r.auditoria.read_bytes().splitlines(keepends=True)
+    r.auditoria.write_bytes(lineas[0])  # falta la última línea: la cabeza no coincide
+
+
+def test_auditoria_reparar_con_servicio_en_marcha_sale_3(mundo, capsys):
+    _auditoria_rota(mundo)
+    antes = mundo.auditoria.read_bytes()
+    with candado(mundo.base.with_suffix(".lock")):
+        assert main(["auditoria", "reparar"]) == 3
+    c = capsys.readouterr()
+    assert "sudo systemctl stop trovefy-ejecutor" in c.out + c.err
+    assert mundo.auditoria.read_bytes() == antes
+    assert not list(mundo.auditoria.parent.glob("*.roto-*"))
+
+
+def test_auditoria_reparar_renombra_y_reanuda(mundo, capsys):
+    from trovefy_ejecutor.auditoria import Auditoria
+    _auditoria_rota(mundo)
+    assert not Auditoria(mundo.auditoria).verificar()
+    assert main(["auditoria", "reparar"]) == 0
+    rotos = list(mundo.auditoria.parent.glob("auditoria.jsonl.roto-*"))
+    assert len(rotos) == 1
+    assert rotos[0].name in capsys.readouterr().out
+    assert Auditoria(mundo.auditoria).verificar()
+    assert main(["estado"]) == 0
+
+
+def test_auditoria_reparar_integra_no_hace_nada(mundo, capsys):
+    from trovefy_ejecutor.auditoria import Auditoria
+    Auditoria(mundo.auditoria).anotar("stop", activo=True)
+    assert main(["auditoria", "reparar"]) == 0
+    assert not list(mundo.auditoria.parent.glob("*.roto-*"))
+    assert "íntegra" in capsys.readouterr().out

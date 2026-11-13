@@ -1567,9 +1567,10 @@ def servir(rutas: RutasEjecutor | None = None, *, graph_simulado: bool = False,
            reloj: Callable[[], datetime] | None = None) -> int:
     """Proceso del servicio. Devuelve el código de salida:
 
-    0 parado con ``parar``/SIGTERM/SIGINT · 1 SQLite roto (``OperationalError``) o auditoría corrupta: se
-    detiene sin ejecutar nada · 2 tzdata, secretos, ``limites.yaml`` o clientes no válidos · 3 otro ejecutor
-    con el candado · 4 Telegram sin emparejar.
+    0 parado con ``parar``/SIGTERM/SIGINT · 1 SQLite roto (``OperationalError``, quizá pasajero: systemd
+    reintenta) · 2 tzdata, secretos, ``limites.yaml`` o clientes no válidos · 3 otro ejecutor con el candado ·
+    4 Telegram sin emparejar · 5 auditoría corrupta (no se reintenta: ``trovefy-ejecutor auditoria reparar``).
+    En 1 y 5 se detiene sin ejecutar nada.
 
     Orden: tzdata → candado → secretos → límites → emparejamiento → ``recuperar()`` → bucle de ``ciclo()``.
     ``fabrica(secretos) -> (telegram, graph)`` y ``reloj`` permiten inyectar clientes y hora en las pruebas.
@@ -1663,7 +1664,7 @@ def _servir_con_candado(rutas: RutasEjecutor, graph_simulado: bool, parar: threa
     except AuditoriaCorrupta as e:
         _decir_err(f"Auditoría corrupta ({e}): para el servicio y repárala con `trovefy-ejecutor auditoria "
                    "reparar`; no se ejecuta nada")
-        return 1
+        return 5
     except LimitesInvalidos as e:
         _decir_err(f"limites.yaml no válido: {e}")
         return 2

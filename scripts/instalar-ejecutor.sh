@@ -558,7 +558,11 @@ if ((SIMULAR)); then printf '\nListo (simulación: no se ejecutó nada).\n'; els
 printf 'Comprueba:\n'
 printf '    systemctl status trovefy-ejecutor\n'
 printf '    trovefy buzon estado        # tras cerrar y abrir la terminal (grupo %s)\n' "$GRUPO"
-printf 'Para reparar la auditoría, para antes el servicio: sudo systemctl stop trovefy-ejecutor\n'
+printf 'Si el servicio para con código 5 (auditoría corrupta), repárala con el servicio parado:\n'
+printf '    sudo systemctl stop trovefy-ejecutor\n'
+printf '    sudo -u %s %s auditoria reparar\n' "$EXEC" "$BIN"
+printf '    sudo systemctl start trovefy-ejecutor\n'
+printf 'Si Telegram no responde, STOP de respaldo: sudo -u %s %s stop "motivo"\n' "$EXEC" "$BIN"
 if ((SIMULAR == 0)); then
     systemctl --no-pager status trovefy-ejecutor || true
 fi

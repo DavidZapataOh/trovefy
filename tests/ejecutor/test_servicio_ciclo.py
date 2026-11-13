@@ -827,3 +827,15 @@ def test_reinicio_compara_valores_normalizados(montaje):
     finally:
         monkeypatch_vv.undo()
     assert m.estado(id) == "ejecutada"
+
+
+def test_auditoria_corrupta_al_servir_sale_5(montaje, capsys):
+    """Auditoría corrupta = código 5 (RestartPreventExitStatus): no se reinicia en bucle; SQLite sigue en 1."""
+    m = montaje
+    _secretos(m)
+    with m.rutas.auditoria.open("ab") as f:
+        f.write(b'{"n": 99, "roto"')  # última línea incompleta
+    assert _servir(m) == 5
+    err = capsys.readouterr().err
+    assert "trovefy-ejecutor auditoria reparar" in err
+    assert m.graph.escrituras() == []

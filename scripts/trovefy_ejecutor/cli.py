@@ -1,6 +1,7 @@
 """CLI ``trovefy-ejecutor`` (plan 12, tarea 7).
 
 Códigos de salida: 0 ok · 1 error interno · 2 secretos o límites ilegibles · 3 otra instancia · 4 sin emparejar.
+(``servir`` añade 5: auditoría corrupta; se repara con ``trovefy-ejecutor auditoria reparar``.)
 Ninguna salida lleva tokens, ids de chat/usuario ni el contenido de ``secretos.env``: todo texto pasa por
 ``_limpio`` (quita los tokens conocidos y aplica ``auditoria.redactar``).
 """
@@ -13,7 +14,13 @@ import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .auditoria import EV_LIMITE_CAMBIADO, Auditoria, redactar
+from .auditoria import (
+    EV_LIMITE_CAMBIADO,
+    Auditoria,
+    AuditoriaCorrupta,
+    redactar,
+    reparar,
+)
 from .buzon import Buzon
 from .candado import MENSAJE_OTRO, OtroEjecutorActivo, candado
 from .comprobar_meta import comprobar_meta, informe_a_dict
@@ -195,8 +202,39 @@ def _cmd_estado(_a: argparse.Namespace, rutas: RutasEjecutor) -> int:
     except Exception as e:  # noqa: BLE001
         _salida(f"auditoría: ilegible ({type(e).__name__})")
         return 1
-    print(f"auditoría: {'íntegra' if ok else 'ROTA (repárala antes de arrancar)'}")
+    print(f"auditoría: {'íntegra' if ok else 'ROTA (para el servicio y ejecuta: trovefy-ejecutor auditoria reparar)'}")
     return 0 if ok else 1
+
+
+# -- auditoria reparar ------------------------------------------------------------------------------
+def _cmd_auditoria(a: argparse.Namespace, rutas: RutasEjecutor) -> int:
+    """``auditoria reparar``: aparta el archivo roto (``.roto-<fecha>``, nunca se borra) y abre una cadena
+    nueva con ``cadena_reanudada``. Exige el servicio parado (mismo candado que ``servir``)."""
+    rutas.base.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with candado(rutas.base.with_suffix(".lock")):
+            return _reparar_con_candado(rutas)
+    except OtroEjecutorActivo:
+        print(MENSAJE_OTRO)
+        return 3
+
+
+def _reparar_con_candado(rutas: RutasEjecutor) -> int:
+    if not rutas.auditoria.exists() and not rutas.auditoria.with_name(rutas.auditoria.name + ".cabeza").exists():
+        print("auditoría: no existe; no hay nada que reparar")
+        return 0
+    try:
+        Auditoria(rutas.auditoria)
+        integra = Auditoria(rutas.auditoria).verificar()
+    except AuditoriaCorrupta:
+        integra = False
+    if integra:
+        print("auditoría: íntegra; no hay nada que reparar")
+        return 0
+    roto = reparar(rutas.auditoria)
+    print(f"auditoría reparada: el archivo roto se guardó como {roto.name} (no lo borres: es la prueba)")
+    print("Arranca de nuevo el servicio: sudo systemctl start trovefy-ejecutor")
+    return 0
 
 
 # -- simular / limites / servir -----------------------------------------------------------------------
@@ -245,11 +283,15 @@ def _parser() -> argparse.ArgumentParser:
     si = sub.add_parser("simular", help="recorre el ejecutor con Telegram y Meta simulados")
     si.add_argument("--raiz", help="carpeta de trabajo (por defecto, temporal)")
     sub.add_parser("limites", help="muestra los límites por cuenta")
+    au = sub.add_parser("auditoria", help="mantenimiento de la auditoría (con el servicio parado)")
+    au_sub = au.add_subparsers(dest="accion", required=True)
+    au_sub.add_parser("reparar", help="aparta el archivo roto y empieza una cadena nueva")
     return p
 
 
 _ORDENES = {"emparejar": _cmd_emparejar, "comprobar-meta": _cmd_comprobar_meta, "servir": _cmd_servir,
-            "estado": _cmd_estado, "simular": _cmd_simular, "limites": _cmd_limites}
+            "estado": _cmd_estado, "simular": _cmd_simular, "limites": _cmd_limites,
+            "auditoria": _cmd_auditoria}
 
 
 def main(argv: list[str] | None = None) -> int:

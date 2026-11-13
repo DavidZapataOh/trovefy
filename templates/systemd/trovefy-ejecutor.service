@@ -15,8 +15,9 @@ Environment=TROVEFY_SPOOL=/var/spool/trovefy
 ExecStart=/home/trovefy-exec/.local/bin/trovefy-ejecutor servir
 Restart=on-failure
 RestartSec=10
-# 2 = secretos o límites inválidos, 4 = Telegram sin emparejar: requieren intervención, no se reintenta en bucle.
-RestartPreventExitStatus=2 4
+# 2 = secretos o límites inválidos, 4 = Telegram sin emparejar, 5 = auditoría corrupta (se repara con
+# «sudo -u trovefy-exec trovefy-ejecutor auditoria reparar»): requieren intervención, no se reintenta en bucle.
+RestartPreventExitStatus=2 4 5
 # 0077: lo que deben leer Claude y el usuario (estado/, procesadas/, vault) lo crea el código con 0640 explícito.
 UMask=0077
 

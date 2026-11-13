@@ -66,4 +66,15 @@ Guarda y ejecuta `sudo systemctl restart trovefy-ejecutor`. Si sigue fallando, v
 `sudo systemctl edit trovefy-ejecutor` y añade debajo `RestrictNamespaces=no`. Para deshacerlo:
 `sudo systemctl revert trovefy-ejecutor`.
 
-Antes de reparar la auditoría del ejecutor, para el servicio: `sudo systemctl stop trovefy-ejecutor`.
+Si el servicio se detiene con código 5 (auditoría corrupta), no se reinicia solo. Repárala con el servicio
+parado; el archivo roto se guarda aparte (`auditoria.jsonl.roto-<fecha>`), nunca se borra:
+
+```bash
+sudo systemctl stop trovefy-ejecutor
+sudo -u trovefy-exec /home/trovefy-exec/.local/bin/trovefy-ejecutor auditoria reparar
+sudo systemctl start trovefy-ejecutor
+```
+
+Si Telegram no responde, el STOP de respaldo va por la terminal (inmediato, queda en la auditoría):
+`sudo -u trovefy-exec /home/trovefy-exec/.local/bin/trovefy-ejecutor stop "motivo"`. Para quitarlo:
+`sudo -u trovefy-exec /home/trovefy-exec/.local/bin/trovefy-ejecutor reanudar` (pide escribir «sí»).
