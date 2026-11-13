@@ -321,10 +321,13 @@ def evaluar_cuenta(
     )
 
 
-def _act_guardado(vault: Path) -> str | None:
+def act_guardado(vault: Path) -> str | None:
     p = next((p for p in cargar(vault) if p.id == "06"), None)
     valor = p.datos.get("act_id") if p else None
     return valor if valor and re.fullmatch(r"\d+", valor) else None
+
+
+_act_guardado = act_guardado
 
 
 def _decision_guardada(vault: Path) -> tuple[str | None, str | None]:
@@ -341,7 +344,7 @@ def verificar_cuenta(
 ) -> ResultadoVerificacion:
     vault = vault_root() if vault is None else Path(vault)
     confirmacion = confirmacion_de(vault, "06", confirmacion)
-    act = _act_guardado(vault)
+    act = act_guardado(vault)
     moneda_decidida, zona_decidida = _decision_guardada(vault)
     urls = {"facturacion": f"{URL_AJUSTES}?act={act}" if act else URL_AJUSTES}
     if act:
