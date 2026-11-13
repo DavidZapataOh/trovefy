@@ -25,8 +25,11 @@ from trovefy.arranque.verificadores import (  # noqa: F401  (registran los verif
     checklist,
     cuenta,
     dominio,
+    ejecutor,
+    ensayo,
     entorno,
     impultienda,
+    mcp,
     meta_ids,
     pagos,
 )

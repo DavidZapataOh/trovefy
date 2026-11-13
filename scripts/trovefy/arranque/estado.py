@@ -234,4 +234,13 @@ def siguiente(pasos: list[Paso]) -> Paso | None:
             continue
         if p.estado not in ("bloqueado", "hecho"):
             return p
-    return None
+    return _siguiente_fase1(pasos, cobro_ok)
+
+
+def _siguiente_fase1(pasos: list[Paso], cobro_ok: bool) -> Paso | None:
+    """Pasa a la fase 1 solo con la fase 0 sin pasos bloqueados (el cobro vale por uno). En la fase 1 un «hecho»
+    no se salta: su verificador no usa navegador, así que se verifica de verdad."""
+    if any(p.fase == 0 and p.estado == "bloqueado" and not (p.id in _COBRO and cobro_ok) for p in pasos):
+        return None
+    fase1 = sorted((p for p in pasos if p.fase == 1), key=lambda p: _orden(p.id))
+    return next((p for p in fase1 if p.estado not in ("verificado", "bloqueado")), None)

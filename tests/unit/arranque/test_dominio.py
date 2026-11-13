@@ -184,12 +184,12 @@ def test_confirmar_08_solo_con_dominio_verificado(tmp_path, capsys):
 
 SELECT = "https://business.facebook.com/select/"
 SELECT_TXT = (pathlib.Path(__file__).resolve().parents[2] / "fixtures/arranque/seleccionar_negocio.txt").read_text()
-DOMINIOS_BID = "https://business.facebook.com/latest/settings/domains?business_id=778461336017450"
+DOMINIOS_BID = "https://business.facebook.com/latest/settings/domains?business_id=123456789012345"
 
 
 def test_08_reutiliza_el_business_id_del_04(tmp_path):
     paso(tmp_path)
-    marcar_hecho(tmp_path, "04", datos={"business_id": "778461336017450"})
+    marcar_hecho(tmp_path, "04", datos={"business_id": "123456789012345"})
     cap = falso(url_final=DOMINIOS_BID)
     r = verificar_verificacion_meta(tmp_path, capturar=cap, consultar=dns_falso({"TXT": TXT_OK}), confirmacion=CONF)
     assert cap.llamadas == [("meta", DOMINIOS_BID)]
@@ -208,11 +208,11 @@ def test_08_varios_portfolios_sin_id_pide_guardarlo(tmp_path):
 
 def test_08_con_id_pero_meta_abre_el_selector(tmp_path):
     paso(tmp_path)
-    marcar_hecho(tmp_path, "04", datos={"business_id": "778461336017450"})
+    marcar_hecho(tmp_path, "04", datos={"business_id": "123456789012345"})
     r = verificar_verificacion_meta(
         tmp_path, capturar=falso(SELECT_TXT, url_final=SELECT), consultar=dns_falso({"TXT": TXT_OK}), confirmacion=CONF
     )
-    assert r.ok is None and "778461336017450" in r.motivo
+    assert r.ok is None and "123456789012345" in r.motivo
 
 
 def test_08_verificacion_de_seguridad_es_no_medido(tmp_path):

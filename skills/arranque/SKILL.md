@@ -1,8 +1,8 @@
 ---
 name: arranque
 description: >-
-  Te guía paso a paso en la puesta en marcha de Trovefy (fase 0): entorno, cerebro, cuentas y herramientas. Cada paso se explica, lo haces tú, y se da por bueno solo cuando un verificador lo comprueba. Úsala cuando el usuario diga «arranque», «empezar», «configurar Trovefy» o pregunte qué sigue.
-allowed-tools: Read, Bash(trovefy arranque *), Bash(trovefy cerebro *), Bash(trovefy navegador *)
+  Te guía paso a paso en la puesta en marcha de Trovefy (fases 0 y 1): entorno, cerebro, cuentas y herramientas, y después ejecutor, Telegram, Meta y ensayo general. Cada paso se explica, lo haces tú, y se da por bueno solo cuando un verificador lo comprueba. Úsala cuando el usuario diga «arranque», «empezar», «configurar Trovefy» o pregunte qué sigue.
+allowed-tools: Read, Bash(trovefy arranque *), Bash(trovefy cerebro *), Bash(trovefy navegador *), Bash(trovefy meta *), Bash(trovefy buzon depositar *), Bash(trovefy aprobaciones *), Write(data/meta/**)
 ---
 
 # /arranque: puesta en marcha guiada
@@ -36,7 +36,16 @@ Pasos:
    - Paso 02 sin poder verificarse todavía (la caza llega con el plan 07): `trovefy arranque bloqueado 02 --motivo "espera /trovefy:cazar (plan 07)"`.
    - Paso 00 que solo falla por algo que el usuario no puede arreglar ahora (por ejemplo Playwright, que se instala en una terminal de Ubuntu aparte con `cd ~/trovefy/trovefy && uv run playwright install chromium`): déjalo en `hecho` y vuelve a verificarlo cuando lo arregle.
    - `siguiente` salta los pasos `hecho` (el usuario ya hizo su parte y espera verificación) y los `bloqueado`.
+   - Para desbloquear un paso bloqueado de la fase 0 (la fase 1 no empieza mientras quede alguno, salvo el cobro cuando 10 o 10b ya vale): cuando se resuelva el motivo, acompaña al usuario a hacer el paso y ejecuta `trovefy arranque hecho NN` (o `trovefy arranque verificar NN` si se verifica sin navegador). El paso deja de estar `bloqueado` y `siguiente` sigue. Un paso «saltado por el usuario» se desbloquea igual: haciéndolo.
 6. **Recuérdale que los pasos 03 a 08 pueden ir en paralelo con la caza** (paso 02): muchos de ellos esperan revisiones de Meta, y mientras tanto se puede seguir cazando ofertas.
 7. **Si el usuario quiere saltarse un paso**, dile el riesgo concreto, ofrécele las opciones (hacerlo ahora, hacerlo después, saltarlo) con una recomendada, y si insiste regístralo, nunca en silencio:
    `trovefy arranque bloqueado NN --motivo "saltado por el usuario: <riesgo>"`.
 8. **Al terminar el paso**, vuelve a `trovefy arranque siguiente` y propón el que viene.
+
+## Fase 1
+
+- Los pasos 12, 13, 14 y 18 se verifican siempre con `trovefy arranque verificar NN` (sin navegador) y solo cuentan `verificado`.
+- En el 18, Claude deposita solo con `trovefy aprobaciones probar` (el noop) y `trovefy buzon depositar <ruta>` con la ruta que imprime `trovefy arranque ensayo montaje`, cada comando solo en la línea.
+- Si el usuario pega un token en el chat, no lo repitas, no lo guardes y no lo uses: dile que lo revoque y genere otro, y que lo pegue él en secretos.env del ejecutor.
+- Claude nunca ejecuta `sudo` ni lee `/home/trovefy-exec/`; esos comandos los escribe el usuario en una terminal aparte.
+- Hay dos STOP: el del cerebro (`.trovefy/STOP`) bloquea depósitos y el del ejecutor (Telegram `/stop`) bloquea escrituras en Meta.

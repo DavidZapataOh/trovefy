@@ -2,7 +2,7 @@
 name: cazar
 description: >-
   Caza ofertas que ya venden y se sostienen en la Biblioteca de anuncios de Meta (sin cuentas ni login): busca por nicho o en barrido por mercado e idioma, mide cada oferta por país con su enlace, la puntúa con su desglose y escribe el informe y las fichas en el cerebro. Úsala cuando el usuario diga «cazar», «buscar ofertas», «qué se está vendiendo» o pida vigilar las ofertas guardadas. Con --rutina la lanza el timer diario, sin preguntas.
-allowed-tools: Read, Bash(trovefy caza *), Bash(trovefy cerebro *), Write(wiki/caza/**/veredicto.md), Edit(config/caza.yaml)
+allowed-tools: Read, Bash(trovefy caza *), Bash(trovefy cerebro *), Write(wiki/caza/**/veredicto.md), Edit(config/caza.yaml), mcp__meta-ads__ads_library_search, Write(data/caza/mcp/**)
 ---
 
 # /cazar: caza en la Biblioteca de anuncios
@@ -33,7 +33,7 @@ Pasos:
 4. **Hueco por país.** Para cada oferta con nota ≥ B, escribe 2 frases cortas **en el idioma local** de cada país candidato y ejecuta
    `trovefy caza hueco --oferta ID --pais XX --frase "frase 1" --frase "frase 2"`.
    Mide el hueco, actualiza la ficha y recalcula la decisión (A pide hueco en al menos un país). Si imprime `PARADA`, `INTERRUMPIDA` o «Cuota del día agotada», no sigas con más ofertas ni países.
-5. **Resumen al usuario.** A y B con su desglose (nota parte por parte y su enlace por país), el top de países, los descartes con su motivo, las búsquedas usadas (y cuántas quedan hoy), los bloqueos, las búsquedas por vía (Firecrawl o Playwright), los créditos de Firecrawl y las palabras marcadas «reescribir». Cita siempre el enlace de la Biblioteca de cada cifra. Guarda en `config/caza.yaml` (sección `palabras`, por idioma) las frases que rinden y quita las que no, contándoselo al usuario.
+5. **Resumen al usuario.** A y B con su desglose (nota parte por parte y su enlace por país), el top de países, los descartes con su motivo, las búsquedas usadas (y cuántas quedan hoy), los bloqueos, las búsquedas por vía (MCP oficial, Firecrawl o Playwright), los créditos de Firecrawl y las palabras marcadas «reescribir». Cita siempre el enlace de la Biblioteca de cada cifra. Guarda en `config/caza.yaml` (sección `palabras`, por idioma) las frases que rinden y quita las que no, contándoselo al usuario.
 6. **Veredicto.** Pregunta al usuario qué quiere hacer con las A y B (modelar, vigilar, descartar), con una opción recomendada. Solo cuando lo diga, escribe su decisión **literal** en `wiki/caza/<AAAA-MM-DD>/veredicto.md` (cambia `decision: pendiente` y añade su frase entre comillas). Si no decide, el veredicto queda pendiente.
 7. **`--rutina`** (la lanza el timer de lunes a sábado a las 06:30 COT; no hay nadie al otro lado): no hagas preguntas ni edites nada. Ejecuta
    `trovefy caza ejecutar --modo vigilar --rutina`
@@ -41,3 +41,12 @@ Pasos:
    y después, con las palabras guardadas en `config/caza.yaml`, como mucho 3 ofertas nuevas en total:
    `trovefy caza ejecutar --modo barrido --region <region> --consulta PAIS:FRASE … --max 3 --rutina`.
    Si una ejecución imprime `PARADA`, `INTERRUMPIDA` o «Cuota del día agotada», no lances la siguiente (con la cuota agotada la rutina terminó bien: lo pendiente sale mañana). Si imprime «Caza omitida» (otra caza estaba en marcha), no lances la siguiente: queda anotada en el registro de la rutina. Termina con el resumen tal cual lo imprimió `trovefy caza`.
+
+## Fuente de la caza [D-11]
+
+1. Si tienes la herramienta `mcp__meta-ads__ads_library_search` **y** `config/meta_tools.json` la lista como lectura, la caza va por el **MCP oficial**; si no, por la Biblioteca pública como hasta ahora (Firecrawl, Playwright de respaldo [D-11b]).
+2. Con el MCP: llama a `ads_library_search` por cada consulta (país, frase, activos); guarda **tal cual** cada respuesta en un lote `data/caza/mcp/lote-<AAAA-MM-DD>-<HHMM>.json` con el formato `{"version": 1, "herramienta": "mcp__meta-ads__ads_library_search", "busquedas": [{"pais", "q", "page_id", "estado", "capturado_en", "argumentos", "respuesta"}]}` (nunca edites, resumas ni completes la respuesta); ejecuta `trovefy caza ejecutar --modo <modo> --region <region> --desde-mcp <lote>`. Solo usas la herramienta de lectura `ads_library_search`; nunca llames a herramientas que escriban en Meta.
+3. Si el resumen dice «Faltaron N búsquedas en el lote del MCP», puedes hacer esas llamadas con el MCP, guardarlas en un lote nuevo y medir con `--modo oferta --page-id … --desde-mcp <lote nuevo>`.
+4. **Nunca mezcles fuentes en silencio.** Si el MCP falla, no está conectado o da «no tiene la forma esperada (P-01)», díselo al usuario con opciones (recomendada: seguir con la Biblioteca pública) y espera su respuesta. `--respaldo-publico` solo con su «sí», y el informe dice qué vía dio cada búsqueda.
+5. Un error de límite del MCP es una `PARADA`: no cambies de vía para esquivarlo.
+6. `--rutina` nunca usa el MCP; `trovefy caza hueco` sigue por la Biblioteca pública.

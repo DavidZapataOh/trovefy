@@ -278,3 +278,38 @@ def test_estado_no_lee_la_copia_de_lectura_muerta(vault, tmp_path):
     (vault / "config" / "limites_ejecutor.lectura.yaml").write_text("secreto: 1\n")
     s = _spool(tmp_path, latido={"fecha": AHORA.isoformat()})
     assert "limites_ejecutor.lectura" not in "\n".join(resumen_estado(vault, AHORA, s))
+
+
+# --- tramos públicos (los usa el verificador 18) ---
+
+def test_tramos_de_auditoria_con_hueco(tmp_path):
+    copias = _cadena(tmp_path, [("2026-11-11", 4), ("2026-11-12", 2)])
+    copias["2026-11-11"] = copias["2026-11-11"][:2]
+    tramos, error = listado.tramos_de_auditoria(_vault_con(tmp_path, copias))
+    assert error is None and [len(t.lineas) for t in tramos] == [2, 2] and all(t.cuadra for t in tramos)
+    assert tramos[0].detalle == "" and "hueco" in tramos[1].detalle
+    assert tramos[0].lineas[0]["evento"] == "transicion"
+
+
+def test_tramos_de_auditoria_tramo_que_no_cuadra(tmp_path):
+    copias = _cadena(tmp_path, [("2026-11-11", 3)])
+    copias["2026-11-11"][1] = copias["2026-11-11"][1].replace("enviada", "aceptada")
+    tramos, error = listado.tramos_de_auditoria(_vault_con(tmp_path, copias))
+    assert error is None and [t.cuadra for t in tramos] == [False]
+
+
+def test_tramos_de_auditoria_sin_copia_o_linea_rota(tmp_path):
+    tramos, error = listado.tramos_de_auditoria(tmp_path / "nada")
+    assert tramos == [] and "no hay copia" in error
+    copias = _cadena(tmp_path, [("2026-11-11", 3)])
+    copias["2026-11-11"].insert(1, "{basura")
+    assert listado.tramos_de_auditoria(_vault_con(tmp_path, copias)) == ([], listado.NO_CUADRA)
+
+
+def test_linea_final_a_medio_escribir_no_rompe(tmp_path):
+    v = _vault_con(tmp_path, _cadena(tmp_path, [("2026-11-11", 3)]))
+    ruta = v / "ledger/auditoria/2026-11-11.jsonl"
+    ruta.write_text(ruta.read_text() + '{"n": 4, "ts": "2026-11-1', encoding="utf-8")
+    tramos, error = listado.tramos_de_auditoria(v)
+    assert error is None and sum(len(t.lineas) for t in tramos) == 3
+    assert _auditoria(v) == ["Auditoría: la copia cuadra"]

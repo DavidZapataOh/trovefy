@@ -16,7 +16,7 @@ from trovefy.cli import registrar
 from trovefy.vault.andamio import crear_vault
 from trovefy.vault.escritura import anadir_log
 from trovefy.vault.lint import lint
-from trovefy.vault.permisos import escribir_settings
+from trovefy.vault.permisos import SettingsIlegible, escribir_settings
 from trovefy.vault.reglas import ConflictoDeReglas, aplicar_plan, planear_regla
 from trovefy.vault.rutas import vault_root
 from trovefy.vault.sesiones import escribir_traspaso, ultimo_traspaso
@@ -271,7 +271,10 @@ def _ejecutar(args: argparse.Namespace) -> int:
     if args.accion == "destilar":
         return _destilar(args, destino)
     if args.accion == "permisos":
-        escribir_settings(destino, sobrescribir=True)
+        try:
+            escribir_settings(destino, sobrescribir=True)
+        except SettingsIlegible as exc:
+            return _error(f"no se tocó .claude/settings.json: {exc}")
         print(f"Permisos regenerados en {destino / '.claude' / 'settings.json'}.")
         return 0
     creados = crear_vault(destino)

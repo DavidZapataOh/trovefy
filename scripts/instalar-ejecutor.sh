@@ -536,9 +536,10 @@ fi
 paso 13 "Arranque"
 secretos_emparejados() {
     como_exec grep -Eq '^TELEGRAM_BOT_TOKEN=[^[:space:]]+' "$SECRETOS" \
-        && como_exec grep -Eq '^TELEGRAM_CHAT_ID=-?[0-9]+$' "$SECRETOS"
+        && como_exec grep -Eq '^TELEGRAM_CHAT_ID=-?[0-9]+$' "$SECRETOS" \
+        && como_exec grep -Eq '^META_TOKEN=[^[:space:]]+' "$SECRETOS"
 }
-if consulta "¿secretos.env tiene TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID? (sin mostrarlos)" secretos_emparejados; then
+if consulta "¿secretos.env tiene TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID y META_TOKEN? (sin mostrarlos)" secretos_emparejados; then
     if ((CAMBIO_WHEEL || CAMBIO_UNIDAD)); then
         nota "Cambió el código o la unidad: se reinicia el servicio."
         cmd systemctl restart trovefy-ejecutor
@@ -547,9 +548,9 @@ if consulta "¿secretos.env tiene TELEGRAM_BOT_TOKEN y TELEGRAM_CHAT_ID? (sin mo
         cmd systemctl start trovefy-ejecutor
     fi
 else
-    nota "Aún no se arranca. Rellena TELEGRAM_BOT_TOKEN y META_TOKEN, empareja primero:"
+    nota "Aún no se arranca (faltan tokens o emparejar). Paso 12: TELEGRAM_BOT_TOKEN y"
     nota "    sudo -u $EXEC $BIN emparejar"
-    nota "y luego:"
+    nota "Paso 13: META_TOKEN, «sudo -u $EXEC $BIN comprobar-meta» y luego:"
     nota "    sudo systemctl start trovefy-ejecutor"
 fi
 

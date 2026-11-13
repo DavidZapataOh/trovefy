@@ -1,0 +1,37 @@
+{
+  "_nota": "forma por confirmar (P-01)",
+  "version": 1,
+  "herramienta": "mcp__meta-ads__ads_library_search",
+  "busquedas": [
+    {
+      "pais": "RO",
+      "q": "fise de lucru",
+      "page_id": null,
+      "estado": "active",
+      "capturado_en": "2026-11-13T10:00:00+00:00",
+      "argumentos": {"search_terms": "fise de lucru", "ad_reached_countries": ["RO"], "ad_active_status": "ACTIVE"},
+      "respuesta": {
+        "content": [
+          {
+            "type": "text",
+            "text": "{\"data\": [{\"id\": \"900000000000001\", \"page_id\": \"800000000001\", \"page_name\": \"Pagina Ficticia Uno\", \"ad_delivery_start_time\": \"2026-09-01\", \"ad_delivery_stop_time\": null, \"ad_active_status\": \"ACTIVE\", \"publisher_platforms\": [\"facebook\", \"instagram\"], \"ad_creative_bodies\": [\"Fise de lucru pentru clasa a doua\"], \"ad_creative_link_titles\": [\"Fise de lucru\"], \"ad_creative_link_urls\": [\"https://tienda-ficticia.example/fise\"], \"collation_id\": \"700000000001\", \"collation_count\": 3}, {\"id\": \"900000000000002\", \"page_id\": \"800000000002\", \"page_name\": \"Pagina Ficticia Dos\", \"ad_delivery_start_time\": \"2026-08-15T07:30:00+0300\", \"ad_delivery_stop_time\": \"2026-10-01T00:00:00+0000\", \"publisher_platforms\": [\"facebook\"], \"ad_creative_bodies\": [\"Alta oferta\"], \"ad_creative_link_titles\": []}], \"paging\": {\"next\": \"https://graph.example/next?after=abc\"}, \"total_count\": 120}"
+          }
+        ]
+      }
+    },
+    {
+      "pais": "RO",
+      "q": null,
+      "page_id": "800000000001",
+      "estado": "active",
+      "capturado_en": "2026-11-13T10:01:00+00:00",
+      "argumentos": {"search_page_ids": ["800000000001"], "ad_reached_countries": ["RO"]},
+      "respuesta": {
+        "data": [
+          {"id": "900000000000003", "page_id": "800000000001", "page_name": "Pagina Ficticia Uno", "ad_delivery_start_time": "2026-09-01", "ad_delivery_stop_time": null, "publisher_platforms": ["facebook"], "ad_creative_bodies": ["Cuaderno"], "ad_creative_link_titles": ["Cuaderno"]},
+          {"page_id": "800000000001", "page_name": "Sin id", "ad_delivery_start_time": "2026-09-02", "publisher_platforms": ["facebook"], "ad_creative_bodies": [], "ad_creative_link_titles": []}
+        ]
+      }
+    }
+  ]
+}

@@ -29,6 +29,12 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     e.add_argument("--rutina", action="store_true",
                    help="deja el resumen en rutinas/log/<día>/caza.md y el archivo ok si terminó bien; usa la "
                         "cuota de la rutina y, en vigilar, su tope de fichas del día")
+    e.add_argument("--desde-mcp", metavar="ARCHIVO", dest="desde_mcp",
+                   help="lote con las respuestas del MCP oficial ads_library_search (data/caza/mcp/lote-*.json); "
+                        "sin --consulta usa las consultas del lote")
+    e.add_argument("--respaldo-publico", action="store_true", dest="respaldo_publico",
+                   help="solo con --desde-mcp y con el sí del usuario: lo que no esté en el lote se busca en la "
+                        "Biblioteca pública (el informe dice la vía de cada búsqueda)")
     h = sub.add_parser("hueco", help="mide el hueco de una oferta en un país y recalcula la decisión")
     h.add_argument("--oferta", required=True, metavar="ID", help="oferta_id de wiki/ofertas/<ID>.md")
     h.add_argument("--pais", required=True, metavar="XX", help="código ISO del país (p. ej. RO)")
@@ -77,13 +83,44 @@ def _consultas(valores: list[str]) -> list[tuple[str, str]]:
     return out
 
 
+def _cliente_mcp(vault: Path, args: argparse.Namespace):
+    from trovefy.caza.cache import Cache
+    from trovefy.caza.cliente import ClienteBibliotecaPublica
+    from trovefy.caza.mcp import ClienteMcp, cargar_lote
+    from trovefy.caza.presupuesto import Presupuesto
+
+    lote = cargar_lote(Path(args.desde_mcp))
+    respaldo = None
+    if args.respaldo_publico:
+        from trovefy.caza import orquestador
+
+        respaldo = ClienteBibliotecaPublica(Presupuesto.desde_umbrales(vault, orquestador.hoy_negocio()),
+                                            cache=Cache(vault / "data" / "cache" / "biblioteca"))
+    cliente = ClienteMcp(lote, respaldo=respaldo)
+    cliente.lote = lote
+    return cliente
+
+
+def _escribir_faltan(vault: Path, faltan: list[dict]) -> Path:
+    import json
+    from datetime import datetime
+
+    from trovefy.vault.escritura import ZONA_NEGOCIO, escribir_atomico
+
+    ruta = vault / "data/caza/mcp" / f"faltan-{datetime.now(ZONA_NEGOCIO).strftime('%Y-%m-%d-%H%M')}.json"
+    escribir_atomico(ruta, json.dumps(faltan, ensure_ascii=False, indent=2) + "\n")
+    return ruta
+
+
 def _ejecutar_caza(args: argparse.Namespace) -> int:
     from trovefy.caza import orquestador
+    from trovefy.caza.mcp import LoteInvalido, consultas_del_lote
     from trovefy.caza.presupuesto import Presupuesto
     from trovefy.config.umbrales import cargar
     from trovefy.vault.rutas import vault_root
 
     vault = vault_root()
+    cliente = None
     try:
         config = _config(vault)
         regiones = config.get("regiones") or {}
@@ -97,6 +134,15 @@ def _ejecutar_caza(args: argparse.Namespace) -> int:
         else:
             region = args.region
         consultas = _consultas(args.consulta)
+        cliente = None
+        if args.respaldo_publico and not args.desde_mcp:
+            return _error("--respaldo-publico solo se usa junto con --desde-mcp")
+        if args.desde_mcp:
+            if args.rutina:
+                return _error("la rutina no usa el MCP: quita --desde-mcp")
+            cliente = _cliente_mcp(vault, args)
+            if not consultas:
+                consultas = consultas_del_lote(cliente.lote)
         u = cargar(vault / "config/umbrales.yaml")
         tope = int(u["caza.max_nuevas_por_ejecucion"].valor)
         max_nuevas = tope if args.max_nuevas is None else args.max_nuevas
@@ -107,7 +153,7 @@ def _ejecutar_caza(args: argparse.Namespace) -> int:
         cuota_rutina, max_vigiladas = _rutina(config)
         dia = orquestador.hoy_negocio()
         e = orquestador.ejecutar(vault, args.modo, consultas, perfil, max_nuevas, page_ids=args.page_ids or None,
-                                 hoy=dia, region=region, paises=args.pais or None,
+                                 hoy=dia, cliente=cliente, region=region, paises=args.pais or None,
                                  max_vigiladas=max_vigiladas if args.rutina else None,
                                  max_busquedas_rutina=cuota_rutina if args.rutina else None)
     except orquestador.CazaEnCurso as exc:
@@ -121,6 +167,8 @@ def _ejecutar_caza(args: argparse.Namespace) -> int:
         rutinas.registrar_ejecucion(vault, "caza", orquestador.hoy_negocio(), texto, ok=False,
                                     estado="omitida: otra caza en curso")
         return 4
+    except LoteInvalido as exc:
+        return _error(f"lote del MCP no válido (se espera una respuesta de ads_library_search): {exc}")
     except (ValueError, FileNotFoundError, KeyError) as exc:
         return _error(str(exc))
     usadas = None
@@ -131,6 +179,9 @@ def _ejecutar_caza(args: argparse.Namespace) -> int:
         usadas = None
     texto = orquestador.resumen(e, u["caza.palabra.min_resultados"].valor, usadas)
     print(texto)
+    if cliente is not None and cliente.faltan:
+        ruta = _escribir_faltan(vault, cliente.faltan)
+        print(f"Faltaron {len(cliente.faltan)} búsquedas en el lote del MCP; quedan «no medido»: {ruta}")
     # Fin normal (también con la cuota del día agotada): 0 y «ok». Bloqueo de Meta: 1 (PARADA, dura
     # el día). Racha de errores o navegador caído: 3 (INTERRUMPIDA: solo esta ejecución). Con
     # --rutina y otra caza en curso: 4 («omitida», sin «ok»). Error de uso o configuración: 2.

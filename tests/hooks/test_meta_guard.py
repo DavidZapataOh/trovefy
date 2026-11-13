@@ -94,3 +94,42 @@ def test_stop_deniega_depositar_en_meta_guard(correr_hook, vault_tmp):
     cmd2 = {"tool_name": "Bash", "tool_input": {"command": "cp x /var/spool/trovefy/entrada/P-1.json"}}
     assert correr_hook("meta_guard", cmd2, vault_tmp)[0] == "deny"
     assert correr_hook("meta_guard", {"tool_name": "Bash", "tool_input": {"command": "ls"}}, vault_tmp)[0] == "allow"
+
+
+# --- Tarea 2: el hook sigue siendo la barrera aunque el deny no liste la herramienta ---
+import importlib.util
+import json as _json
+import pathlib as _pl
+
+_RAIZ = _pl.Path(__file__).resolve().parents[2]
+_FIX = _RAIZ / "tests/fixtures/meta/tools_list.json"
+
+
+@pytest.mark.parametrize("prefijo", ["mcp__meta-ads__", "mcp__claude_ai_Meta_Ads__"])
+def test_meta_guard_deniega_toda_escritura_de_la_fixture(correr_hook, vault_tmp, prefijo):
+    from trovefy.meta.herramientas import herramientas_de, leer_tools_list
+
+    for h in herramientas_de(leer_tools_list(_json.loads(_FIX.read_text()))[1]):
+        esperado = "allow" if h.clase == "lectura" else "deny"
+        assert correr_hook("meta_guard", {"tool_name": prefijo + h.nombre, "tool_input": {}}, vault_tmp)[0] == esperado
+
+
+def test_herramienta_desconocida_fuera_del_deny_la_deniega_el_hook(correr_hook, vault_tmp):
+    from trovefy.vault.permisos import generar_settings
+
+    nombre = "ads_reasignar_presupuesto_v9"
+    deny = generar_settings(["ads_get_a"])["permissions"]["deny"]
+    assert not any(__import__("fnmatch").fnmatchcase(f"mcp__meta-ads__{nombre}", r) for r in deny)
+    assert correr_hook("meta_guard", {"tool_name": f"mcp__meta-ads__{nombre}", "tool_input": {}}, vault_tmp)[0] == "deny"
+
+
+def test_lista_blanca_igual_en_hook_y_permisos():
+    from trovefy.vault import permisos
+
+    spec = importlib.util.spec_from_file_location("_mg", _RAIZ / "hooks" / "meta_guard.py")
+    import sys
+    sys.path.insert(0, str(_RAIZ / "hooks"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    assert mod._PREFIJOS_LECTURA == permisos._PREFIJOS_LECTURA
+    assert mod._LECTURA_EXACTA == permisos._LECTURA_EXACTA

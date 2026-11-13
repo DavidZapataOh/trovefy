@@ -1,0 +1,218 @@
+{
+  "_nota": "forma por confirmar (P-01): nombres plausibles; se sustituye por el volcado real del paso 14",
+  "tools": [
+    {
+      "name": "ads_get_campaigns",
+      "description": "Lista campañas",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "ads_get_ad_sets",
+      "description": "ads_get_ad_sets",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "ads_insights_get",
+      "description": "ads_insights_get",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string"
+          },
+          "fields": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "ads_library_search",
+      "description": "Busca en la Biblioteca",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "search_terms": {
+            "type": "string"
+          },
+          "ad_reached_countries": {
+            "type": "string"
+          },
+          "ad_active_status": {
+            "type": "string"
+          },
+          "search_page_ids": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "ads_account_get_activity_logs",
+      "description": "ads_account_get_activity_logs",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "account_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "ads_update_entity",
+      "description": "ads_update_entity",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "daily_budget": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "ads_activate_entity",
+      "description": "ads_activate_entity",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "ads_create_campaign",
+      "description": "ads_create_campaign",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "ads_create_ad_set",
+      "description": "ads_create_ad_set",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "bid_amount": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "ads_delete_ad",
+      "description": "ads_delete_ad",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "ads_creative_update",
+      "description": "ads_creative_update",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "ads_pixel_event_send",
+      "description": "ads_pixel_event_send",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pixel_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "ads_experiment_create",
+      "description": "ads_experiment_create",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "ads_catalog_product_update",
+      "description": "ads_catalog_product_update",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "ads_boost_ig_post",
+      "description": "ads_boost_ig_post",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "post_id": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "name": "ads_estimate_reach",
+      "description": "Estima alcance",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "targeting": {
+            "type": "string"
+          }
+        }
+      },
+      "annotations": {
+        "readOnlyHint": true
+      }
+    }
+  ]
+}

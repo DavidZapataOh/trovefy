@@ -196,6 +196,7 @@ class _Buscador:
         self.creditos = 0
         self.creditos_desconocidos = False
         self.navegadas = self.bloqueos = self.vacios = 0
+        self.sin_cuota = 0  # búsquedas del lote del MCP con respaldo público: no tocan el presupuesto
         p = self._presupuesto()
         self._inicio = (p.usadas, p.bloqueos, p.vacios) if p is not None else None
 
@@ -224,9 +225,13 @@ class _Buscador:
                 self.parada, self.tipo_parada = motivo, tipo
             return None
         navego = p is None or p.usadas > antes
+        # La vía se cuenta por ``r.via`` aunque no gaste cuota: el lote del MCP no pasa por el presupuesto público.
+        if navego or r.via == "mcp":
+            self.via[r.via] += 1
+            if not navego:
+                self.sin_cuota += 1
         if navego:
             self.navegadas += 1
-            self.via[r.via] += 1
             if r.via == "firecrawl":
                 if r.creditos is None:
                     self.creditos_desconocidos = True
@@ -249,7 +254,8 @@ class _Buscador:
     def cuentas(self) -> tuple[int, int, int]:
         p = self._presupuesto()
         if p is not None and self._inicio is not None:
-            return p.usadas - self._inicio[0], p.bloqueos - self._inicio[1], p.vacios - self._inicio[2]
+            return (p.usadas - self._inicio[0] + self.sin_cuota, p.bloqueos - self._inicio[1],
+                    p.vacios - self._inicio[2])
         return self.navegadas, self.bloqueos, self.vacios
 
     def creditos_totales(self) -> int | None:

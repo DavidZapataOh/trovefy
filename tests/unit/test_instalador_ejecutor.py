@@ -224,3 +224,10 @@ def test_simular_muestra_las_formas_sudo_u():
         assert s in out, s
     assert out.index("describe --dirty --always") < out.index("[1/13]")
     assert "+ setfacl" not in out and "+ install -m 0600 -o" not in out and "+ chown" not in out
+
+
+def test_no_arranca_sin_meta_token():
+    """El servicio sale con 2 sin META_TOKEN: el instalador solo arranca con los tres datos (paso 13)."""
+    r = _simular("--vault", "/tmp/v")
+    assert r.returncode == 0
+    assert "TELEGRAM_CHAT_ID y META_TOKEN" in r.stdout and "comprobar-meta" in r.stdout

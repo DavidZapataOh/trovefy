@@ -217,6 +217,16 @@ def test_estructura_dataset_e_importes(limites_cop):
     assert v == ["dataset_no_permitido", "importe_sobre_limite", "tope_diario_cuenta"]
 
 
+def test_solo_validar_no_exige_pagina_ni_dataset(limites_cop):
+    # Ensayo (paso 18): solo valida la campaña en Meta, no crea nada ni usa página/dataset (decisión del usuario).
+    d = estructura(pagina_id="111", dataset_id="1"); d["campana"]["spend_cap"] = 99000; d["solo_validar"] = True
+    assert comprobar(cargar_propuesta(d), limites_cop, ctx()) == []
+    d["solo_validar"] = False  # un montaje real sigue exigiéndolos
+    assert {"pagina_no_permitida", "dataset_no_permitido"} <= set(codigos(comprobar(cargar_propuesta(d), limites_cop, ctx())))
+    d["solo_validar"] = True; d["campana"]["spend_cap"] = 130000  # el resto de reglas siguen aplicando
+    assert codigos(comprobar(cargar_propuesta(d), limites_cop, ctx())) == ["spend_cap_sobre_limite"]
+
+
 def test_estructura_cbo(limites_cop):
     d = estructura(); d["campana"].update(spend_cap=99000, tipo_presupuesto="CBO", daily_budget=132001)
     d["conjuntos"][0].pop("daily_budget")
