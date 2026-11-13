@@ -799,7 +799,8 @@ def test_stop_por_telegram_es_inmediato(montaje):
     m.ej.ciclo()
     assert stop_activo(m.rutas)
     assert m.eventos("stop", activo=True)
-    assert m.textos()[-1].startswith("STOP activo desde 15:00. No pausa campañas; para eso, /pausar_todo.")
+    assert m.textos()[-1] == ("STOP activo desde 15:00. No pausa campañas: para pausarlas, /reanudar y luego "
+                              "/pausar_todo.")
     assert not m.tg.mensajes[max(m.tg.mensajes)]["botones"]
     m.tg.escribir("/stop")
     m.ej.ciclo()
@@ -832,6 +833,7 @@ def test_reanudar_confirmado_y_q_no_se_reutiliza(montaje):
     m.ej.ciclo()
     assert stop_activo(m.rutas)
     assert m.eventos("callback_invalido", motivo="callback_confirmacion_usada")
+    assert "esta confirmación ya se usó" in m.textos()[-1].lower()
 
 
 def test_reanudar_rechazado_no_quita_stop(montaje):
@@ -961,3 +963,110 @@ def test_responder_y_ignorar(montaje):
     assert m.textos()[0].startswith("Comandos:") and "Ya está emparejado" in m.textos()[1]
     assert not stop_activo(m.rutas) and m.eventos("mensaje_ignorado", motivo="chat_ajeno")
     assert m.ej.almacen.ultimo_update() == 3
+
+
+# == Ronda de arreglos 1 =========================================================================
+
+def test_stop_y_luego_pausar_todo_responde_y_no_escribe(montaje):
+    m = montaje
+    m.tg.escribir("/stop")
+    m.tg.escribir("/pausar_todo")
+    m.ej.ciclo()
+    assert m.estado("P-20261112-900") == "rechazada" and m.graph.escrituras() == []
+    assert m.textos()[-1].endswith("STOP activo: primero /reanudar y luego /pausar_todo")
+
+
+def test_propuesta_de_telegram_rechazada_al_recibir_responde_el_motivo(montaje):
+    m = montaje
+    m.limites(1, paso_max_pct=10)
+    m.ej.ciclo()
+    m.tg.escribir("/limites paso_max_pct 200")  # ErrorComando: ya lo respondía
+    m.ej.ciclo()
+    m.graph.cuentas[CUENTA]["currency"] = "USD"
+    m.tg.escribir("/pausar_todo")
+    m.ej.ciclo()
+    assert m.estado("P-20261112-900") == "rechazada"
+    assert "P-20261112-900" in m.textos()[-1] and "P-21" in m.textos()[-1]
+
+
+def test_propuesta_de_claude_rechazada_no_avisa(montaje):
+    m = montaje
+    m.depositar(presupuesto(a=40000))
+    m.ej.ciclo()
+    assert m.tg.mensajes == {}
+
+
+def test_pedir_cambio_con_propuesta_invalida_responde(montaje, monkeypatch):
+    from trovefy_ejecutor import servicio
+    from trovefy_ejecutor.esquema import PropuestaInvalida
+
+    def invalida(datos):
+        raise PropuestaInvalida("esquema: roto")
+
+    monkeypatch.setattr(servicio, "cargar_propuesta", invalida)
+    m = montaje
+    m.tg.escribir("/limites paso_max_pct 40")
+    m.ej.ciclo()
+    assert "esquema: roto" in m.textos()[-1]
+
+
+def test_gasto_tras_lote_con_activacion_sin_doble_conteo(montaje):
+    from trovefy_ejecutor.esquema import cargar_propuesta
+    from trovefy_ejecutor.vivo import valores_vivos
+
+    m = montaje
+    m.graph.cambiar(S2, status="PAUSED", effective_status="PAUSED")
+    ops = [{"entidad": "adset", "id": S2, "campo": "daily_budget", "de_esperado": 15000, "a": 18000,
+            "unidad": "minima", "moneda": "COP"},
+           {"entidad": "adset", "id": S2, "campo": "status", "de_esperado": "PAUSED", "a": "ACTIVE"}]
+    p = cargar_propuesta(presupuesto(id="P-20261112-007", tipo="lote", operaciones=ops))
+    vv = valores_vivos(p, m.graph, ahora=m.reloj)
+    assert Ejecutor._gasto_tras(p, vv) == (20000 + 18000, False)
+    del m.graph.objetos[S2]["daily_budget"]  # sin presupuesto propio ni de campaña: desconocido
+    p2 = cargar_propuesta(presupuesto(id="P-20261112-007", tipo="lote", operaciones=[ops[1]]))
+    assert Ejecutor._gasto_tras(p2, valores_vivos(p2, m.graph, ahora=m.reloj)) == (None, True)
+
+
+def test_alerta_texto_guardado_redactado(montaje):
+    m = montaje
+    m.depositar(alerta(texto=f"clave {TOKEN_TG}"))
+    m.ej.ciclo()
+    fila = m.ej.almacen.obtener("P-20261112-010")
+    assert TOKEN_TG not in json.dumps(fila.datos)
+    assert TOKEN_TG not in (m.vault / "propuestas/P-20261112-010.md").read_text()
+
+
+def test_fallo_entre_registrar_y_procesar_deja_la_fila_rechazada(montaje, monkeypatch):
+    m = montaje
+    procesar = m.ej.buzon.procesar
+
+    def roto(ruta, resultado):
+        if resultado["estado"] == "recibida":
+            raise OSError("disco lleno")
+        return procesar(ruta, resultado)
+
+    monkeypatch.setattr(m.ej.buzon, "procesar", roto)
+    m.depositar(noop())
+    m.ej.ciclo()
+    assert m.estado("P-20261112-001") == "rechazada" and m.tg.mensajes == {}
+    assert not list((m.rutas.spool / "entrada").glob("*.json"))
+    assert m.eventos("transicion", id="P-20261112-001", a="rechazada")
+
+
+def test_segundo_motivo_con_vault_caido_no_se_pierde(montaje):
+    m = montaje
+    id = _enviar(m, presupuesto(id="P-20261112-002"))
+    m.tg.tocar(id, "R", m.clave)
+    m.ej.ciclo()
+    pregunta = m.ej.almacen.obtener(id).datos["pregunta_motivo"]
+    os.chmod(m.vault, 0o500)  # no se pueden crear carpetas nuevas: las notas quedan en cola
+    try:
+        m.tg.escribir("primero", responde_a=pregunta)
+        m.tg.escribir("segundo", responde_a=pregunta)
+        m.ej.ciclo()
+    finally:
+        os.chmod(m.vault, 0o750)
+    m.ej.copia.reintentar()
+    base = m.vault / "raw/telegram/motivos"
+    textos = sorted(f.read_text() for f in base.glob("*.md"))
+    assert len(textos) == 2 and any("> primero" in t for t in textos) and any("> segundo" in t for t in textos)

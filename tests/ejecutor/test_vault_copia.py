@@ -275,3 +275,16 @@ def test_demasiados_intentos_van_a_rotos(tmp_path):
         (v / "propuestas").chmod(0o700)
     assert len(list((pend / "rotos").glob("*"))) >= 1
     assert c.escribir("propuestas/c.md", "tres") is True
+
+
+def test_ocupada_mira_el_vault_y_la_cola(tmp_path):
+    from trovefy_ejecutor.vault_copia import CopiaVault
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    c = CopiaVault(vault, tmp_path / "pend")
+    rel = "raw/telegram/motivos/2026-11-12-P-20261112-002.md"
+    assert not c.ocupada(rel)
+    c._encolar(rel, "x", True)
+    assert c.ocupada(rel)
+    assert not c.ocupada(rel.replace("002", "003"))

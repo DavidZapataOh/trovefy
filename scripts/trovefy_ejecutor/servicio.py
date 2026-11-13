@@ -106,6 +106,8 @@ AVISO_TOKEN = ("Token de Meta caducado: renuévalo en /arranque paso 13. No se e
                "comprobar-meta vuelva a dar ok.")
 MOTIVO_TOKEN = "token de Meta caducado: renuévalo en /arranque paso 13"
 CLAVE_TOKEN = "token_caducado"
+AVISO_STOP_TELEGRAM = "STOP activo: primero /reanudar y luego /pausar_todo"
+CONFIRMACION_USADA = "Esta confirmación ya se usó: no se hizo nada"
 
 
 class GraphConStop:
@@ -249,7 +251,8 @@ class Ejecutor:
             fila = self.almacen.obtener(id)
             if fila is not None:
                 t = texto if texto is not None else fila.datos.get("texto")
-                self.copia.resultado(fila, r, t if isinstance(t, str) else f"{fila.id} · {fila.tipo}")
+                t = self._limpio(t) if isinstance(t, str) else f"{fila.id} · {fila.tipo}"
+                self.copia.resultado(fila, r, t)
         except Exception as e:  # noqa: BLE001 — copiar no es escribir en Meta: nunca tumba nada
             self._anotar_error("vault", e)
 
@@ -331,8 +334,14 @@ class Ejecutor:
             self.almacen.registrar(p)
         except IdDuplicado:
             return self._rechazo_buzon(ruta, p.id, "id duplicado")
-        self.auditoria.anotar(EV_RECIBIDA, id=p.id, tipo=p.tipo)
-        self.buzon.procesar(ruta, {"estado": "recibida", "motivo": None})
+        try:
+            self.auditoria.anotar(EV_RECIBIDA, id=p.id, tipo=p.tipo)
+            self.buzon.procesar(ruta, {"estado": "recibida", "motivo": None})
+        except sqlite3.OperationalError:
+            raise
+        except Exception as e:  # registrada pero sin procesar: nunca queda viva a medias
+            self._rechazar_recibida(p.id, f"error interno al recibir: {self._texto_error(e)}")
+            raise
         self._despachar(p.id)
 
     # -- despacho de propuestas -------------------------------------------------------------------------
@@ -352,6 +361,15 @@ class Ejecutor:
         if self._transicion(id, "recibida", "rechazada", motivo=motivo):
             self.auditoria.anotar(EV_VALIDACION_RECHAZADA, id=id, motivo=motivo)
             self._copiar(id)
+            self._avisar_si_telegram(id, motivo)
+
+    def _avisar_si_telegram(self, id: str, motivo: str) -> None:
+        """Lo pedido desde Telegram y rechazado al recibir se responde con el motivo (lo de Claude, no)."""
+        fila = self.almacen.obtener(id)
+        if fila is None or not fila.propuesta.origen.startswith("telegram:"):
+            return
+        texto = AVISO_STOP_TELEGRAM if motivo == "STOP activo" else motivo
+        self._decir(f"{id}: rechazada, no se hizo nada. {texto}")
 
     def _leer_vivo(self, p: Propuesta) -> ValoresVivos | None:
         if p.tipo in _SIN_LECTURA_VIVA:
@@ -436,11 +454,23 @@ class Ejecutor:
             return (None, True) if extra is None else (vv.suma_diaria_activa + extra, False)
         if p.tipo in ("presupuesto", "lote"):
             sim = dict(vv.presupuestos_activos)
+            pendientes: dict[str, int] = {}  # presupuesto nuevo de algo que hoy no gasta
             for op in p.operaciones:
-                if op.campo == "daily_budget" and op.id in sim and isinstance(op.a, int):
-                    sim[op.id] = op.a
+                if op.campo == "daily_budget" and isinstance(op.a, int):
+                    if op.id in sim:
+                        sim[op.id] = op.a
+                    else:
+                        pendientes[op.id] = op.a
                 elif op.campo == "status" and op.a == "PAUSED":
                     sim.pop(op.id, None)
+            activadas = [op for op in p.operaciones if op.campo == "status" and op.a == "ACTIVE"]
+            if activadas:
+                if vv.presupuesto_al_activar(p) is None:
+                    return None, True
+                por_id = vv.presupuesto_al_activar_por_id(p)
+                # Una sola vez por entidad: si además cambia su presupuesto, cuenta lo mayor (como comprobar).
+                for op in activadas:
+                    sim[op.id] = max(sim.get(op.id, 0), por_id.get(op.id, 0), pendientes.get(op.id, 0))
             return sum(sim.values()), False
         return None, False
 
@@ -457,6 +487,7 @@ class Ejecutor:
         if obsoleta:
             if self._transicion(id, "recibida", "obsoleta", motivo=obsoleta):
                 self._copiar(id)
+                self._avisar_si_telegram(id, f"obsoleta: {self._limpio(obsoleta)}")
             return
         motivo = self._validar(p, vv)
         if motivo:
@@ -496,9 +527,9 @@ class Ejecutor:
         if not decision.enviar or self._chat is None:
             self.almacen.actualizar_datos(fila.id, "recibida", en_cola=True)
             return
-        texto = render_alerta(p)
+        texto = self._limpio(render_alerta(p))
         try:
-            mid = self.telegram.enviar(self._chat, self._limpio(texto), None, sonido=decision.sonido)
+            mid = self.telegram.enviar(self._chat, texto, None, sonido=decision.sonido)
         except _ERRORES_TELEGRAM as e:
             self._anotar_error("telegram", e)
             self.almacen.actualizar_datos(fila.id, "recibida", en_cola=True)
@@ -772,7 +803,7 @@ class Ejecutor:
             return
         n = 1
         nota = nota_motivo(m, fila.propuesta, n)
-        while self.rutas.vault is not None and os.path.lexists(self.rutas.vault / nota.ruta_relativa):
+        while self.rutas.vault is not None and self.copia.ocupada(nota.ruta_relativa):
             n += 1
             nota = nota_motivo(m, fila.propuesta, n)
         guardado = self.copia.motivo(nota)
@@ -834,8 +865,8 @@ class Ejecutor:
             return
         activar_stop(self.rutas, "Telegram /stop", self.reloj())
         self.auditoria.anotar(EV_STOP, activo=True, motivo="Telegram /stop")
-        self._decir(f"STOP activo desde {self._hora()}. No pausa campañas; para eso, /pausar_todo. "
-                    "Para quitarlo: /reanudar")
+        self._decir(f"STOP activo desde {self._hora()}. No pausa campañas: para pausarlas, /reanudar y luego "
+                    "/pausar_todo.")
 
     def _confirmar(self, a: Confirmar) -> None:
         if self._chat is None or not self.secretos.hmac_clave:
@@ -846,7 +877,7 @@ class Ejecutor:
         self._responder_toque(a.callback_id, RECIBIDO)
         if not self.almacen.consumir(a.id):  # un Q-/S- vale una sola vez, aunque siga en sus 10 min
             self.auditoria.anotar(EV_CALLBACK_INVALIDO, motivo="callback_confirmacion_usada", id=a.id)
-            self._decir(texto_ya_procesada("ejecutada"))
+            self._decir(CONFIRMACION_USADA)
             return
         original = CONFIRMAR_REANUDAR if not a.activar else "¿Activar el STOP?"
         if a.accion == "R":
@@ -922,8 +953,14 @@ class Ejecutor:
         return monedas
 
     def _registrar_y_despachar(self, datos: dict) -> None:
-        p = cargar_propuesta(datos)
-        self.almacen.registrar(p)
+        """Las propuestas nacidas en Telegram: un fallo al armarlas se responde (``ErrorComando``)."""
+        try:
+            p = cargar_propuesta(datos)
+            self.almacen.registrar(p)
+        except PropuestaInvalida as e:
+            raise ErrorComando(f"no se pudo armar la propuesta: {self._limpio(e.motivo)[:300]}") from None
+        except IdDuplicado:
+            raise ErrorComando("id de propuesta ya usado: vuelve a intentarlo") from None
         self.auditoria.anotar(EV_RECIBIDA, id=p.id, tipo=p.tipo, origen=p.origen)
         self._despachar(p.id)
 

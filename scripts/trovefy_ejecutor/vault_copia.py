@@ -152,6 +152,18 @@ class CopiaVault:
         return r == "ok"
 
     # -- cola -----------------------------------------------------------------------------
+    def ocupada(self, relativa: str) -> bool:
+        """(plan 12) La ruta ya existe en el vault o espera en la cola (``nuevo`` no la pisaría)."""
+        if self.vault is not None and os.path.lexists(self.vault / relativa):
+            return True
+        for n in self._numeros():
+            try:
+                if json.loads((self.pendientes / f"{n}.json").read_text(encoding="utf-8")).get("relativa") == relativa:
+                    return True
+            except (OSError, ValueError, AttributeError):
+                continue
+        return False
+
     def _numeros(self) -> list[int]:
         try:
             return sorted(int(p.stem) for p in self.pendientes.glob("*.json") if p.stem.isdigit())
