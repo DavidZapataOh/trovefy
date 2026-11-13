@@ -9,12 +9,14 @@ import json
 import re
 from urllib.parse import unquote, urlsplit
 
-from _comun import ejecutar_guardia, herramienta
+from _comun import ejecutar_guardia, herramienta, stop_activo, vault_root
 
+MOTIVO_STOP = "STOP activo: no se deposita nada"
 MOTIVO = "escritura en Meta: solo la hace el ejecutor tras Aceptar"
 _TOKENS_SERVIDOR = ("meta", "facebook", "fb")
 _PREFIJOS_LECTURA = ("ads_get_", "ads_insights_")
 _LECTURA_EXACTA = ("ads_library_search", "ads_account_get_activity_logs")
+_DEPOSITO = re.compile(r"\btrovefy\s+buzon\s+depositar\b|/var/spool/trovefy/entrada")
 _HOST_GRAPH = re.compile(r"graph[\w.-]*\.facebook\.com|graph\.fb\.com", re.IGNORECASE)
 
 
@@ -69,6 +71,9 @@ def clasificar(tool_name: str, tool_input: dict) -> tuple[str, str]:
         if _menciona_graph(volcado) or _menciona_graph(unquote(volcado)):
             return "deny", MOTIVO
     elif tool_name == "bash":
+        comando = str(tool_input.get("command", ""))
+        if _DEPOSITO.search(comando) and stop_activo(vault_root()):
+            return "deny", MOTIVO_STOP
         if _menciona_graph(str(tool_input.get("command", "")).lower()):
             return "deny", MOTIVO
     elif tool_name == "webfetch":

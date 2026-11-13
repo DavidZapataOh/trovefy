@@ -247,3 +247,29 @@ def bash_toca_protegidas(
             if any(_dentro(destino, r) for r in rutas):
                 return True
     return False
+
+
+# --- Comandos de solo lectura (lista blanca) ---------------------------------------------------
+
+_SOLO_LECTURA = frozenset(
+    {"ls", "cat", "head", "tail", "less", "wc", "grep", "find", "stat", "pwd", "echo", "cd", "pushd"}
+)
+_REDIRECCION_INOFENSIVA = re.compile(r"\d?>\s*/dev/null|\d>&\d|>&-")
+_FIND_PELIGROSO = re.compile(r"-(?:delete|exec|execdir|ok|okdir|fprint\w*|fls)\b")
+_SEGMENTOS = re.compile(r"&&|\|\||[;|\n]")
+
+
+def solo_lectura(comando: str) -> bool:
+    """¿Todo el comando es de la lista blanca de solo lectura, sin redirecciones?"""
+    limpio = _REDIRECCION_INOFENSIVA.sub(" ", comando)
+    if any(c in limpio for c in ("<", ">", "`", "$(")) or "&" in limpio.replace("&&", ""):
+        return False
+    for segmento in _SEGMENTOS.split(limpio):
+        fichas = segmento.split()
+        if not fichas:
+            continue
+        if fichas[0] not in _SOLO_LECTURA:
+            return False
+        if fichas[0] == "find" and _FIND_PELIGROSO.search(segmento):
+            return False
+    return True
