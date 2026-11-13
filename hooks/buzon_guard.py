@@ -9,7 +9,9 @@ Capa de mejor esfuerzo: las barreras reales son los permisos del spool (instalad
 propia del ejecutor más el Aceptar del usuario.
 Evasiones residuales conocidas y aceptadas (el ejecutor revalida cada archivo: origen, nombre,
 ``cargar_propuesta``, límites, y exige Aceptar humano): globs sin palabra clave (``cd /var; cd s*;
-cp x t*/e*/a``) y rutas ofuscadas (base64 vía xargs).
+cp x t*/e*/a``), rutas ofuscadas (base64 vía xargs) y fichas con glob/``$`` que no llevan ``var``/``spool`` ni son
+una ruta absoluta con el glob antes de ``trovefy`` (``/v*/s*/trovefy/e*``). Un glob o ``$`` junto a ``trovefy`` a
+secas (``scripts/trovefy/*.py``, ``'^trovefy$'``) ya NO se deniega: eran falsos positivos.
 """
 from __future__ import annotations
 
@@ -128,6 +130,12 @@ def _normalizar(comando: str) -> str:
     return re.sub(r"/{2,}", "/", limpio)
 
 
+def _expansion_antes_de_trovefy(ficha: str) -> bool:
+    """Ruta absoluta (o ``$X``) cuyo glob/``$`` cae antes del componente ``trovefy``: ``/v*/s*/trovefy/e*``."""
+    i = ficha.find("trovefy")
+    return i > 0 and ficha[0] in "/$" and _EXPANSION.search(ficha[:i]) is not None
+
+
 def _menciona_spool(comando: str, spool: pathlib.Path, spool_res: pathlib.Path, cwd: str | None) -> bool:
     sin_comillas = _normalizar(comando)
     bajo = sin_comillas.lower()
@@ -137,7 +145,7 @@ def _menciona_spool(comando: str, spool: pathlib.Path, spool_res: pathlib.Path, 
     if any(m.rstrip("/") in sin_comillas for m in marcas if m.rstrip("/")):
         return True
     for ficha in bajo.split():
-        if _EXPANSION.search(ficha) and ("var" in ficha or "trovefy" in ficha):
+        if _EXPANSION.search(ficha) and ("var" in ficha or _expansion_antes_de_trovefy(ficha)):
             return True
     actual = resolver(cwd, None) if cwd else None
     if actual is not None and _dentro(actual, spool_res):

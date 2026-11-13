@@ -75,6 +75,19 @@ def test_solo_validar_no_crea_nada(entorno_montaje):
     assert all(e["validate_only"] is True for e in evs if e["evento"] == "ejecucion")
 
 
+def test_solo_validar_no_resuelve_idiomas(entorno_montaje, monkeypatch):
+    g, alm, aud, vault = entorno_montaje
+
+    def _buscar_roto(*a, **k):
+        raise ErrorGraph(100, None, "adlocale no debe consultarse con solo_validar")
+
+    monkeypatch.setattr(g, "buscar", _buscar_roto)
+    r = montar(estructura(solo_validar=True), g, alm, aud, vault, esperar=NADA)
+    assert r.estado == "ejecutada" and g.escrituras() == []
+    assert [_arista(l) for l in g.llamadas if l.metodo == "crear"] == ["campaigns"]
+    assert any(e["evento"] == "ejecucion" and e["validate_only"] is True and e["ok"] is True for e in _eventos(aud))
+
+
 def test_solo_validar_con_error_es_fallida(entorno_montaje):
     g, alm, aud, vault = entorno_montaje
     g.fallar_validacion["campaigns"] = ErrorGraph(100, None, "Invalid")
@@ -128,40 +141,20 @@ def test_idioma_sin_tabla(entorno_montaje):
     assert not [l for l in g.llamadas if l.metodo == "buscar"]
 
 
-def test_idioma_por_nombre_exacto(entorno_montaje):
+def test_idioma_por_clave_fijada_sin_buscar(entorno_montaje, monkeypatch):
     g, alm, aud, vault = entorno_montaje
+    monkeypatch.setattr(g, "buscar", lambda *a, **k: pytest.fail("no debe buscar adlocale"))
     r = montar(estructura(conjuntos=[conjunto(idiomas=("ro", "es"))]), g, alm, aud, vault, esperar=NADA)
     (adset,) = _reales(g, "adsets")
-    busquedas = [l.datos["q"] for l in g.llamadas if l.metodo == "buscar"]
-    assert r.estado == "ejecutada" and busquedas == ["Romanian", "Spanish (All)"]
-    assert adset.datos["targeting"]["locales"] == [10, 1001]  # entre varias filas por subcadena, la exacta
-
-
-def test_idioma_sin_fila_exacta(entorno_montaje):
-    g, alm, aud, vault = entorno_montaje
-    g.locales = [x for x in g.locales if x["name"] != "Romanian"]  # quedan «Aromanian», «Romanian (Moldova)»
-    r = montar(estructura(), g, alm, aud, vault)
-    assert r.estado == "fallida" and "idioma sin resolver: ro" in r.detalle and _sin_escritura(g)
-
-
-@pytest.mark.parametrize("filas", [
-    [{"key": 10, "name": "Romanian"}, {"key": 11, "name": "Romanian"}],  # dos exactas
-    [{"key": "abc", "name": "Romanian"}],  # clave no entera
-    [{"key": True, "name": "Romanian"}],
-    [{"name": "Romanian"}],
-])
-def test_idioma_ambiguo_o_ilegible(entorno_montaje, filas):
-    g, alm, aud, vault = entorno_montaje
-    g.locales = filas
-    r = montar(estructura(), g, alm, aud, vault)
-    assert r.estado == "fallida" and "idioma sin resolver: ro" in r.detalle and _sin_escritura(g)
+    assert r.estado == "ejecutada"
+    assert adset.datos["targeting"]["locales"] == [32, 1002]
+    assert not [l for l in g.llamadas if l.metodo == "buscar"]
 
 
 def test_tabla_de_idiomas():
-    assert montaje.IDIOMAS_META == {
-        "bg": "Bulgarian", "ro": "Romanian", "ru": "Russian", "uk": "Ukrainian", "es": "Spanish (All)",
-        "en": "English (All)", "pt": "Portuguese (All)", "fr": "French (All)", "de": "German", "it": "Italian",
-        "pl": "Polish"}
+    # Claves de adlocale de Meta (estables entre idiomas de la cuenta; la búsqueda por nombre sale localizada).
+    assert montaje.IDIOMAS_META == {"bg": 37, "ro": 32, "ru": 17, "uk": 52, "en": 1001, "pt": 1005, "fr": 1003,
+                                    "de": 5, "it": 10, "pl": 15, "es": 1002}
 
 
 def test_moneda_de_la_propuesta_distinta(entorno_montaje):
@@ -213,7 +206,7 @@ def test_ubicaciones_automaticas_sin_publisher_platforms(entorno_montaje):
     montar(estructura(), g, alm, aud, vault, esperar=NADA)
     (adset,) = _reales(g, "adsets")
     assert "publisher_platforms" not in adset.datos["targeting"]
-    assert adset.datos["targeting"] == {"geo_locations": {"countries": ["RO"]}, "locales": [10]}
+    assert adset.datos["targeting"] == {"geo_locations": {"countries": ["RO"]}, "locales": [32]}
 
 
 def test_ubicaciones_excluidas(entorno_montaje):

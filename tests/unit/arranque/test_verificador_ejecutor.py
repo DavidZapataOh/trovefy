@@ -86,6 +86,20 @@ def test_12_sin_permiso_no_medido(tmp_path, vault):
     assert r.ok is None and "grupo trovefy" in r.motivo
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignora permisos")
+def test_12_raiz_sin_acceso_no_medido(tmp_path, vault):
+    raiz = tmp_path / "raiz"
+    estado(raiz, "emparejamiento.json", EMP_OK)
+    raiz.chmod(0)  # como la carpeta del ejecutor para quien no está en el grupo: ni siquiera se ve estado/
+    try:
+        r = verificar_bot(vault, raiz=raiz)
+    finally:
+        raiz.chmod(0o755)
+    assert r.ok is None
+    assert r.motivo == ("no medido: tu usuario no está en el grupo trovefy "
+                        "(cierra y abre la terminal y Claude Code tras instalar)")
+
+
 def test_estado_con_token_no_se_lee(tmp_path, vault):
     token = "EAAB" + "x" * 60
     paso06(vault)
