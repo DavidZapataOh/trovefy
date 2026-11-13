@@ -459,9 +459,11 @@ def _r_estructura(c: _Caso) -> list[str]:
     if e is None or lc is None:
         return []
     v = []
-    if e.pagina_id not in lc.paginas_permitidas:
+    # Con solo_validar solo se valida la campaña en Meta (resolución 19): no se crea nada ni se usan la
+    # página ni el dataset, así que no se exigen (ensayo del paso 18, decisión del usuario 2026-11-13).
+    if not e.solo_validar and e.pagina_id not in lc.paginas_permitidas:
         v.append(f"pagina_no_permitida: {e.pagina_id} no está en paginas_permitidas")
-    if e.dataset_id not in lc.datasets_permitidos:
+    if not e.solo_validar and e.dataset_id not in lc.datasets_permitidos:
         v.append(f"dataset_no_permitido: {e.dataset_id} no está en datasets_permitidos")
     if e.campana.spend_cap > lc.spend_cap_test:
         v.append(f"spend_cap_sobre_limite: spend_cap {c.fmt(e.campana.spend_cap)} supera "

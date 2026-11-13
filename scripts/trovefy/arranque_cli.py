@@ -38,8 +38,8 @@ _VAULT_AYUDA = "ruta del vault (por defecto, TROVEFY_VAULT o ~/trovefy-cerebro)"
 
 def _configurar(p: argparse.ArgumentParser) -> None:
     sub = p.add_subparsers(dest="accion", metavar="<accion>", required=True)
-    sub.add_parser("estado", help="tabla de pasos y avance de la fase 0").add_argument("--vault", help=_VAULT_AYUDA)
-    sub.add_parser("siguiente", help="el próximo paso de la fase 0").add_argument("--vault", help=_VAULT_AYUDA)
+    sub.add_parser("estado", help="tabla de pasos y avance de las fases 0 y 1").add_argument("--vault", help=_VAULT_AYUDA)
+    sub.add_parser("siguiente", help="el próximo paso (fases 0 y 1)").add_argument("--vault", help=_VAULT_AYUDA)
     h = sub.add_parser("hecho", help="marca un paso como hecho (no verificado)")
     h.add_argument("id", metavar="ID", help="id del paso (p. ej. 05)")
     h.add_argument("--nota", help="nota breve")
@@ -57,6 +57,21 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     cf.add_argument("id", metavar="ID", help="04, 05, 06, 08, 09, 10 o 10b")
     cf.add_argument("--respuesta", metavar="si|no", help="tu respuesta: ¿coincide con lo que ves en tu pantalla?")
     cf.add_argument("--vault", help=_VAULT_AYUDA)
+    e = sub.add_parser("ensayo", help="ensayo general: montaje de prueba, compra de prueba y su reembolso")
+    ens = e.add_subparsers(dest="ensayo_accion", metavar="<compra|reembolso|montaje>", required=True)
+    em = ens.add_parser("montaje", help="prepara el montaje de prueba (solo_validar) en propuestas/ensayo/")
+    em.add_argument("--vault", help=_VAULT_AYUDA)
+    ec = ens.add_parser("compra", help="registra la compra de prueba")
+    ec.add_argument("--pedido", required=True, metavar="ID")
+    ec.add_argument("--importe", required=True, help="importe de la prueba, p. ej. 2.00")
+    ec.add_argument("--moneda", required=True, help="código de tres letras, p. ej. USD")
+    ec.add_argument("--pasarela", required=True, help="whop, hotmart o impultienda")
+    ec.add_argument("--fecha", help="AAAA-MM-DD (por defecto, hoy)")
+    ec.add_argument("--vault", help=_VAULT_AYUDA)
+    er = ens.add_parser("reembolso", help="registra el reembolso de la compra de prueba")
+    er.add_argument("--pedido", required=True, metavar="ID")
+    er.add_argument("--fecha", help="AAAA-MM-DD (por defecto, hoy)")
+    er.add_argument("--vault", help=_VAULT_AYUDA)
     b = sub.add_parser("bloqueado", help="marca un paso como bloqueado")
     b.add_argument("id", metavar="ID", help="id del paso (p. ej. 05)")
     b.add_argument("--motivo", required=True, help="por qué está bloqueado")
@@ -252,9 +267,46 @@ def _verificar(vault: Path, id_: str) -> int:
     return codigo
 
 
+def _ensayo(vault: Path, args: argparse.Namespace) -> int:
+    from datetime import datetime
+    from decimal import Decimal, InvalidOperation
+
+    from trovefy.arranque.ensayo import (
+        RUTA_ENSAYO,
+        preparar_montaje,
+        registrar_compra,
+        registrar_reembolso,
+    )
+    from trovefy.vault.escritura import ZONA_NEGOCIO
+
+    if args.ensayo_accion == "montaje":
+        ruta = preparar_montaje(vault, datetime.now(ZONA_NEGOCIO))
+        rel = ruta.relative_to(vault).as_posix()
+        anadir_log(vault, "arranque", "ensayo montaje: propuesta de prueba con solo_validar", [rel])
+        print(f"Propuesta de prueba lista: {ruta}")
+        print(f"Deposítala, sola en la línea: trovefy buzon depositar {ruta}")
+        return 0
+    fecha = args.fecha or datetime.now(ZONA_NEGOCIO).strftime("%Y-%m-%d")
+    if args.ensayo_accion == "compra":
+        try:
+            importe = Decimal(args.importe)
+        except InvalidOperation:
+            return _error("--importe: no es un número (p. ej. 2.00)")
+        registrar_compra(vault, args.pedido, importe, args.moneda, args.pasarela, fecha)
+        que = f"ensayo compra: compra de prueba {args.pedido} ({args.pasarela})"
+    else:
+        registrar_reembolso(vault, args.pedido, fecha)
+        que = f"ensayo reembolso: reembolso de {args.pedido}"
+    anadir_log(vault, "arranque", que, [RUTA_ENSAYO])
+    print(f"Registrado: {que}. Comprueba con `trovefy arranque verificar 18`.")
+    return 0
+
+
 def _ejecutar(args: argparse.Namespace) -> int:
     destino = Path(args.vault).expanduser() if args.vault else vault_root()
     try:
+        if args.accion == "ensayo":
+            return _ensayo(destino, args)
         if args.accion == "hecho":
             p = marcar_hecho(destino, args.id, args.nota, _parsear_datos(args.dato))
             print(f"Paso {p.id} ({p.nombre}): {p.estado}.")
@@ -283,11 +335,11 @@ def _ejecutar(args: argparse.Namespace) -> int:
         if s is not None:
             print(f"Siguiente: {s.id} · {s.nombre} ({s.estado})")
             return 0
-        pendientes = [p for p in pasos if p.fase == 0 and p.estado in ("bloqueado", "hecho")]
+        pendientes = [p for p in pasos if p.fase in (0, 1) and p.estado in ("bloqueado", "hecho")]
         if not pendientes:
-            print("Fase 0 completa: todos los pasos están verificados.")
+            print("Fases 0 y 1 completas: todos los pasos están verificados.")
         else:
-            print("No hay un paso siguiente: lo que falta de la fase 0 está bloqueado o esperando verificación.")
+            print("No hay un paso siguiente: lo que falta de las fases 0 y 1 está bloqueado o esperando verificación.")
             for p in pendientes:
                 print(f"  {p.id} · {p.nombre} ({p.estado}): {p.nota or 'sin motivo'}")
         return 0
@@ -298,7 +350,9 @@ def _ejecutar(args: argparse.Namespace) -> int:
         print(f"{p.id:<4} {p.nombre:<40} {p.estado:<11} {p.fecha or '—':<10} {nota}".rstrip())
     frac = porcentaje_fase(pasos, 0)
     print(f"\nFase 0: {round(frac * 12)}/12 completados, hechos o verificados ({frac * 100:.0f} %)")
+    frac1 = porcentaje_fase(pasos, 1)
+    print(f"Fase 1: {round(frac1 * 4)}/4 verificados ({frac1 * 100:.0f} %)")
     return 0
 
 
-registrar("arranque", _configurar, _ejecutar, ayuda="puesta en marcha guiada (fase 0): estado, pasos y verificadores")
+registrar("arranque", _configurar, _ejecutar, ayuda="puesta en marcha guiada (fases 0 y 1): estado, pasos y verificadores")

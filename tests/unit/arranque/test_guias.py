@@ -37,7 +37,8 @@ def test_verificadores_sin_exclamacion_en_arreglos():
 def test_skill_tiene_frontmatter_y_permisos():
     t = (RAIZ / "SKILL.md").read_text()
     assert t.startswith("---\nname: arranque\n")
-    assert "allowed-tools: Read, Bash(trovefy arranque *), Bash(trovefy cerebro *), Bash(trovefy navegador *)" in t
+    assert ("allowed-tools: Read, Bash(trovefy arranque *), Bash(trovefy cerebro *), Bash(trovefy navegador *), "
+            "Bash(trovefy meta *), Bash(trovefy buzon depositar *), Bash(trovefy aprobaciones *), Write(data/meta/**)") in t
     assert "saltado por el usuario" in t
 
 
@@ -167,3 +168,116 @@ def test_guia_06_avisa_de_la_informacion_fiscal_y_la_decision_de_moneda():
         "equivalencia en USD no medida", "Verificación necesaria",
     ]:
         assert x in t, x
+
+
+FASE1 = {"12-bot-telegram.md": "12", "13-app-meta-system-user.md": "13", "14-mcp-meta.md": "14", "18-ensayo-general.md": "18"}
+
+
+def test_guias_fase1_secciones_y_verificador():
+    for n, paso in FASE1.items():
+        t = _t(n)
+        for s in SECCIONES:
+            assert s in t, (n, s)
+        assert f"trovefy arranque verificar {paso}" in t
+
+
+def test_guia_13_datos_y_token():
+    t = _t("13-app-meta-system-user.md")
+    for x in ["trovefy arranque estado", "business_id=", "trovefy-ejecutor", "Employee", "ads_management",
+              "business_management", "sudo -u trovefy-exec", "nunca lo pegues en el chat", "comprobar-meta", "P-21",
+              "Verificación necesaria", "META_TOKEN", "systemctl restart trovefy-ejecutor", "D-37", "P-08"]:
+        assert x in t, x
+
+
+def test_guia_14_mcp():
+    t = _t("14-mcp-meta.md")
+    for x in ["claude mcp add --transport http meta-ads https://mcp.facebook.com/ads", "/mcp", "P-02",
+              "--dato oauth=lectura", "trovefy meta herramientas importar"]:
+        assert x in t, x
+
+
+def test_guia_12_y_18():
+    t = _t("12-bot-telegram.md")
+    for x in ["@BotFather", "/start", "6 dígitos", "emparejar", "instalar-ejecutor.sh", "TELEGRAM_BOT_TOKEN",
+              "/home/trovefy-exec/.local/bin/trovefy-ejecutor", "plan 12", "el servicio arranca en el paso 13"]:
+        assert x in t, x
+    assert "systemctl start" not in t and "systemctl restart" not in t  # sin META_TOKEN, servir sale con 2
+    t = _t("18-ensayo-general.md")
+    for x in ["noop", '"solo_validar": true', "trovefy buzon depositar", "validate_only", "US$ 1–5", "reembolso",
+              "trovefy arranque ensayo compra", "trovefy arranque ensayo reembolso", "trovefy aprobaciones estado"]:
+        assert x in t, x
+
+
+def test_guias_fase1_comandos_del_ejecutor_con_ruta_completa():
+    for n in FASE1:
+        for linea in _t(n).splitlines():
+            if "sudo -u trovefy-exec" in linea and "nano" not in linea:
+                assert "/home/trovefy-exec/.local/bin/trovefy-ejecutor" in linea, (n, linea)
+
+
+def test_skill_rechaza_token_en_el_chat():
+    t = (RAIZ / "SKILL.md").read_text()
+    assert "Si el usuario pega un token en el chat, no lo repitas, no lo guardes y no lo uses" in t
+
+
+def _ids_reales(texto: str) -> list[str]:
+    """Ids que parecen reales: `act_<n>` distinto del ficticio o 15–17 dígitos que no sean ceros (fuera de URLs)."""
+    sin_urls = re.sub(r"https?://\S+", "", texto)
+    malos = [a for a in re.findall(r"act_\d+", sin_urls) if a != "act_0000000000000000"]
+    malos += [n for n in re.findall(r"(?<!\d)\d{15,17}(?!\d)", sin_urls) if set(n) != {"0"}]
+    return malos
+
+
+def test_detector_de_ids_reales():
+    assert _ids_reales("act_0000000000000000 y 0000000000000000") == []
+    assert _ids_reales("act_1234567890123456") and _ids_reales("business_id=123456789012345")
+    assert _ids_reales("ver https://www.facebook.com/business/help/141820733085330") == []
+
+
+def test_guias_sin_ids_reales():
+    for f in [*GUIAS.glob("*.md"), RAIZ / "SKILL.md"]:
+        assert _ids_reales(f.read_text()) == [], f.name
+
+
+def test_guias_12_13_pegan_el_token_en_la_linea_que_ya_existe():
+    for n, clave in (("12-bot-telegram.md", "TELEGRAM_BOT_TOKEN"), ("13-app-meta-system-user.md", "META_TOKEN")):
+        t = _t(n)
+        assert f"busca la línea `{clave}=` (ya existe, vacía) y pega el token justo después del `=`, sin comillas ni otra línea" in t, n
+        assert "duplicada" in t and "No se pueden leer los secretos" in t, n
+
+
+def test_guia_13_arranca_el_servicio_tras_comprobar_meta():
+    t = _t("13-app-meta-system-user.md")
+    pasos = t.split("**Pasos**")[1].split("**Errores típicos**")[0]
+    assert pasos.index("comprobar-meta") < pasos.index("sudo systemctl start trovefy-ejecutor")
+    assert "sudo systemctl restart trovefy-ejecutor" in t and "renuev" in t
+
+
+def test_guia_18_noop_montaje_y_compra_en_orden():
+    t = _t("18-ensayo-general.md")
+    pasos = t.split("**Pasos**")[1].split("**Errores típicos**")[0]
+    i_probar = pasos.index("trovefy aprobaciones probar")
+    i_montaje = pasos.index("trovefy arranque ensayo montaje")
+    i_dep = pasos.index("trovefy buzon depositar <ruta>")
+    i_compra = pasos.index("trovefy arranque ensayo compra")
+    assert i_probar < i_montaje < i_dep < i_compra
+    assert "propuestas/ensayo/" in t and "Fase 3" in t and "dataset" in t
+
+
+def test_skill_fases_0_y_1_y_desbloqueo():
+    t = (RAIZ / "SKILL.md").read_text()
+    desc = t.split("description:")[1].split("allowed-tools:")[0]
+    assert "fases 0 y 1" in desc
+    assert "Para desbloquear un paso bloqueado de la fase 0" in t
+    assert "trovefy arranque hecho NN" in t.split("Para desbloquear un paso bloqueado de la fase 0")[1]
+
+
+def test_guia_14_orden_preparar_y_reinicios():
+    t = _t("14-mcp-meta.md")
+    pasos = t.split("**Pasos**")[1].split("**Errores típicos**")[0]
+    orden = ["cd ~/trovefy-cerebro", "claude mcp add --transport http meta-ads https://mcp.facebook.com/ads",
+             "trovefy meta herramientas preparar", "`/mcp`", "trovefy meta herramientas importar"]
+    posiciones = [pasos.index(x) for x in orden]
+    assert posiciones == sorted(posiciones)
+    assert pasos.count("Cierra y abre Claude Code") >= 2
+    assert "documentación de Meta" in t and "meta_guard" in t

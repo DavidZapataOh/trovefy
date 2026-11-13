@@ -65,7 +65,7 @@ def test_siguiente(tmp_path):
     aplicar_verificacion(tmp_path, "10b", _ok())
     assert siguiente(cargar(tmp_path)).id == "16"
     aplicar_verificacion(tmp_path, "16", _ok())
-    assert siguiente(cargar(tmp_path)) is None
+    assert siguiente(cargar(tmp_path)).id == "12"  # fase 0 completa: sigue la fase 1
 
 
 def test_paso_nuevo_del_catalogo_se_anade(tmp_path):
@@ -261,3 +261,58 @@ def test_hecho_cuenta_como_verificado_en_la_fase_0(tmp_path):
     assert porcentaje_fase(cargar(tmp_path)) == pytest.approx(6 / 12)
     marcar_bloqueado(tmp_path, "05", "Meta restringió la página")
     assert porcentaje_fase(cargar(tmp_path)) == pytest.approx(6 / 12)
+
+
+def _fase0_hecha(v):
+    for i in [f"{n:02d}" for n in range(10)] + ["10", "16"]:
+        marcar_hecho(v, i)
+
+
+def test_fase1_cuenta_solo_verificado(tmp_path):
+    marcar_hecho(tmp_path, "12")
+    aplicar_verificacion(tmp_path, "13", _ok())
+    assert porcentaje_fase(cargar(tmp_path), 1) == 0.25
+
+
+def test_siguiente_pasa_a_fase1_con_fase0_hecha(tmp_path):
+    _fase0_hecha(tmp_path)
+    assert siguiente(cargar(tmp_path)).id == "12"
+
+
+def test_siguiente_fase1_no_salta_hecho_y_sigue_el_orden(tmp_path):
+    _fase0_hecha(tmp_path)
+    marcar_hecho(tmp_path, "12")
+    assert siguiente(cargar(tmp_path)).id == "12"
+    aplicar_verificacion(tmp_path, "12", _ok())
+    assert siguiente(cargar(tmp_path)).id == "13"
+    marcar_bloqueado(tmp_path, "13", "x")
+    assert siguiente(cargar(tmp_path)).id == "14"
+    for i in ("14", "18"):
+        aplicar_verificacion(tmp_path, i, _ok())
+    assert siguiente(cargar(tmp_path)) is None
+
+
+def test_siguiente_no_entra_en_fase1_con_fase0_pendiente(tmp_path):
+    _fase0_hecha(tmp_path)
+    aplicar_verificacion(tmp_path, "05", ResultadoVerificacion(False, [], "falla", []))
+    marcar_bloqueado(tmp_path, "05", "x")
+    assert siguiente(cargar(tmp_path)) is None
+    p = cargar(tmp_path)
+    assert next(x for x in p if x.id == "05").estado == "bloqueado"
+
+
+def test_siguiente_con_fase0_pendiente_devuelve_el_pendiente(tmp_path):
+    for i in ["00", "01", "02", "03", "04", "06", "07", "08", "09", "10", "16"]:
+        marcar_hecho(tmp_path, i)
+    assert siguiente(cargar(tmp_path)).id == "05"
+
+
+def test_fase0_sigue_en_12(tmp_path):
+    for i in ["00", "01", "02"]:
+        aplicar_verificacion(tmp_path, i, _ok())
+    assert round(porcentaje_fase(cargar(tmp_path)) * 12) == 3
+
+
+def test_estado_imprime_fase1(tmp_path, capsys):
+    assert main(["arranque", "estado", "--vault", str(tmp_path)]) == 0
+    assert "Fase 1: 0/4 verificados" in capsys.readouterr().out

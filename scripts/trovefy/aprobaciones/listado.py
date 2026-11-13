@@ -237,45 +237,94 @@ def _dia_cot(ts: object) -> str:
         return VACIO
 
 
-def _verificar_cadena(vault: Path) -> list[str]:
-    """Verifica la copia por tramos. [] si cuadra; si no, líneas «Auditoría: …» (aviso, hueco o reanudación)."""
+SIN_COPIA = "Auditoría: no medido: no hay copia en ledger/auditoria/"
+
+
+@dataclass(frozen=True)
+class TramoAuditoria:
+    """Trozo continuo de la copia: empieza en ``n0`` tras ``hash_prev``. ``cuadra`` = verifica por dentro.
+
+    ``detalle`` explica por qué empieza un tramo nuevo («» = origen de la cadena): reanudación, hueco o
+    copia que no empieza en el origen. Ninguno de esos motivos invalida los eventos de un tramo que cuadra."""
+
+    n0: int
+    hash_prev: str
+    lineas: tuple[dict, ...]
+    detalle: str
+    cuadra: bool
+
+
+def _lineas_del_dia(ruta: Path, ultimo: bool) -> list[dict] | None:
+    """Líneas de un día, leídas una sola vez. None si alguna está rota; en el último día, una línea final sin
+    salto de línea que no se puede leer se ignora (el ejecutor la está escribiendo)."""
+    try:
+        trozos = ruta.read_bytes().split(b"\n")
+    except OSError:
+        return None
+    a_medias = len(trozos) - 1 if ultimo and trozos[-1] else -1  # trozo final sin salto de línea
+    lineas: list[dict] = []
+    for i, crudo in enumerate(trozos):
+        if not crudo.strip():
+            continue
+        try:
+            ln = json.loads(crudo)
+        except ValueError:
+            ln = None
+        if not isinstance(ln, dict) or not isinstance(ln.get("n"), int):
+            if i == a_medias:
+                continue
+            return None
+        lineas.append(ln)
+    return lineas
+
+
+def tramos_de_auditoria(vault: Path) -> tuple[list[TramoAuditoria], str | None]:
+    """Copia ``ledger/auditoria/*.jsonl`` partida en tramos y verificada tramo a tramo.
+
+    Devuelve ``(tramos, None)`` o ``([], error)``: ``SIN_COPIA`` si no hay copia, ``NO_CUADRA`` si una línea
+    (que no sea la última a medio escribir) no se puede leer."""
     carpeta = Path(vault) / "ledger" / "auditoria"
     dias = sorted(p for p in carpeta.glob("*.jsonl") if p.is_file() and not p.is_symlink()) if carpeta.is_dir() else []
     if not dias:
-        return ["Auditoría: no medido: no hay copia en ledger/auditoria/"]
-    info: list[str] = []
-    tramos: list[tuple[int, str, list[dict]]] = []  # (n0, hash_prev, líneas)
+        return [], SIN_COPIA
+    crudos: list[tuple[int, str, list[dict], str]] = []  # (n0, hash_prev, líneas, detalle)
     sig: tuple[int, str] | None = None  # (n esperada, hash previo) para continuar
     dia_prev = ""
-    for ruta in dias:
-        try:
-            crudas = [x for x in ruta.read_bytes().split(b"\n") if x.strip()]
-            lineas = [json.loads(x) for x in crudas]
-        except (OSError, ValueError):
-            return [NO_CUADRA]
-        if not all(isinstance(x, dict) and isinstance(x.get("n"), int) for x in lineas):
-            return [NO_CUADRA]
+    for k, ruta in enumerate(dias):
+        lineas = _lineas_del_dia(ruta, ultimo=k == len(dias) - 1)
+        if lineas is None:
+            return [], NO_CUADRA
         for i, ln in enumerate(lineas):
             reanuda = ln["n"] == 1 and ln.get("hash_prev") == _aud.GENESIS and ln.get("evento") == _aud.EV_CADENA_REANUDADA
             if sig is None or reanuda:
                 if reanuda:
-                    info.append(f"cadena reanudada el {_dia_cot(ln.get('ts'))}")
-                    tramos.append((1, _aud.GENESIS, [ln]))
+                    crudos.append((1, _aud.GENESIS, [ln], f"cadena reanudada el {_dia_cot(ln.get('ts'))}"))
                 elif ln["n"] == 1:
-                    tramos.append((1, _aud.GENESIS, [ln]))
+                    crudos.append((1, _aud.GENESIS, [ln], ""))
                 else:
-                    info.append("no medido: la copia no empieza en el origen de la cadena")
-                    tramos.append((ln["n"], str(ln.get("hash_prev")), [ln]))
+                    crudos.append((ln["n"], str(ln.get("hash_prev")), [ln],
+                                   "no medido: la copia no empieza en el origen de la cadena"))
             elif i == 0 and ln["n"] > sig[0] and ln.get("hash_prev") != sig[1]:
-                info.append(f"no medido: la copia tiene un hueco entre {dia_prev} y {ruta.stem}")
-                tramos.append((ln["n"], str(ln.get("hash_prev")), [ln]))
+                crudos.append((ln["n"], str(ln.get("hash_prev")), [ln],
+                               f"no medido: la copia tiene un hueco entre {dia_prev} y {ruta.stem}"))
             else:
-                tramos[-1][2].append(ln)
+                crudos[-1][2].append(ln)
             sig = (ln["n"] + 1, str(ln.get("hash")))
         if lineas:
             dia_prev = ruta.stem
-    if any(_aud.verificar_lineas(ls, n0, prev) for n0, prev, ls in tramos):
+    tramos = [TramoAuditoria(n0, prev, tuple(ls), detalle, _aud.verificar_lineas(ls, n0, prev) is None)
+              for n0, prev, ls, detalle in crudos]
+    return tramos, None
+
+
+def _verificar_cadena(vault: Path) -> list[str]:
+    """Verifica la copia por tramos. [] si cuadra; si no, líneas «Auditoría: …» (aviso, hueco o reanudación)."""
+    tramos, error = tramos_de_auditoria(vault)
+    if error:
+        return [error]
+    if not all(t.cuadra for t in tramos):
         return [NO_CUADRA]
+    info = [t.detalle for t in tramos if t.detalle]
     if not info:
         return []
     medidas = [x for x in info if x.startswith("no medido")]

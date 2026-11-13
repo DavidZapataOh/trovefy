@@ -505,7 +505,7 @@ def _resumen(e: Ejecucion, estado: str) -> str:
 
 
 def _cabecera_via(e: Ejecucion) -> str:
-    nombres = {"firecrawl": "Firecrawl", "playwright": "Playwright"}
+    nombres = {"firecrawl": "Firecrawl", "playwright": "Playwright", "mcp": "MCP oficial"}
     partes = [f"{nombres.get(k, k)} {n}" for k, n in sorted(e.via.items()) if n]
     texto = f"Búsquedas en la Biblioteca: {e.busquedas}"
     if partes:

@@ -199,11 +199,11 @@ def test_04_varios_portfolios_sin_id_guardado_pide_guardarlo(tmp_path, conf):
 
 
 def test_04_con_id_guardado_abre_su_portfolio(tmp_path):
-    marcar_hecho(tmp_path, "04", datos={"business_id": "778461336017450"})
-    cap = falso_texto("https://business.facebook.com/latest/settings/business_info?business_id=778461336017450")
+    marcar_hecho(tmp_path, "04", datos={"business_id": "123456789012345"})
+    cap = falso_texto("https://business.facebook.com/latest/settings/business_info?business_id=123456789012345")
     r = verificar_business(tmp_path, capturar=cap, confirmacion=CONF)
-    assert cap.llamadas == [("meta", "https://business.facebook.com/latest/settings/business_info?business_id=778461336017450")]
-    assert r.ok is True and r.datos == {"business_id": "778461336017450"}
+    assert cap.llamadas == [("meta", "https://business.facebook.com/latest/settings/business_info?business_id=123456789012345")]
+    assert r.ok is True and r.datos == {"business_id": "123456789012345"}
 
 
 def test_04_con_id_guardado_sin_confirmar_guarda_provisional_con_el_id(tmp_path):
@@ -212,25 +212,25 @@ def test_04_con_id_guardado_sin_confirmar_guarda_provisional_con_el_id(tmp_path)
         ultimo_texto_provisional,
     )
 
-    marcar_hecho(tmp_path, "04", datos={"business_id": "778461336017450"})
-    url = "https://business.facebook.com/latest/settings/business_info?business_id=778461336017450"
+    marcar_hecho(tmp_path, "04", datos={"business_id": "123456789012345"})
+    url = "https://business.facebook.com/latest/settings/business_info?business_id=123456789012345"
     r = verificar_business(tmp_path, capturar=falso_texto(url), confirmacion=Confirmacion(fecha=None, fuente="prueba"))
     assert r.ok is None and "sin confirmar" in r.motivo
     texto = leer_texto_provisional(ultimo_texto_provisional(tmp_path, "04"))["pagina"]
-    assert "business_id=778461336017450" in texto
+    assert "business_id=123456789012345" in texto
 
 
 def test_04_con_id_guardado_pero_meta_abre_el_selector(tmp_path):
-    marcar_hecho(tmp_path, "04", datos={"business_id": "778461336017450"})
+    marcar_hecho(tmp_path, "04", datos={"business_id": "123456789012345"})
     r = verificar_business(tmp_path, capturar=falso_texto(SELECT, SELECT_TXT), confirmacion=CONF)
-    assert r.ok is None and "778461336017450" in r.motivo and "Seleccionar negocio" in r.motivo
+    assert r.ok is None and "123456789012345" in r.motivo and "Seleccionar negocio" in r.motivo
 
 
 def test_04_otro_portfolio_que_el_guardado_falla(tmp_path):
-    marcar_hecho(tmp_path, "04", datos={"business_id": "778461336017450"})
+    marcar_hecho(tmp_path, "04", datos={"business_id": "123456789012345"})
     cap = falso_texto("https://business.facebook.com/latest/settings/business_info?business_id=111")
     r = verificar_business(tmp_path, capturar=cap, confirmacion=CONF)
-    assert r.ok is False and "111" in r.motivo and "778461336017450" in r.motivo
+    assert r.ok is False and "111" in r.motivo and "123456789012345" in r.motivo
 
 
 def test_04_id_guardado_no_numerico_se_ignora(tmp_path):
@@ -257,11 +257,11 @@ def test_texto_normal_con_la_palabra_verificar_no_es_intersticial(tmp_path):
     assert r.ok is True
 
 
-@pytest.mark.parametrize("valor,ok", [("778461336017450", True), (" 778461336017450 ", True), ("abc", False), ("12a", False)])
+@pytest.mark.parametrize("valor,ok", [("123456789012345", True), (" 123456789012345 ", True), ("abc", False), ("12a", False)])
 def test_cli_dato_business_id_solo_digitos(tmp_path, valor, ok):
     from trovefy.arranque.estado import cargar
 
     codigo = main(["arranque", "hecho", "04", "--vault", str(tmp_path), "--dato", f"business_id={valor}"])
     assert (codigo == 0) is ok
     if ok:
-        assert next(p for p in cargar(tmp_path) if p.id == "04").datos["business_id"] == "778461336017450"
+        assert next(p for p in cargar(tmp_path) if p.id == "04").datos["business_id"] == "123456789012345"

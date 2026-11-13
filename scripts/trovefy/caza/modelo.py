@@ -60,7 +60,7 @@ class ResultadoBusqueda:
     motivo: str | None
     capturado_en: datetime
     completo: bool = False
-    via: Literal["firecrawl", "playwright"] = "playwright"
+    via: Literal["firecrawl", "playwright", "mcp"] = "playwright"
     creditos: int | None = None  # metadata.creditsUsed de Firecrawl; None con Playwright
     proxy: str | None = None  # metadata.proxyUsed de Firecrawl; None con Playwright
     # True solo si ``total_aprox`` es el ``count`` exacto de Meta (sin tope ni cota), o un ``vacio``.
