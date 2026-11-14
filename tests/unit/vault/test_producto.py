@@ -301,3 +301,29 @@ def test_actualizar_sin_cambios_no_escribe(tmp_path):
     assert devuelta == ruta
     assert ruta.read_bytes() == antes
     assert not (tmp_path / "log.md").exists()
+
+
+@pytest.mark.parametrize("cambios", [
+    {"nota": "vale\n\t" + "sk" + "-" + "q" * 24},
+    {"nota": "sí\x07" + "sk" + "-" + "q" * 24},
+    {"oferta": {"citas": ["ok", "vale\n\t" + "sk" + "-" + "q" * 24]}},
+    {"oferta": {"x\t" + "sk" + "-" + "q" * 24: 1}},
+])
+def test_actualizar_rechaza_secretos_tras_escape_yaml(tmp_path, cambios):
+    ruta = _producto(tmp_path, {"XE": {"estado": "modelado"}})
+    antes = ruta.read_bytes()
+    with pytest.raises(ValueError, match="secreto") as exc:
+        actualizar_producto(tmp_path, P, cambios, [], "modelar", AHORA)
+    assert "q" * 24 not in str(exc.value)
+    assert ruta.read_bytes() == antes
+    assert not (tmp_path / "log.md").exists()
+
+
+def test_avanzar_rechaza_secretos_tras_escape_yaml(tmp_path):
+    ruta = _producto(tmp_path, {"XE": {"estado": "aprobado"}})
+    antes = ruta.read_bytes()
+    with pytest.raises(ValueError, match="secreto"):
+        avanzar_estado(tmp_path, P, "XE", "aprobado", "modelado", "nota\n\t" + "sk" + "-" + "q" * 24, "modelar",
+                       AHORA)
+    assert ruta.read_bytes() == antes
+    assert not (tmp_path / "log.md").exists()

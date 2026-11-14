@@ -7,16 +7,23 @@ vía ``actualizar_producto``. El país elegido pasa a ``modelado`` solo con la o
 ``decisiones/*-excepcion-r16.md`` (resolución 8). ``cerrar`` es la aprobación tácita: idempotente,
 la llaman ``/cerrar`` y el paso 0 de ``/producto`` (resolución 9).
 
-Las citas del usuario se guardan tal cual, después de pasar por ``buscar_secreto``.
+Las citas del usuario se guardan tal cual, después de pasar por ``buscar_secreto`` (la cita cruda, cada
+texto decodificado del frontmatter y el texto renderizado).
+
+``oferta_aprobada`` es el gate público de la aprobación (lo comprueba también el paso 0 de ``/producto``).
+``cerrar`` devuelve un ``Cierre``: su ``linea`` es lo que se muestra y ``bloqueado`` es True cuando la
+oferta está rechazada (la CLI sale con 1).
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
+import yaml
+
 from trovefy.modelar.salida import cargar_oferta
-from trovefy.secretos import buscar_secreto
 from trovefy.vault import frontmatter
 from trovefy.vault.escritura import ZONA_NEGOCIO, anadir_log, escribir_atomico
 from trovefy.vault.producto import (
@@ -26,6 +33,7 @@ from trovefy.vault.producto import (
     estado_pais,
     pais_elegido,
     ruta_producto,
+    secreto_en,
 )
 
 APROBACIONES = ("presentada", "aprobada", "aprobada_tacita", "rechazada")
@@ -46,28 +54,57 @@ def _con_zona(ahora: datetime) -> datetime:
     return ahora.astimezone(ZONA_NEGOCIO)
 
 
+@dataclass(frozen=True)
+class Cierre:
+    """Resultado de ``cerrar``: la línea para el usuario y si bloquea (oferta rechazada → salida 1)."""
+
+    linea: str
+    bloqueado: bool = False
+
+    def __str__(self) -> str:
+        return self.linea
+
+
 def _cita(cita: str) -> str:
     if not isinstance(cita, str) or not cita.strip():
         raise ValueError("hace falta la cita literal del usuario (--cita)")
+    c1 = sorted({f"U+{ord(c):04X}" for c in cita if 0x80 <= ord(c) <= 0x9F})
+    if c1:
+        raise ValueError(f"la cita lleva caracteres de control C1 ({', '.join(c1)}), que no se ven al leerla: "
+                         "escríbela de nuevo sin ellos (--cita)")
     return cita
 
 
 def _fecha(valor: object) -> date | None:
+    """Fecha estricta: un ``date`` (no ``datetime``) o un texto ``AAAA-MM-DD`` entero."""
     if isinstance(valor, datetime):
-        return valor.date()
+        return None
     if isinstance(valor, date):
         return valor
     if isinstance(valor, str):
         try:
-            return date.fromisoformat(valor.strip()[:10])
+            return date.fromisoformat(valor) if len(valor) == 10 else None
         except ValueError:
             return None
     return None
 
 
-def _sin_secretos(textos: dict[str, str]) -> None:
-    for nombre, texto in textos.items():
-        patron = buscar_secreto(texto)  # RevisionSecretosNoDisponible: no se escribe nada
+def _instante(valor: object) -> datetime | None:
+    """Marca de hora ISO con zona (``registrada``), en la zona de negocio."""
+    if isinstance(valor, str):
+        try:
+            valor = datetime.fromisoformat(valor)
+        except ValueError:
+            return None
+    if not isinstance(valor, datetime) or valor.tzinfo is None or valor.utcoffset() is None:
+        return None
+    return valor.astimezone(ZONA_NEGOCIO)
+
+
+def _sin_secretos(contenidos: dict[str, object]) -> None:
+    """Cada contenido (texto, o mapa recorrido en profundidad con sus claves) pasa por ``buscar_secreto``."""
+    for nombre, contenido in contenidos.items():
+        patron = secreto_en(contenido)  # RevisionSecretosNoDisponible: no se escribe nada
         if patron:
             raise ValueError(f"{nombre}: aparece un secreto ({patron}); no se escribe nada")
 
@@ -112,15 +149,21 @@ def _nueva_oferta(meta: dict, cuerpo: str, nueva: str, ahora: datetime, cita: st
     return meta, cuerpo
 
 
+def _copiar_a_producto(vault: Path, p_id: str, meta: dict, ahora: datetime) -> None:
+    """Copia los tres campos de OFERTA.md a ``PRODUCTO.md:oferta``. Si ya son iguales no escribe nada;
+    si no, repara la copia (por ejemplo tras una escritura interrumpida entre los dos archivos)."""
+    actualizar_producto(vault, p_id, {"oferta": {"aprobacion": meta.get("aprobacion"),
+                                                 "aprobacion_fecha": meta.get("aprobacion_fecha"),
+                                                 "aprobacion_cita": meta.get("aprobacion_cita")}},
+                        [], _SKILL, ahora)
+
+
 def _guardar_oferta(vault: Path, p_id: str, ruta: Path, texto: str, meta: dict, otros: list[Path],
                     que: str, ahora: datetime) -> None:
     escribir_atomico(ruta, texto)
     archivos = [r.relative_to(vault).as_posix() for r in [ruta, *otros]]
     anadir_log(vault, _SKILL, que, archivos, ahora=ahora)
-    actualizar_producto(vault, p_id, {"oferta": {"aprobacion": meta["aprobacion"],
-                                                 "aprobacion_fecha": meta["aprobacion_fecha"],
-                                                 "aprobacion_cita": meta["aprobacion_cita"]}},
-                        [], _SKILL, ahora)
+    _copiar_a_producto(vault, p_id, meta, ahora)
 
 
 # --- reglas ----------------------------------------------------------------------------------------
@@ -144,10 +187,59 @@ def puede_avanzar(meta_oferta: dict, excepcion: Path | None) -> tuple[bool, str]
                    "o mejoras la oferta o registras la excepción con las palabras del usuario")
 
 
-def excepcion_vigente(vault: Path, p_id: str) -> Path | None:
-    """La ``decisiones/*-excepcion-r16.md`` más reciente del país de ``OFERTA.md`` con fecha igual o
-    posterior a la de ``OFERTA.md``; None si no hay (o si aún no hay ``OFERTA.md``)."""
+def oferta_aprobada(vault: Path, p_id: str) -> tuple[bool, str]:
+    """Gate público: (True, motivo) si ``OFERTA.md`` es de este producto y está ``aprobada`` o
+    ``aprobada_tacita``; si no, (False, motivo). No escribe nada."""
+    try:
+        _, meta, _ = _leer_oferta(Path(vault), p_id)
+    except FileNotFoundError:
+        return False, "falta OFERTA.md: /modelar"
+    except ValueError as exc:
+        return False, str(exc)
+    if meta.get("producto") != p_id:
+        return False, f"OFERTA.md es de {meta.get('producto')}, no de {p_id}: rehaz /modelar"
+    aprobacion = meta["aprobacion"]
+    if aprobacion == "rechazada":
+        return False, MOTIVO_RECHAZADA
+    if aprobacion not in APROBADAS:
+        return False, f"la oferta está {aprobacion}: falta aprobarla (o cerrar la sesión sin rechazarla)"
+    return True, f"oferta {_ETIQUETA[aprobacion]}"
+
+
+def _excepcion_valida(meta: object, p_id: str, oferta: dict, desde: date, hoy: date) -> tuple | None:
+    """Clave de orden (fecha, registrada) si la excepción es completa y coherente; None si no vale."""
+    if not isinstance(meta, dict):
+        return None
+    if (meta.get("tipo"), meta.get("regla"), meta.get("fuente"), meta.get("senal")) != (
+            "decision", "R16", "usuario", "se_puede_mejorar"):
+        return None
+    if meta.get("producto") != p_id or meta.get("pais") != oferta.get("pais"):
+        return None
+    cita = meta.get("cita")
+    if not isinstance(cita, str) or not cita.strip():
+        return None
+    if "oferta_fecha" not in meta or str(meta["oferta_fecha"]) != str(oferta.get("fecha")):
+        return None
+    fecha, registrada = _fecha(meta.get("fecha")), _instante(meta.get("registrada"))
+    if fecha is None or registrada is None:
+        return None
+    if fecha < desde or fecha > hoy or fecha > registrada.date():
+        return None
+    return fecha, registrada
+
+
+def excepcion_vigente(vault: Path, p_id: str, ahora: datetime | None = None) -> Path | None:
+    """La ``decisiones/*-excepcion-r16.md`` válida más reciente para ``OFERTA.md``; None si no hay (o si
+    aún no hay ``OFERTA.md``).
+
+    Vale solo una excepción completa: ``tipo: decision``, ``regla: R16``, ``fuente: usuario``,
+    ``senal: se_puede_mejorar``, el producto y el país de ``OFERTA.md``, ``oferta_fecha`` igual a su
+    ``fecha``, una ``cita`` no vacía, ``registrada`` con zona y una ``fecha`` (AAAA-MM-DD estricta) no
+    anterior a la de la oferta ni posterior a hoy (``ahora``, por defecto el momento actual) ni a
+    ``registrada``. Un archivo ilegible o con YAML roto se salta. Orden: fecha y luego ``registrada``.
+    """
     vault = Path(vault)
+    hoy = (_con_zona(ahora) if ahora is not None else datetime.now(ZONA_NEGOCIO)).date()
     try:
         oferta = cargar_oferta(vault, p_id)
     except FileNotFoundError:
@@ -157,16 +249,14 @@ def excepcion_vigente(vault: Path, p_id: str) -> Path | None:
         return None
     candidatas = []
     for ruta in (_carpeta(vault, p_id) / "decisiones").glob("*-excepcion-r16.md"):
-        meta, _ = frontmatter.leer(ruta)
-        if not isinstance(meta, dict) or meta.get("regla") != "R16" or meta.get("tipo") != "decision":
+        try:
+            meta, _ = frontmatter.leer(ruta)
+        except (OSError, UnicodeDecodeError, yaml.YAMLError):
             continue
-        if meta.get("producto") != p_id or meta.get("pais") != oferta.get("pais"):
-            continue
-        fecha = _fecha(meta.get("fecha"))
-        if fecha is None or fecha < desde:
-            continue
-        candidatas.append(((fecha, str(meta.get("registrada") or ""), ruta.name), ruta))
-    return max(candidatas)[1] if candidatas else None
+        clave = _excepcion_valida(meta, p_id, oferta, desde, hoy)
+        if clave is not None:
+            candidatas.append((*clave, ruta.name, ruta))
+    return max(candidatas)[-1] if candidatas else None
 
 
 def _avanzar(vault: Path, p_id: str, ahora: datetime) -> str:
@@ -181,7 +271,7 @@ def _avanzar(vault: Path, p_id: str, ahora: datetime) -> str:
         return f"{pais} ya está en {estado}"
     if estado != "aprobado":
         return f"{pais} está en {estado or 'sin estado'}: no pasa a modelado"
-    ok, motivo = puede_avanzar(meta, excepcion_vigente(vault, p_id))
+    ok, motivo = puede_avanzar(meta, excepcion_vigente(vault, p_id, ahora))
     if not ok:
         return f"{pais} sigue en aprobado: {motivo}"
     avanzar_estado(vault, p_id, pais, "aprobado", "modelado", evidencia=f"productos/{p_id}/OFERTA.md",
@@ -204,11 +294,14 @@ def aprobar(vault: Path, p_id: str, cita: str, ahora: datetime) -> str:
     ruta, meta, cuerpo = _leer_oferta(vault, p_id)
     if meta["aprobacion"] == "rechazada":
         raise ValueError(MOTIVO_RECHAZADA)
+    _sin_secretos({"cita": cita})
     if meta["aprobacion"] == "presentada":
         meta, cuerpo = _nueva_oferta(meta, cuerpo, "aprobada", ahora, cita)
         texto = frontmatter.renderizar(meta, cuerpo)
-        _sin_secretos({"OFERTA.md": texto})
+        _sin_secretos({"OFERTA.md": meta, "OFERTA.md (texto)": texto})
         _guardar_oferta(vault, p_id, ruta, texto, meta, [], f"{p_id}: oferta aprobada por el usuario", ahora)
+    else:
+        _copiar_a_producto(vault, p_id, meta, ahora)
     return _linea(p_id, meta["aprobacion"], _avanzar(vault, p_id, ahora))
 
 
@@ -220,6 +313,7 @@ def rechazar(vault: Path, p_id: str, cita: str, ahora: datetime) -> Path:
         raise ValueError(MOTIVO_YA_APROBADA)
     if meta["aprobacion"] == "rechazada":
         raise ValueError("la oferta ya está rechazada: vuelve a /modelar")
+    _sin_secretos({"cita": cita})
     hoy = ahora.date()
     pais = meta.get("pais")
     meta, cuerpo = _nueva_oferta(meta, cuerpo, "rechazada", ahora, cita)
@@ -232,7 +326,8 @@ def rechazar(vault: Path, p_id: str, cita: str, ahora: datetime) -> Path:
               "La oferta no pasa a producción: hay que rehacer /modelar.", "",
               f"Oferta: [[productos/{p_id}/OFERTA]]", ""]
     texto_decision = frontmatter.renderizar(decision, "\n".join(lineas))
-    _sin_secretos({"OFERTA.md": texto_oferta, "decisión de rechazo": texto_decision})
+    _sin_secretos({"OFERTA.md": meta, "OFERTA.md (texto)": texto_oferta, "decisión de rechazo": decision,
+                   "decisión de rechazo (texto)": texto_decision})
     dir_ = _carpeta(vault, p_id) / "decisiones"
     dir_.mkdir(parents=True, exist_ok=True)
     destino = _ruta_decision(dir_, hoy, "oferta-rechazada")
@@ -242,17 +337,22 @@ def rechazar(vault: Path, p_id: str, cita: str, ahora: datetime) -> Path:
     return destino
 
 
-def cerrar(vault: Path, p_id: str, ahora: datetime) -> str:
+def cerrar(vault: Path, p_id: str, ahora: datetime) -> Cierre:
     """La aprobación tácita [D-14], idempotente: ``presentada → aprobada_tacita``; aprobada o rechazada
-    no cambian. Después intenta avanzar a ``modelado``. Devuelve una línea para el usuario."""
+    no cambian (solo se repara la copia de ``PRODUCTO.md`` si quedó distinta). Después intenta avanzar a
+    ``modelado``. Con la oferta rechazada devuelve ``Cierre(MOTIVO_RECHAZADA, bloqueado=True)``."""
     vault, ahora = Path(vault), _con_zona(ahora)
     ruta, meta, cuerpo = _leer_oferta(vault, p_id)
     if meta["aprobacion"] == "presentada":
         meta, cuerpo = _nueva_oferta(meta, cuerpo, "aprobada_tacita", ahora, None)
         texto = frontmatter.renderizar(meta, cuerpo)
-        _sin_secretos({"OFERTA.md": texto})
+        _sin_secretos({"OFERTA.md": meta, "OFERTA.md (texto)": texto})
         _guardar_oferta(vault, p_id, ruta, texto, meta, [], f"{p_id}: oferta aprobada tácitamente", ahora)
-    return _linea(p_id, meta["aprobacion"], _avanzar(vault, p_id, ahora))
+    else:
+        _copiar_a_producto(vault, p_id, meta, ahora)
+    if meta["aprobacion"] == "rechazada":
+        return Cierre(MOTIVO_RECHAZADA, bloqueado=True)
+    return Cierre(_linea(p_id, meta["aprobacion"], _avanzar(vault, p_id, ahora)))
 
 
 def registrar_excepcion(vault: Path, p_id: str, pais: str, cita: str, ahora: datetime) -> Path:
@@ -264,6 +364,10 @@ def registrar_excepcion(vault: Path, p_id: str, pais: str, cita: str, ahora: dat
     if pais != elegido:
         raise ValueError(f"la excepción es para el país elegido ({elegido}), no para {pais or 'ninguno'}")
     _, oferta, _ = _leer_oferta(vault, p_id)
+    if oferta["aprobacion"] == "rechazada":
+        raise ValueError(MOTIVO_RECHAZADA)
+    if oferta.get("producto") != p_id:
+        raise ValueError(f"OFERTA.md es de {oferta.get('producto')}, no de {p_id}: rehaz /modelar")
     if oferta.get("pais") != elegido:
         raise ValueError(f"OFERTA.md es de {oferta.get('pais')} y el país elegido es {elegido}: rehaz /modelar")
     valor = oferta.get("se_puede_mejorar")
@@ -281,8 +385,9 @@ def registrar_excepcion(vault: Path, p_id: str, pais: str, cita: str, ahora: dat
               "El usuario decide producir igual. Palabras del usuario (cita literal):", "",
               _cita_md(cita), "",
               f"Oferta: [[productos/{p_id}/OFERTA]] ({oferta.get('fecha')})", ""]
+    _sin_secretos({"cita": cita})
     texto = frontmatter.renderizar(meta, "\n".join(lineas))
-    _sin_secretos({"excepción de R16": texto})
+    _sin_secretos({"excepción de R16": meta, "excepción de R16 (texto)": texto})
     dir_ = _carpeta(vault, p_id) / "decisiones"
     dir_.mkdir(parents=True, exist_ok=True)
     destino = _ruta_decision(dir_, hoy, "excepcion-r16")

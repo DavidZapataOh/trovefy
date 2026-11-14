@@ -54,9 +54,30 @@ def _leer(vault: Path, p_id: str) -> tuple[Path, dict, str]:
     return ruta, dict(meta or {}), cuerpo
 
 
+def secreto_en(valor: object) -> str | None:
+    """Patrón del primer secreto en un texto o en las claves y valores de texto de mapas y listas,
+    recorridos en profundidad; None si no hay. Revisa los textos ya decodificados: el YAML
+    renderizado escapa controles (``\\t``, ``\\a``…) y un secreto detrás de uno no se ve en el texto.
+    Nunca devuelve el valor. ``RevisionSecretosNoDisponible`` se propaga."""
+    if isinstance(valor, str):
+        return buscar_secreto(valor)
+    if isinstance(valor, dict):
+        for clave, x in valor.items():
+            nombre = secreto_en(clave) or secreto_en(x)
+            if nombre:
+                return nombre
+    elif isinstance(valor, (list, tuple, set, frozenset)):
+        for x in valor:
+            nombre = secreto_en(x)
+            if nombre:
+                return nombre
+    return None
+
+
 def _guardar(vault: Path, ruta: Path, meta: dict, cuerpo: str, skill: str, que: str, ahora: datetime) -> Path:
     texto = frontmatter.renderizar(meta, cuerpo)
-    nombre = buscar_secreto(texto)  # RevisionSecretosNoDisponible: no se escribe nada
+    # RevisionSecretosNoDisponible: no se escribe nada
+    nombre = secreto_en(meta) or buscar_secreto(texto)
     if nombre:
         raise ValueError(f"{ruta.name}: aparece un secreto ({nombre}); no se escribe nada")
     escribir_atomico(ruta, texto)
