@@ -33,6 +33,13 @@ U = UmbralesReferencia(
 G = anuncio("G", date(2026, 11, 1), activo=False)  # inactivo sin fin: no medido
 
 
+@pytest.fixture(autouse=True)
+def _producto(request, tmp_path):
+    if request.node.name == "test_producto_md_falta":
+        return
+    fm_escribir(tmp_path / "productos/p-001/PRODUCTO.md", {"id": "p-001"}, "# Producto\n")
+
+
 def _medios(**fmt):
     return {k: MediosAnuncio(k, v, (), ()) for k, v in fmt.items()}
 
@@ -157,7 +164,7 @@ def test_secreto_bloquea_escritura(tmp_path):
     an.angulo = "EAA" + "B" * 30
     with pytest.raises(ValueError):
         escribir_referencia(tmp_path, _ref(analisis={"A": an}), AHORA)
-    assert not (tmp_path / "productos").exists() and not (tmp_path / "log.md").exists()
+    assert not (tmp_path / "productos/p-001/referencia").exists() and not (tmp_path / "log.md").exists()
 
 
 def test_referencia_lista(tmp_path):
@@ -166,3 +173,9 @@ def test_referencia_lista(tmp_path):
     assert referencia_lista(tmp_path, "p-001") == (False, "faltan 2 análisis: /trovefy:ver-anuncios")
     escribir_referencia(tmp_path, _ref(analisis={"A": _an("a"), "B": _an("b"), "F": _an("f")}), AHORA)
     assert referencia_lista(tmp_path, "p-001") == (True, "")
+
+
+def test_producto_md_falta(tmp_path):
+    with pytest.raises(FileNotFoundError, match="/trovefy:auditar"):
+        escribir_referencia(tmp_path, _ref(), AHORA)
+    assert not (tmp_path / "productos").exists() and not (tmp_path / "log.md").exists()

@@ -368,10 +368,11 @@ def _resumen(ref: Referencia) -> dict:
 def _producto_md(vault: Path, ref: Referencia) -> tuple[Path, str]:
     """Fusiona solo ``referencia`` en el frontmatter; el resto (incluido ``paises``) y el cuerpo se conservan."""
     ruta = Path(vault) / "productos" / ref.producto / "PRODUCTO.md"
-    if ruta.is_file():
-        meta, cuerpo = fm_leer(ruta)
-    else:
-        meta, cuerpo = {"id": ref.producto}, f"# {ref.producto}\n"
+    if not ruta.is_file():
+        raise FileNotFoundError(
+            f"falta {ruta.name} de {ref.producto}: el producto sale de /trovefy:auditar; no se escribe la referencia"
+        )
+    meta, cuerpo = fm_leer(ruta)
     meta["referencia"] = _resumen(ref)
     linea = f"- Referencia: [[productos/{ref.producto}/referencia/anuncios]]"
     if linea not in cuerpo:
