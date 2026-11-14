@@ -169,7 +169,15 @@ def test_anotar_rechaza_caracteres_de_control(vault, tmp_path):
 
 def test_anotar_sin_texto_ajeno_del_anuncio_no_pasa(vault, tmp_path):
     cache.guardar_textos(P, json.dumps({"111": {"texto": TEXTO, "titulo": ""}, "222": {"texto": "", "titulo": None}}), AHORA, 30)
-    with pytest.raises(AnalisisInvalido, match="no se puede comprobar que el texto sea propio"):
+    assert anotar(vault, P, _json(tmp_path, [_e("222")]), AHORA) == ["222"]
+    copia = " ".join(TEXTO.split()[:9])
+    with pytest.raises(AnalisisInvalido, match="222.angulo: copia literal"):
+        anotar(vault, P, _json(tmp_path, [_e("222", angulo=copia)]), AHORA)
+
+
+def test_anotar_anuncio_ausente_de_textos_no_pasa(vault, tmp_path):
+    cache.guardar_textos(P, json.dumps({"111": {"texto": TEXTO, "titulo": ""}}), AHORA, 30)
+    with pytest.raises(AnalisisInvalido, match="222: no se puede comprobar que el texto sea propio"):
         anotar(vault, P, _json(tmp_path, [_e("222")]), AHORA)
 
 

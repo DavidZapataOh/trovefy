@@ -7,8 +7,8 @@ from datetime import datetime
 from pathlib import Path
 
 from trovefy.cli import registrar
+from trovefy.referencia.cache import _RE_PID
 
-_RE_PID = re.compile(r"^p-\d{4}-[a-z0-9-]+$")
 _RE_PAIS = re.compile(r"^[A-Z]{2}$")
 
 

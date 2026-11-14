@@ -44,7 +44,7 @@ class AnalisisInvalido(ValueError):
         super().__init__("; ".join(self.problemas))
 
 
-def normalizar(t: str) -> list[str]:
+def normalizar(t: str) -> list[str]:  # residuo aceptado: homoglifos (p. ej. cirílicos parecidos) no se detectan
     # Los caracteres de formato (Cf: U+00AD, U+200B…) no deben partir palabras y burlar la guarda.
     t = "".join(c for c in t if unicodedata.category(c) != "Cf")
     s = unicodedata.normalize("NFKD", t.casefold())
@@ -81,7 +81,7 @@ def validar(
         if not isinstance(lib, str) or lib not in conocidos:
             problemas.append(f"{lib}: library_id desconocido")
             continue
-        if not ajenos.get(lib):
+        if lib not in ajenos:
             problemas.append(f"{lib}: {_SIN_TEXTOS}")
             continue
         malo = False
