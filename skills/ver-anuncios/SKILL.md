@@ -34,7 +34,7 @@ Pasos:
    - **Con el MCP:** si tienes `mcp__meta-ads__ads_library_search` y `config/meta_tools.json` la lista como lectura, llámala con `page_ids=[<page_id>]`, `countries=[<país>]`, `ad_active_status="ACTIVE"` y `limit=50`. Guarda la respuesta **tal cual** (sin editar, resumir ni completar) en `~/.cache/trovefy/referencia/<p-id>/mcp/lote-<p-id>-<AAAA-MM-DD>-<HHMM>.json`, nunca en el vault, con este formato: `{"version": 1, "herramienta": "mcp__meta-ads__ads_library_search", "busquedas": [{"pais", "q": null, "page_id", "estado": "active", "capturado_en", "argumentos", "respuesta"}]}`. Luego ejecuta `trovefy ver-anuncios ver --producto <p-id> --desde-mcp <lote>`.
    - **Sin el MCP:** `trovefy ver-anuncios ver --producto <p-id>`.
    - En los dos casos, dile que leerá la página pública del anunciante para los medios y que eso gasta 1 búsqueda del cupo de hoy. Si no quiere, añade `--sin-navegador` (sin medios).
-   - Si el MCP falla o dice «forma por confirmar (P-01)», díselo y ofrece la vía pública. **Nunca cambies de vía por tu cuenta.**
+   - Si el MCP falla o dice «no tiene la forma esperada (P-01)» (la forma real se confirmó el 2026-11-14; si ya no coincide, se mantiene «no medido»), díselo y ofrece la vía pública. **Nunca cambies de vía por tu cuenta.**
 3. **Parada.** Si `ver` termina en `PARADA`, `INTERRUMPIDA` o cuota agotada, actúa como dicen las reglas de fondo y no sigas con la vía que falló.
 4. **Mirar.** Por cada elemento de la lista de trabajo que imprimió `ver`:
    - Lee sus fotogramas con Read, en orden, y su transcripción. Si es un estático, lee la imagen.

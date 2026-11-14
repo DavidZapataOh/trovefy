@@ -107,3 +107,45 @@ def test_cabecera_via_mcp():
     e = Ejecucion.__new__(Ejecucion)
     e.busquedas, e.via, e.creditos = 3, {"mcp": 2, "firecrawl": 1}, None
     assert "Firecrawl 1, MCP oficial 2" in _cabecera_via(e)
+
+
+REAL = Path(__file__).resolve().parents[2] / "fixtures/caza/mcp_real_forma.json"
+
+
+def test_forma_real_results_en_texto():
+    lote = cargar_lote(REAL)
+    p = parsear_mcp(lote[0].respuesta, "RO", lote[0].estado)
+    assert len(p.anuncios) == 2 and p.descartados == 0
+    a = p.anuncios[0]
+    assert a.library_id == "900000000000101" and a.page_id == "800000000001"
+    assert a.inicio.isoformat() == "2026-09-10" and a.titulo == "Titlu fictiv unu"
+    assert a.texto == "" and a.plataformas == () and a.fin is None and a.activo is True
+    assert a.collation_id is None and a.collation_count is None
+    assert p.hay_mas is None
+
+
+def test_forma_real_estado_all_no_inventa_activo():
+    lote = cargar_lote(REAL)
+    p = parsear_mcp(lote[0].respuesta, "RO", "all")
+    assert p.anuncios[0].activo is False
+
+
+def test_forma_real_cliente_ok_no_completo():
+    r = ClienteMcp(cargar_lote(REAL)).buscar("RO", page_id="800000000001")
+    assert r.estado == "ok" and r.motivo is None and len(r.anuncios) == 2 and r.completo is False
+
+
+def test_forma_real_sin_envoltorio_y_ads_directo():
+    cuerpo = json.loads(json.loads(REAL.read_text())["busquedas"][0]["respuesta"]["results"])
+    assert len(parsear_mcp(cuerpo, "RO").anuncios) == 2
+
+
+@pytest.mark.parametrize(
+    "resp",
+    [{"results": "no json"}, {"results": "[1]"}, {"results": json.dumps({"otra": 1})}, {"ads": "x"}, {"foo": "bar"}],
+)
+def test_forma_desconocida_se_sigue_rechazando(resp):
+    from trovefy.caza.parser import FormatoDesconocido
+
+    with pytest.raises(FormatoDesconocido):
+        parsear_mcp(resp, "RO")

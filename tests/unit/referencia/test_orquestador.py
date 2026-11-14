@@ -286,3 +286,9 @@ def test_ver_listado_vacio_conserva_referencia(vault, monkeypatch):
     assert {n: (d / n).read_text() for n in antes} == antes
     assert (vault / f"productos/{P}/PRODUCTO.md").read_text() == prod
     assert any("se conserva la referencia del 2026-11-13" in a for a in r.avisos)
+
+
+def test_ver_desde_lote_forma_real_no_es_p01(vault):
+    r = _ver(vault, lote=Path(__file__).resolve().parents[2] / "fixtures/caza/mcp_real_forma.json")
+    assert r.ref.via == "mcp" and r.ref.fichas
+    assert all("P-01" not in (getattr(f, "motivo", None) or "") for f in r.ref.fichas)

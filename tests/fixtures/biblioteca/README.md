@@ -85,4 +85,4 @@ Los textos de los anuncios (públicos) se conservan como muestra del formato.
   segunda captura (sin desplazamiento, por eso no hay anuncios en `respuestas`); no se repitió la búsqueda para
   no pasar del presupuesto (3 búsquedas, 1 reintento cada una).
 - Ningún captcha, login ni checkpoint real.
-- `mcp_ads_library_search.json`: lote ficticio (IDs inventados) de respuestas del MCP oficial `ads_library_search`; la forma real está por confirmar (P-01).
+- `mcp_ads_library_search.json`: lote ficticio (IDs inventados) de respuestas del MCP oficial `ads_library_search`; la forma real se confirmó el 2026-11-14 (P-01); ver `tests/fixtures/caza/mcp_real_forma.json`.

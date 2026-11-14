@@ -1,4 +1,4 @@
-"""Lote y lector de las respuestas del MCP oficial ``ads_library_search`` (forma por confirmar, P-01).
+"""Lote y lector de las respuestas del MCP oficial ``ads_library_search`` (forma confirmada el 2026-11-14, P-01).
 
 Claude llama a la herramienta del MCP y guarda lo que devolvió, sin tocar, en un *lote*; este módulo
 lo lee. Regla: si la respuesta no tiene la forma esperada es «no medido», nunca un número inventado ni
@@ -19,7 +19,7 @@ from trovefy.caza.modelo import AnuncioBiblioteca, Parseo, ResultadoBusqueda
 from trovefy.caza.parser import FormatoDesconocido
 from trovefy.secretos import buscar_secreto
 
-FORMA = "forma por confirmar (P-01)"
+FORMA = "forma confirmada el 2026-11-14 (P-01); si no coincide, vuelve a «no medido»"
 MOTIVO_FORMA = "no medido: la respuesta del MCP no tiene la forma esperada (P-01)"
 MOTIVO_FUERA = "no medido: búsqueda fuera del lote del MCP"
 _MAX_BYTES = 20 * 1024 * 1024
@@ -105,10 +105,23 @@ def _desenvolver(respuesta: object) -> dict:
         obj = obj["structuredContent"]
     if not isinstance(obj, dict):
         raise FormatoDesconocido("la respuesta no es un objeto")
+    # Forma real (2026-11-14): {"results": "<JSON en texto>", "client_conversation_id": ...}
+    if isinstance(obj.get("results"), str) and "data" not in obj and "ads" not in obj:
+        try:
+            obj = json.loads(obj["results"])
+        except ValueError as exc:
+            raise FormatoDesconocido("results no es JSON") from exc
+        if not isinstance(obj, dict):
+            raise FormatoDesconocido("results no es un objeto")
     return obj
 
 
 def _fecha(valor: Any, campo: str) -> date:
+    if isinstance(valor, int) and not isinstance(valor, bool) and valor > 0:
+        try:
+            return datetime.fromtimestamp(valor, UTC).date()
+        except (OverflowError, OSError, ValueError) as exc:
+            raise FormatoDesconocido(f"{campo} no es una fecha") from exc
     if not isinstance(valor, str) or not valor:
         raise FormatoDesconocido(f"falta {campo}")
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", valor):
@@ -138,19 +151,33 @@ def _primero(valor: Any) -> str | None:
     return next((v for v in valor if isinstance(v, str) and v), None)
 
 
-def _anuncio(a: Any, pais: str) -> AnuncioBiblioteca:
+def _anuncio(a: Any, pais: str, estado_busqueda: str = "active") -> AnuncioBiblioteca:
     if not isinstance(a, dict):
         raise FormatoDesconocido("anuncio que no es un objeto")
-    plataformas = a.get("publisher_platforms")
+    plataformas = a.get("publisher_platforms", [])
+    if plataformas is None:
+        plataformas = []
     if not isinstance(plataformas, list):
         raise FormatoDesconocido("publisher_platforms no es una lista")
-    if "ad_creative_bodies" not in a or "ad_creative_link_titles" not in a:
-        raise FormatoDesconocido("faltan textos del anuncio")
+    cuerpos = a.get("ad_creative_bodies")
+    texto = _primero(cuerpos) or ""
+    if "ad_creative_link_titles" in a:
+        titulo = _primero(a["ad_creative_link_titles"])
+    else:
+        t = a.get("ad_creative_link_title")
+        if t is not None and not isinstance(t, str):
+            raise FormatoDesconocido("ad_creative_link_title no es texto")
+        titulo = t or None
     inicio = _fecha(a.get("ad_delivery_start_time"), "ad_delivery_start_time")
     stop = a.get("ad_delivery_stop_time")
     fin = _fecha(stop, "ad_delivery_stop_time") if stop else None
     estado = a.get("ad_active_status")
-    activo = (estado == "ACTIVE") if isinstance(estado, str) else stop in (None, "")
+    if isinstance(estado, str):
+        activo = estado == "ACTIVE"
+    elif "ad_delivery_stop_time" in a:
+        activo = stop in (None, "")
+    else:  # forma real: sin estado ni fin; la búsqueda ACTIVE solo devuelve activos
+        activo = estado_busqueda == "active"
     cuenta = a.get("collation_count")
     if cuenta is not None and (isinstance(cuenta, bool) or not isinstance(cuenta, int)):
         raise FormatoDesconocido("collation_count no es entero")
@@ -163,8 +190,8 @@ def _anuncio(a: Any, pais: str) -> AnuncioBiblioteca:
         fin=fin,
         activo=activo,
         plataformas=tuple(str(p) for p in plataformas),
-        texto=_primero(a["ad_creative_bodies"]) or "",
-        titulo=_primero(a["ad_creative_link_titles"]),
+        texto=texto,
+        titulo=titulo,
         enlace_destino=_primero(a.get("ad_creative_link_urls")),
         collation_id=_id(col, "collation_id") if col not in (None, "") else None,
         collation_count=cuenta,
@@ -172,16 +199,16 @@ def _anuncio(a: Any, pais: str) -> AnuncioBiblioteca:
     )
 
 
-def parsear_mcp(respuesta: object, pais: str) -> Parseo:
+def parsear_mcp(respuesta: object, pais: str, estado: str = "active") -> Parseo:
     cuerpo = _desenvolver(respuesta)
-    data = cuerpo.get("data")
+    data = cuerpo.get("data") if "data" in cuerpo else cuerpo.get("ads")
     if not isinstance(data, list):
         raise FormatoDesconocido("data no es una lista")
     anuncios: list[AnuncioBiblioteca] = []
     descartados = 0
     for a in data:
         try:
-            anuncios.append(_anuncio(a, pais))
+            anuncios.append(_anuncio(a, pais, estado))
         except FormatoDesconocido:
             descartados += 1
     if data and not anuncios:
@@ -216,7 +243,7 @@ class ClienteMcp:
             )
         url = url_biblioteca(pais, b.q, b.page_id, estado)
         try:
-            p = parsear_mcp(b.respuesta, pais)
+            p = parsear_mcp(b.respuesta, pais, b.estado)
         except FormatoDesconocido:
             return ResultadoBusqueda("error", url, None, [], MOTIVO_FORMA, b.capturado_en, via="mcp")
         completo = p.hay_mas is False and p.descartados == 0
