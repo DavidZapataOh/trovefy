@@ -79,4 +79,14 @@ def test_sin_navegador_no_mide_medios(vault):
 def test_presupuesto_cuenta_la_busqueda(vault):
     fuente.listar(vault, "RO", PID, lote=None, sin_navegador=False, navegador=NavFalso([pag()]), hoy=HOY)
     datos = json.loads((vault / "data/caza/presupuesto" / f"{HOY.isoformat()}.json").read_text())
-    assert 1 in [v for v in datos.values() if isinstance(v, int)]
+    assert datos["usadas"] == 1
+
+
+def test_lote_invalido_es_no_medido(vault, tmp_path):
+    malo = tmp_path / "malo.json"
+    malo.write_text("no es json")
+    nav = NavFalso([pag()])
+    r = fuente.listar(vault, "RO", PID, lote=malo, sin_navegador=False, navegador=nav, hoy=HOY)
+    assert r.via == "mcp" and r.anuncios == []
+    assert r.motivo == "no medido: lote inválido (el lote no es JSON)"
+    assert "no es json" not in r.motivo

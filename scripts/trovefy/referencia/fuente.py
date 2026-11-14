@@ -19,7 +19,7 @@ from trovefy.caza.cliente import (
     PaginaCapturada,
     SesionBloqueada,
 )
-from trovefy.caza.mcp import ClienteMcp, cargar_lote
+from trovefy.caza.mcp import ClienteMcp, LoteInvalido, cargar_lote
 from trovefy.caza.modelo import AnuncioBiblioteca
 from trovefy.caza.presupuesto import (
     ParadaDelDia,
@@ -74,9 +74,15 @@ def listar(
     url = url_biblioteca(pais, None, page_id, "active")
     out = Listado([], "mcp" if lote is not None else "publica", False, url, None)
     if lote is not None:
-        r = ClienteMcp(cargar_lote(lote)).buscar(pais, None, page_id, "active")
-        out.anuncios, out.completo, out.url = list(r.anuncios), r.completo, r.url
-        out.motivo = r.motivo if r.estado in ("error", "bloqueado") else None
+        try:
+            busquedas = cargar_lote(lote)
+        except LoteInvalido as exc:
+            # Sin cambio silencioso de fuente: el listado queda sin medir (los mensajes no llevan datos del lote).
+            out.motivo = f"no medido: lote inválido ({exc})"
+        else:
+            r = ClienteMcp(busquedas).buscar(pais, None, page_id, "active")
+            out.anuncios, out.completo, out.url = list(r.anuncios), r.completo, r.url
+            out.motivo = r.motivo if r.estado in ("error", "bloqueado") else None
     if sin_navegador:
         out.motivo_medios = MOTIVO_SIN_NAVEGADOR
         if lote is None:
