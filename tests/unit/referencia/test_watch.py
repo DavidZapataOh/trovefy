@@ -165,3 +165,15 @@ def test_idioma_validado_video_absoluto_y_quote(monkeypatch, tmp_path):
         ejecutar=lambda c, **k: (vistos.append(k.get("env")), _proc(0, "{}"))[1],
     )
     assert vistos[0] is not None and not any(k.endswith("_API_KEY") for k in vistos[0])
+
+
+def test_pasos_whisperx_incluyen_ytdlp_y_torchvision_cpu():
+    sin = Entorno("/usr/bin/ffmpeg", "/usr/bin/ffprobe", True, False, "", yt_dlp=None)
+    pasos = pasos_instalacion(sin)
+    i_yt = next(i for i, p in enumerate(pasos) if "uv tool install yt-dlp" in p)
+    i_wx = next(i for i, p in enumerate(pasos) if "--install-whisperx" in p)
+    assert i_yt < i_wx
+    assert any("torchvision" in p and "download.pytorch.org/whl/cpu" in p for p in pasos)
+    con = Entorno("/usr/bin/ffmpeg", "/usr/bin/ffprobe", True, False, "", yt_dlp="/x/yt-dlp")
+    assert not any("uv tool install yt-dlp" in p for p in pasos_instalacion(con))
+    assert pasos_instalacion(Entorno("/a", "/b", True, True, "", yt_dlp=None)) == []

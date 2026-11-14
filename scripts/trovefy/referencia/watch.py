@@ -37,6 +37,7 @@ class Entorno:
     vendor_ok: bool
     whisperx: bool
     whisperx_detalle: str
+    yt_dlp: str | None = None
 
 
 @dataclass(frozen=True)
@@ -132,7 +133,9 @@ def comprobar_entorno(which=shutil.which, ejecutar=subprocess.run) -> Entorno:
             detalle = f"no se pudo leer el estado de WhisperX ({type(e).__name__})"
     else:
         detalle = "vendor/claude-video no cuadra con su MANIFEST"
-    return Entorno(which("ffmpeg"), which("ffprobe"), vendor, whisperx, detalle)
+    return Entorno(
+        which("ffmpeg"), which("ffprobe"), vendor, whisperx, detalle, which("yt-dlp")
+    )
 
 
 def pasos_instalacion(e: Entorno) -> list[str]:
@@ -149,7 +152,21 @@ def pasos_instalacion(e: Entorno) -> list[str]:
                 "WhisperX local: unos 1 GB de paquetes más el modelo small (464 MB), en "
                 "`~/.cache/watch/whisperx-venv`; pide 3 GB libres y 8 GB de RAM. Sin sudo."
             ),
-            f"Ejecuta tú: `{shlex.quote(sys.executable)} -s -E {shlex.quote(str(RAIZ_VENDOR / 'setup.py'))} --install-whisperx`",
+        ]
+        if not e.yt_dlp:
+            pasos.append(
+                "Antes, ejecuta tú: `uv tool install yt-dlp` (el instalador de WhisperX lo exige)."
+            )
+        setup = f"{shlex.quote(sys.executable)} -s -E {shlex.quote(str(RAIZ_VENDOR / 'setup.py'))}"
+        venv_py = "~/.cache/watch/whisperx-venv/bin/python"
+        pasos += [
+            f"Ejecuta tú: `{setup} --install-whisperx`",
+            (
+                "Si falla con un error de torchvision, ejecuta tú: "
+                f"`uv pip install --python {venv_py} --reinstall torchvision==0.23.0 "
+                "--index-url https://download.pytorch.org/whl/cpu && touch ~/.cache/watch/whisperx-venv/.deps-ok`, "
+                f"y repite `{setup} --install-whisperx`."
+            ),
             "Después: `trovefy ver-anuncios comprobar`.",
         ]
     return pasos
