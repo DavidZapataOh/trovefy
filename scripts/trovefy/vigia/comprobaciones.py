@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 import shutil
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
@@ -22,6 +22,7 @@ from trovefy.aprobaciones.fuentes import (
 )
 from trovefy.arranque.verificadores.apimart import BASE_POR_DEFECTO, consultar_saldo
 from trovefy.caja.config import cargar_caja
+from trovefy.referencia import cache as cache_referencia_mod
 from trovefy.rutinas import TIMER_CAZA, directorio_unidades
 from trovefy.secretos import RUTA_CLAUDE_ENV, leer_env
 from trovefy.vault.escritura import ZONA_NEGOCIO
@@ -54,6 +55,7 @@ class Fuentes:
     ruta_env: Path
     abrir_apimart: Callable | None = None
     uso_disco: Callable[[Path], tuple[int, int, int]] = shutil.disk_usage
+    cache_referencia: Path = field(default_factory=cache_referencia_mod.base_cache)
 
 
 def fuentes_por_defecto() -> Fuentes:
@@ -239,6 +241,18 @@ def impultienda(vault: Path) -> Comprobacion:
     return Comprobacion("impultienda", "info", f"última comprobación de ImpulTienda el {cuando} (no se revisa en vivo)")
 
 
+def referencia_cache(ahora: datetime, base: Path) -> Comprobacion:
+    base = Path(base)
+    if not base.is_dir():
+        return Comprobacion("referencia", "ok", "sin medios de referencia")
+    n = len(cache_referencia_mod.vencidos(ahora, base))
+    if n:
+        return Comprobacion(
+            "referencia", "aviso",
+            f"{n} carpetas de medios de referencia pasaron sus 30 días: `trovefy ver-anuncios limpiar`")
+    return Comprobacion("referencia", "ok", "medios de referencia dentro de plazo")
+
+
 def no_medidas() -> list[Comprobacion]:
     return [Comprobacion(n, "no_medido", MOTIVO_MCP) for n in
             ("anuncios rechazados", "eventos del dataset en 24 h", "restricciones del Business",
@@ -260,7 +274,7 @@ def vigilar(vault: Path, ahora: datetime, fuentes: Fuentes) -> list[Comprobacion
            apimart(fuentes.ruta_env, aviso, fuentes.abrir_apimart),
            disco(vault, fuentes.uso_disco),
            rutinas(vault, ahora, fuentes.unidades),
-           impultienda(vault), *no_medidas()]
+           impultienda(vault), referencia_cache(ahora, fuentes.cache_referencia), *no_medidas()]
     return res
 
 

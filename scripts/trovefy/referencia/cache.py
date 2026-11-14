@@ -119,10 +119,10 @@ def _textos_vencidos(ahora: datetime) -> list[Path]:
     return salida
 
 
-def _recorrer(ahora: datetime):
+def _recorrer(ahora: datetime, base: Path | None = None):
     """Devuelve (vencidas, avisos): solo base/*/*, sin seguir enlaces simbólicos."""
     ahora = _utc(ahora)
-    base = base_cache()
+    base = base if base is not None else base_cache()
     base_real = base.resolve()
     vencidas: list[Path] = []
     avisos: list[str] = []
@@ -149,12 +149,12 @@ def _recorrer(ahora: datetime):
     return vencidas, avisos
 
 
-def vencidos(ahora: datetime) -> list[Path]:
-    return _recorrer(ahora)[0]
+def vencidos(ahora: datetime, base: Path | None = None) -> list[Path]:
+    return _recorrer(ahora, base)[0]
 
 
-def avisos_limpieza(ahora: datetime) -> list[str]:
-    return _recorrer(ahora)[1]
+def avisos_limpieza(ahora: datetime, base: Path | None = None) -> list[str]:
+    return _recorrer(ahora, base)[1]
 
 
 def limpiar(ahora: datetime) -> list[Path]:
