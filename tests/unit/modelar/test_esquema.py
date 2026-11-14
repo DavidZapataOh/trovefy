@@ -268,3 +268,159 @@ def test_ejemplo_de_la_skill_es_valido():
     m = cargar_modelado(EJEMPLO, "p-0042-kit-demo", "XE", "bg")
     assert m.producto == "p-0042-kit-demo"
     assert yaml.safe_load(EJEMPLO.read_text(encoding="utf-8")) == datos_demo()
+
+
+# --- ronda de revisión de las tareas 4–5 -----------------------------------------------------------
+
+
+def escribir_texto(tmp_path: Path, datos: dict, marca: str, crudo: str) -> Path:
+    """Vuelca ``datos`` y sustituye la línea ``formato: <marca>`` por YAML escrito a mano."""
+    ruta = escribir(tmp_path, datos)
+    texto = ruta.read_text(encoding="utf-8")
+    assert f"formato: {marca}" in texto
+    ruta.write_text(texto.replace(f"formato: {marca}", f"formato: {crudo}"), encoding="utf-8")
+    return ruta
+
+
+def errores_de(ruta: Path) -> list[str]:
+    with pytest.raises(ModeladoInvalido) as exc:
+        cargar_modelado(ruta, "p-0042-kit-demo", "XE", "bg")
+    return exc.value.errores
+
+
+def test_ejes_vacios_no_pasan(tmp_path):
+    d = datos_demo()
+    d["ejes_original"] = {}
+    d["ejes_nuestra"] = {}
+    errs = errores(tmp_path, d)
+    assert any(e.startswith("ejes_original: faltan ejes") for e in errs)
+    assert any(e.startswith("ejes_nuestra: faltan ejes") for e in errs)
+
+
+def test_paleta_vacia_no_pasa(tmp_path):
+    d = datos_demo()
+    d["brandbook"]["paleta"] = {}
+    assert "brandbook.paleta: hacen falta al menos 3 colores, hay 0" in errores(tmp_path, d)
+
+
+def test_tokens_vacios_piden_los_obligatorios(tmp_path):
+    d = datos_demo()
+    d["brandbook"]["tokens_css"] = {}
+    errs = [e for e in errores(tmp_path, d) if e.startswith("brandbook.tokens_css:")]
+    assert errs and all(t in errs[0] for t in ("--color-primario", "--fuente-titulos", "--fuente-texto"))
+
+
+def test_secreto_escapado_en_yaml(tmp_path):
+    d = datos_demo()
+    d["core"]["formato"] = "MARCA"
+    resto = "x1Y2" * 10
+    ruta = escribir_texto(tmp_path, d, "MARCA", f'"PDF \\x45AA{resto}"')
+    errs = errores_de(ruta)
+    assert len(errs) == 1 and errs[0].startswith("secreto en modelar.yaml: token de Meta")
+    assert resto not in errs[0]
+
+
+def test_secreto_partido_con_continuacion(tmp_path):
+    d = datos_demo()
+    d["core"]["formato"] = "MARCA"
+    resto = "x1Y2" * 10
+    ruta = escribir_texto(tmp_path, d, "MARCA", f'"PDF EA\\\n    A{resto}"')
+    errs = errores_de(ruta)
+    assert len(errs) == 1 and errs[0].startswith("secreto en modelar.yaml:") and resto not in errs[0]
+
+
+def test_secreto_en_una_clave(tmp_path):
+    d = datos_demo()
+    d["core"]["MARCA"] = "x"
+    ruta = escribir(tmp_path, d)
+    texto = ruta.read_text(encoding="utf-8").replace("MARCA:", f'"\\x45AA{"x1Y2" * 10}":')
+    ruta.write_text(texto, encoding="utf-8")
+    errs = errores_de(ruta)
+    assert len(errs) == 1 and errs[0].startswith("secreto en modelar.yaml:")
+
+
+def test_clave_de_token_con_css(tmp_path):
+    d = datos_demo()
+    d["brandbook"]["tokens_css"]["--x}body{display:none}"] = "#000000"
+    assert any(e.startswith("brandbook.tokens_css") and "--x}body" in e for e in errores(tmp_path, d))
+
+
+def test_valor_de_token_con_css(tmp_path):
+    d = datos_demo()
+    d["brandbook"]["tokens_css"]["--color-acento"] = "red} body{display:none}"
+    assert any(e.startswith("brandbook.tokens_css.--color-acento:") for e in errores(tmp_path, d))
+
+
+def test_clave_de_paleta_rara(tmp_path):
+    d = datos_demo()
+    d["brandbook"]["paleta"]["<script>"] = "#000000"
+    assert any(e.startswith("brandbook.paleta") and "<script>" in e for e in errores(tmp_path, d))
+
+
+def test_claves_pasan_por_material_ajeno(tmp_path):
+    d = datos_demo()
+    d["core"]["<b>raro</b>"] = "x"
+    assert any("HTML" in e for e in errores(tmp_path, d))
+
+
+@pytest.mark.parametrize("texto", [
+    ".hero{color:red}",
+    "color: red; margin-top: 4px;",
+    "&lt;div&gt; Casa ordenada",
+    "Ver portada-original.jpg",
+    "fondo.avif", "letra.woff2", "letra.woff", "audio.mp3", "lista.m3u8",
+    "https://x.test/v/lista.m3u8",
+])
+def test_mas_material_ajeno(texto):
+    assert material_ajeno(texto) is not None
+
+
+@pytest.mark.parametrize("texto", [
+    "Incluye: 30 fichas; 5 bonos",
+    "Включва: 30 карти; 5 бонуса",
+    "Precio: 13,90; garantía: 30 días; formato: PDF",
+    "Hecho con React/Next.js",
+    "Ver entregable/portada.webp y entregable/fuentes/ubuntu.woff2",
+])
+def test_texto_propio_no_es_material_ajeno(texto):
+    assert material_ajeno(texto) is None
+
+
+def test_mensaje_de_medio_no_acusa_al_original():
+    motivo = material_ajeno("img/portada.webp")
+    assert "parece un archivo, URL o estilo" in motivo and "original" not in motivo
+
+
+@pytest.mark.parametrize("fecha", ["2026-02-30", "2026-13-01"])
+def test_fecha_lectura_real(tmp_path, fecha):
+    d = datos_demo()
+    d["teardown"]["fecha_lectura"] = fecha
+    assert any(e.startswith("teardown.fecha_lectura:") for e in errores(tmp_path, d))
+
+
+def test_fecha_sin_comillas_imposible(tmp_path):
+    d = datos_demo()
+    d["core"]["formato"] = "MARCA"
+    ruta = escribir_texto(tmp_path, d, "MARCA", "2026-02-30")
+    assert errores_de(ruta)[0].startswith("modelar.yaml:")
+
+
+@pytest.mark.parametrize("precio", ["13.905", 13.9, True])
+def test_importe_invalido(tmp_path, precio):
+    d = datos_demo()
+    d["teardown"]["checkout"]["precio"] = precio
+    assert any(e.startswith("teardown.checkout.precio:") for e in errores(tmp_path, d))
+
+
+@pytest.mark.parametrize(("precio", "esperado"), [("13.90", "13.90"), (13, "13"), ("9", "9")])
+def test_importe_valido(tmp_path, precio, esperado):
+    d = datos_demo()
+    d["teardown"]["checkout"]["precio"] = precio
+    m = cargar_modelado(escribir(tmp_path, d), "p-0042-kit-demo", "XE", "bg")
+    assert str(m.teardown.checkout["precio"]) == esperado
+
+
+def test_token_no_texto(tmp_path):
+    d = datos_demo()
+    d["brandbook"]["tokens_css"]["--color-acento"] = 5
+    assert "brandbook.tokens_css.--color-acento: tiene que ser texto" in errores(tmp_path, d)

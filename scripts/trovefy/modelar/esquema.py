@@ -3,8 +3,9 @@
 ``modelar.yaml`` lo escribe Claude en /modelar. Aquí se valida entero y se informan **todos** los
 errores a la vez, cada uno con su ruta YAML (``core.bonos: hacen falta 3–5, hay 2``). Dos guardas
 transversales: material ajeno (HTML, CSS, medios o texto copiado del original) y secretos
-(``trovefy.secretos.buscar_secreto`` sobre el archivo entero; si la revisión no está disponible,
-``RevisionSecretosNoDisponible`` se propaga y no se sigue).
+(``trovefy.secretos.buscar_secreto`` sobre el archivo entero y, tras leerlo, sobre cada clave y cada
+texto ya desescapado; si la revisión no está disponible, ``RevisionSecretosNoDisponible`` se propaga y
+no se sigue).
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -49,9 +51,23 @@ _COLORES_MIN = 3
 _LARGO_COPIADO = 280
 _LETRAS_MARCA = 4
 
-_HTML = re.compile(r"<[a-zA-Z/]")
-_CSS = re.compile(r"[^{}]*\{[^}]*:[^}]*;")
-_MEDIO = re.compile(r"\.(png|jpe?g|webp|gif|svg|mp4|webm|mov|css|js)(\?|#|$)", re.IGNORECASE)
+_HTML = re.compile(r"<[a-zA-Z/!]|&(?:lt|gt|#0*6[02]|#x0*3[ce]);", re.IGNORECASE)
+_CSS = re.compile(r"\{[^}]*:[^}]*(?:;|\})")
+# Estilo en línea sin llaves: dos o más declaraciones «propiedad: valor;» con nombres de CSS (en ASCII,
+# así «Incluye: 30 fichas; 5 bonos» o la prosa búlgara no saltan).
+_PROPIEDAD_CSS = (r"(?:[a-z]+-[a-z-]+|color|background|margin|padding|border|display|width|height|font|position"
+                  r"|top|left|right|bottom|opacity|transform|float|overflow|content|gap|flex|grid|outline|filter)")
+_ESTILO_EN_LINEA = re.compile(rf"(?:(?<![\w-]){_PROPIEDAD_CSS}\s*:\s*[^:;{{}}]+;\s*){{2,}}")
+_EXT_MEDIO = r"png|jpe?g|webp|avif|gif|svg|ico|mp4|webm|mov|m3u8|mp3|woff2?|ttf|otf|css"
+_MEDIO = re.compile(rf"\.(?:{_EXT_MEDIO})(?:[?#]|$)", re.IGNORECASE)
+# ``.js`` solo cuenta en una URL o ruta absoluta: «Next.js» o «React/Next.js» son nombres, no archivos.
+_SCRIPT = re.compile(r"^(?:[a-z]+:)?//|^\.?/", re.IGNORECASE)
+_JS = re.compile(r"\.js(?:[?#]|$)", re.IGNORECASE)
+_PROPIO = "entregable/"  # rutas del vault a nuestro propio material
+_CLAVE_TOKEN = re.compile(r"^--[a-z0-9-]+$")
+_CLAVE_PALETA = re.compile(r"^[a-z0-9_-]+$")
+_VALOR_TOKEN_PROHIBIDO = re.compile(r"[{};<>]")
+_IMPORTE = re.compile(r"^\d+(?:\.\d{1,2})?$")
 _PAGINAS = re.compile(r"p[aá]gina|page|страниц", re.IGNORECASE)
 _COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
 _MONEDA = re.compile(r"^[A-Z]{3}$")
@@ -171,27 +187,36 @@ class Modelado:
 def material_ajeno(texto: str, *, de_teardown: bool = False) -> str | None:
     """Motivo si ``texto`` parece material del original (HTML, CSS, medio o texto copiado); si no, None.
 
-    La URL de medio o estilo se busca en las palabras con ``/`` (rutas y URL), para no confundir
-    «Next.js» con un archivo. El largo (más de 280 caracteres) solo cuenta en campos del teardown.
+    Cada palabra se mira como posible archivo o URL (imagen, vídeo, audio, fuente, hoja de estilo);
+    ``.js`` solo cuenta en URL o rutas absolutas, para no confundir «Next.js» con un archivo, y las
+    rutas ``entregable/…`` son material propio. El largo (más de 280 caracteres) solo cuenta en campos
+    del teardown.
     """
     if _HTML.search(texto):
-        return "parece HTML (etiquetas <…>): describe la sección con tus palabras"
-    if _CSS.search(texto):
+        return "parece HTML (etiquetas <…> o &lt;…&gt;): describe la sección con tus palabras"
+    if _CSS.search(texto) or _ESTILO_EN_LINEA.search(texto):
         return "parece CSS ({ propiedad: valor; }): guarda solo la estructura"
     for palabra in texto.split():
-        if "/" in palabra and _MEDIO.search(palabra.rstrip(".,;:)»\"'")):
-            return "enlaza una imagen, vídeo, hoja de estilo o script: no se guarda material del original"
+        palabra = palabra.strip(".,;:()«»\"'")
+        if palabra.startswith(_PROPIO):
+            continue
+        if _MEDIO.search(palabra) or (_JS.search(palabra) and _SCRIPT.search(palabra)):
+            return "parece un archivo, URL o estilo: aquí solo va texto propio"
     if de_teardown and len(texto.strip()) > _LARGO_COPIADO:
         return f"más de {_LARGO_COPIADO} caracteres seguidos: parece texto copiado, resúmelo con tus palabras"
     return None
 
 
 def _textos(nodo: Any, ruta: str) -> Iterator[tuple[str, str]]:
+    """Cada texto del árbol con su ruta YAML, también las claves de los bloques."""
     if isinstance(nodo, str):
         yield ruta, nodo
     elif isinstance(nodo, dict):
         for clave, valor in nodo.items():
-            yield from _textos(valor, f"{ruta}.{clave}" if ruta else str(clave))
+            sub = f"{ruta}.{clave}" if ruta else str(clave)
+            if isinstance(clave, str):
+                yield sub, clave
+            yield from _textos(valor, sub)
     elif isinstance(nodo, list):
         for i, valor in enumerate(nodo):
             yield from _textos(valor, f"{ruta}[{i}]")
@@ -250,17 +275,17 @@ class _Lector:
         valor = nodo.get(clave) if isinstance(nodo, dict) else None
         if valor is None:
             return None
-        if isinstance(valor, bool):
-            self.error(ruta, "tiene que ser un importe como texto (\"13.90\") o null")
+        # Texto con hasta 2 decimales o entero; un float de YAML (13.9) o un booleano no valen.
+        es_entero = isinstance(valor, int) and not isinstance(valor, bool) and valor >= 0
+        if not es_entero and not (isinstance(valor, str) and _IMPORTE.match(valor.strip())):
+            self.error(ruta, "tiene que ser un importe como texto con hasta 2 decimales (\"13.90\"), "
+                             "un entero o null")
             return None
         try:
-            importe = Decimal(str(valor))
-        except InvalidOperation:
-            importe = None
-        if importe is None or not importe.is_finite() or importe < 0:
+            return Decimal(str(valor).strip())
+        except InvalidOperation:  # pragma: no cover - el patrón ya lo impide
             self.error(ruta, "tiene que ser un importe como texto (\"13.90\") o null")
             return None
-        return importe
 
     def textos(self, nodo: Any, clave: str, ruta: str) -> tuple[str, ...]:
         resultado = []
@@ -329,16 +354,20 @@ def _teardown(lec: _Lector, datos: dict) -> Teardown:
 
 def _fecha(lec: _Lector, nodo: dict, clave: str, ruta: str) -> str:
     valor = nodo.get(clave)
-    texto = valor.isoformat() if hasattr(valor, "isoformat") else valor
-    if not isinstance(texto, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", texto):
-        lec.error(ruta, "tiene que ser una fecha AAAA-MM-DD")
-        return ""
-    return texto
+    if isinstance(valor, date) and not isinstance(valor, datetime):
+        return valor.isoformat()
+    if isinstance(valor, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", valor):
+        try:
+            return date.fromisoformat(valor).isoformat()
+        except ValueError:
+            pass
+    lec.error(ruta, "tiene que ser una fecha real AAAA-MM-DD")
+    return ""
 
 
 def _ejes(lec: _Lector, datos: dict, clave: str) -> dict[str, EjeValorado]:
     nodo = lec.mapa(datos, clave, clave)
-    if not nodo:
+    if not isinstance(datos.get(clave), dict):
         return {}
     faltan = [e for e in EJES if e not in nodo]
     sobran = [str(e) for e in nodo if e not in EJES]
@@ -467,9 +496,12 @@ def _brandbook(lec: _Lector, datos: dict, idioma: str, anunciante: str) -> Brand
         lec.error("brandbook.idioma", f"dice «{idioma_bb}» y el país habla «{idioma}»")
     paleta = lec.mapa(nodo, "paleta", "brandbook.paleta")
     for nombre_color, color in paleta.items():
+        if not isinstance(nombre_color, str) or not _CLAVE_PALETA.match(nombre_color):
+            lec.error("brandbook.paleta", f"nombre de color no válido: {nombre_color!s} (solo a-z, 0-9, _ y -)")
+            continue
         if not isinstance(color, str) or not _COLOR.match(color):
             lec.error(f"brandbook.paleta.{nombre_color}", "tiene que ser un color #RRGGBB")
-    if paleta and len(paleta) < _COLORES_MIN:
+    if isinstance(nodo.get("paleta"), dict) and len(paleta) < _COLORES_MIN:
         lec.error("brandbook.paleta", f"hacen falta al menos {_COLORES_MIN} colores, hay {len(paleta)}")
     alfabeto = ALFABETO.get(idioma, "latin")
     tipografias = []
@@ -492,14 +524,21 @@ def _brandbook(lec: _Lector, datos: dict, idioma: str, anunciante: str) -> Brand
         if sorted(usos) != sorted(USOS_TIPOGRAFIA):
             lec.error("brandbook.tipografias", "hace falta exactamente una con uso: titulos y otra con uso: texto")
     tokens = lec.mapa(nodo, "tokens_css", "brandbook.tokens_css")
-    raras = [str(k) for k in tokens if not str(k).startswith("--")]
+    raras = [str(k) for k in tokens if not isinstance(k, str) or not _CLAVE_TOKEN.match(k)]
     if raras:
-        lec.error("brandbook.tokens_css", f"las claves empiezan por --: {', '.join(raras)}")
+        lec.error("brandbook.tokens_css", f"las claves son --minusculas-numeros-y-guiones: {', '.join(raras)}")
     for clave, valor in tokens.items():
-        if not isinstance(valor, str) or not valor.strip():
-            lec.error(f"brandbook.tokens_css.{clave}", "falta o está vacío (texto)")
+        if str(clave) in raras:
+            continue
+        r = f"brandbook.tokens_css.{clave}"
+        if not isinstance(valor, str):
+            lec.error(r, "tiene que ser texto")
+        elif not valor.strip():
+            lec.error(r, "está vacío")
+        elif _VALOR_TOKEN_PROHIBIDO.search(valor):
+            lec.error(r, "no puede llevar { } ; < >: solo el valor del token")
     faltan = [t for t in TOKENS_OBLIGATORIOS if t not in tokens]
-    if tokens and faltan:
+    if isinstance(nodo.get("tokens_css"), dict) and faltan:
         lec.error("brandbook.tokens_css", f"faltan {', '.join(faltan)}")
     return Brandbook(
         nombre_local=nombre, idioma=idioma_bb, significado=lec.texto(nodo, "significado", "brandbook.significado"),
@@ -559,8 +598,14 @@ def cargar_modelado(ruta: Path, p_id: str, pais: str, idioma: str) -> Modelado:
         marca = getattr(exc, "problem_mark", None)
         donde = f" (línea {marca.line + 1})" if marca is not None else ""
         raise ModeladoInvalido([f"modelar.yaml: no es YAML válido{donde}"]) from None
+    except ValueError:  # p. ej. una fecha sin comillas que no existe (2026-02-30)
+        raise ModeladoInvalido(["modelar.yaml: no es YAML válido (hay una fecha o un valor que no existe)"]) from None
     if not isinstance(datos, dict):
         raise ModeladoInvalido(["modelar.yaml: tiene que ser un bloque de claves"])
+    # Tras leerlo, los escapes (\x45, \u…, «\» de continuación) ya están resueltos: se revisa otra vez.
+    patron = buscar_secreto("\n".join(valor for _, valor in _textos(datos, "")))
+    if patron:
+        raise ModeladoInvalido([f"secreto en modelar.yaml: {patron} (quítalo; nunca se guarda)"])
 
     lec = _Lector()
     producto = lec.texto(datos, "producto", "producto")

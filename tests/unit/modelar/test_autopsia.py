@@ -1,6 +1,8 @@
 """Autopsia de 8 ejes: nota ponderada, ejes flojos y tercera señal de R16."""
 
+from dataclasses import replace
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from trovefy.economia.config import PLANTILLA, cargar_texto
@@ -12,7 +14,9 @@ from trovefy.modelar.autopsia import (
     senal_se_puede_mejorar,
     vende_por_presupuesto,
 )
+from trovefy.modelar.esquema import cargar_modelado
 
+DEMO = Path(__file__).resolve().parents[3] / "tests" / "fixtures" / "modelar" / "modelar-demo.yaml"
 REGLAS = cargar_texto(PLANTILLA.read_text(encoding="utf-8")).autopsia
 PESOS = REGLAS.pesos
 ORIGINAL = {"resultado_sonado": 8, "probabilidad_percibida": 5, "tiempo": 6, "esfuerzo": 7, "avatar": 6,
@@ -120,3 +124,34 @@ def test_nota_fuera_de_0_10(nota):
 def test_eje_desconocido():
     with pytest.raises(ValueError):
         puntuar({"color": EjeValorado("color", 5, "x")}, PESOS)
+
+
+# --- ronda de revisión de las tareas 4–5 -----------------------------------------------------------
+
+
+@pytest.mark.parametrize(("cobertura", "medida"), [(70, True), (69, False)])
+def test_cobertura_en_el_limite(cobertura, medida):
+    # el plan: «con cobertura < 70 puntos de peso la tercera señal es "no medida"»; la cobertura es entera
+    assert REGLAS.cobertura_min == 70
+    e_orig, e_nuestra = ejes(**ORIGINAL), ejes(**NUESTRA)
+    original = replace(puntuar(e_orig, PESOS), cobertura=cobertura)
+    senal, motivo = senal_se_puede_mejorar(original, puntuar(e_nuestra, PESOS), e_orig, e_nuestra, REGLAS)
+    assert (senal is not None) is medida
+    if not medida:
+        assert "del original cubre 69 de 100" in motivo
+
+
+def test_solo_la_nuestra_con_cobertura_baja():
+    nuestra = {**NUESTRA, "probabilidad_percibida": None, "esfuerzo": None, "precio": None}
+    e_orig, e_nuestra = ejes(**ORIGINAL), ejes(**nuestra)
+    senal, motivo = senal_se_puede_mejorar(puntuar(e_orig, PESOS), puntuar(e_nuestra, PESOS), e_orig, e_nuestra,
+                                           REGLAS)
+    assert senal is None and "de la nuestra cubre 55 de 100" in motivo
+
+
+def test_fixture_da_las_cifras_del_plan():
+    m = cargar_modelado(DEMO, "p-0042-kit-demo", "XE", "bg")
+    original, nuestra = puntuar(m.ejes_original, PESOS), puntuar(m.ejes_nuestra, PESOS)
+    assert (original.nota, nuestra.nota) == (Decimal("56.5"), Decimal("74.0"))
+    senal, _ = senal_se_puede_mejorar(original, nuestra, m.ejes_original, m.ejes_nuestra, REGLAS)
+    assert senal is True
