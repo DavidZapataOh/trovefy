@@ -250,7 +250,7 @@ def test_vigia_referencia_vencida(tmp_path):
     _carpeta_referencia(base, -1)
     r = c.referencia_cache(AHORA, base)
     assert r.nivel == "aviso"
-    assert "1 carpetas de medios de referencia pasaron sus 30 días" in r.texto
+    assert "1 carpetas o lotes de referencia pasaron sus 30 días" in r.texto
     assert "trovefy ver-anuncios limpiar" in r.texto
 
 
@@ -301,3 +301,20 @@ def test_vigia_referencia_iterdir_falla_no_revienta(tmp_path, monkeypatch):
     monkeypatch.setattr(cache_ref, "vencidos", falla)
     r = c.referencia_cache(AHORA, base)
     assert r.nivel == "aviso" and "no se pudo leer" in r.texto and "PermissionError" in r.texto
+
+
+def test_vigia_referencia_usa_retencion_configurada(tmp_path):
+    base = tmp_path / "cache"
+    lote = base / "p-0001-x" / "mcp" / "lote-x.json"
+    lote.parent.mkdir(parents=True)
+    lote.write_text("{}")
+    import os
+
+    viejo = (AHORA - timedelta(days=45)).timestamp()
+    os.utime(lote, (viejo, viejo))
+    assert c.referencia_cache(AHORA, base, 60).nivel == "ok"
+    assert c.referencia_cache(AHORA, base, 30).nivel == "aviso"
+
+
+def test_retencion_referencia_sin_umbrales_usa_defecto(tmp_path):
+    assert c._retencion_referencia(tmp_path) == 30

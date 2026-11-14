@@ -137,6 +137,13 @@ def consultas_del_lote(lote: list[BusquedaMcp]) -> list[tuple[str, str]]:
 def _desenvolver(respuesta: object) -> dict:
     obj = respuesta
     if isinstance(obj, dict) and obj.get("isError") is True:
+        # Un límite de Meta puede llegar como error MCP con el JSON de Graph dentro: se clasifica igual.
+        try:
+            _desenvolver({k: v for k, v in obj.items() if k != "isError"})
+        except ErrorMcp:
+            raise
+        except (FormatoDesconocido, LoteInvalido, ValueError, TypeError, AttributeError):
+            pass
         raise ErrorMcp(False, "no medido: el MCP devolvió un error")
     if isinstance(obj, dict) and isinstance(obj.get("content"), list):
         textos = [c.get("text") for c in obj["content"] if isinstance(c, dict) and c.get("type") == "text"]

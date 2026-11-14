@@ -191,3 +191,14 @@ def test_epoch_float_o_texto(valor):
         a["ad_delivery_start_time"] = valor
     p = parsear_mcp(cuerpo, "RO")
     assert p.descartados == 0 and p.anuncios[0].inicio.isoformat() == "2026-09-10"
+
+
+def test_iserror_con_limite_de_graph_es_bloqueado():
+    from trovefy.caza.mcp import ErrorMcp, _desenvolver
+
+    with pytest.raises(ErrorMcp) as e:
+        _desenvolver({"isError": True, "content": [{"type": "text", "text": '{"error":{"code":4}}'}]})
+    assert e.value.bloqueado is True
+    with pytest.raises(ErrorMcp) as e:
+        _desenvolver({"isError": True, "content": [{"type": "text", "text": "fallo interno"}]})
+    assert e.value.bloqueado is False

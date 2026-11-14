@@ -241,19 +241,28 @@ def impultienda(vault: Path) -> Comprobacion:
     return Comprobacion("impultienda", "info", f"última comprobación de ImpulTienda el {cuando} (no se revisa en vivo)")
 
 
-def referencia_cache(ahora: datetime, base: Path) -> Comprobacion:
+def _retencion_referencia(vault: Path) -> int:
+    try:
+        from trovefy.referencia.config import cargar_umbrales_referencia
+
+        return cargar_umbrales_referencia(vault).retencion_dias
+    except (OSError, ValueError, KeyError, TypeError):  # umbrales ilegibles: la vigía no cae, usa el valor por defecto
+        return cache_referencia_mod.RETENCION_DIAS
+
+
+def referencia_cache(ahora: datetime, base: Path, retencion_dias: int = cache_referencia_mod.RETENCION_DIAS) -> Comprobacion:
     base = Path(base)
     if not base.is_dir():
         return Comprobacion("referencia", "ok", "sin medios de referencia")
     try:
-        n = len(cache_referencia_mod.vencidos(ahora, base))
+        n = len(cache_referencia_mod.vencidos(ahora, base, retencion_dias))
     except OSError as e:
         return Comprobacion(
             "referencia", "aviso", f"no se pudo leer la caché de medios de referencia ({type(e).__name__})")
     if n:
         return Comprobacion(
             "referencia", "aviso",
-            f"{n} carpetas de medios de referencia pasaron sus 30 días: `trovefy ver-anuncios limpiar`")
+            f"{n} carpetas o lotes de referencia pasaron sus {retencion_dias} días: `trovefy ver-anuncios limpiar`")
     return Comprobacion("referencia", "ok", "medios de referencia dentro de plazo")
 
 
@@ -278,7 +287,7 @@ def vigilar(vault: Path, ahora: datetime, fuentes: Fuentes) -> list[Comprobacion
            apimart(fuentes.ruta_env, aviso, fuentes.abrir_apimart),
            disco(vault, fuentes.uso_disco),
            rutinas(vault, ahora, fuentes.unidades),
-           impultienda(vault), referencia_cache(ahora, fuentes.cache_referencia), *no_medidas()]
+           impultienda(vault), referencia_cache(ahora, fuentes.cache_referencia, _retencion_referencia(vault)), *no_medidas()]
     return res
 
 
