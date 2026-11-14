@@ -12,5 +12,6 @@ Responde siempre en español. Muestra al usuario esta lista de lo disponible hoy
 - `/trovefy:ayuda`: esta ayuda; resume los comandos y skills de Trovefy.
 - `/trovefy:cazar`: caza ofertas que ya venden en la Biblioteca de anuncios de Meta y escribe el informe y las fichas en el cerebro (`trovefy caza ejecutar`, `trovefy caza hueco`).
 - `/trovefy:auditar`: audita una oferta cazada país por país (hueco, precio y nota), escribe `productos/<p-id>/AUDITORIA.md` y registra el país que eliges con tus palabras (`trovefy auditar ejecutar`, `trovefy auditar elegir`).
+- `/trovefy:modelar`: modela la oferta del país elegido (autopsia, core offer, escalera de precios y brandbook) y escribe `OFERTA.md`, `ESCALERA.md`, `BRANDBOOK.md` y `comparativa.md`; queda aprobada si no la rechazas en la sesión (`trovefy modelar …`, `trovefy economia …`).
 
 Si el usuario pide algo que no aparece aquí, dile que todavía no está disponible en esta versión. No inventes comandos.
