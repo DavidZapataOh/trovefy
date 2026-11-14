@@ -20,6 +20,12 @@ from trovefy.vault.frontmatter import escribir as fm_escribir
 AHORA = datetime(2026, 11, 13, 10, 0, tzinfo=ZoneInfo("America/Bogota"))
 P = "p-0001-demo"
 TRANSCRIPCION = "hoy te enseño cómo calmar tu sistema nervioso en solo cinco minutos al día"
+WATCH_MD = (
+    "# watch: video report\n\n- **Transcript:** 2 segments (via whisperx)\n\n## Frames\n\n"
+    "- `/w/frames/f_0001.jpg` (t=0:00, reason=scene)\n\n## Transcript\n\n_Source: whisperx._\n\n```\n"
+    "[0:00] hoy te enseño cómo calmar tu sistema nervioso\n[0:04] en solo cinco minutos al día\n```\n\n---\n"
+    "_Work dir: `/w` — delete when done._\n"
+)
 TEXTO = "Texto ajeno ficticio para el anuncio uno con palabras que nadie copiará jamás"
 PROPIO = {
     "transcripcion_resumida": "Promete calma rápida con una rutina corta diaria",
@@ -51,7 +57,7 @@ def vault(tmp_path, monkeypatch):
     }
     cache.guardar_textos(P, json.dumps(textos), AHORA, 30)
     c = cache.carpeta_anuncio(P, "111", AHORA, 30)
-    (c / "watch.md").write_text(TRANSCRIPCION, encoding="utf-8")
+    (c / "watch.md").write_text(WATCH_MD, encoding="utf-8")
     return v
 
 
@@ -141,3 +147,39 @@ def test_anotar_json_grande_o_mal_formado(vault, tmp_path):
     r.write_text('{"a": 1}')
     with pytest.raises(AnalisisInvalido):
         anotar(vault, P, r, AHORA)
+
+
+def test_anotar_detecta_copia_entre_segmentos_reales(vault, tmp_path):
+    r = _json(tmp_path, [_e(angulo="calmar tu sistema nervioso en solo cinco minutos al día")])
+    with pytest.raises(AnalisisInvalido, match="copia literal"):
+        anotar(vault, P, r, AHORA)
+
+
+@pytest.mark.parametrize("invisible", ["\u00ad", "\u200b"])
+def test_anotar_invisibles_no_burlan_la_guarda(vault, tmp_path, invisible):
+    v = f"calmar tu sis{invisible}tema ner{invisible}vioso en solo cinco minutos al día"
+    with pytest.raises(AnalisisInvalido, match="copia literal"):
+        anotar(vault, P, _json(tmp_path, [_e(angulo=v)]), AHORA)
+
+
+def test_anotar_rechaza_caracteres_de_control(vault, tmp_path):
+    with pytest.raises(AnalisisInvalido, match="control"):
+        anotar(vault, P, _json(tmp_path, [_e(cta="descargar\x07 la guía")]), AHORA)
+
+
+def test_anotar_sin_texto_ajeno_del_anuncio_no_pasa(vault, tmp_path):
+    cache.guardar_textos(P, json.dumps({"111": {"texto": TEXTO, "titulo": ""}, "222": {"texto": "", "titulo": None}}), AHORA, 30)
+    with pytest.raises(AnalisisInvalido, match="no se puede comprobar que el texto sea propio"):
+        anotar(vault, P, _json(tmp_path, [_e("222")]), AHORA)
+
+
+def test_anotar_compara_con_todos_los_anuncios(vault, tmp_path):
+    copia = " ".join(TEXTO.split()[:9])
+    with pytest.raises(AnalisisInvalido, match="222.angulo: copia literal"):
+        anotar(vault, P, _json(tmp_path, [_e("222", angulo=copia)]), AHORA)
+
+
+def test_anotar_una_sola_linea_de_log(vault, tmp_path):
+    antes = (vault / "log.md").read_text().count("ver-anuncios")
+    anotar(vault, P, _json(tmp_path, [_e()]), AHORA)
+    assert (vault / "log.md").read_text().count("ver-anuncios") == antes + 1

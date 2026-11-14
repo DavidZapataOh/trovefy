@@ -19,6 +19,7 @@ from trovefy.referencia.salida import (
     cargar_referencia,
     escribir_referencia,
 )
+from trovefy.referencia.watch import texto_transcripcion
 from trovefy.secretos import buscar_secreto
 from trovefy.vault.escritura import anadir_log
 
@@ -44,6 +45,8 @@ class AnalisisInvalido(ValueError):
 
 
 def normalizar(t: str) -> list[str]:
+    # Los caracteres de formato (Cf: U+00AD, U+200B…) no deben partir palabras y burlar la guarda.
+    t = "".join(c for c in t if unicodedata.category(c) != "Cf")
     s = unicodedata.normalize("NFKD", t.casefold())
     s = "".join(c for c in s if not unicodedata.combining(c))
     s = re.sub(r"[^\w\s]|_", " ", s)
@@ -67,6 +70,7 @@ def validar(
     entradas: list[dict], ref: Referencia, ajenos: dict[str, list[str]]
 ) -> dict[str, Analisis]:
     conocidos = {f.library_id for f in ref.fichas}
+    todos = [t for ts in ajenos.values() for t in ts]
     problemas: list[str] = []
     salida: dict[str, Analisis] = {}
     for i, e in enumerate(entradas):
@@ -77,6 +81,9 @@ def validar(
         if not isinstance(lib, str) or lib not in conocidos:
             problemas.append(f"{lib}: library_id desconocido")
             continue
+        if not ajenos.get(lib):
+            problemas.append(f"{lib}: {_SIN_TEXTOS}")
+            continue
         malo = False
         valores: dict[str, str] = {}
         for campo, limite in LIMITES.items():
@@ -85,11 +92,13 @@ def validar(
                 problemas.append(f"{lib}.{campo}: falta o no es texto")
             elif re.search(r"[\r\n]", v):
                 problemas.append(f"{lib}.{campo}: tiene saltos de línea")
+            elif any(unicodedata.category(c) == "Cc" for c in v):
+                problemas.append(f"{lib}.{campo}: tiene caracteres de control")
             elif re.search(r"http|www\.", v, re.IGNORECASE):
                 problemas.append(f"{lib}.{campo}: lleva una URL")
             elif len(v) > limite:
                 problemas.append(f"{lib}.{campo}: supera {limite} caracteres")
-            elif copia_literal(v, ajenos.get(lib, [])):
+            elif copia_literal(v, todos):
                 problemas.append(f"{lib}.{campo}: copia literal del texto ajeno; reescríbelo con tus palabras")
             elif buscar_secreto(v):
                 problemas.append(f"{lib}.{campo}: parece contener un secreto")
@@ -118,10 +127,10 @@ def _cargar_ajenos(p_id: str) -> dict[str, list[str]]:
         textos = [d.get("texto"), d.get("titulo")]
         watch = cache.base_cache() / p_id / str(lib) / "watch.md"
         try:
-            textos.append(watch.read_text(encoding="utf-8"))
+            textos.append(texto_transcripcion(watch.read_text(encoding="utf-8")))
         except OSError:
             pass
-        ajenos[str(lib)] = [t for t in textos if isinstance(t, str)]
+        ajenos[str(lib)] = [t for t in textos if isinstance(t, str) and t.strip()]
     return ajenos
 
 
@@ -143,7 +152,7 @@ def anotar(vault: Path, p_id: str, ruta_json: Path, ahora: datetime) -> list[str
     for f in ref.fichas:
         if f.library_id in nuevos:
             f.analisis = nuevos[f.library_id]
-    escribir_referencia(vault, ref, ahora)
+    escribir_referencia(vault, ref, ahora, log=False)
     ids = sorted(nuevos)
     anadir_log(
         vault, "ver-anuncios", f"anotar análisis de {len(ids)} anuncios", [f"productos/{p_id}/referencia/anuncios.md"], ahora=ahora

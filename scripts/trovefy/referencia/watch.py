@@ -179,6 +179,21 @@ def entorno_hijo(idioma: str | None, whisperx: bool) -> dict[str, str]:
     return env
 
 
+_SECCION_TRANSCRIPT = r"^## Transcript\n(.*?)(?=^## |^---$|\Z)"
+_MARCA_TIEMPO = re.compile(r"^\[\d+:\d{2}(?::\d{2})?\]\s*")
+
+
+def texto_transcripcion(texto: str) -> str | None:
+    """Solo el texto hablado del bloque ``## Transcript`` de watch.md, sin marcas ``[MM:SS]``."""
+    sec = re.search(_SECCION_TRANSCRIPT, texto, re.DOTALL | re.MULTILINE)
+    b = re.search(r"```\n(.*?)\n```", sec.group(1), re.DOTALL) if sec else None
+    if not b:
+        return None
+    lineas = [_MARCA_TIEMPO.sub("", ln).strip() for ln in b.group(1).splitlines()]
+    unido = " ".join(ln for ln in lineas if ln)
+    return unido or None
+
+
 def leer_informe(texto: str, trabajo: Path) -> InformeWatch:
     m = re.search(r"- \*\*Duration:\*\* \S+ \(([\d.]+)s\)", texto)
     duracion = Decimal(m.group(1)) if m else None
@@ -195,9 +210,7 @@ def leer_informe(texto: str, trabajo: Path) -> InformeWatch:
         fotos.append(p)
 
     transcripcion = fuente = None
-    sec = re.search(
-        r"^## Transcript\n(.*?)(?=^## |^---$|\Z)", texto, re.DOTALL | re.MULTILINE
-    )
+    sec = re.search(_SECCION_TRANSCRIPT, texto, re.DOTALL | re.MULTILINE)
     if sec:
         b = re.search(r"```\n(.*?)\n```", sec.group(1), re.DOTALL)
         if b and b.group(1).strip():

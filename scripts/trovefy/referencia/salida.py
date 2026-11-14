@@ -380,7 +380,7 @@ def _producto_md(vault: Path, ref: Referencia) -> tuple[Path, str]:
     return ruta, renderizar(meta, cuerpo)
 
 
-def escribir_referencia(vault: Path, ref: Referencia, ahora: datetime) -> list[Path]:
+def escribir_referencia(vault: Path, ref: Referencia, ahora: datetime, *, log: bool = True) -> list[Path]:
     d = _ruta_dir(vault, ref.producto)
     textos = {
         d / "anuncios.md": _anuncios_md(ref),
@@ -396,10 +396,11 @@ def escribir_referencia(vault: Path, ref: Referencia, ahora: datetime) -> list[P
             raise ValueError(f"{ruta.name}: aparece un secreto ({nombre}); no se escribe nada")
     for ruta, t in textos.items():
         escribir_atomico(ruta, t)
-    anadir_log(
-        vault, "ver-anuncios", f"referencia {ref.producto} {ref.pais}",
-        [f"productos/{ref.producto}/referencia/anuncios.md"], ahora=ahora,
-    )  # fmt: skip
+    if log:
+        anadir_log(
+            vault, "ver-anuncios", f"referencia {ref.producto} {ref.pais}",
+            [f"productos/{ref.producto}/referencia/anuncios.md"], ahora=ahora,
+        )  # fmt: skip
     return list(textos)
 
 
