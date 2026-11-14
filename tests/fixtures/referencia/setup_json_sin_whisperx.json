@@ -1,0 +1,31 @@
+{
+  "status": "needs_install",
+  "can_proceed": false,
+  "engine": "local",
+  "configured_engine": "auto",
+  "gemini_key_present": false,
+  "gemini_model": "gemini-3.7-flash",
+  "binaries_required": true,
+  "first_run": true,
+  "setup_complete": false,
+  "missing_binaries": [
+    "yt-dlp"
+  ],
+  "whisper_backend": null,
+  "configured_backend": "auto",
+  "has_api_key": false,
+  "backend_ready": false,
+  "whisperx_ready": false,
+  "whisperx_bin": "",
+  "whisperx_model": "small",
+  "config_file": "/tmp/ejemplo/.env",
+  "watch_detail": "balanced",
+  "platform": "Linux",
+  "youtube": {
+    "deno": null,
+    "node": "/home/david/.nvm/versions/node/v26.13.0/bin/node",
+    "ejs": "unknown (inspect the owning yt-dlp installation; no network probe)",
+    "impersonation": null,
+    "update_hint": "Update the owning package: brew upgrade yt-dlp; pipx upgrade yt-dlp; or winget upgrade --id yt-dlp.yt-dlp --exact. Verify the executable path above."
+  }
+}
