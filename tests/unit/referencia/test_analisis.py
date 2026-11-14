@@ -1,0 +1,143 @@
+from __future__ import annotations
+
+import json
+from datetime import date, datetime
+from decimal import Decimal
+from zoneinfo import ZoneInfo
+
+import pytest
+from trovefy.referencia import cache
+from trovefy.referencia.analisis import (
+    LIMITES,
+    AnalisisInvalido,
+    anotar,
+    copia_literal,
+    normalizar,
+)
+from trovefy.referencia.salida import FichaReferencia, Referencia, escribir_referencia
+from trovefy.vault.frontmatter import escribir as fm_escribir
+
+AHORA = datetime(2026, 11, 13, 10, 0, tzinfo=ZoneInfo("America/Bogota"))
+P = "p-0001-demo"
+TRANSCRIPCION = "hoy te enseño cómo calmar tu sistema nervioso en solo cinco minutos al día"
+TEXTO = "Texto ajeno ficticio para el anuncio uno con palabras que nadie copiará jamás"
+PROPIO = {
+    "transcripcion_resumida": "Promete calma rápida con una rutina corta diaria",
+    "hook_sujeto": "una persona estresada",
+    "hook_dolor_o_resultado": "el cansancio de no desconectar",
+    "angulo": "calma en cinco minutos",
+    "cta": "descargar la guía",
+    "objecion": "no medido: el anuncio no ataca ninguna objeción visible",
+}
+
+
+def _ficha(lib):
+    return FichaReferencia(
+        1, lib, "ganador", 10, 1, False, 1, "video", Decimal(30), True,
+        f"https://www.facebook.com/ads/library/?id={lib}", None, None, [],
+    )  # fmt: skip
+
+
+@pytest.fixture
+def vault(tmp_path, monkeypatch):
+    monkeypatch.setenv("TROVEFY_CACHE_REFERENCIA", str(tmp_path / "cache"))
+    v = tmp_path / "vault"
+    fm_escribir(v / f"productos/{P}/PRODUCTO.md", {"id": P}, "# Producto\n")
+    ref = Referencia(P, "o-001", "8", "MX", date(2026, 11, 13), "publica", None, True, [_ficha("111"), _ficha("222")], [])
+    escribir_referencia(v, ref, AHORA)
+    textos = {
+        "111": {"texto": TEXTO, "titulo": "Título ajeno"},
+        "222": {"texto": "otro texto", "titulo": None},
+    }
+    cache.guardar_textos(P, json.dumps(textos), AHORA, 30)
+    c = cache.carpeta_anuncio(P, "111", AHORA, 30)
+    (c / "watch.md").write_text(TRANSCRIPCION, encoding="utf-8")
+    return v
+
+
+def _json(tmp_path, entradas):
+    r = tmp_path / "analisis.json"
+    r.write_text(json.dumps(entradas), encoding="utf-8")
+    return r
+
+
+def _e(lib="111", **cambios):
+    return {"library_id": lib, **PROPIO, **cambios}
+
+
+def test_normalizar_y_copia():
+    assert normalizar("¡Cómo, CALMAR!") == ["como", "calmar"]
+    assert copia_literal("a b c d e f g h", ["x a b c d e f g h y"])
+    assert not copia_literal("a b c d e f g", ["a b c d e f g"])
+
+
+def test_anotar_rechaza_copia_literal(vault, tmp_path):
+    r = _json(tmp_path, [_e(transcripcion_resumida="calmar tu sistema nervioso en solo cinco minutos al día")])
+    with pytest.raises(AnalisisInvalido) as ei:
+        anotar(vault, P, r, AHORA)
+    assert "111" in str(ei.value) and "transcripcion_resumida" in str(ei.value)
+
+
+def test_anotar_acepta_texto_propio(vault, tmp_path):
+    anotar(vault, P, _json(tmp_path, [_e()]), AHORA)
+    out = (vault / f"productos/{P}/referencia/anuncios.md").read_text()
+    assert "Promete calma rápida con una rutina corta diaria" in out
+    assert "no medido: el anuncio no ataca" in out
+    assert TRANSCRIPCION not in out and TEXTO not in out
+    assert "anotar" in (vault / "log.md").read_text()
+
+
+def test_anotar_rechaza_url(vault, tmp_path):
+    for v in ("mira https://x.test", "en www.x.test"):
+        with pytest.raises(AnalisisInvalido):
+            anotar(vault, P, _json(tmp_path, [_e(cta=v)]), AHORA)
+
+
+def test_anotar_rechaza_id_desconocido(vault, tmp_path):
+    with pytest.raises(AnalisisInvalido, match="999"):
+        anotar(vault, P, _json(tmp_path, [_e("999")]), AHORA)
+
+
+def test_anotar_limites(vault, tmp_path):
+    with pytest.raises(AnalisisInvalido, match="cta"):
+        anotar(vault, P, _json(tmp_path, [_e(cta="x" * (LIMITES["cta"] + 1))]), AHORA)
+
+
+def test_anotar_campos_y_tipos(vault, tmp_path):
+    e = _e(angulo="dos\nlíneas")
+    del e["cta"]
+    with pytest.raises(AnalisisInvalido) as ei:
+        anotar(vault, P, _json(tmp_path, [e]), AHORA)
+    assert len(ei.value.problemas) == 2
+
+
+def test_anotar_sin_textos_en_cache(vault, tmp_path):
+    cache.textos_path(P).unlink()
+    with pytest.raises(AnalisisInvalido, match="vuelve a ejecutar"):
+        anotar(vault, P, _json(tmp_path, [_e()]), AHORA)
+
+
+def test_anotar_acumula_problemas(vault, tmp_path):
+    r = _json(tmp_path, [_e("111", cta="ver https://x.test"), _e("222", angulo="y" * 500)])
+    with pytest.raises(AnalisisInvalido) as ei:
+        anotar(vault, P, r, AHORA)
+    assert len(ei.value.problemas) == 2
+
+
+def test_anotar_no_medido_permitido(vault, tmp_path):
+    assert anotar(vault, P, _json(tmp_path, [_e()]), AHORA) == ["111"]
+
+
+def test_anotar_secreto(vault, tmp_path):
+    with pytest.raises(AnalisisInvalido):
+        anotar(vault, P, _json(tmp_path, [_e(cta="EAA" + "B" * 30)]), AHORA)
+
+
+def test_anotar_json_grande_o_mal_formado(vault, tmp_path):
+    r = tmp_path / "g.json"
+    r.write_text("x" * (1024 * 1024 + 1))
+    with pytest.raises(AnalisisInvalido):
+        anotar(vault, P, r, AHORA)
+    r.write_text('{"a": 1}')
+    with pytest.raises(AnalisisInvalido):
+        anotar(vault, P, r, AHORA)
