@@ -16,7 +16,7 @@ def test_init_crea_el_andamio(tmp_path):
               "wiki/caza/exclusiones.md", "wiki/entidades.md"]:
         assert (v / f).is_file(), f
     assert "<!-- REGLAS:INICIO -->" in (v / "CLAUDE.md").read_text()
-    assert len(list((v / "wiki/reglas").glob("R-*.md"))) == 12
+    assert len(list((v / "wiki/reglas").glob("R-*.md"))) == 13
     assert not list(v.rglob(".gitkeep"))
 
 

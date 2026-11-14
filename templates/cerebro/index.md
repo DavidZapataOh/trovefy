@@ -16,6 +16,7 @@ Catálogo: una línea por página. Es lo primero que se lee.
 - [[wiki/reglas/R-010-ritmo-del-surf]] — Ritmo del surf
 - [[wiki/reglas/R-011-paciencia-de-72-h]] — Paciencia de 72 h
 - [[wiki/reglas/R-012-caza-de-pocos-en-pocos]] — Caza de pocos en pocos
+- [[wiki/reglas/R-013-ranking-de-anuncios-de-referencia]] — Ranking de anuncios de referencia
 
 ## Caza
 
