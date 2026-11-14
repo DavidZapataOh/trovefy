@@ -237,3 +237,84 @@ def test_vigia_enmascara_ids_de_cuenta_en_informe_y_alerta():
     a = c.alerta(res)
     assert LARGA not in t and LARGA not in a["texto"]
     assert "act_…3456" in t and "act_…3456" in a["texto"]
+
+
+def _carpeta_referencia(base, dias_caduca):
+    carpeta = base / "p-0001-x" / "123"
+    carpeta.mkdir(parents=True)
+    (carpeta / "caduca.json").write_text(json.dumps({"caduca": (AHORA + timedelta(days=dias_caduca)).isoformat()}))
+
+
+def test_vigia_referencia_vencida(tmp_path):
+    base = tmp_path / "cache"
+    _carpeta_referencia(base, -1)
+    r = c.referencia_cache(AHORA, base)
+    assert r.nivel == "aviso"
+    assert "1 carpetas o lotes de referencia pasaron sus 30 días" in r.texto
+    assert "trovefy ver-anuncios limpiar" in r.texto
+
+
+def test_vigia_referencia_sin_base_ok(tmp_path):
+    r = c.referencia_cache(AHORA, tmp_path / "no-existe")
+    assert r.nivel == "ok" and "sin medios de referencia" in r.texto
+
+
+def test_vigia_referencia_vigente_ok(tmp_path):
+    base = tmp_path / "cache"
+    _carpeta_referencia(base, 5)
+    assert c.referencia_cache(AHORA, base).nivel == "ok"
+
+
+def test_vigilar_incluye_referencia(tmp_path):
+    base = tmp_path / "cache"
+    _carpeta_referencia(base, -1)
+    fu = Fuentes(spool=tmp_path / "s", unidades=tmp_path / "u", ruta_env=tmp_path / "e", cache_referencia=base)
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    res = {x.nombre: x for x in c.vigilar(vault, AHORA, fu)}
+    assert res["referencia"].nivel == "aviso"
+
+
+def test_vigia_referencia_cuenta_lotes_mcp_vencidos(tmp_path):
+    import os
+
+    base = tmp_path / "cache"
+    mcp = base / "p-0001-x" / "mcp"
+    mcp.mkdir(parents=True)
+    lote = mcp / "lote-a.json"
+    lote.write_text("{}")
+    t = (AHORA - timedelta(days=400)).timestamp()
+    os.utime(lote, (t, t))
+    r = c.referencia_cache(AHORA, base)
+    assert r.nivel == "aviso" and r.texto.startswith("1 ")
+
+
+def test_vigia_referencia_iterdir_falla_no_revienta(tmp_path, monkeypatch):
+    from trovefy.referencia import cache as cache_ref
+
+    base = tmp_path / "cache"
+    base.mkdir()
+
+    def falla(*a, **kw):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(cache_ref, "vencidos", falla)
+    r = c.referencia_cache(AHORA, base)
+    assert r.nivel == "aviso" and "no se pudo leer" in r.texto and "PermissionError" in r.texto
+
+
+def test_vigia_referencia_usa_retencion_configurada(tmp_path):
+    base = tmp_path / "cache"
+    lote = base / "p-0001-x" / "mcp" / "lote-x.json"
+    lote.parent.mkdir(parents=True)
+    lote.write_text("{}")
+    import os
+
+    viejo = (AHORA - timedelta(days=45)).timestamp()
+    os.utime(lote, (viejo, viejo))
+    assert c.referencia_cache(AHORA, base, 60).nivel == "ok"
+    assert c.referencia_cache(AHORA, base, 30).nivel == "aviso"
+
+
+def test_retencion_referencia_sin_umbrales_usa_defecto(tmp_path):
+    assert c._retencion_referencia(tmp_path) == 30

@@ -23,9 +23,9 @@ def _vault(tmp_path):
 def test_regla_nueva_se_indexa(tmp_path):
     v = _vault(tmp_path)
     ruta = nueva_regla(v, "No cazar en diciembre", "…", "…", "…", "Usuario 2026-11-10", fecha="2026-11-10")
-    assert ruta.name == "R-013-no-cazar-en-diciembre.md"
-    assert "R-013-no-cazar-en-diciembre" in (v / "CLAUDE.md").read_text()
-    assert "R-013" in (v / "index.md").read_text()
+    assert ruta.name == "R-014-no-cazar-en-diciembre.md"
+    assert "R-014-no-cazar-en-diciembre" in (v / "CLAUDE.md").read_text()
+    assert "R-014" in (v / "index.md").read_text()
     meta, _ = leer(ruta)
     assert meta["estado"] == "vigente" and meta["fecha"] == "2026-11-10"
     assert "recordar" in (v / "log.md").read_text()
@@ -35,7 +35,7 @@ def test_regla_nueva_se_indexa(tmp_path):
 def test_slug_sin_acentos(tmp_path):
     v = _vault(tmp_path)
     ruta = nueva_regla(v, "Ñandú: ¡Más rápido!", "r", "p", "c", "U")
-    assert ruta.name == "R-013-nandu-mas-rapido.md"
+    assert ruta.name == "R-014-nandu-mas-rapido.md"
 
 
 def test_contradiccion_se_detecta(tmp_path):
@@ -45,7 +45,7 @@ def test_contradiccion_se_detecta(tmp_path):
         nueva_regla(v, "Corte a 20", "…", "…", "…", "Usuario", umbrales={"corte.oferta.sin_ventas_usd": 20})
     assert "R-006" in e.value.ids
     assert (v / "config/umbrales.yaml").read_text() == antes
-    assert not list((v / "wiki/reglas").glob("R-013*"))
+    assert not list((v / "wiki/reglas").glob("R-014*"))
 
 
 def test_conflictos(tmp_path):
@@ -62,12 +62,12 @@ def test_reemplazo_actualiza_umbral_y_queda_consistente(tmp_path):
     u = yaml.safe_load((v / "config/umbrales.yaml").read_text())
     assert list(u) == claves
     assert u["corte.oferta.sin_ventas_usd"]["valor"] == 20
-    assert u["corte.oferta.sin_ventas_usd"]["regla"] == "R-013"
+    assert u["corte.oferta.sin_ventas_usd"]["regla"] == "R-014"
     assert u["corte.oferta.sin_ventas_usd"]["fecha"] == "2026-11-10"
-    assert u["corte.oferta.factor_cpa_be"]["regla"] == "R-013"
+    assert u["corte.oferta.factor_cpa_be"]["regla"] == "R-014"
     meta, _ = leer(v / "wiki/reglas/R-006-corte-de-oferta-sin-ventas.md")
-    assert meta["estado"] == "reemplazada" and meta["reemplazada_por"] == "R-013"
-    assert "reemplazada por [[R-013-corte-a-20]]" in (v / "CLAUDE.md").read_text()
+    assert meta["estado"] == "reemplazada" and meta["reemplazada_por"] == "R-014"
+    assert "reemplazada por [[R-014-corte-a-20]]" in (v / "CLAUDE.md").read_text()
     assert consistencia(v) == []
 
 
@@ -75,7 +75,7 @@ def test_umbral_desconocido_no_escribe(tmp_path):
     v = _vault(tmp_path)
     with pytest.raises(ValueError):
         nueva_regla(v, "X", "r", "p", "c", "U", umbrales={"inventado": 1})
-    assert not list((v / "wiki/reglas").glob("R-013*"))
+    assert not list((v / "wiki/reglas").glob("R-014*"))
 
 
 def test_consistencia_ignora_reglas_reemplazadas(tmp_path):
@@ -98,7 +98,7 @@ def test_cli_regla_ok(tmp_path, monkeypatch, capsys):
     v = _vault(tmp_path)
     monkeypatch.setenv("TROVEFY_VAULT", str(v))
     assert cli.main(["cerebro", "regla", "--json", _json(tmp_path)]) == 0
-    assert "R-013-no-cazar-en-diciembre.md" in capsys.readouterr().out
+    assert "R-014-no-cazar-en-diciembre.md" in capsys.readouterr().out
 
 
 def test_cli_regla_stdin(tmp_path, monkeypatch, capsys):
@@ -166,7 +166,7 @@ def test_slug_vacio_y_fecha_invalida(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("TROVEFY_VAULT", str(v))
     assert cli.main(["cerebro", "regla", "--json", _json(tmp_path, titulo="¡¡")]) == 2
     assert cli.main(["cerebro", "regla", "--json", _json(tmp_path, fecha="10/11/2026")]) == 2
-    assert not list((v / "wiki/reglas").glob("R-013*"))
+    assert not list((v / "wiki/reglas").glob("R-014*"))
 
 
 def test_simular_no_escribe_y_muestra_heredados(tmp_path, monkeypatch, capsys):
@@ -177,9 +177,9 @@ def test_simular_no_escribe_y_muestra_heredados(tmp_path, monkeypatch, capsys):
     assert cli.main(["cerebro", "regla", "--simular", "--json", j]) == 0
     out = capsys.readouterr().out
     assert _snapshot(v) == antes
-    assert "R-013 pasa a ser dueña de corte.oferta.factor_cpa_be (valor sin cambios)" in out
+    assert "R-014 pasa a ser dueña de corte.oferta.factor_cpa_be (valor sin cambios)" in out
     assert "corte.oferta.sin_ventas_usd: 25 -> 20" in out
-    assert "config/umbrales.yaml" in out and "R-013-no-cazar-en-diciembre" in out
+    assert "config/umbrales.yaml" in out and "R-014-no-cazar-en-diciembre" in out
 
 
 def test_real_imprime_mismo_resumen(tmp_path, monkeypatch, capsys):
@@ -188,8 +188,8 @@ def test_real_imprime_mismo_resumen(tmp_path, monkeypatch, capsys):
     j = _json(tmp_path, umbrales={"corte.oferta.sin_ventas_usd": 20}, reemplaza=["R-006"])
     assert cli.main(["cerebro", "regla", "--json", j]) == 0
     out = capsys.readouterr().out
-    assert "R-013 pasa a ser dueña de corte.oferta.factor_cpa_be (valor sin cambios)" in out
-    assert out.strip().endswith("R-013-no-cazar-en-diciembre.md")
+    assert "R-014 pasa a ser dueña de corte.oferta.factor_cpa_be (valor sin cambios)" in out
+    assert out.strip().endswith("R-014-no-cazar-en-diciembre.md")
     assert consistencia(v) == []
 
 
@@ -263,7 +263,7 @@ def test_fecha_imposible_sale_2(tmp_path, monkeypatch):
     monkeypatch.setenv("TROVEFY_VAULT", str(v))
     for f in ("2026-13-45", "2026-02-30"):
         assert cli.main(["cerebro", "regla", "--json", _json(tmp_path, fecha=f)]) == 2
-    assert not list((v / "wiki/reglas").glob("R-013*"))
+    assert not list((v / "wiki/reglas").glob("R-014*"))
 
 
 def test_lint_marca_valor_desactualizado_y_consistencia(tmp_path):

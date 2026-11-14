@@ -49,3 +49,6 @@ markers = [
     "integracion: usa un navegador real (Chromium de Playwright); se ejecuta con -m integracion",
     "vivo: toca servicios reales; se ejecuta con -m vivo",
 ]
+
+[tool.ruff]
+extend-exclude = ["vendor"]

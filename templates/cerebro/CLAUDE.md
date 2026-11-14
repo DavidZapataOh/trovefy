@@ -47,4 +47,5 @@ Las reglas nuevas se añaden con `/recordar` como `R-nnn`; aquí solo aparece su
 - [[R-010-ritmo-del-surf]] Ritmo del surf
 - [[R-011-paciencia-de-72-h]] Paciencia de 72 h
 - [[R-012-caza-de-pocos-en-pocos]] Caza de pocos en pocos
+- [[R-013-ranking-de-anuncios-de-referencia]] Ranking de anuncios de referencia
 <!-- REGLAS:FIN -->

@@ -26,11 +26,11 @@ def test_clave_inexistente_se_detecta(tmp_path):
     assert any("corte.anuncio.gasto_usd" in x for x in problemas)
 
 
-def test_claude_md_lista_las_12_reglas_y_17_duras(tmp_path):
+def test_claude_md_lista_las_13_reglas_y_17_duras(tmp_path):
     v = tmp_path / "v"; crear_vault(v)
     t = (v / "CLAUDE.md").read_text()
     bloque = t.split("<!-- REGLAS:INICIO -->")[1].split("<!-- REGLAS:FIN -->")[0]
-    assert len(re.findall(r"^- \[\[R-\d{3}-", bloque, re.MULTILINE)) == 12
+    assert len(re.findall(r"^- \[\[R-\d{3}-", bloque, re.MULTILINE)) == 13
     assert len(re.findall(r"^\d+\. \*\*", t, re.MULTILINE)) == 17
 
 

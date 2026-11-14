@@ -1,0 +1,42 @@
+{
+ "_nota": "forma por confirmar (P-01)",
+ "version": 1,
+ "herramienta": "mcp__meta-ads__ads_library_search",
+ "busquedas": [
+  {
+   "pais": "RO",
+   "q": null,
+   "page_id": "800000000001",
+   "estado": "active",
+   "capturado_en": "2026-11-13T10:01:00+00:00",
+   "argumentos": {
+    "search_page_ids": [
+     "800000000001"
+    ],
+    "ad_reached_countries": [
+     "RO"
+    ]
+   },
+   "respuesta": {
+    "data": [
+     {
+      "id": "900000000000001",
+      "page_id": "800000000001",
+      "page_name": "Pagina Ficticia Uno",
+      "ad_delivery_start_time": "2026-09-01",
+      "ad_delivery_stop_time": null,
+      "publisher_platforms": [
+       "facebook"
+      ],
+      "ad_creative_bodies": [
+       "Cuaderno"
+      ],
+      "ad_creative_link_titles": [
+       "Cuaderno"
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

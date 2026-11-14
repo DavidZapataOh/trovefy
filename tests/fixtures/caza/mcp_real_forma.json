@@ -1,0 +1,18 @@
+{
+ "_nota": "forma confirmada el 2026-11-14 (P-01); datos sinteticos",
+ "version": 1,
+ "herramienta": "mcp__meta-ads__ads_library_search",
+ "busquedas": [
+  {
+   "pais": "RO",
+   "q": null,
+   "page_id": "800000000001",
+   "estado": "active",
+   "capturado_en": "2026-11-13T10:01:00+00:00",
+   "respuesta": {
+    "results": "{\"estimated_total_count\": 2, \"ads\": [{\"id\": \"900000000000101\", \"page_id\": 800000000001, \"page_name\": \"Pagina Ficticia Uno\", \"ad_creative_link_title\": \"Titlu fictiv unu\", \"ad_creation_time\": 1789000000, \"ad_delivery_start_time\": 1789000000, \"ad_snapshot_url\": \"https://www.facebook.com/ads/library/?id=900000000000101\", \"currency\": \"RON\"}, {\"id\": \"900000000000102\", \"page_id\": 800000000001, \"page_name\": \"Pagina Ficticia Uno\", \"ad_creative_link_title\": \"Titlu fictiv doi\", \"ad_creation_time\": 1788000000, \"ad_delivery_start_time\": 1788000000, \"ad_snapshot_url\": \"https://www.facebook.com/ads/library/?id=900000000000102\", \"currency\": \"RON\"}]}",
+    "client_conversation_id": "conv-ficticia-0001"
+   }
+  }
+ ]
+}

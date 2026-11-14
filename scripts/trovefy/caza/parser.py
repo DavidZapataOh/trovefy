@@ -14,12 +14,20 @@ from __future__ import annotations
 import html as _html
 import json
 import re
+from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from typing import Any
 
 from trovefy.caza.modelo import AnuncioBiblioteca, Parseo
 
-__all__ = ["FormatoDesconocido", "parsear_detalle", "parsear_respuestas", "sin_resultados", "total_aproximado"]
+__all__ = [
+    "FormatoDesconocido",
+    "parsear_detalle",
+    "parsear_respuestas",
+    "resultados_crudos",
+    "sin_resultados",
+    "total_aproximado",
+]
 
 
 class FormatoDesconocido(Exception):
@@ -122,6 +130,32 @@ def _scripts(html: str | None) -> list[str]:
     return [_html.unescape(m) if "&quot;" in m else m for m in _SCRIPT_JSON.findall(html)]
 
 
+def _recorrer(cuerpos: list[str], html: str | None) -> Iterator[tuple[str, Any]]:
+    """Recorre las conexiones: ``("conexion", con)``, ``("edge_malo", None)`` o ``("anuncio", crudo)``."""
+    for t in _scripts(html) + list(cuerpos):
+        try:
+            doc = json.loads(t)
+        except (ValueError, TypeError):
+            continue
+        for con in _conexiones(doc):
+            yield "conexion", con
+            for edge in con["edges"]:
+                nodo = edge.get("node") if isinstance(edge, dict) else None
+                resultados = nodo.get("collated_results") if isinstance(nodo, dict) else None
+                if not isinstance(resultados, list):
+                    yield "edge_malo", None
+                    continue
+                for r in resultados:
+                    yield "anuncio", r
+
+
+def resultados_crudos(cuerpos: list[str], html: str | None) -> Iterator[dict]:
+    """Cada ``collated_results[]`` crudo (dict), en el orden que usa :func:`parsear_detalle`."""
+    for tipo, valor in _recorrer(cuerpos, html):
+        if tipo == "anuncio" and isinstance(valor, dict):
+            yield valor
+
+
 def parsear_detalle(cuerpos: list[str], pais: str, html: str | None = None) -> Parseo:
     """Lee anuncios de las respuestas de datos y de los bloques JSON del HTML.
 
@@ -134,37 +168,28 @@ def parsear_detalle(cuerpos: list[str], pais: str, html: str | None = None) -> P
     ``search_results_connection``, o si hubo entradas pero ninguna se pudo leer. Una conexión
     reconocida con ``edges`` vacío es una búsqueda sin resultados.
     """
-    textos = _scripts(html) + list(cuerpos)
     vistos: dict[str, AnuncioBiblioteca] = {}
     hay_mas: bool | None = None
     reconocido = False
     descartados = 0
     entradas = 0
-    for t in textos:
-        try:
-            doc = json.loads(t)
-        except (ValueError, TypeError):
-            continue
-        for con in _conexiones(doc):
+    for tipo, valor in _recorrer(cuerpos, html):
+        if tipo == "conexion":
             reconocido = True
-            info = con.get("page_info")
+            info = valor.get("page_info")
             if isinstance(info, dict) and isinstance(info.get("has_next_page"), bool):
                 hay_mas = info["has_next_page"]
-            for edge in con["edges"]:
-                nodo = edge.get("node") if isinstance(edge, dict) else None
-                resultados = nodo.get("collated_results") if isinstance(nodo, dict) else None
-                if not isinstance(resultados, list):
-                    entradas += 1
-                    descartados += 1
-                    continue
-                for r in resultados:
-                    entradas += 1
-                    try:
-                        a = _anuncio(r, pais)
-                    except FormatoDesconocido:
-                        descartados += 1
-                        continue
-                    vistos.setdefault(a.library_id, a)
+        elif tipo == "edge_malo":
+            entradas += 1
+            descartados += 1
+        else:
+            entradas += 1
+            try:
+                a = _anuncio(valor, pais)
+            except FormatoDesconocido:
+                descartados += 1
+                continue
+            vistos.setdefault(a.library_id, a)
     if not reconocido:
         raise FormatoDesconocido("ninguna respuesta trae search_results_connection")
     if entradas and not vistos:

@@ -432,3 +432,45 @@ cuenta.limite_gasto_inicial_usd:
   fecha: "2026-11-09"
   gana_sobre: "—"
   regla: R-007
+
+referencia.ranking.min_dias:
+  valor: 7
+  fuente: "cuongbigdigi rank.js:23-30; diseño §4.4"
+  fecha: "2026-11-13"
+  gana_sobre: "—"
+  regla: R-013
+
+referencia.ranking.max_variantes:
+  valor: 30
+  fuente: "cuongbigdigi rank.js:23-30; diseño §4.4"
+  fecha: "2026-11-13"
+  gana_sobre: "—"
+  regla: R-013
+
+referencia.ranking.peso_variantes:
+  valor: 2
+  fuente: "cuongbigdigi rank.js:23-30; diseño §4.4"
+  fecha: "2026-11-13"
+  gana_sobre: "—"
+  regla: R-013
+
+referencia.en_test.min_variantes:
+  valor: 3
+  fuente: "cuongbigdigi rank.js:23-30; diseño §4.4"
+  fecha: "2026-11-13"
+  gana_sobre: "—"
+  regla: R-013
+
+referencia.top:
+  valor: 10
+  fuente: "Diseño §4.4 (--top 10)"
+  fecha: "2026-11-13"
+  gana_sobre: "—"
+  regla: R-013
+
+referencia.medios.retencion_dias:
+  valor: 30
+  fuente: "Diseño §4.4; contrato 4"
+  fecha: "2026-11-13"
+  gana_sobre: "—"
+  regla: R-013
