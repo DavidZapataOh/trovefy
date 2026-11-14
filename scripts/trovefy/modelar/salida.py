@@ -9,6 +9,7 @@ son los de las resoluciones 4–7 del contrato de la fase 2; los leen los planes
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -32,11 +33,18 @@ from trovefy.modelar.autopsia import (
     senal_se_puede_mejorar,
     vende_por_presupuesto,
 )
-from trovefy.modelar.esquema import IMPACTOS, Brandbook, Modelado, PiezaEscalera
+from trovefy.modelar.esquema import (
+    IMPACTOS,
+    Brandbook,
+    Modelado,
+    PiezaEscalera,
+    token_css_inseguro,
+)
 from trovefy.secretos import buscar_secreto
 from trovefy.vault import frontmatter
 from trovefy.vault.escritura import anadir_log, escribir_atomico
 from trovefy.vault.producto import (
+    ESTADOS_FASE2,
     EstadoInesperado,
     actualizar_producto,
     estado_pais,
@@ -51,6 +59,13 @@ CIERRE_TACITO = "Si no la rechazas en esta sesión, queda aprobada (aprobación 
 _ETIQUETA_PASO = {"front": "Front", "bump": "Bump", "u1": "U1", "u2": "U2", "u3": "U3", "downsell": "Downsell"}
 _CAMPOS_ECONOMIA = ("aov_usd", "be_usd", "cpa_be_usd", "cpa_test_usd", "cpa_escala_usd", "roas_be")
 _ID_OFERTA = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# Dato técnico: monedas con céntimos (el resto se cobra en unidades enteras).
+_MONEDAS_CON_CENTIMOS = frozenset({"EUR", "USD"})
+_CENTIMO = Decimal("0.01")
+_SIN_CAMBIO = "no medido: sin cambio del BCE del día"
+AVISO_ORIGINAL_ILEGIBLE = "comparación con el original: no medido (precio de la ficha no legible)"
+# Estados de fase 2 en los que la oferta ya se está produciendo (después de ``modelado``).
+_EN_PRODUCCION = ESTADOS_FASE2[ESTADOS_FASE2.index("modelado") + 1:]
 
 
 # --- formato ---------------------------------------------------------------------------------------
@@ -258,8 +273,15 @@ def _cifras(e: Economia) -> dict[str, Cifra]:
 
 
 def _pais_meta(escalera: EscaleraPais, economia: Economia, piezas: dict[str, PiezaEscalera]) -> dict:
-    bloque: dict = {"moneda": escalera.moneda, "fuente_precio": escalera.fuente_precio,
-                    "front_eur": _txt(escalera.front_eur.valor)}
+    bloque: dict = {"moneda": escalera.moneda or None}
+    if not escalera.moneda:
+        bloque["moneda_motivo"] = escalera.motivo
+    if escalera.pasos is None:
+        bloque["fuente_precio"] = None
+        bloque["fuente_precio_motivo"] = escalera.motivo
+    else:
+        bloque["fuente_precio"] = escalera.fuente_precio
+    bloque["front_eur"] = _txt(escalera.front_eur.valor)
     if escalera.front_eur.valor is None:
         bloque["front_eur_motivo"] = escalera.front_eur.motivo
     if escalera.pasos is None:
@@ -284,8 +306,7 @@ def _pais_meta(escalera: EscaleraPais, economia: Economia, piezas: dict[str, Pie
 
 def _cambio_meta(cambio: Cambio | None) -> dict:
     if cambio is None:
-        return {"fuente": "BCE", "fecha": None, "url": None,
-                "motivo": "no medido: sin cambio del BCE del día"}
+        return {"fuente": "BCE", "fecha": None, "fecha_motivo": _SIN_CAMBIO, "url": None, "url_motivo": _SIN_CAMBIO}
     return {"fuente": "BCE", "fecha": cambio.fecha, "url": cambio.url}
 
 
@@ -321,18 +342,19 @@ def render_escalera(escaleras: dict[str, EscaleraPais], economias: dict[str, Eco
     lineas = [f"# Escalera de precios · {producto}", "", linea_cambio, ""]
     for pais, e in escaleras.items():
         eco = economias[pais]
-        lineas += [f"## {pais} ({e.moneda})", "", f"Precio del front: {e.fuente_precio}.", ""]
-        if e.pasos is None:
+        lineas += [f"## {pais} ({e.moneda or 'moneda no medida'})", ""]
+        if e.pasos is None:  # sin escalera no hay nada más que contar: solo el motivo
             lineas += [f"Escalera: {e.motivo}", ""]
-        else:
-            lineas += ["| Paso | Pieza | Precio | Activo | Motivo |", "|---|---|---|---|---|"]
-            for nombre in PASOS:
-                p = e.pasos[nombre]
-                pieza = por_paso.get(nombre)
-                lineas.append(f"| {_ETIQUETA_PASO[nombre]} | {_celda(pieza.titulo if pieza else '—')} | "
-                              f"{_coma(p.precio)} {p.moneda} | {'sí' if p.activo else 'no'} | "
-                              f"{_celda(p.motivo_inactivo or '—')} |")
-            lineas.append("")
+            continue
+        lineas += [f"Precio del front: {e.fuente_precio}.", ""]
+        lineas += ["| Paso | Pieza | Precio | Activo | Motivo |", "|---|---|---|---|---|"]
+        for nombre in PASOS:
+            p = e.pasos[nombre]
+            pieza = por_paso.get(nombre)
+            lineas.append(f"| {_ETIQUETA_PASO[nombre]} | {_celda(pieza.titulo if pieza else '—')} | "
+                          f"{_coma(p.precio)} {p.moneda} | {'sí' if p.activo else 'no'} | "
+                          f"{_celda(p.motivo_inactivo or '—')} |")
+        lineas.append("")
         lineas += [
             "### Economía (USD)", "",
             f"- AOV: {_cifra_texto(eco.aov_usd)}",
@@ -352,7 +374,14 @@ def render_escalera(escaleras: dict[str, EscaleraPais], economias: dict[str, Eco
 
 
 def render_brandbook(b: Brandbook, hoy: date, *, producto: str) -> str:
-    """``BRANDBOOK.md``: 7 secciones; ``tokens_css`` del frontmatter es la fuente (el bloque css es copia)."""
+    """``BRANDBOOK.md``: 7 secciones; ``tokens_css`` del frontmatter es la fuente (el bloque css es copia).
+
+    Defensa en profundidad: un token fuera de la lista blanca del esquema lanza ``ValueError`` y no se pinta.
+    """
+    for clave, valor in b.tokens_css.items():
+        motivo = token_css_inseguro(clave, valor)
+        if motivo:
+            raise ValueError(f"brandbook.tokens_css.{clave}: {motivo}; no se escribe el brandbook")
     meta = {
         "tipo": "brandbook",
         "producto": producto,
@@ -436,27 +465,51 @@ def render_comparativa(m: Modelado, original: Autopsia, nuestra: Autopsia, escal
 # --- escritura -------------------------------------------------------------------------------------
 
 
-def _precio_original(vault: Path, p_id: str) -> tuple[Decimal | float, str | None] | None:
-    """``(precio, moneda)`` de ``wiki/ofertas/<oferta_id>.md``; moneda ausente → ``None``; sin precio → ``None``."""
+def _precio_original(vault: Path, p_id: str) -> tuple[tuple[Decimal, str | None] | None, bool]:
+    """``((precio, moneda), False)`` de ``wiki/ofertas/<oferta_id>.md``; moneda ausente → ``None``.
+
+    Sin ``oferta_id`` o sin ficha: ``(None, False)`` (no hay con qué comparar). Con ficha pero con un precio
+    que no se lee, no es finito o es ≤ 0: ``(None, True)``, y la comparación sale «no medido». Un float del
+    YAML (``9.0``) pasa por ``str`` para no arrastrar el error binario.
+    """
     meta = frontmatter.leer(ruta_producto(vault, p_id))[0] or {}
     oferta_id = meta.get("oferta_id")
     if not isinstance(oferta_id, str) or not _ID_OFERTA.fullmatch(oferta_id) or ".." in oferta_id:
-        return None
+        return None, False
     ficha = Path(vault) / "wiki" / "ofertas" / f"{oferta_id}.md"
     if not ficha.is_file():
-        return None
+        return None, False
     datos = frontmatter.leer(ficha)[0] or {}
-    precio = datos.get("precio")
-    if isinstance(precio, str):
+    crudo = datos.get("precio")
+    precio: Decimal | None = None
+    if isinstance(crudo, str):
         try:
-            precio = Decimal(precio.strip().replace(",", "."))
+            precio = Decimal(crudo.strip().replace(",", "."))
         except InvalidOperation:
-            return None
-    if isinstance(precio, bool) or not isinstance(precio, (int, float, Decimal)):
-        return None
+            precio = None
+    elif isinstance(crudo, (int, float, Decimal)) and not isinstance(crudo, bool):
+        precio = crudo if isinstance(crudo, Decimal) else Decimal(str(crudo))
+    if precio is None or not precio.is_finite() or precio <= 0:
+        return None, True
     moneda = datos.get("moneda")
     moneda = moneda.strip().upper() if isinstance(moneda, str) and moneda.strip() else None
-    return precio, moneda
+    return (precio, moneda), False
+
+
+def _precio_manual(precio: Decimal | float, moneda: str) -> Decimal:
+    """EUR/USD al céntimo (``13.9`` → ``13.90``, ``15`` → ``15.00``); las monedas sin céntimos, tal cual."""
+    importe = precio if isinstance(precio, Decimal) else Decimal(str(precio))
+    return importe.quantize(_CENTIMO) if moneda.upper() in _MONEDAS_CON_CENTIMOS else importe
+
+
+def _sin_mercado(pais: str) -> EscaleraPais:
+    """La reserva que no está en ``config/mercados.yaml``: sin escalera, con su motivo."""
+    motivo = f"no medido: {pais} no está en config/mercados.yaml"
+    return EscaleraPais(pais, "", None, Cifra(None, motivo), "", (), motivo)
+
+
+def _con_avisos(escalera: EscaleraPais, *avisos: str) -> EscaleraPais:
+    return dataclasses.replace(escalera, avisos=(*escalera.avisos, *avisos)) if avisos else escalera
 
 
 def _version_libre(versiones: Path, nombre: str, hoy: date, ocupadas: set[Path]) -> Path:
@@ -483,7 +536,7 @@ def escribir_modelado(vault: Path, p_id: str, m: Modelado, config: ConfigEconomi
     estado = estado_pais(vault, p_id, pais)
     if estado not in ESTADOS_PERMITIDOS:
         motivo = f"{pais} está en {estado or 'sin estado'}: /modelar solo trabaja en aprobado (o en modelado, para rehacer)"
-        if estado is not None and estado not in ("auditado",):
+        if estado in _EN_PRODUCCION:
             motivo += "; la oferta ya pasó a producción y no se rehace"
         raise EstadoInesperado(motivo)
 
@@ -496,16 +549,29 @@ def escribir_modelado(vault: Path, p_id: str, m: Modelado, config: ConfigEconomi
     if not ruta_mercados.is_file():
         raise FileNotFoundError("falta config/mercados.yaml")
     mercados = mercados_cfg.cargar(ruta_mercados)
-    faltan = [p for p in paises if p not in mercados]
-    if faltan:
-        raise ValueError(f"falta {', '.join(faltan)} en config/mercados.yaml")
+    if pais not in mercados:
+        raise ValueError(f"falta {pais} en config/mercados.yaml")
+    # La reserva que falta en mercados.yaml no bloquea el país elegido: sale «no medido» con su motivo.
+    sin_mercado = [p for p in paises if p not in mercados]
+    con_precio = sorted(set(sin_mercado) & set(precios_manuales))
+    if con_precio:
+        raise ValueError(f"precio manual para {', '.join(con_precio)}, que no está en config/mercados.yaml")
+    manuales = {p: _precio_manual(v, mercados[p].moneda) for p, v in precios_manuales.items()}
 
-    original_precio = _precio_original(vault, p_id)
-    escaleras = {
-        p: escalera_pais(mercados[p], config.escalera, cambio, original_precio, precios_manuales.get(p),
-                         upsells_permitidos(config), admite_downsell(config))
-        for p in paises
-    }
+    original_precio, original_ilegible = _precio_original(vault, p_id)
+    idioma = mercados[pais].idioma
+    escaleras: dict[str, EscaleraPais] = {}
+    for p in paises:
+        if p in sin_mercado:
+            escalera = _sin_mercado(p)
+        else:
+            escalera = escalera_pais(mercados[p], config.escalera, cambio, original_precio, manuales.get(p),
+                                     upsells_permitidos(config), admite_downsell(config))
+            if p != pais and escalera.pasos is not None and mercados[p].idioma != idioma:
+                escalera = _con_avisos(escalera, f"títulos en {idioma}: se traducen al lanzar este país")
+        if original_ilegible:
+            escalera = _con_avisos(escalera, AVISO_ORIGINAL_ILEGIBLE)
+        escaleras[p] = escalera
     economias = {p: economia_pais(e, config, cambio) for p, e in escaleras.items()}
     original = puntuar(m.ejes_original, config.autopsia.pesos)
     nuestra = puntuar(m.ejes_nuestra, config.autopsia.pesos)
@@ -524,6 +590,10 @@ def escribir_modelado(vault: Path, p_id: str, m: Modelado, config: ConfigEconomi
         if patron:
             raise ValueError(f"{nombre}.md: aparece un secreto ({patron}); no se escribe nada")
 
+    # Orden de escritura: versiones previas → los 4 archivos → PRODUCTO.md → log.md. Ventana residual (sin
+    # bloqueo ni transacción, R-6b): si el proceso muere a mitad, pueden quedar algunos de los 4 archivos
+    # nuevos sin la anotación en PRODUCTO.md, o todo escrito sin la línea de log.md. El estado no cambia,
+    # así que repetir /modelar lo arregla (en modelado rehace y versiona lo que haya).
     carpeta = ruta_producto(vault, p_id).parent
     if estado == "modelado":
         print(f"{pais} ya está en modelado: se rehace la oferta; los archivos anteriores pasan a versiones/ "
@@ -540,19 +610,23 @@ def escribir_modelado(vault: Path, p_id: str, m: Modelado, config: ConfigEconomi
         ruta = carpeta / f"{nombre}.md"
         escribir_atomico(ruta, texto)
         escritas.append(ruta)
-    que = f"{p_id} {pais}: oferta presentada (OFERTA, ESCALERA, BRANDBOOK, comparativa)"
-    if versionadas:
-        que += f"; {len(versionadas)} versiones previas guardadas"
-    anadir_log(vault, "modelar", que, [r.relative_to(vault).as_posix() for r in escritas + versionadas], ahora=ahora)
 
     valor, motivo = senal
+    oferta: dict = {"aprobacion": "presentada", "fecha": hoy.isoformat()}
+    if estado == "modelado":  # al rehacer, la aprobación anterior ya no vale (R-T7b)
+        oferta |= {"aprobacion_cita": None, "aprobacion_fecha": None}
     actualizar_producto(
         vault, p_id,
-        {"oferta": {"aprobacion": "presentada", "fecha": hoy.isoformat()},
+        {"oferta": oferta,
          "senales": {"se_puede_mejorar": valor, "motivo": motivo, "fuente": f"productos/{p_id}/OFERTA.md"}},
         [f"- {etiqueta}: [[productos/{p_id}/{nombre}]]"
          for etiqueta, nombre in zip(("Oferta", "Escalera", "Brandbook", "Comparativa"), ARCHIVOS, strict=True)],
         "modelar", ahora)
+
+    que = f"{p_id} {pais}: oferta presentada (OFERTA, ESCALERA, BRANDBOOK, comparativa)"
+    if versionadas:
+        que += f"; {len(versionadas)} versiones previas guardadas"
+    anadir_log(vault, "modelar", que, [r.relative_to(vault).as_posix() for r in escritas + versionadas], ahora=ahora)
     return escritas
 
 

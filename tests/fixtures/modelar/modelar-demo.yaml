@@ -64,7 +64,7 @@ teardown:                          # lectura del original: estructura y datos, c
       cta: true
 
 ejes_original:                     # nota 0–10 de cada eje del original y su porqué (null = no se pudo valorar)
-  resultado_sonado: {nota: 8, porque: Promete una casa ordenada, que es lo que quieren}
+  resultado_sonado: {nota: 8, porque: "Promete una casa ordenada, que es lo que quieren"}
   probabilidad_percibida: {nota: 5, porque: No enseña ningún caso ni resultado medible}
   tiempo: {nota: 6, porque: Dice pocos días pero no concreta cuántos}
   esfuerzo: {nota: 7, porque: Las tareas son cortas pero hay muchas}
@@ -74,7 +74,7 @@ ejes_original:                     # nota 0–10 de cada eje del original y su p
   prueba_garantia: {nota: 3, porque: Garantía corta y sin testimonios}
 
 ejes_nuestra:                      # lo mismo para nuestra oferta (la pone Claude: hay que leerla con ojo crítico)
-  resultado_sonado: {nota: 8, porque: Misma promesa, dicha con un plazo concreto}
+  resultado_sonado: {nota: 8, porque: "Misma promesa, dicha con un plazo concreto"}
   probabilidad_percibida: {nota: 7, porque: Muestra el plan día a día antes de comprar}
   tiempo: {nota: 7, porque: Plazo cerrado de 14 días}
   esfuerzo: {nota: 8, porque: Quince minutos al día como máximo}
@@ -110,7 +110,7 @@ core:                              # nuestra oferta (core offer)
 escalera_piezas:                   # nombre local y entregable de cada paso de la escalera (los 6 pasos)
   - {paso: front, titulo: Подреден дом за 14 дни, entregable: El plan de 14 días con su lista de control}
   - {paso: bump, titulo: Седмичен план, entregable: Plan de mantenimiento para después de los 14 días}
-  - {paso: u1, titulo: Кухня без хаос, entregable: Plan de 7 días solo para la cocina, la próxima dolencia}
+  - {paso: u1, titulo: Кухня без хаос, entregable: "Plan de 7 días solo para la cocina, la próxima dolencia"}
   - {paso: u2, titulo: Гардероб за един уикенд, entregable: Método para vaciar y ordenar el armario}
   - {paso: u3, titulo: Мини план, entregable: Versión corta del plan para pisos pequeños}
   - {paso: downsell, titulo: Кухня лайт, entregable: La guía de cocina sin las listas imprimibles}

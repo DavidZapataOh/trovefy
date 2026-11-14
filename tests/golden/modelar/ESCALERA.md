@@ -26,7 +26,7 @@ paises:
         activo: true
         motivo_inactivo: null
         titulo: Кухня без хаос
-        entregable: Plan de 7 días solo para la cocina
+        entregable: Plan de 7 días solo para la cocina, la próxima dolencia
       u2:
         precio: '30.90'
         activo: false
@@ -76,7 +76,7 @@ paises:
         activo: true
         motivo_inactivo: null
         titulo: Кухня без хаос
-        entregable: Plan de 7 días solo para la cocina
+        entregable: Plan de 7 días solo para la cocina, la próxima dolencia
       u2:
         precio: '149'
         activo: false

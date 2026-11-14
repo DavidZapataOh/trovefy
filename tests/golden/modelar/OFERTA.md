@@ -210,7 +210,7 @@ Solo la estructura, con nuestras palabras. Leído el 2026-11-13 en https://ofert
 
 | Eje | Peso | Original | Nuestra | Por qué (original) | Por qué (nuestra) |
 |---|---|---|---|---|---|
-| Resultado soñado | 15 | 8 | 8 | Promete una casa ordenada | Misma promesa |
+| Resultado soñado | 15 | 8 | 8 | Promete una casa ordenada, que es lo que quieren | Misma promesa, dicha con un plazo concreto |
 | Probabilidad percibida | 20 | 5 | 7 | No enseña ningún caso ni resultado medible | Muestra el plan día a día antes de comprar |
 | Tiempo | 10 | 6 | 7 | Dice pocos días pero no concreta cuántos | Plazo cerrado de 14 días |
 | Esfuerzo | 15 | 7 | 8 | Las tareas son cortas pero hay muchas | Quince minutos al día como máximo |

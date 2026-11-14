@@ -67,6 +67,14 @@ _PROPIO = "entregable/"  # rutas del vault a nuestro propio material
 _CLAVE_TOKEN = re.compile(r"^--[a-z0-9-]+$")
 _CLAVE_PALETA = re.compile(r"^[a-z0-9_-]+$")
 _VALOR_TOKEN_PROHIBIDO = re.compile(r"[{};<>]")
+# Lista blanca de valores de ``tokens_css`` (van tal cual a un ``:root {}`` de la landing): nada que pueda
+# cargar recursos (``url(``, ``image-set(``), abrir comentarios, escapar, encadenar reglas o romper el bloque.
+_TOKEN_PROHIBIDO = re.compile(r"\(|/\*|\\|@|!|[\x00-\x1f\x7f-\x9f\u2028\u2029]")
+_TOKEN_COLOR = re.compile(r"#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})")
+_FAMILIA = r"(?:'[\w \-]+'|[\w\-]+)"
+_TOKEN_FUENTE = re.compile(rf"{_FAMILIA}(?:\s*,\s*{_FAMILIA})*")
+_TOKEN_OTRO = re.compile(r"-?\d+(?:\.\d+)?(?:px|rem|em|%|vh|vw|vmin|vmax|ch|ex|pt|fr|s|ms|deg)?"
+                         r"|#(?:[0-9A-Fa-f]{3,4}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})")
 _IMPORTE = re.compile(r"^\d+(?:\.\d{1,2})?$")
 _PAGINAS = re.compile(r"p[aá]gina|page|страниц", re.IGNORECASE)
 _COLOR = re.compile(r"^#[0-9A-Fa-f]{6}$")
@@ -181,6 +189,32 @@ class Modelado:
     estructura_landing: tuple[SeccionLanding, ...]
 
 
+def token_css_inseguro(clave: str, valor: object) -> str | None:
+    """Motivo si el token CSS no está en la lista blanca; ``None`` si es seguro de copiar a ``:root {}``.
+
+    ``--color-*``: ``#RRGGBB`` o ``#RGB``. ``--fuente-*``: familias (entre comillas simples o sin ellas)
+    separadas por comas, con la genérica al final. Otro token: un número con unidad CSS o un ``#hex``.
+    Nunca ``(``, ``/*``, ``\\``, ``@``, ``!``, ``{ } ; < >`` ni caracteres de control o saltos de línea.
+    """
+    if not isinstance(clave, str) or not _CLAVE_TOKEN.match(clave):
+        return "las claves son --minusculas-numeros-y-guiones"
+    if not isinstance(valor, str):
+        return "tiene que ser texto"
+    if not valor.strip():
+        return "está vacío"
+    if _VALOR_TOKEN_PROHIBIDO.search(valor) or _TOKEN_PROHIBIDO.search(valor):
+        return "no puede llevar ( /* \\ @ ! { } ; < > ni saltos de línea: solo el valor del token"
+    if clave.startswith("--color-"):
+        if not _TOKEN_COLOR.fullmatch(valor):
+            return "tiene que ser un color #RRGGBB (o #RGB)"
+    elif clave.startswith("--fuente-"):
+        if not _TOKEN_FUENTE.fullmatch(valor):
+            return "tiene que ser una lista de familias ('Noto Sans', sans-serif)"
+    elif not _TOKEN_OTRO.fullmatch(valor):
+        return "tiene que ser un número con unidad CSS (8px, 1.5rem) o un color #hex"
+    return None
+
+
 # --- material ajeno --------------------------------------------------------------------------------
 
 
@@ -231,6 +265,17 @@ class _Lector:
 
     def error(self, ruta: str, motivo: str) -> None:
         self.errores.append(f"{ruta}: {motivo}")
+
+    def claves(self, nodo: Any, permitidas: tuple[str, ...], ruta: str) -> None:
+        """Una clave que el esquema no conoce es un error con su ruta (p. ej. el resto de un texto con coma
+        sin comillas dentro de un mapa en flujo, que YAML convierte en otra clave)."""
+        if not isinstance(nodo, dict):
+            return
+        for clave in nodo:
+            if clave not in permitidas:
+                donde = f"{ruta}.{clave}" if ruta else str(clave)
+                self.error(donde, f"clave desconocida (se esperan: {', '.join(permitidas)}); "
+                                  "si es el resto de un texto con comas, ponlo entre comillas")
 
     def mapa(self, nodo: Any, clave: str, ruta: str) -> dict:
         valor = nodo.get(clave) if isinstance(nodo, dict) else None
@@ -302,6 +347,7 @@ class _Lector:
 
 def _checkout(lec: _Lector, nodo: dict) -> dict:
     r = "teardown.checkout"
+    lec.claves(nodo, ("plataforma", "precio", "moneda", "bump", "upsells", "garantia_dias"), r)
     moneda = nodo.get("moneda")
     if moneda is not None and (not isinstance(moneda, str) or not _MONEDA.match(moneda)):
         lec.error(f"{r}.moneda", "tiene que ser un código ISO de 3 letras (EUR, USD…) o null si no se midió")
@@ -324,12 +370,15 @@ def _checkout(lec: _Lector, nodo: dict) -> dict:
 
 def _teardown(lec: _Lector, datos: dict) -> Teardown:
     nodo = lec.mapa(datos, "teardown", "teardown")
+    lec.claves(nodo, ("url", "anunciante", "fecha_lectura", "checkout", "promesa", "mecanismo", "avatar", "villano",
+                      "secciones"), "teardown")
     secciones = []
     for i, s in enumerate(lec.lista(nodo, "secciones", "teardown.secciones")):
         r = f"teardown.secciones[{i}]"
         if not isinstance(s, dict):
             lec.error(r, "tiene que ser un bloque de claves")
             continue
+        lec.claves(s, ("n", "tipo", "objetivo", "palabras_aprox", "objeciones", "prueba", "cta"), r)
         tipo = lec.texto(s, "tipo", f"{r}.tipo")
         if tipo and tipo not in TIPOS_TEARDOWN:
             lec.error(f"{r}.tipo", f"tipo desconocido; usa uno de: {', '.join(TIPOS_TEARDOWN)}")
@@ -384,6 +433,7 @@ def _ejes(lec: _Lector, datos: dict, clave: str) -> dict[str, EjeValorado]:
         if not isinstance(valor, dict):
             lec.error(r, "tiene que ser {nota, porque}")
             continue
+        lec.claves(valor, ("nota", "porque"), r)
         porque = lec.texto(valor, "porque", f"{r}.porque")
         nota = valor.get("nota")
         try:
@@ -395,6 +445,9 @@ def _ejes(lec: _Lector, datos: dict, clave: str) -> dict[str, EjeValorado]:
 
 def _core(lec: _Lector, datos: dict) -> CoreOffer:
     nodo = lec.mapa(datos, "core", "core")
+    lec.claves(nodo, ("promesa_h1", "plazo", "sin", "unidad_venta", "big_idea", "villano", "mecanismo_nombre",
+                      "mecanismo_pasos", "entregables", "bonos", "garantia_dias", "garantia_como", "formato",
+                      "avatar", "angulo"), "core")
     sin = lec.textos(nodo, "sin", "core.sin")
     if isinstance(nodo.get("sin"), list) and len(nodo["sin"]) != 3:
         lec.error("core.sin", f"hacen falta exactamente 3, hay {len(nodo['sin'])}")
@@ -420,6 +473,7 @@ def _core(lec: _Lector, datos: dict) -> CoreOffer:
             continue
         if "id" in b:
             lec.error(r, f"los bonos no llevan id: su id es bono-{i + 1}")
+        lec.claves({k: v for k, v in b.items() if k != "id"}, ("nombre", "objecion"), r)
         bonos.append(Bono(lec.texto(b, "nombre", f"{r}.nombre"), lec.texto(b, "objecion", f"{r}.objecion")))
     if isinstance(nodo.get("bonos"), list) and not _BONOS[0] <= len(lista_bonos) <= _BONOS[1]:
         lec.error("core.bonos", f"hacen falta {_BONOS[0]}–{_BONOS[1]}, hay {len(lista_bonos)}")
@@ -441,6 +495,7 @@ def _escalera_piezas(lec: _Lector, datos: dict) -> tuple[PiezaEscalera, ...]:
         if not isinstance(p, dict):
             lec.error(r, "tiene que ser {paso, titulo, entregable}")
             continue
+        lec.claves(p, ("paso", "titulo", "entregable"), r)
         paso = lec.texto(p, "paso", f"{r}.paso")
         if paso and paso not in PASOS:
             lec.error(f"{r}.paso", f"paso desconocido; usa uno de: {', '.join(PASOS)}")
@@ -465,6 +520,7 @@ def _estructura_landing(lec: _Lector, datos: dict) -> tuple[SeccionLanding, ...]
         if not isinstance(s, dict):
             lec.error(r, "tiene que ser {orden, tipo, palabras, cta}")
             continue
+        lec.claves(s, ("orden", "tipo", "palabras", "cta"), r)
         tipo = lec.texto(s, "tipo", f"{r}.tipo")
         if tipo and tipo not in TIPOS_SECCION:
             lec.error(f"{r}.tipo", f"tipo desconocido; usa uno de: {', '.join(TIPOS_SECCION)}")
@@ -485,6 +541,8 @@ def _estructura_landing(lec: _Lector, datos: dict) -> tuple[SeccionLanding, ...]
 
 def _brandbook(lec: _Lector, datos: dict, idioma: str, anunciante: str) -> Brandbook:
     nodo = lec.mapa(datos, "brandbook", "brandbook")
+    lec.claves(nodo, ("nombre_local", "idioma", "significado", "paleta", "tipografias", "tono", "iconografia",
+                      "mockup", "tokens_css"), "brandbook")
     nombre = lec.texto(nodo, "nombre_local", "brandbook.nombre_local")
     marca = sorted({p for p in re.findall(r"\w+", (anunciante or "").casefold()) if len(p) >= _LETRAS_MARCA})
     choca = [p for p in marca if p in (nombre or "").casefold()]
@@ -511,6 +569,7 @@ def _brandbook(lec: _Lector, datos: dict, idioma: str, anunciante: str) -> Brand
         if not isinstance(t, dict):
             lec.error(r, "tiene que ser {familia, uso, subconjuntos, licencia}")
             continue
+        lec.claves(t, ("familia", "uso", "subconjuntos", "licencia"), r)
         uso = lec.texto(t, "uso", f"{r}.uso")
         if uso and uso not in USOS_TIPOGRAFIA:
             lec.error(f"{r}.uso", f"tiene que ser {' o '.join(USOS_TIPOGRAFIA)}")
@@ -530,13 +589,9 @@ def _brandbook(lec: _Lector, datos: dict, idioma: str, anunciante: str) -> Brand
     for clave, valor in tokens.items():
         if str(clave) in raras:
             continue
-        r = f"brandbook.tokens_css.{clave}"
-        if not isinstance(valor, str):
-            lec.error(r, "tiene que ser texto")
-        elif not valor.strip():
-            lec.error(r, "está vacío")
-        elif _VALOR_TOKEN_PROHIBIDO.search(valor):
-            lec.error(r, "no puede llevar { } ; < >: solo el valor del token")
+        motivo = token_css_inseguro(clave, valor)
+        if motivo:
+            lec.error(f"brandbook.tokens_css.{clave}", motivo)
     faltan = [t for t in TOKENS_OBLIGATORIOS if t not in tokens]
     if isinstance(nodo.get("tokens_css"), dict) and faltan:
         lec.error("brandbook.tokens_css", f"faltan {', '.join(faltan)}")
@@ -555,6 +610,7 @@ def _mapa_cambios(lec: _Lector, datos: dict) -> tuple[Cambio, ...]:
         if not isinstance(c, dict):
             lec.error(r, "tiene que ser {que, por_que, impacto}")
             continue
+        lec.claves(c, ("que", "por_que", "impacto"), r)
         impacto = lec.texto(c, "impacto", f"{r}.impacto")
         if impacto and impacto not in IMPACTOS:
             lec.error(f"{r}.impacto", f"tiene que ser {', '.join(IMPACTOS)}")
@@ -572,6 +628,7 @@ def _comparativa(lec: _Lector, datos: dict) -> tuple[tuple[str, str, str], ...]:
         if not isinstance(f, dict):
             lec.error(r, "tiene que ser {aspecto, original, nuestra}")
             continue
+        lec.claves(f, ("aspecto", "original", "nuestra"), r)
         filas.append((lec.texto(f, "aspecto", f"{r}.aspecto"), lec.texto(f, "original", f"{r}.original"),
                       lec.texto(f, "nuestra", f"{r}.nuestra")))
     if isinstance(datos.get("comparativa"), list) and not lista:
@@ -608,6 +665,8 @@ def cargar_modelado(ruta: Path, p_id: str, pais: str, idioma: str) -> Modelado:
         raise ModeladoInvalido([f"secreto en modelar.yaml: {patron} (quítalo; nunca se guarda)"])
 
     lec = _Lector()
+    lec.claves(datos, ("producto", "pais", "teardown", "ejes_original", "ejes_nuestra", "angulos_referencia", "core",
+                       "escalera_piezas", "estructura_landing", "brandbook", "mapa_cambios", "comparativa"), "")
     producto = lec.texto(datos, "producto", "producto")
     if producto and producto != p_id:
         lec.error("producto", f"dice «{producto}» y se está modelando «{p_id}»")

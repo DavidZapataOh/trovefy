@@ -182,7 +182,7 @@ def test_escalera_sin_cambio_no_medida(tmp_path):
     assert paises["XE"]["be_usd"] is None and "USD" in paises["XE"]["be_usd_motivo"]
     assert paises["XR"]["pasos"] is None and "RON" in paises["XR"]["pasos_motivo"]
     meta = frontmatter.leer(v / "productos" / P / "ESCALERA.md")[0]
-    assert meta["cambio"]["fecha"] is None and meta["cambio"]["motivo"].startswith("no medido")
+    assert meta["cambio"]["fecha"] is None and meta["cambio"]["fecha_motivo"].startswith("no medido")
 
 
 def test_no_cambia_estado(tmp_path):
@@ -319,3 +319,222 @@ def test_brandbook_se_lee(tmp_path):
     _escribir(v)
     assert cargar_brandbook(v, P)["nombre_local"] == "Подреден дом"
 
+
+
+# --- ronda de revisión de la Tarea 7 ---------------------------------------------------------------
+
+MERCADOS_XM = MERCADOS + "XM: {idioma: ro, moneda: MDL, zona: Zona demo, banda_eur: [11.90, 15.90], estado: activo}\n"
+
+
+def _con_reserva(v, reserva):
+    frontmatter.escribir(v / "productos" / P / "decisiones/2026-11-12-eleccion.md",
+                         {"tipo": "decision", "pais": "XE", "reserva": reserva}, "Elección.\n")
+
+
+def _ficha(v, **campos):
+    meta = {"tipo": "oferta", "id": "o-demo", "dominio": "oferta-demo.test", **campos}
+    (v / "wiki/ofertas/o-demo.md").write_text(
+        "---\n" + yaml.safe_dump(meta, allow_unicode=True) + "---\n# Oferta demo\n", encoding="utf-8")
+
+
+def _poner_estado(v, estado):
+    meta, cuerpo = frontmatter.leer(v / "productos" / P / "PRODUCTO.md")
+    meta["paises"]["XE"]["estado"] = estado
+    frontmatter.escribir(v / "productos" / P / "PRODUCTO.md", meta, cuerpo)
+
+
+@pytest.mark.parametrize("valor", [
+    "url(https://evil.test/f)",
+    'image-set("//evil.test/x" 1x)',
+    "#fff /* x",
+    "#fff\n```\n# Inyectado",
+])
+def test_render_brandbook_no_pinta_tokens_inseguros(valor):
+    import dataclasses
+
+    m = _modelado()
+    b = dataclasses.replace(m.brandbook, tokens_css={**m.brandbook.tokens_css, "--color-acento": valor})
+    with pytest.raises(ValueError, match="--color-acento"):
+        render_brandbook(b, HOY, producto=P)
+
+
+def test_reserva_fuera_de_mercados_no_bloquea(tmp_path):
+    v = _vault(tmp_path)
+    _con_reserva(v, "XQ")
+    _escribir(v)
+    paises = cargar_escalera(v, P)
+    assert paises["XE"]["pasos"]["front"]["precio"] == "13.90"
+    assert paises["XQ"]["pasos"] is None
+    assert paises["XQ"]["pasos_motivo"] == "no medido: XQ no está en config/mercados.yaml"
+
+
+def test_pais_elegido_fuera_de_mercados_si_bloquea(tmp_path):
+    v = _vault(tmp_path)
+    (v / "config/mercados.yaml").write_text(MERCADOS.splitlines()[1] + "\n", encoding="utf-8")
+    with pytest.raises(FileNotFoundError, match="elección de país"):  # pais_elegido ya lo salta
+        _escribir(v)
+    assert not (v / "productos" / P / "OFERTA.md").exists()
+
+
+@pytest.mark.parametrize("campos", [
+    {"precio": "9 €", "moneda": "EUR"},
+    {"moneda": "EUR"},
+    {"precio": float("nan"), "moneda": "EUR"},
+    {"precio": -9.0, "moneda": "EUR"},
+    {"precio": 0, "moneda": "EUR"},
+    {"precio": float("inf"), "moneda": "EUR"},
+])
+def test_precio_original_inservible_es_no_medido(tmp_path, campos):
+    v = _vault(tmp_path)
+    _ficha(v, **campos)
+    _escribir(v)
+    aviso = "comparación con el original: no medido (precio de la ficha no legible)"
+    paises = cargar_escalera(v, P)
+    for pais in ("XE", "XR"):
+        assert aviso in paises[pais]["avisos"], pais
+
+
+def test_precio_original_float_pasa_por_str(tmp_path):
+    v = _vault(tmp_path)
+    _ficha(v, precio=12.1, moneda="EUR")
+    _escribir(v)
+    avisos = cargar_escalera(v, P)["XE"]["avisos"]
+    assert any("el original cuesta 12,10 €" in a for a in avisos)
+
+
+@pytest.mark.parametrize(("precio", "esperado"), [(Decimal("13.9"), "13.90"), (Decimal(15), "15.00"),
+                                                  (13.9, "13.90")])
+def test_precio_manual_eur_con_centimos(tmp_path, precio, esperado):
+    v = _vault(tmp_path)
+    _escribir(v, precios={"XE": precio})
+    assert cargar_escalera(v, P)["XE"]["pasos"]["front"]["precio"] == esperado
+
+
+def test_cambio_sin_tasa_usa_motivos_por_campo(tmp_path):
+    v = _vault(tmp_path)
+    _escribir(v, cambio=None)
+    cambio = frontmatter.leer(v / "productos" / P / "ESCALERA.md")[0]["cambio"]
+    assert "motivo" not in cambio
+    assert cambio["fecha"] is None and cambio["fecha_motivo"].startswith("no medido")
+    assert cambio["url"] is None and cambio["url_motivo"].startswith("no medido")
+
+
+def test_pasos_null_solo_motivo(tmp_path):
+    v = _vault(tmp_path)
+    _escribir(v, cambio=None)
+    xr = cargar_escalera(v, P)["XR"]
+    assert xr["fuente_precio"] is None and "RON" in xr["fuente_precio_motivo"]
+    cuerpo = frontmatter.leer(v / "productos" / P / "ESCALERA.md")[1]
+    seccion = cuerpo.split("## XR", 1)[1]
+    assert "Precio del front" not in seccion and "### Economía" not in seccion
+    assert xr["pasos_motivo"] in seccion
+
+
+@pytest.mark.parametrize("estado", ["producido", "con_landing", "con_checkout", "listo"])
+def test_rechazo_tras_modelado_dice_produccion(tmp_path, estado):
+    v = _vault(tmp_path, xe=estado)
+    with pytest.raises(EstadoInesperado, match="ya pasó a producción"):
+        _escribir(v)
+
+
+@pytest.mark.parametrize("estado", ["auditado", "descartado", "cazado"])
+def test_rechazo_generico_nombra_el_estado(tmp_path, estado):
+    v = _vault(tmp_path, xe=estado)
+    with pytest.raises(EstadoInesperado) as exc:
+        _escribir(v)
+    assert estado in str(exc.value) and "producción" not in str(exc.value)
+
+
+def test_reserva_mdl_sin_tasa_con_cambio(tmp_path):
+    v = _vault(tmp_path)
+    (v / "config/mercados.yaml").write_text(MERCADOS_XM, encoding="utf-8")
+    _con_reserva(v, "XM")
+    _escribir(v)
+    paises = cargar_escalera(v, P)
+    assert paises["XE"]["pasos"]["front"]["precio"] == "13.90"
+    assert paises["XM"]["pasos"] is None and "MDL" in paises["XM"]["pasos_motivo"]
+    assert paises["XM"]["be_usd"] is None
+    meta = frontmatter.leer(v / "productos" / P / "ESCALERA.md")[0]
+    assert meta["cambio"] == {"fuente": "BCE", "fecha": "2026-11-12", "url": CAMBIO.url}
+
+
+@pytest.mark.parametrize("llamada", [3, 4])
+def test_secreto_en_texto_tardio_no_escribe_nada(tmp_path, monkeypatch, llamada):
+    from trovefy.modelar import salida
+
+    v = _vault(tmp_path)
+    _escribir(v)
+    _poner_estado(v, "modelado")
+    carpeta = v / "productos" / P
+    antes = {p: p.read_bytes() for p in v.rglob("*") if p.is_file()}
+    llamadas = []
+
+    def falso(texto):
+        llamadas.append(texto)
+        return "patron-demo" if len(llamadas) == llamada else None
+
+    monkeypatch.setattr(salida, "buscar_secreto", falso)
+    with pytest.raises(ValueError, match="patron-demo"):
+        _escribir(v)
+    assert not (carpeta / "versiones").exists()
+    assert {p: p.read_bytes() for p in v.rglob("*") if p.is_file()} == antes
+
+
+@pytest.mark.parametrize(("nota_media", "esperado"), [([45, 70], True), ([10, 20], False)])
+def test_vende_por_presupuesto_en_escribir(tmp_path, nota_media, esperado):
+    datos = yaml.safe_load(PLANTILLA.read_text(encoding="utf-8"))
+    datos["autopsia"]["nota_media"]["valor"] = nota_media
+    v = _vault(tmp_path)
+    _escribir(v, config=cargar_texto(yaml.safe_dump(datos, allow_unicode=True)))
+    assert cargar_oferta(v, P)["vende_por_presupuesto"] is esperado
+    cuerpo = (v / "productos" / P / "OFERTA.md").read_text(encoding="utf-8")
+    assert ("Vende por presupuesto" in cuerpo) is esperado
+
+
+def test_cuerpo_con_economia_no_medida(tmp_path):
+    v = _vault(tmp_path)
+    _escribir(v, config=_config(ruta_activa=None))
+    cuerpo = frontmatter.leer(v / "productos" / P / "ESCALERA.md")[1]
+    seccion = cuerpo.split("## XE", 1)[1].split("## XR", 1)[0]
+    assert "- AOV: 17,16 USD" in seccion
+    assert "- BE (CPA de equilibrio): no medido: falta ruta_activa" in seccion
+    assert "- CPA de test: no medido" in seccion
+    assert "- ROAS de equilibrio: no medido" in seccion
+    assert "BE = AOV × (1 − comisión − impuestos − reembolsos) − comisión fija × cobros: no medido" in seccion
+
+
+def test_orden_archivos_producto_log(tmp_path, monkeypatch):
+    from trovefy.modelar import salida
+
+    v = _vault(tmp_path)
+    orden = []
+    real_escribir, real_actualizar, real_log = salida.escribir_atomico, salida.actualizar_producto, salida.anadir_log
+    monkeypatch.setattr(salida, "escribir_atomico", lambda r, t: (orden.append(("archivo", r.name)),
+                                                                 real_escribir(r, t))[1])
+    monkeypatch.setattr(salida, "actualizar_producto", lambda *a, **k: (orden.append(("producto",)),
+                                                                       real_actualizar(*a, **k))[1])
+    monkeypatch.setattr(salida, "anadir_log", lambda *a, **k: (orden.append(("log",)), real_log(*a, **k))[1])
+    _escribir(v)
+    assert [o[0] for o in orden] == ["archivo"] * 4 + ["producto", "log"]
+
+
+def test_rehacer_borra_la_aprobacion_de_producto(tmp_path):
+    v = _vault(tmp_path)
+    _escribir(v)
+    meta, cuerpo = frontmatter.leer(v / "productos" / P / "PRODUCTO.md")
+    meta["oferta"].update(aprobacion="aprobada", aprobacion_cita="sí, adelante", aprobacion_fecha="2026-11-13")
+    meta["paises"]["XE"]["estado"] = "modelado"
+    frontmatter.escribir(v / "productos" / P / "PRODUCTO.md", meta, cuerpo)
+    _escribir(v)
+    oferta = frontmatter.leer(v / "productos" / P / "PRODUCTO.md")[0]["oferta"]
+    assert oferta["aprobacion"] == "presentada"
+    assert oferta["aprobacion_cita"] is None and oferta["aprobacion_fecha"] is None
+
+
+def test_reserva_avisa_titulos_en_idioma_del_elegido(tmp_path):
+    v = _vault(tmp_path)
+    _escribir(v)
+    paises = cargar_escalera(v, P)
+    aviso = "títulos en bg: se traducen al lanzar este país"
+    assert aviso in paises["XR"]["avisos"]
+    assert aviso not in paises["XE"]["avisos"]

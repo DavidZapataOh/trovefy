@@ -424,3 +424,91 @@ def test_token_no_texto(tmp_path):
     d = datos_demo()
     d["brandbook"]["tokens_css"]["--color-acento"] = 5
     assert "brandbook.tokens_css.--color-acento: tiene que ser texto" in errores(tmp_path, d)
+
+
+# --- ronda de revisión de la Tarea 7 ---------------------------------------------------------------
+
+_TOKENS_PELIGROSOS = [
+    "url(https://evil.test/f)",
+    'image-set("//evil.test/x" 1x)',
+    "#fff /* x",
+    "#fff\n```\n# Inyectado",
+    "#fff !important",
+    "@import 'x'",
+    "#fff\\9",
+    "#fff\t",
+]
+
+
+@pytest.mark.parametrize("clave", ["--color-acento", "--fuente-texto", "--radio"])
+@pytest.mark.parametrize("valor", _TOKENS_PELIGROSOS)
+def test_token_css_peligroso_se_rechaza(tmp_path, clave, valor):
+    d = datos_demo()
+    d["brandbook"]["tokens_css"][clave] = valor
+    assert any(e.startswith(f"brandbook.tokens_css.{clave}:") for e in errores(tmp_path, d))
+
+
+@pytest.mark.parametrize(("clave", "valor"), [
+    ("--color-acento", "red"),
+    ("--color-acento", "#12345"),
+    ("--fuente-texto", "Noto Sans, sans-serif;"),
+    ("--fuente-texto", '"Noto Sans", sans-serif'),
+    ("--radio", "8 px"),
+    ("--radio", "calc(1px + 2px)"),
+])
+def test_token_css_fuera_de_la_lista(tmp_path, clave, valor):
+    d = datos_demo()
+    d["brandbook"]["tokens_css"][clave] = valor
+    assert any(e.startswith(f"brandbook.tokens_css.{clave}:") for e in errores(tmp_path, d))
+
+
+@pytest.mark.parametrize(("clave", "valor"), [
+    ("--color-acento", "#abc"),
+    ("--fuente-texto", "'Noto Sans', 'DejaVu Sans', sans-serif"),
+    ("--fuente-texto", "Ubuntu,sans-serif"),
+    ("--radio", "8px"),
+    ("--ancho", "72.5rem"),
+    ("--borde", "#1F4E5F"),
+])
+def test_token_css_permitido(tmp_path, clave, valor):
+    d = datos_demo()
+    d["brandbook"]["tokens_css"][clave] = valor
+    cargar_modelado(escribir(tmp_path, d), "p-0042-kit-demo", "XE", "bg")
+
+
+def test_textos_con_comas_no_se_cortan():
+    m = cargar_modelado(DEMO, "p-0042-kit-demo", "XE", "bg")
+    assert m.ejes_original["resultado_sonado"].porque == "Promete una casa ordenada, que es lo que quieren"
+    assert m.escalera_piezas[2].entregable == "Plan de 7 días solo para la cocina, la próxima dolencia"
+
+
+@pytest.mark.parametrize(("donde", "ruta"), [
+    (lambda d: d, "sobra"),
+    (lambda d: d["teardown"], "teardown.sobra"),
+    (lambda d: d["teardown"]["checkout"], "teardown.checkout.sobra"),
+    (lambda d: d["teardown"]["secciones"][1], "teardown.secciones[1].sobra"),
+    (lambda d: d["ejes_original"]["tiempo"], "ejes_original.tiempo.sobra"),
+    (lambda d: d["core"], "core.sobra"),
+    (lambda d: d["core"]["bonos"][0], "core.bonos[0].sobra"),
+    (lambda d: d["escalera_piezas"][2], "escalera_piezas[2].sobra"),
+    (lambda d: d["estructura_landing"][0], "estructura_landing[0].sobra"),
+    (lambda d: d["brandbook"], "brandbook.sobra"),
+    (lambda d: d["brandbook"]["tipografias"][1], "brandbook.tipografias[1].sobra"),
+    (lambda d: d["mapa_cambios"][0], "mapa_cambios[0].sobra"),
+    (lambda d: d["comparativa"][0], "comparativa[0].sobra"),
+])
+def test_clave_desconocida_se_rechaza(tmp_path, donde, ruta):
+    d = datos_demo()
+    donde(d)["sobra"] = "texto"
+    assert any(e.startswith(f"{ruta}:") and "clave desconocida" in e for e in errores(tmp_path, d))
+
+
+def test_coma_sin_comillas_en_mapa_en_flujo_se_detecta(tmp_path):
+    texto = DEMO.read_text(encoding="utf-8").replace(
+        'porque: "Promete una casa ordenada, que es lo que quieren"',
+        "porque: Promete una casa ordenada, que es lo que quieren")
+    ruta = tmp_path / "modelar.yaml"
+    ruta.write_text(texto, encoding="utf-8")
+    with pytest.raises(ModeladoInvalido) as exc:
+        cargar_modelado(ruta, "p-0042-kit-demo", "XE", "bg")
+    assert any(e.startswith("ejes_original.resultado_sonado.que es lo que quieren:") for e in exc.value.errores)
