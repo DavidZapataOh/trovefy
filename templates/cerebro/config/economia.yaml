@@ -1,0 +1,60 @@
+# Economía de la oferta: rutas de cobro, comisiones, reembolsos, tomas, reglas de CPA, escalera y autopsia.
+# Cada hoja lleva {valor, fuente, fecha}. valor null = no medido: la cifra que depende de él sale
+# «no medido: falta <clave> en config/economia.yaml», nunca un 0 ni un supuesto.
+# Para cambiar un valor: `trovefy economia fijar --clave <clave> --valor <valor> --fuente "…"` (la explicación va en la fuente).
+ruta_activa: {valor: null, fuente: "la ruta verificada en /arranque (paso 10 Whop o 10b Hotmart)", fecha: "2026-11-13"}
+rutas:
+  impultienda_whop: {valor: [impultienda, whop], fuente: "diseño §2: tienda Impultienda con pasarela Whop", fecha: "2026-11-13"}
+  hotmart: {valor: [hotmart], fuente: "diseño §2: Hotmart sola (paso 10b)", fecha: "2026-11-13"}
+plataformas:
+  impultienda:
+    comision_pct: {valor: null, fuente: "no medido: se rellena al verificar el plan de Impultienda (paso 09 de /arranque)", fecha: "2026-11-13"}
+    comision_fija_usd: {valor: null, fuente: "no medido: se rellena al verificar el plan de Impultienda (paso 09 de /arranque)", fecha: "2026-11-13"}
+    impuestos_pct: {valor: null, fuente: "no medido: se rellena al verificar el plan de Impultienda (paso 09 de /arranque)", fecha: "2026-11-13"}
+    upsells_por_plan: {valor: 1, fuente: "diseño §2: plan Free = 1 upsell", fecha: "2026-11-13"}
+    admite_downsell: {valor: null, fuente: "P-05", fecha: "2026-11-13"}
+  whop:
+    comision_pct: {valor: null, fuente: "no medido: se rellena al verificar Whop (paso 10 de /arranque)", fecha: "2026-11-13"}
+    comision_fija_usd: {valor: null, fuente: "no medido: se rellena al verificar Whop (paso 10 de /arranque)", fecha: "2026-11-13"}
+    impuestos_pct: {valor: null, fuente: "no medido: se rellena al verificar Whop (paso 10 de /arranque)", fecha: "2026-11-13"}
+  hotmart:
+    comision_pct: {valor: null, fuente: "no medido: se rellena al verificar Hotmart (paso 10b de /arranque)", fecha: "2026-11-13"}
+    comision_fija_usd: {valor: null, fuente: "no medido: se rellena al verificar Hotmart (paso 10b de /arranque)", fecha: "2026-11-13"}
+    impuestos_pct: {valor: null, fuente: "no medido: se rellena al verificar Hotmart (paso 10b de /arranque)", fecha: "2026-11-13"}
+    upsells_por_plan: {valor: null, fuente: "no medido: se rellena al verificar Hotmart (paso 10b de /arranque)", fecha: "2026-11-13"}
+    admite_downsell: {valor: null, fuente: "no medido: se rellena al verificar Hotmart (paso 10b de /arranque)", fecha: "2026-11-13"}
+reembolsos_pct: {valor: 0.05, fuente: "supuesto conservador del plan 16; lo recalibra /cierre con reembolsos reales", fecha: "2026-11-13"}
+tomas:
+  bump: {valor: 0, fuente: "§4.6, toma inicial conservadora", fecha: "2026-11-13"}
+  u1: {valor: 0.10, fuente: "§4.6, toma inicial conservadora", fecha: "2026-11-13"}
+  downsell: {valor: 0.05, fuente: "§4.6, toma inicial conservadora", fecha: "2026-11-13"}
+reglas:
+  cpa_test_factor: {valor: 0.5, fuente: "Santino, §4.6", fecha: "2026-11-13"}
+  cpa_escala_factor: {valor: 0.65, fuente: "lowticket-engine, §4.6", fecha: "2026-11-13"}
+  be_minimo_usd: {valor: 8, fuente: "S1, §4.6", fecha: "2026-11-13"}
+  aov_objetivo_usd: {valor: 30, fuente: "§4.6, aspiracional", fecha: "2026-11-13"}
+escalera:
+  front_eur: {valor: [12, 24], fuente: "§4.6", fecha: "2026-11-13"}
+  front_usd: {valor: [17, 27], fuente: "§4.6", fecha: "2026-11-13"}
+  precio_minimo: {valor: 10, fuente: "§4.6: nunca por debajo de 10", fecha: "2026-11-13"}
+  bump: {valor: 0.35, fuente: "S1, §4.6", fecha: "2026-11-13"}
+  u1: {valor: 1.4, fuente: "L1, §4.1", fecha: "2026-11-13"}
+  u2: {valor: 2.2, fuente: "L1, §4.1", fecha: "2026-11-13"}
+  u3: {valor: 0.9, fuente: "L1, §4.1", fecha: "2026-11-13"}
+  downsell: {valor: 0.40, fuente: "punto medio del 30–50 % de §4.6", fecha: "2026-11-13"}
+  downsell_rango: {valor: [0.30, 0.50], fuente: "§4.6", fecha: "2026-11-13"}
+  bump_activo_test1: {valor: false, fuente: "§4.1: apagado en el test 1", fecha: "2026-11-13"}
+autopsia:
+  peso:
+    resultado_sonado: {valor: 15, fuente: "L2 0:11:56", fecha: "2026-11-13"}
+    probabilidad_percibida: {valor: 20, fuente: "L2 0:11:56", fecha: "2026-11-13"}
+    tiempo: {valor: 10, fuente: "L2 0:11:56", fecha: "2026-11-13"}
+    esfuerzo: {valor: 15, fuente: "L2 0:11:56", fecha: "2026-11-13"}
+    avatar: {valor: 10, fuente: "L2 0:11:56", fecha: "2026-11-13"}
+    mecanismo: {valor: 10, fuente: "[D-12]", fecha: "2026-11-13"}
+    precio: {valor: 10, fuente: "[D-12]", fecha: "2026-11-13"}
+    prueba_garantia: {valor: 10, fuente: "[D-12]", fecha: "2026-11-13"}
+  mejora_min_puntos: {valor: 10, fuente: "plan 16; se recalibra con 5 productos, P-15", fecha: "2026-11-13"}
+  mejora_eje_min: {valor: 2, fuente: "plan 16; se recalibra con 5 productos, P-15", fecha: "2026-11-13"}
+  cobertura_min: {valor: 70, fuente: "plan 16; se recalibra con 5 productos, P-15", fecha: "2026-11-13"}
+  nota_media: {valor: [45, 70], fuente: "L2 0:11:56, «unos 58» = vende por presupuesto", fecha: "2026-11-13"}
