@@ -62,6 +62,7 @@ _ID_OFERTA = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 # Dato técnico: monedas con céntimos (el resto se cobra en unidades enteras).
 _MONEDAS_CON_CENTIMOS = frozenset({"EUR", "USD"})
 _CENTIMO = Decimal("0.01")
+_MONEDA_ISO = re.compile(r"[A-Z]{3}")
 _SIN_CAMBIO = "no medido: sin cambio del BCE del día"
 AVISO_ORIGINAL_ILEGIBLE = "comparación con el original: no medido (precio de la ficha no legible)"
 # Estados de fase 2 en los que la oferta ya se está produciendo (después de ``modelado``).
@@ -492,14 +493,28 @@ def _precio_original(vault: Path, p_id: str) -> tuple[tuple[Decimal, str | None]
     if precio is None or not precio.is_finite() or precio <= 0:
         return None, True
     moneda = datos.get("moneda")
-    moneda = moneda.strip().upper() if isinstance(moneda, str) and moneda.strip() else None
+    moneda = moneda.strip().upper() if isinstance(moneda, str) else None
+    if moneda is not None and not _MONEDA_ISO.fullmatch(moneda):
+        moneda = None  # lo que no es un código ISO de 3 letras sale «moneda no medida»
     return (precio, moneda), False
 
 
-def _precio_manual(precio: Decimal | float, moneda: str) -> Decimal:
-    """EUR/USD al céntimo (``13.9`` → ``13.90``, ``15`` → ``15.00``); las monedas sin céntimos, tal cual."""
+def _precio_manual(pais: str, precio: Decimal | float, moneda: str) -> Decimal:
+    """EUR/USD al céntimo (``13.9`` → ``13.90``, ``15`` → ``15.00``); las monedas sin céntimos, en unidades.
+
+    Nunca redondea: más de 2 decimales en EUR/USD, o cualquier decimal en una moneda sin céntimos
+    (MDL, RON…), es un ``ValueError`` con el motivo.
+    """
     importe = precio if isinstance(precio, Decimal) else Decimal(str(precio))
-    return importe.quantize(_CENTIMO) if moneda.upper() in _MONEDAS_CON_CENTIMOS else importe
+    if moneda.upper() in _MONEDAS_CON_CENTIMOS:
+        if importe != importe.quantize(_CENTIMO):
+            raise ValueError(f"precio manual de {pais} con más de 2 decimales ({importe} {moneda}): "
+                             "escríbelo al céntimo, no se redondea")
+        return importe.quantize(_CENTIMO)
+    if importe != importe.to_integral_value():
+        raise ValueError(f"precio manual de {pais} con decimales ({importe} {moneda}): {moneda} va en "
+                         "unidades enteras, sin decimales")
+    return importe.quantize(Decimal(1))
 
 
 def _sin_mercado(pais: str) -> EscaleraPais:
@@ -556,7 +571,7 @@ def escribir_modelado(vault: Path, p_id: str, m: Modelado, config: ConfigEconomi
     con_precio = sorted(set(sin_mercado) & set(precios_manuales))
     if con_precio:
         raise ValueError(f"precio manual para {', '.join(con_precio)}, que no está en config/mercados.yaml")
-    manuales = {p: _precio_manual(v, mercados[p].moneda) for p, v in precios_manuales.items()}
+    manuales = {p: _precio_manual(p, v, mercados[p].moneda) for p, v in precios_manuales.items()}
 
     original_precio, original_ilegible = _precio_original(vault, p_id)
     idioma = mercados[pais].idioma
@@ -612,9 +627,9 @@ def escribir_modelado(vault: Path, p_id: str, m: Modelado, config: ConfigEconomi
         escritas.append(ruta)
 
     valor, motivo = senal
-    oferta: dict = {"aprobacion": "presentada", "fecha": hoy.isoformat()}
-    if estado == "modelado":  # al rehacer, la aprobación anterior ya no vale (R-T7b)
-        oferta |= {"aprobacion_cita": None, "aprobacion_fecha": None}
+    # Cada escritura presenta una oferta nueva: la aprobación o el rechazo anteriores ya no valen (R-T7b).
+    oferta: dict = {"aprobacion": "presentada", "fecha": hoy.isoformat(), "aprobacion_cita": None,
+                    "aprobacion_fecha": None}
     actualizar_producto(
         vault, p_id,
         {"oferta": oferta,

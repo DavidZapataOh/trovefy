@@ -81,7 +81,11 @@ def _rel(vault: Path, ruta: Path) -> str:
 
 
 def precios_front(valores: list[str]) -> dict[str, Decimal]:
-    """``["XR:65", "XE:13,90"]`` → ``{"XR": Decimal("65"), "XE": Decimal("13.90")}``; mal formado → ``_Uso``."""
+    """``["XR:65", "XE:13,90"]`` → ``{"XR": Decimal("65"), "XE": Decimal("13.90")}``; mal formado → ``_Uso``.
+
+    Más de 2 decimales es error, no se redondea. Si la moneda del país admite decimales lo decide
+    ``escribir_modelado`` (aquí aún no se sabe la moneda).
+    """
     out: dict[str, Decimal] = {}
     for v in valores:
         m = _PRECIO_FRONT.match(v.strip())
@@ -94,6 +98,9 @@ def precios_front(valores: list[str]) -> dict[str, Decimal]:
         if importe is None or not importe.is_finite() or importe <= 0:
             raise _Uso(f"--precio-front mal formado: «{v}»; usa XX:importe en la moneda del país (p. ej. XR:65)")
         pais = m.group(1).upper()
+        if -importe.as_tuple().exponent > 2:
+            raise _Uso(f"--precio-front de {pais} con más de 2 decimales («{v}»): escríbelo al céntimo (EUR/USD) "
+                       "o en unidades enteras (MDL, RON…); no se redondea")
         if pais in out:
             raise _Uso(f"--precio-front repetido para {pais}")
         out[pais] = importe
@@ -289,6 +296,11 @@ def _escribir(args: argparse.Namespace) -> int:
     return 0
 
 
+def _nota_autopsia(autopsia: dict, cual: str) -> str:
+    nota = (autopsia.get(cual) or {}).get("nota")
+    return "no medido" if nota is None else _coma(nota)
+
+
 def _ver(args: argparse.Namespace) -> int:
     from trovefy.modelar.salida import cargar_escalera, cargar_oferta
     from trovefy.vault.producto import estado_pais, pais_elegido
@@ -302,8 +314,7 @@ def _ver(args: argparse.Namespace) -> int:
     print(f"Oferta de {p_id} · {oferta.get('pais')} · {oferta.get('fecha')}")
     print(f"- aprobación: {oferta.get('aprobacion') or 'no medida'}")
     nota = (oferta.get("autopsia") or {})
-    print(f"- autopsia: original {_coma((nota.get('original') or {}).get('nota'))} · nuestra "
-          f"{_coma((nota.get('nuestra') or {}).get('nota'))}")
+    print(f"- autopsia: original {_nota_autopsia(nota, 'original')} · nuestra {_nota_autopsia(nota, 'nuestra')}")
     valor = oferta.get("se_puede_mejorar")
     print(f"- se puede mejorar: {_SENAL.get(valor, 'no medida')} ({oferta.get('se_puede_mejorar_motivo') or 'sin motivo'})")
     print(f"- estado de {pais}: {estado_pais(vault, p_id, pais) or 'sin estado'}")

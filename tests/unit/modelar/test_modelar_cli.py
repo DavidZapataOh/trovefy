@@ -523,3 +523,64 @@ def test_precio_front_con_coma(vault, capsys):
 def test_landing_original_sin_doble_esquema(dominio):
     landing = modelar_cli._landing_original({"dominio": dominio})
     assert landing.count("://") == 1 and landing.endswith("oferta-demo.test/")
+
+
+# --- revisión final ---------------------------------------------------------------------------------
+
+
+def test_reescribir_tras_rechazo_limpia_la_aprobacion(vault, capsys):
+    assert _main("escribir", "--producto", P) == 0
+    assert _main("rechazar", "--producto", P, "--cita", "no me convence el precio") == 0
+    assert estado_pais(vault, P, "XE") == "aprobado"
+    assert _main("escribir", "--producto", P) == 0
+    oferta = frontmatter.leer(_carpeta(vault) / "PRODUCTO.md")[0]["oferta"]
+    assert oferta["aprobacion"] == "presentada"
+    assert oferta["aprobacion_cita"] is None and oferta["aprobacion_fecha"] is None
+
+
+@pytest.mark.parametrize("valor", ["MD:249.555", "BG:13.999", "XE:13,999"])
+def test_precio_front_mas_de_dos_decimales(valor):
+    with pytest.raises(modelar_cli._Uso, match="decimales"):
+        modelar_cli.precios_front([valor])
+
+
+def test_precio_front_mas_de_dos_decimales_sale_2(vault, capsys):
+    for valor in ("MD:249.555", "BG:13.999"):
+        assert _main("escribir", "--producto", P, "--precio-front", valor) == 2
+        assert "decimales" in capsys.readouterr().err
+    assert not (_carpeta(vault) / "OFERTA.md").exists()
+
+
+def test_precio_front_moneda_sin_centimos_con_decimales_sale_2(vault, capsys):
+    assert _main("escribir", "--producto", P, "--precio-front", "XR:65,5") == 2
+    err = capsys.readouterr().err
+    assert err.startswith("Error: ") and "RON" in err and "decimales" in err
+    assert not (_carpeta(vault) / "OFERTA.md").exists()
+
+
+def test_precio_front_con_coma_se_guarda_al_centimo(vault, capsys):
+    assert modelar_cli.precios_front(["BG:13,9"]) == {"BG": modelar_cli.Decimal("13.9")}
+    assert _main("escribir", "--producto", P, "--precio-front", "XE:13,9") == 0
+    escalera = frontmatter.leer(_carpeta(vault) / "ESCALERA.md")[0]
+    assert escalera["paises"]["XE"]["pasos"]["front"]["precio"] == "13.90"
+
+
+def test_ver_autopsia_sin_nota(vault, capsys):
+    assert _main("escribir", "--producto", P) == 0
+    ruta = _carpeta(vault) / "OFERTA.md"
+    meta, cuerpo = frontmatter.leer(ruta)
+    meta["autopsia"]["original"]["nota"] = None
+    frontmatter.escribir(ruta, meta, cuerpo)
+    capsys.readouterr()
+    assert _main("ver", "--producto", P) == 0
+    out = capsys.readouterr().out
+    assert "None" not in out
+    assert "original no medido" in out
+
+
+def test_cabecera_economia_muestra_fijar_con_flags():
+    from trovefy.economia.config import CABECERA
+
+    orden = 'trovefy economia fijar --clave <clave> --valor <valor> --fuente "…"'
+    assert orden in CABECERA
+    assert PLANTILLA.read_text(encoding="utf-8").splitlines()[3] == CABECERA.splitlines()[3]

@@ -28,7 +28,7 @@ CABECERA = (
     "# Economía de la oferta: rutas de cobro, comisiones, reembolsos, tomas, reglas de CPA, escalera y autopsia.\n"
     "# Cada hoja lleva {valor, fuente, fecha}. valor null = no medido: la cifra que depende de él sale\n"
     "# «no medido: falta <clave> en config/economia.yaml», nunca un 0 ni un supuesto.\n"
-    "# Para cambiar un valor: `trovefy economia fijar <clave> <valor> --fuente \"…\"` (la explicación va en la fuente).\n"
+    "# Para cambiar un valor: `trovefy economia fijar --clave <clave> --valor <valor> --fuente \"…\"` (la explicación va en la fuente).\n"
 )
 _CAMPOS_COSTE = ("comision_pct", "comision_fija_usd", "impuestos_pct")
 

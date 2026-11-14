@@ -191,7 +191,8 @@ def test_no_cambia_estado(tmp_path):
     meta, cuerpo = frontmatter.leer(v / "productos" / P / "PRODUCTO.md")
     assert meta["paises"]["XE"]["estado"] == "aprobado"
     assert meta["paises"]["XR"]["estado"] == "auditado"
-    assert meta["oferta"] == {"aprobacion": "presentada", "fecha": "2026-11-13"}
+    assert meta["oferta"] == {"aprobacion": "presentada", "fecha": "2026-11-13", "aprobacion_cita": None,
+                              "aprobacion_fecha": None}
     assert meta["senales"]["se_puede_mejorar"] is True
     assert meta["senales"]["fuente"] == f"productos/{P}/OFERTA.md"
     for nombre in ARCHIVOS:
@@ -538,3 +539,34 @@ def test_reserva_avisa_titulos_en_idioma_del_elegido(tmp_path):
     aviso = "títulos en bg: se traducen al lanzar este país"
     assert aviso in paises["XR"]["avisos"]
     assert aviso not in paises["XE"]["avisos"]
+
+
+@pytest.mark.parametrize("moneda", ["EURO-LARGO", "EU", "E1R", "€", "euros por unidad"])
+def test_moneda_del_original_rara_no_medida(tmp_path, moneda):
+    v = _vault(tmp_path)
+    _ficha(v, precio="9.0", moneda=moneda)
+    _escribir(v)
+    texto = (v / "productos" / P / "comparativa.md").read_text(encoding="utf-8")
+    assert texto.count("no medido (moneda del original no medida)") == 2  # XE y XR
+
+
+def test_moneda_del_original_en_minusculas_vale(tmp_path):
+    v = _vault(tmp_path)
+    _ficha(v, precio="12.1", moneda=" eur ")
+    _escribir(v)
+    assert any("el original cuesta 12,10 €" in a for a in cargar_escalera(v, P)["XE"]["avisos"])
+
+
+@pytest.mark.parametrize(("pais", "precio"), [("XE", Decimal("13.999")), ("XR", Decimal("65.5")),
+                                              ("XE", 13.999)])
+def test_precio_manual_con_decimales_de_mas(tmp_path, pais, precio):
+    v = _vault(tmp_path)
+    with pytest.raises(ValueError, match="decimales"):
+        _escribir(v, precios={pais: precio})
+    assert not (v / "productos" / P / "OFERTA.md").exists()
+
+
+def test_precio_manual_sin_centimos_entero_con_ceros(tmp_path):
+    v = _vault(tmp_path)
+    _escribir(v, precios={"XR": Decimal("65.00")})
+    assert cargar_escalera(v, P)["XR"]["pasos"]["front"]["precio"] == "65"

@@ -1,7 +1,7 @@
 # Economía de la oferta: rutas de cobro, comisiones, reembolsos, tomas, reglas de CPA, escalera y autopsia.
 # Cada hoja lleva {valor, fuente, fecha}. valor null = no medido: la cifra que depende de él sale
 # «no medido: falta <clave> en config/economia.yaml», nunca un 0 ni un supuesto.
-# Para cambiar un valor: `trovefy economia fijar <clave> <valor> --fuente "…"` (la explicación va en la fuente).
+# Para cambiar un valor: `trovefy economia fijar --clave <clave> --valor <valor> --fuente "…"` (la explicación va en la fuente).
 ruta_activa: {valor: null, fuente: "la ruta verificada en /arranque (paso 10 Whop o 10b Hotmart)", fecha: "2026-11-13"}
 rutas:
   impultienda_whop: {valor: [impultienda, whop], fuente: "diseño §2: tienda Impultienda con pasarela Whop", fecha: "2026-11-13"}
