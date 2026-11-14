@@ -84,9 +84,19 @@ def _texto(x: Decimal) -> str:
     return f"{_abajo(x):.2f}".replace(".", ",")
 
 
-def _no_medida(motivo: str, aov_usd: Cifra | None = None, cobros: Decimal | None = None) -> Economia:
+def _no_medida(motivo: str, aov_usd: Cifra | None = None, cobros: Decimal | None = None,
+               avisos: tuple[str, ...] = ()) -> Economia:
     nm = Cifra(None, motivo)
-    return Economia(aov_usd or nm, nm, nm, nm, nm, cobros, ())
+    return Economia(aov_usd or nm, nm, nm, nm, nm, cobros, avisos)
+
+
+def _aviso_aov(total: Decimal, aov_usd: Cifra, reglas: ReglasEconomia) -> list[str]:
+    """El aviso de AOV bajo: depende solo del AOV, no de los costes."""
+    if total < reglas.aov_objetivo_usd:
+        aviso = (f"AOV estimado {_texto(aov_usd.valor)} USD: lejos del objetivo de "
+                 f"{_texto(reglas.aov_objetivo_usd)} USD (aspiracional)")
+        return [aviso]
+    return []
 
 
 def economia_de(precios_usd: dict[str, Cifra | None], costes: Costes | Cifra, tomas: Tomas,
@@ -95,7 +105,7 @@ def economia_de(precios_usd: dict[str, Cifra | None], costes: Costes | Cifra, to
 
     ``None`` = paso apagado; una ``Cifra`` sin valor = no medido y su motivo pasa a las cinco cifras.
     Con los costes no medidos, el AOV sí sale (no depende de ellos) y BE, CPA y ROAS llevan el motivo;
-    los avisos solo se dan con la economía entera medida.
+    el aviso de AOV bajo sale igual (solo depende del AOV) y el de BE bajo solo con el BE medido.
     """
     front = precios_usd.get("front")
     if front is None:
@@ -111,15 +121,13 @@ def economia_de(precios_usd: dict[str, Cifra | None], costes: Costes | Cifra, to
     cobros = cobros_esperados(tomas, precios["u1"] is not None, precios["downsell"] is not None)
     aov_usd = Cifra(_abajo(total))
     if isinstance(costes, Cifra):
-        return _no_medida(costes.motivo, aov_usd, cobros)
+        return _no_medida(costes.motivo, aov_usd, cobros, tuple(_aviso_aov(total, aov_usd, reglas)))
 
     be = neto_por_pedido(total, cobros, costes)
     avisos: list[str] = []
     if be < reglas.be_minimo_usd:
         avisos.append(AVISO_BE_BAJO)
-    if total < reglas.aov_objetivo_usd:
-        avisos.append(f"AOV estimado {_texto(aov_usd.valor)} USD: lejos del objetivo de "
-                      f"{_texto(reglas.aov_objetivo_usd)} USD (aspiracional)")
+    avisos += _aviso_aov(total, aov_usd, reglas)
     if be <= 0:
         sin = Cifra(None, _SIN_NETO)
         return Economia(aov_usd, Cifra(_abajo(be)), sin, sin, sin, cobros, tuple(avisos))

@@ -198,8 +198,18 @@ def _activo_downsell(admite: bool | None) -> tuple[bool, str | None]:
     return False, "el plan de la tienda no admite downsell"
 
 
+def _importe_original(x: object) -> Decimal:
+    """El precio del original puede llegar del YAML de la wiki como float (``9.0``): pasa por ``str``."""
+    if isinstance(x, bool) or not isinstance(x, (Decimal, int, float)):
+        raise ValueError(f"importe del original mal escrito: {x!r} (debe ser un número)")  # noqa: TRY004
+    importe = x if isinstance(x, Decimal) else Decimal(str(x))
+    if not importe.is_finite():
+        raise ValueError(f"importe del original mal escrito: {x!r} (debe ser un número finito)")
+    return importe
+
+
 def escalera_pais(mercado: Mercado, reglas: ReglasEscalera, cambio: Cambio | None,
-                  original: tuple[Decimal, str | None] | None, precio_manual: Decimal | None,
+                  original: tuple[Decimal | float, str | None] | None, precio_manual: Decimal | None,
                   upsells_permitidos: int | None, admite_downsell: bool | None) -> EscaleraPais:
     """La escalera de un país en su moneda. ``PrecioInvalido`` si el precio manual baja del mínimo."""
     moneda = mercado.moneda.upper()
@@ -250,6 +260,7 @@ def escalera_pais(mercado: Mercado, reglas: ReglasEscalera, cambio: Cambio | Non
 
     if original is not None:
         importe, moneda_original = original
+        importe = _importe_original(importe)
         if moneda_original is None:
             avisos.append("comparación con el original: no medido (moneda del original no medida)")
         else:

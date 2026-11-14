@@ -164,3 +164,15 @@ def test_ajuste_de_un_escalon_para_quedar_dentro():
     e = escalera_pais(xb, R, CAMBIO, None, None, 1, None)
     assert e.pasos["front"].precio == D("12.90")
     assert e.avisos == ("la banda de precios del país queda fuera del rango del front (12–24 €)",)
+
+
+def test_original_float_de_yaml():
+    # M-6: el precio de la wiki llega del YAML como float (9.0).
+    e = escalera_pais(XE, R, CAMBIO, (9.0, "EUR"), None, 1, None)
+    assert any("el original cuesta 9,00 €" in a for a in e.avisos)
+
+
+def test_original_importe_no_numerico():
+    for malo in (True, "9", None, [9]):
+        with pytest.raises(ValueError, match="importe del original"):
+            escalera_pais(XE, R, CAMBIO, (malo, "EUR"), None, 1, None)

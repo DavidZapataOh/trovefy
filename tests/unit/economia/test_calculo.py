@@ -90,8 +90,12 @@ def test_neto_no_positivo_roas_no_medido():
 def test_costes_no_medidos_arrastran_motivo():
     e = economia_de({"front": usd("17"), "bump": None, "u1": None, "downsell": None},
                     Cifra(None, "no medido: falta ruta_activa en config/economia.yaml"), T, R)
-    assert e.be_usd.valor is None and "falta ruta_activa" in e.cpa_test_usd.motivo and e.avisos == ()
+    assert e.be_usd.valor is None and "falta ruta_activa" in e.cpa_test_usd.motivo
     assert e.roas_be.valor is None and e.cpa_escala_usd.valor is None
+    # R-a: el aviso de AOV bajo depende solo del AOV; el de BE bajo, solo con BE medido.
+    assert e.aov_usd.valor == D("17.00")
+    assert e.avisos == ("AOV estimado 17 USD: lejos del objetivo de 30 USD (aspiracional)",)
+    assert AVISO_BE_BAJO not in e.avisos
 
 
 def test_precio_no_medido_arrastra_motivo():

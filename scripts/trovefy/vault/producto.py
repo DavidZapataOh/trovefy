@@ -7,6 +7,7 @@ que fusiona y nunca borra claves, ni cuerpo, ni toca ``paises.<P>.estado`` o su 
 
 import copy
 import re
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -37,6 +38,12 @@ def _pais(pais: str) -> str:
     if not _PAIS.fullmatch(codigo):
         raise ValueError(f"país mal escrito: «{pais}»; usa su código de dos letras (por ejemplo RO)")
     return codigo
+
+
+def _con_zona(ahora: datetime) -> datetime:
+    if not isinstance(ahora, datetime) or ahora.tzinfo is None or ahora.utcoffset() is None:
+        raise ValueError(f"ahora sin zona horaria: {ahora!r} (usa un datetime con tzinfo)")
+    return ahora
 
 
 def _leer(vault: Path, p_id: str) -> tuple[Path, dict, str]:
@@ -89,18 +96,24 @@ def pais_elegido(vault: Path, p_id: str) -> tuple[str, str | None, Path]:
     raise FileNotFoundError("falta la elección de país en decisiones/: /auditar")
 
 
-def _evidencias(evidencia: str | list[str]) -> list[str]:
-    lista = [evidencia] if isinstance(evidencia, str) else evidencia
-    if (not isinstance(lista, list) or not lista
-            or any(not isinstance(e, str) or not e.strip() for e in lista)):
+def _evidencias(evidencia: str | Sequence[str]) -> list[str]:
+    if isinstance(evidencia, str):
+        lista = [evidencia]
+    elif isinstance(evidencia, Sequence) and not isinstance(evidencia, (bytes, bytearray)):
+        lista = list(evidencia)
+    else:
+        msg = f"evidencia de tipo {type(evidencia).__name__}: va un texto o una lista de textos"
+        raise ValueError(msg)  # noqa: TRY004 - el contrato (resolución 1) promete ValueError
+    if not lista or any(not isinstance(e, str) or not e.strip() for e in lista):
         raise ValueError("falta la evidencia del paso (un texto o una lista de textos no vacíos)")
     return [e.strip() for e in lista]
 
 
-def avanzar_estado(vault: Path, p_id: str, pais: str, desde: str, hacia: str, evidencia: str | list[str],
+def avanzar_estado(vault: Path, p_id: str, pais: str, desde: str, hacia: str, evidencia: str | Sequence[str],
                    skill: str, ahora: datetime) -> Path:
     """Pasa ``paises.<PAIS>.estado`` de ``desde`` al siguiente estado (``hacia``) y lo anota en ``historial``."""
     vault = Path(vault)
+    ahora = _con_zona(ahora)
     pais = _pais(pais)
     if desde not in ESTADOS_FASE2[:-1] or hacia != ESTADOS_FASE2[ESTADOS_FASE2.index(desde) + 1]:
         raise ValueError(f"paso no permitido: {desde} → {hacia} (los estados van en orden: "
@@ -139,12 +152,17 @@ def _fusionar(base: dict, cambios: dict, camino: str) -> dict:
 
 
 def _sin_protegidas(cambios: dict) -> dict:
-    """Quita ``paises.<P>.estado`` e ``historial``: solo los escribe ``avanzar_estado``."""
+    """Normaliza los códigos de país y quita ``paises.<P>.estado`` e ``historial`` (solo de ``avanzar_estado``)."""
     paises = cambios.get("paises")
     if not isinstance(paises, dict):
         return cambios
     limpios = {}
-    for p, b in paises.items():
+    vistos: set[str] = set()
+    for crudo, b in paises.items():
+        p = _pais(crudo)
+        if p in vistos:
+            raise ValueError(f"el país {p} aparece dos veces en los cambios (con mayúsculas y minúsculas)")
+        vistos.add(p)
         if not isinstance(b, dict):
             limpios[p] = b
             continue
@@ -156,21 +174,31 @@ def _sin_protegidas(cambios: dict) -> dict:
 
 def actualizar_producto(vault: Path, p_id: str, cambios: dict, enlaces: list[str], skill: str,
                         ahora: datetime) -> Path:
-    """Fusiona ``cambios`` en el frontmatter (mapas en profundidad) y añade al cuerpo los enlaces que falten."""
+    """Fusiona ``cambios`` en el frontmatter (mapas en profundidad) y añade al cuerpo los enlaces que falten.
+
+    Los códigos de ``cambios["paises"]`` se normalizan a mayúsculas. Si no cambia nada (mismo
+    frontmatter y ningún enlace nuevo) devuelve la ruta sin escribir ni anotar en ``log.md``.
+    Al reescribir, el frontmatter conserva su significado pero no sus comentarios ni el formato
+    hecho a mano; el cuerpo se conserva byte a byte.
+    """
     vault = Path(vault)
+    ahora = _con_zona(ahora)
     if not isinstance(cambios, dict):
         raise ValueError("los cambios de PRODUCTO.md van en un mapa")  # noqa: TRY004 - error del llamador
     for e in enlaces:
         if not isinstance(e, str) or not e.strip() or "\n" in e or "\r" in e:
             raise ValueError(f"enlace mal escrito: {e!r} (una sola línea, no vacía)")
-    ruta, meta, cuerpo = _leer(vault, p_id)
-    meta = _fusionar(meta, _sin_protegidas(cambios), "")
+    limpios = _sin_protegidas(cambios)
+    ruta, original, cuerpo = _leer(vault, p_id)
+    meta = _fusionar(original, limpios, "")
     presentes = {linea.strip() for linea in cuerpo.splitlines()}
     nuevos = []
     for e in (x.strip() for x in enlaces):
         if e not in presentes:
             nuevos.append(e)
             presentes.add(e)
+    if not nuevos and meta == original:
+        return ruta
     if nuevos:
         cuerpo = cuerpo.rstrip("\n") + "\n\n" + "\n".join(nuevos) + "\n"
     que = f"{p_id}: actualiza {', '.join(map(str, cambios)) or 'enlaces'}"

@@ -249,3 +249,55 @@ def test_actualizar_solo_estado_no_crea_pais(tmp_path):
     ruta = _producto(tmp_path, {"XE": {"estado": "modelado"}})
     actualizar_producto(tmp_path, P, {"paises": {"XR": {"estado": "listo"}}}, [], "modelar", AHORA)
     assert frontmatter.leer(ruta)[0]["paises"] == {"XE": {"estado": "modelado"}}
+
+
+def test_actualizar_normaliza_codigo_de_pais(tmp_path):
+    ruta = _producto(tmp_path, {"BG": {"estado": "modelado", "nota": "x"}})
+    actualizar_producto(tmp_path, P, {"paises": {"bg": {"landing": {"url": "u"}}}}, [], "modelar", AHORA)
+    assert frontmatter.leer(ruta)[0]["paises"] == {"BG": {"estado": "modelado", "nota": "x",
+                                                           "landing": {"url": "u"}}}
+
+
+def test_actualizar_rechaza_pais_mal_escrito_o_duplicado(tmp_path):
+    ruta = _producto(tmp_path, {"BG": {"estado": "modelado"}})
+    antes = ruta.read_bytes()
+    with pytest.raises(ValueError, match="país mal escrito"):
+        actualizar_producto(tmp_path, P, {"paises": {"B/G": {"a": 1}}}, [], "modelar", AHORA)
+    with pytest.raises(ValueError, match="BG"):
+        actualizar_producto(tmp_path, P, {"paises": {"bg": {"a": 1}, "BG": {"b": 2}}}, [], "modelar", AHORA)
+    assert ruta.read_bytes() == antes
+
+
+def test_ahora_sin_zona_horaria(tmp_path):
+    ruta = _producto(tmp_path, {"XE": {"estado": "aprobado"}})
+    antes = ruta.read_bytes()
+    ingenua = datetime(2026, 11, 13, 9, 30)
+    with pytest.raises(ValueError, match="zona horaria"):
+        avanzar_estado(tmp_path, P, "XE", "aprobado", "modelado", "x", "modelar", ingenua)
+    with pytest.raises(ValueError, match="zona horaria"):
+        actualizar_producto(tmp_path, P, {"nota": "x"}, [], "modelar", ingenua)
+    assert ruta.read_bytes() == antes
+
+
+def test_evidencia_tupla_se_guarda_como_lista(tmp_path):
+    ruta = _producto(tmp_path, {"XE": {"estado": "aprobado"}})
+    avanzar_estado(tmp_path, P, "XE", "aprobado", "modelado", ("a.md", "b.md"), "modelar", AHORA)
+    assert frontmatter.leer(ruta)[0]["paises"]["XE"]["historial"][0]["evidencia"] == ["a.md", "b.md"]
+
+
+def test_evidencia_de_tipo_erroneo(tmp_path):
+    _producto(tmp_path, {"XE": {"estado": "aprobado"}})
+    for mala in (3, None, {"a": "b"}, b"x", [1]):
+        with pytest.raises(ValueError, match="evidencia"):
+            avanzar_estado(tmp_path, P, "XE", "aprobado", "modelado", mala, "modelar", AHORA)
+
+
+def test_actualizar_sin_cambios_no_escribe(tmp_path):
+    ruta = _producto(tmp_path, {"XE": {"estado": "modelado"}}, senales={"ya_se_vende": True})
+    antes = ruta.read_bytes()
+    devuelta = actualizar_producto(tmp_path, P, {"senales": {"ya_se_vende": True},
+                                                 "paises": {"XE": {"estado": "listo"}}},
+                                   ["- Oferta: [[wiki/ofertas/o-demo]]"], "modelar", AHORA)
+    assert devuelta == ruta
+    assert ruta.read_bytes() == antes
+    assert not (tmp_path / "log.md").exists()
