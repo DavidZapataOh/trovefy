@@ -92,19 +92,24 @@ def construir_referencia(
     *,
     informes: dict[str, InformeWatch] | None = None,
     analisis: dict[str, Analisis] | None = None,
-    medios_hasta: date | None = None,
+    medios_hasta: date | dict[str, date] | None = None,
     top_n: int = 10,
 ) -> Referencia:
-    """Reduce un listado y su ranking a fichas propias: sin texto ni URLs de medios del anuncio."""
+    """Reduce un listado y su ranking a fichas propias: sin texto ni URLs de medios del anuncio.
+
+    Los ganadores más allá de ``top_n`` se conservan como fichas sin puesto (cuentan en «todos los
+    leídos»), pero no entran en el top. ``medios_hasta`` puede ser una fecha común o una por anuncio.
+    """
     informes = informes or {}
     analisis = analisis or {}
     fichas: list[FichaReferencia] = []
     n = 0
     for p in puestos:
-        if p.estado == "ganador":
-            if n >= top_n:
-                continue
+        puesto = None
+        if p.estado == "ganador" and n < top_n:
             n += 1
+            puesto = n
+        hasta = medios_hasta.get(p.library_id) if isinstance(medios_hasta, dict) else medios_hasta
         med = listado.medios.get(p.library_id)
         inf = informes.get(p.library_id)
         motivos = [m for m in (p.motivo,) if m]
@@ -112,7 +117,7 @@ def construir_referencia(
             motivos.append(inf.motivo)
         fichas.append(
             FichaReferencia(
-                puesto=n if p.estado == "ganador" else None,
+                puesto=puesto,
                 library_id=p.library_id,
                 estado=p.estado,
                 dias=p.dias,
@@ -123,7 +128,7 @@ def construir_referencia(
                 duracion_s=inf.duracion_s if inf else None,
                 transcrito=bool(inf and inf.transcripcion),
                 enlace=enlace_publico(p.library_id),
-                medios_hasta=medios_hasta,
+                medios_hasta=hasta,
                 analisis=analisis.get(p.library_id),
                 motivos=motivos,
             )
@@ -229,7 +234,8 @@ def _dias(f: FichaReferencia) -> str:
 
 
 def _ganadores(ref: Referencia) -> list[FichaReferencia]:
-    return [f for f in ref.fichas if f.estado == "ganador"]
+    """Solo el top: los ganadores fuera del top no tienen puesto."""
+    return [f for f in ref.fichas if f.estado == "ganador" and f.puesto is not None]
 
 
 def _hook(a: Analisis) -> str:

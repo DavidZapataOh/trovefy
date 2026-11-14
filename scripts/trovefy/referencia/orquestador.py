@@ -37,6 +37,9 @@ from trovefy.vault.escritura import ZONA_NEGOCIO
 from trovefy.vault.frontmatter import leer as fm_leer
 
 _PAGE = re.compile(r"^\d{1,25}$")
+_PAIS = re.compile(r"^[A-Z]{2}$")
+_PARADA_ERRORES = "la lectura se interrumpió por errores"
+_PARADA_META = "Meta bloqueó la lectura"
 
 
 @dataclass(frozen=True)
@@ -84,6 +87,8 @@ def resolver_objetivo(vault: Path, producto: str, pais: str | None, page_id: str
         if page_id not in validos:
             raise ValueError(f"la página {page_id} no es una de las páginas de la oferta {oferta_id}")
         elegida = page_id
+    elif original:
+        elegida = str(original)
     elif page_ids:
         elegida = page_ids[0]
     else:
@@ -97,7 +102,9 @@ def resolver_objetivo(vault: Path, producto: str, pais: str | None, page_id: str
         con_c8 = [(k, _num(v.get("c8"))) for k, v in paises.items() if isinstance(v, dict)]
         if not con_c8:
             raise ValueError(f"la ficha de {oferta_id} no tiene países medidos: indica --pais")
-        elegido = min(con_c8, key=lambda kv: (-kv[1], kv[0]))[0]
+        elegido = str(min(con_c8, key=lambda kv: (-kv[1], kv[0]))[0]).strip().upper()
+    if not _PAIS.fullmatch(elegido):
+        raise ValueError(f"país inválido: {elegido!r} (dos letras, p. ej. MX)")
     idiomas = ficha.get("idiomas")
     idioma = str(idiomas[0]) if isinstance(idiomas, list) and len(idiomas) == 1 else None
     return Objetivo(producto, oferta_id, elegida, elegido, idioma)
@@ -121,6 +128,23 @@ def _guardar_textos(objetivo: Objetivo, listado: Listado, ahora: datetime, reten
         a.library_id: {"texto": a.texto or "", "titulo": a.titulo or ""} for a in listado.anuncios
     }
     cache.guardar_textos(objetivo.producto, json.dumps(datos, ensure_ascii=False), ahora, retencion)
+
+
+def _referencia_conservada(vault: Path, producto: str) -> str | None:
+    """Fecha de la referencia ya escrita, si hay una legible; un listado vacío no debe pisarla."""
+    try:
+        return cargar_referencia(vault, producto).fecha.isoformat()
+    except Exception:  # noqa: BLE001 - un ranking.json ausente o ilegible no merece conservarse
+        return None
+
+
+def _escribir_salvo_vacio(vault: Path, ref: Referencia, listado: Listado, ahora: datetime, avisos: list[str]) -> None:
+    if not listado.anuncios:
+        fecha = _referencia_conservada(vault, ref.producto)
+        if fecha:
+            avisos.append(f"no se leyó ningún anuncio: se conserva la referencia del {fecha}")
+            return
+    escribir_referencia(vault, ref, ahora)
 
 
 def _busquedas_hoy(vault: Path, hoy: date) -> int | None:
@@ -163,8 +187,10 @@ def ver(
             vault, objetivo.pais, objetivo.page_id,
             lote=lote, sin_navegador=sin_navegador, navegador=navegador, hoy=hoy,
         )  # fmt: skip
-    except Exception as e:  # noqa: BLE001 - nunca un traceback: el listado queda «no medido»
-        listado = Listado([], "publica", False, "", f"no medido: listado interrumpido ({type(e).__name__})")
+    except Exception as e:  # noqa: BLE001 - nunca un traceback: el listado queda «no medido» y se para
+        listado = Listado(
+            [], "publica", False, "", f"no medido: listado interrumpido ({type(e).__name__})", parada="errores"
+        )
     n = top if top is not None else u.top
     puestos = rankear(listado.anuncios, ranking_hoy, u)
     previos = _analisis_previos(vault, objetivo.producto)
@@ -175,14 +201,17 @@ def ver(
             objetivo.producto, objetivo.oferta_id, objetivo.page_id, objetivo.pais, ranking_hoy,
             listado, puestos, analisis=previos, top_n=n,
         )  # fmt: skip
-        if listado.motivo_medios:
-            ref.motivos.append(listado.motivo_medios)
-        escribir_referencia(vault, ref, ahora)
-        return Resultado(ref, [], listado.motivo_medios or "Meta bloqueó la lectura", listado.parada, avisos, busquedas)
+        try:
+            _guardar_textos(objetivo, listado, ahora, u.retencion_dias)
+        except OSError as e:
+            avisos.append(f"no se pudieron guardar los textos en la caché ({type(e).__name__})")
+        _escribir_salvo_vacio(vault, ref, listado, ahora, avisos)
+        defecto = _PARADA_ERRORES if listado.parada == "errores" else _PARADA_META
+        return Resultado(ref, [], listado.motivo_medios or defecto, listado.parada, avisos, busquedas)
 
     informes: dict[str, InformeWatch] = {}
     trabajo: list[dict] = []
-    hubo_medios = False
+    con_medios: set[str] = set()
     for p in top_de(puestos, n):
         med = listado.medios.get(p.library_id)
         item = {
@@ -200,7 +229,7 @@ def ver(
             kw = {k: v for k, v in (("resolver", resolver), ("conectar", conectar)) if v is not None}
             es_video = bool(med.videos)
             ruta = descargar_medio((med.videos or med.imagenes)[0], medio / ("video" if es_video else "imagen"), **kw)
-            hubo_medios = True
+            con_medios.add(p.library_id)
         except DescargaRechazada as e:
             item["motivo"] = f"no medido: medio no descargable ({e})"
             informes[p.library_id] = InformeWatch(None, (), None, None, item["motivo"])
@@ -231,10 +260,10 @@ def ver(
     ref = construir_referencia(
         objetivo.producto, objetivo.oferta_id, objetivo.page_id, objetivo.pais, ranking_hoy,
         listado, puestos, informes=informes, analisis=previos,
-        medios_hasta=(ranking_hoy + timedelta(days=u.retencion_dias)) if hubo_medios else None, top_n=n,
+        medios_hasta={lib: ranking_hoy + timedelta(days=u.retencion_dias) for lib in con_medios}, top_n=n,
     )  # fmt: skip
     for it in trabajo:
         f = next((x for x in ref.fichas if x.library_id == it["library_id"]), None)
         it["puesto"] = f.puesto if f else None
-    escribir_referencia(vault, ref, ahora)
+    _escribir_salvo_vacio(vault, ref, listado, ahora, avisos)
     return Resultado(ref, trabajo, None, None, avisos, busquedas)

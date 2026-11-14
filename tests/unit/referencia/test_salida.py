@@ -75,9 +75,9 @@ def test_anuncios_md_golden(tmp_path):
     assert out == (GOLD / "anuncios.md").read_text()
 
 
-def _ficha(lib, formato, dur=None, estado="ganador"):
+def _ficha(lib, formato, dur=None, estado="ganador", puesto=1):
     return FichaReferencia(
-        None, lib, estado, 10, 1, False, 1, formato, Decimal(dur) if dur else None,
+        puesto if estado == "ganador" else None, lib, estado, 10, 1, False, 1, formato, Decimal(dur) if dur else None,
         False, f"https://www.facebook.com/ads/library/?id={lib}", None, None, [],
     )  # fmt: skip
 
@@ -179,3 +179,30 @@ def test_producto_md_falta(tmp_path):
     with pytest.raises(FileNotFoundError, match="/trovefy:auditar"):
         escribir_referencia(tmp_path, _ref(), AHORA)
     assert not (tmp_path / "productos").exists() and not (tmp_path / "log.md").exists()
+
+
+def test_ganadores_fuera_del_top_cuentan_en_leidos(tmp_path):
+    anuncios = [A, B, C, F, G]
+    puestos = rankear(anuncios, HOY, U)
+    medios = _medios(A="video", B="imagen", C="video", F="video")
+    ref = construir_referencia(
+        "p-001", "o-001", "8", "MX", HOY, _listado(anuncios, medios), puestos,
+        analisis={"A": _an("a")}, top_n=1,
+    )  # fmt: skip
+    assert len(ref.fichas) == 5 and sum(f.estado == "ganador" for f in ref.fichas) == 3
+    assert [f.puesto for f in ref.fichas if f.puesto] == [1]
+    escribir_referencia(tmp_path, ref, AHORA)
+    mezcla = (tmp_path / "productos/p-001/referencia/mezcla.md").read_text()
+    assert "## Top (1 ganadores)" in mezcla and "## Todos los leídos (5)" in mezcla
+    r = fm_leer(tmp_path / "productos/p-001/PRODUCTO.md")[0]["referencia"]
+    assert r["leidos"] == 5 and r["ganadores"] == 1
+    assert referencia_lista(tmp_path, "p-001") == (True, "")
+
+
+def test_medios_hasta_por_anuncio():
+    ref = construir_referencia(
+        "p-001", "o-001", "8", "MX", HOY, _listado([A, B], _medios(A="video", B="imagen")),
+        rankear([A, B], HOY, U), medios_hasta={"A": date(2026, 12, 13)},
+    )  # fmt: skip
+    d = {f.library_id: f.medios_hasta for f in ref.fichas}
+    assert d == {"A": date(2026, 12, 13), "B": None}

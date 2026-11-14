@@ -26,6 +26,10 @@ JPG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
 PAISES = {"MX": {"c8": 31}, "AR": {"c8": 5}}
 
 
+TEXTO_AJENO = "Texto ajeno ficticio del anunciante que nunca entra al vault"
+TITULO_AJENO = "Titulo ajeno ficticio del anunciante"
+
+
 class NavFalso:
     def __init__(self):
         self.llamadas = []
@@ -33,7 +37,9 @@ class NavFalso:
     def abrir(self, url, max_anuncios):
         self.llamadas.append(url)
         d = json.loads((FIX / "pagina_con_medios.json").read_text())
-        return PaginaCapturada(d["url_final"], d["html_final"], "", [])
+        h = d["html_final"].replace('"text": "a"', f'"text": "{TEXTO_AJENO}"')
+        h = h.replace('"title": "t"', f'"title": "{TITULO_AJENO}"')
+        return PaginaCapturada(d["url_final"], h, "", [])
 
 
 class Resp:
@@ -119,11 +125,25 @@ def test_ver_extremo_a_extremo(vault, tmp_path):
     assert len(t["fotogramas"]) == 3 and t["transcripcion"] and t["puesto"] == 1
     textos = json.loads(cache.textos_path(P).read_text())
     assert set(textos[LIB]) == {"texto", "titulo"}
+    assert textos[LIB] == {"texto": TEXTO_AJENO, "titulo": TITULO_AJENO}
+    for f in vault.rglob("*"):
+        if f.is_file():
+            t = f.read_text(errors="replace")
+            assert TEXTO_AJENO not in t and TITULO_AJENO not in t
+    hasta = {f.library_id: f.medios_hasta for f in r.ref.fichas}
+    con_medios = {t["library_id"] for t in r.trabajo if t["fotogramas"] or t["imagen"]}
+    assert hasta[LIB] is not None
+    assert all((hasta[x] is not None) == (x in con_medios) for x in hasta)
 
 
 def test_ver_desde_lote(vault):
-    ref = _ver(vault, lote=FIX / "lote_pagina.json").ref
+    r = _ver(vault, lote=FIX / "lote_pagina.json")
+    ref = r.ref
     assert ref.via == "mcp" and ref.via_medios == "publica"
+    con_medios = {t["library_id"] for t in r.trabajo if t["fotogramas"] or t["imagen"]}
+    hasta = {f.library_id: f.medios_hasta for f in ref.fichas}
+    assert con_medios
+    assert all((hasta[x] is not None) == (x in con_medios) for x in hasta)
 
 
 def test_ver_parada_meta_no_descarga(vault):
@@ -203,3 +223,66 @@ def test_no_cambia_estados(vault):
 
 def test_modulo_importable():
     assert orquestador.Resultado
+
+
+def test_resolver_objetivo_pagina_original(vault):
+    fm_escribir(
+        vault / "wiki/ofertas/o-001.md",
+        {"oferta_id": "o-001", "page_ids": ["800000000001", "800000000002"], "original_page_id": "800000000002", "paises": PAISES},
+        "# o\n",
+    )
+    assert resolver_objetivo(vault, P, None, None).page_id == "800000000002"
+
+
+def test_resolver_objetivo_pais_invalido(vault):
+    with pytest.raises(ValueError, match="país"):
+        resolver_objetivo(vault, P, "M1", None)
+
+
+class Bloquea:
+    def abrir(self, url, max_anuncios):
+        from trovefy.caza.cliente import SesionBloqueada
+
+        raise SesionBloqueada("x")
+
+
+def test_ver_parada_guarda_textos_si_hay_listado(vault):
+    r = _ver(vault, lote=FIX / "lote_pagina.json", navegador=Bloquea())
+    assert r.tipo_parada == "meta" and r.ref.fichas
+    assert json.loads(cache.textos_path(P).read_text())
+
+
+def test_ver_listado_que_revienta_es_errores(vault, monkeypatch):
+    def revienta(*a, **kw):
+        raise RuntimeError("x")
+
+    monkeypatch.setattr(orquestador, "listar", revienta)
+    r = _ver(vault)
+    assert r.tipo_parada == "errores"
+    assert any(m.startswith("no medido") for m in r.ref.motivos)
+
+
+def test_ver_parada_errores_sin_motivo_duplicado(vault, monkeypatch):
+    from trovefy.referencia.fuente import Listado
+
+    monkeypatch.setattr(
+        orquestador, "listar", lambda *a, **kw: Listado([], "publica", False, "", None, motivo_medios="M", parada="errores")
+    )
+    r = _ver(vault)
+    assert r.ref.motivos.count("M") == 1 and r.parada == "M"
+    monkeypatch.setattr(orquestador, "listar", lambda *a, **kw: Listado([], "publica", False, "", None, parada="errores"))
+    assert "Meta" not in _ver(vault).parada
+
+
+def test_ver_listado_vacio_conserva_referencia(vault, monkeypatch):
+    from trovefy.referencia.fuente import Listado
+
+    _ver(vault)
+    d = vault / f"productos/{P}/referencia"
+    antes = {n: (d / n).read_text() for n in ("ranking.json", "anuncios.md")}
+    prod = (vault / f"productos/{P}/PRODUCTO.md").read_text()
+    monkeypatch.setattr(orquestador, "listar", lambda *a, **kw: Listado([], "publica", False, "", "no medido: vacío"))
+    r = _ver(vault)
+    assert {n: (d / n).read_text() for n in antes} == antes
+    assert (vault / f"productos/{P}/PRODUCTO.md").read_text() == prod
+    assert any("se conserva la referencia del 2026-11-13" in a for a in r.avisos)

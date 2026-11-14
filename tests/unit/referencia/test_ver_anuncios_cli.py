@@ -59,3 +59,29 @@ def test_cli_anotar_invalido_sale_2(vault, tmp_path, capsys):
     r.write_text(json.dumps({"no": "lista"}))
     assert cli._ejecutar(_args(accion="anotar", desde=str(r))) == 2
     assert "Traceback" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("cambio", [{"producto": "../x"}, {"pais": "MEX"}, {"pais": "M1"}, {"top": 0}])
+def test_cli_valida_argumentos(vault, capsys, cambio):
+    assert cli._ejecutar(_args(**cambio)) == 2
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_cli_ctrl_c_es_interrumpida(vault, monkeypatch, capsys):
+    from trovefy.referencia import orquestador
+
+    def corta(*a, **kw):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(orquestador, "ver", corta)
+    assert cli._ejecutar(_args()) == 3
+    err = capsys.readouterr().err
+    assert "INTERRUMPIDA" in err and "Traceback" not in err
+
+
+def test_cli_ayuda_pagina_original(capsys):
+    p = argparse.ArgumentParser()
+    cli._configurar(p)
+    with pytest.raises(SystemExit):
+        p.parse_args(["ver", "--help"])
+    assert "original_page_id" in capsys.readouterr().out

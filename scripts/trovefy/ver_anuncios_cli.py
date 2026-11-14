@@ -1,11 +1,15 @@
 """Subcomando `trovefy ver-anuncios`: ve los anuncios del original (ranking, /watch local y ficha propia)."""
 
 import argparse
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
 
 from trovefy.cli import registrar
+
+_RE_PID = re.compile(r"^p-\d{4}-[a-z0-9-]+$")
+_RE_PAIS = re.compile(r"^[A-Z]{2}$")
 
 
 def _configurar(p: argparse.ArgumentParser) -> None:
@@ -15,7 +19,7 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     v = sub.add_parser("ver", help="lista, ordena y descarga a la caché los medios del top")
     v.add_argument("--producto", required=True, metavar="P", help="p-id del producto (productos/<P>/)")
     v.add_argument("--pais", metavar="XX", help="país a leer (por defecto el de la ficha con más C8)")
-    v.add_argument("--page-id", metavar="ID", dest="page_id", help="página de la oferta (por defecto la primera)")
+    v.add_argument("--page-id", metavar="ID", dest="page_id", help="página de la oferta (por defecto original_page_id de la ficha; si no, la primera de page_ids)")
     v.add_argument("--top", type=int, metavar="N", help="cuántos ganadores ver (por defecto el umbral)")
     v.add_argument("--desde-mcp", metavar="ARCHIVO", dest="desde_mcp",
                    help="lote del MCP (~/.cache/trovefy/referencia/<P>/mcp/…) para el listado")
@@ -62,7 +66,8 @@ def _resumen(r) -> None:
     nm = [f for f in ref.fichas if f.estado == "no_medido"]
     print(f"Referencia de {ref.producto} · {ref.pais} · {ref.fecha}")
     print(f"- listado: {ref.via} ({'completo' if ref.completo else 'muestra'}); medios: {ref.via_medios or 'sin medios'}")
-    print(f"- leídos {len(ref.fichas)}: {len(gan)} ganadores, "
+    en_top = sum(1 for f in gan if f.puesto is not None)
+    print(f"- leídos {len(ref.fichas)}: {len(gan)} ganadores ({en_top} en el top), "
           f"{sum(1 for f in ref.fichas if f.estado == 'en_test')} en test, {len(nm)} no medidos")
     for m in ref.motivos:
         print(f"- {m}")
@@ -85,12 +90,24 @@ def _resumen(r) -> None:
           f"{ref.producto} --desde data/referencia/analisis-<fecha>.json`")
 
 
+def _validar_producto(producto: str) -> str | None:
+    return None if _RE_PID.fullmatch(producto or "") else f"producto inválido: {producto!r} (p. ej. p-0001-nombre)"
+
+
 def _ver(args: argparse.Namespace) -> int:
     from trovefy.caza.mcp import LoteInvalido
     from trovefy.config.umbrales import UmbralFaltante
     from trovefy.referencia import orquestador
     from trovefy.vault.rutas import vault_root
 
+    if msg := _validar_producto(args.producto):
+        return _error(msg)
+    if args.pais is not None:
+        args.pais = args.pais.strip().upper()
+        if not _RE_PAIS.fullmatch(args.pais):
+            return _error(f"país inválido: {args.pais!r} (dos letras, p. ej. MX)")
+    if args.top is not None and args.top < 1:
+        return _error("--top debe ser al menos 1")
     vault = vault_root()
     try:
         obj = orquestador.resolver_objetivo(vault, args.producto, args.pais, args.page_id)
@@ -116,6 +133,8 @@ def _anotar(args: argparse.Namespace) -> int:
     from trovefy.referencia.analisis import AnalisisInvalido, anotar
     from trovefy.vault.rutas import vault_root
 
+    if msg := _validar_producto(args.producto):
+        return _error(msg)
     try:
         ids = anotar(vault_root(), args.producto, Path(args.desde), _ahora())
     except AnalisisInvalido as e:
@@ -172,6 +191,9 @@ def _ejecutar(args: argparse.Namespace) -> int:
             "anotar": lambda: _anotar(args),
             "limpiar": lambda: _limpiar(),
         }[args.accion]()
+    except KeyboardInterrupt:
+        print("INTERRUMPIDA: cancelado por el usuario (Ctrl-C).", file=sys.stderr)
+        return 3
     except Exception as e:  # noqa: BLE001 - sin traceback ante el usuario
         return _error(f"{type(e).__name__}", 3)
 
