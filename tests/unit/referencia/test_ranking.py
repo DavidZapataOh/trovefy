@@ -3,22 +3,8 @@ from __future__ import annotations
 from datetime import date
 
 from fixtures.referencia.anuncios_ranking import E1, E2, HOY, A, B, C, D, F, anuncio
+from trovefy.referencia.config import UmbralesReferencia
 from trovefy.referencia.ranking import dias_activo, rankear, top
-
-try:
-    from trovefy.referencia.config import UmbralesReferencia
-except ImportError:  # Tarea 2 aún no unida: mismo contrato
-    from dataclasses import dataclass
-
-    @dataclass(frozen=True)
-    class UmbralesReferencia:  # type: ignore[no-redef]
-        min_dias: int
-        max_variantes: int
-        peso_variantes: int
-        en_test_min_variantes: int
-        top: int
-        retencion_dias: int
-
 
 U = UmbralesReferencia(
     min_dias=7,
