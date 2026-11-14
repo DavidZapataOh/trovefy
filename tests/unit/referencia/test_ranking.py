@@ -10,7 +10,7 @@ U = UmbralesReferencia(
     min_dias=7,
     max_variantes=30,
     peso_variantes=2,
-    en_test_min_variantes=5,
+    en_test_min_variantes=3,
     top=10,
     retencion_dias=30,
 )
@@ -74,3 +74,13 @@ def test_top_solo_ganadores():
         "B",
     ]
     assert [x.library_id for x in top(rankear([A, C, D], HOY, U), 5)] == ["A"]
+
+
+def test_en_test_frontera_con_umbral_por_defecto():
+    (c3,) = rankear(
+        [anuncio("T3", date(2026, 11, 10), collation_id="t3", count=3)], HOY, U
+    )
+    (c2,) = rankear(
+        [anuncio("T2", date(2026, 11, 10), collation_id="t2", count=2)], HOY, U
+    )
+    assert (c3.estado, c2.estado) == ("en_test", "nuevo")

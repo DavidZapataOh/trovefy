@@ -3,6 +3,7 @@
 import json
 import os
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from trovefy.referencia import cache
@@ -92,3 +93,53 @@ def test_textos_path(base):
     assert cache.textos_path(P_ID) == base / P_ID / "textos.json"
     with pytest.raises(ValueError):
         cache.textos_path("../x")
+
+
+def test_guardar_textos_crea_caduca_una_vez(base):
+    r = cache.guardar_textos(P_ID, '{"a": 1}', AHORA, 30)
+    assert r == base / P_ID / "textos.json" and r.read_text() == '{"a": 1}'
+    marca = base / P_ID / "caduca.json"
+    antes = marca.read_text()
+    assert json.loads(antes)["caduca"] == (AHORA + timedelta(days=30)).isoformat()
+    cache.guardar_textos(P_ID, '{"a": 2}', AHORA + timedelta(days=10), 30)
+    assert marca.read_text() == antes and r.read_text() == '{"a": 2}'
+    assert not [p for p in (base / P_ID).iterdir() if p.name.endswith(".tmp")]
+
+
+def test_caduca_se_escribe_atomico(base, monkeypatch):
+    usados = []
+    real = os.replace
+    monkeypatch.setattr(
+        os, "replace", lambda a, b: (usados.append(Path(b).name), real(a, b))
+    )
+    cache.carpeta_anuncio(P_ID, "1", AHORA, 30)
+    cache.guardar_textos(P_ID, "{}", AHORA, 30)
+    assert usados.count("caduca.json") == 2
+
+
+def test_limpiar_borra_textos_vencidos(base):
+    r = cache.guardar_textos(P_ID, "{}", AHORA - timedelta(days=31), 30)
+    assert cache.limpiar(AHORA) == [r]
+    assert not r.exists() and not (r.parent / "caduca.json").exists()
+
+
+def test_limpiar_conserva_textos_vigentes_o_sin_marca(base):
+    r = cache.guardar_textos(P_ID, "{}", AHORA - timedelta(days=5), 30)
+    otro = base / "p-0002-otro"
+    otro.mkdir()
+    (otro / "textos.json").write_text("{}")
+    assert cache.limpiar(AHORA) == []
+    assert r.exists() and (otro / "textos.json").exists()
+
+
+def test_limpiar_no_borra_textos_symlink(base, tmp_path):
+    fuera = tmp_path / "fuera.json"
+    fuera.write_text("x")
+    d = base / P_ID
+    d.mkdir(parents=True)
+    os.symlink(fuera, d / "textos.json")
+    (d / "caduca.json").write_text(
+        json.dumps({"caduca": (AHORA - timedelta(days=1)).isoformat()})
+    )
+    assert cache.limpiar(AHORA) == []
+    assert fuera.exists() and (d / "textos.json").is_symlink()

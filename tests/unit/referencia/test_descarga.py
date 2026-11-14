@@ -92,6 +92,8 @@ def test_rechaza_host_no_permitido(url, tmp_path):
         ["169.254.169.254"],
         ["::1"],
         ["::ffff:127.0.0.1"],
+        ["64:ff9b::7f00:1"],
+        ["64:ff9b::9df0:1"],
         ["157.240.0.1", "10.0.0.1"],
         [],
     ],
@@ -199,3 +201,51 @@ def test_mensaje_sin_query(tmp_path):
 
 def test_destino_tipo_path(tmp_path):
     assert isinstance(tmp_path, Path)
+
+
+class _Reloj:
+    def __init__(self, paso):
+        self.t = 0.0
+        self.paso = paso
+
+    def __call__(self):
+        self.t += self.paso
+        return self.t
+
+
+def test_plazo_total_corta_lectura_lenta(tmp_path):
+    con = ConexionFalsa(cuerpo=MP4 + b"\x00" * (1024**2))
+    with pytest.raises(DescargaRechazada):
+        descargar_medio(
+            URL,
+            tmp_path / "x",
+            resolver=resolver_fijo("157.240.0.1"),
+            conectar=con,
+            reloj=_Reloj(50.0),
+        )
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_plazo_total_no_afecta_descarga_rapida(tmp_path):
+    res = descargar_medio(
+        URL,
+        tmp_path / "x",
+        resolver=resolver_fijo("157.240.0.1"),
+        conectar=ConexionFalsa(),
+        reloj=_Reloj(0.001),
+    )
+    assert res.read_bytes() == MP4
+
+
+def test_parcial_symlink_no_se_sigue(tmp_path):
+    objetivo = tmp_path / "objetivo.txt"
+    objetivo.write_text("intacto")
+    os.symlink(objetivo, tmp_path / "x.part")
+    with pytest.raises(DescargaRechazada):
+        descargar_medio(
+            URL,
+            tmp_path / "x",
+            resolver=resolver_fijo("157.240.0.1"),
+            conectar=ConexionFalsa(),
+        )
+    assert objetivo.read_text() == "intacto"

@@ -15,6 +15,7 @@ import ipaddress
 import os
 import socket
 import ssl
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -26,6 +27,8 @@ TIPOS = {
     "image/webp": 8 * 1024**2,
 }
 TIMEOUT_S = 30
+PLAZO_TOTAL_S = 120
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
 _TROZO = 64 * 1024
 _EXT = {
     "video/mp4": "mp4",
@@ -65,6 +68,8 @@ def _es_global(ip: str) -> bool:
         return False
     if isinstance(a, ipaddress.IPv6Address) and a.ipv4_mapped is not None:
         a = a.ipv4_mapped
+    if isinstance(a, ipaddress.IPv6Address) and a in _NAT64:
+        return False
     return a.is_global and not a.is_multicast
 
 
@@ -112,7 +117,11 @@ def _firma_ok(tipo: str, cabeza: bytes) -> bool:
 
 
 def descargar_medio(
-    url: str, destino_sin_ext: Path, resolver=_resolver, conectar=_conectar
+    url: str,
+    destino_sin_ext: Path,
+    resolver=_resolver,
+    conectar=_conectar,
+    reloj=time.monotonic,
 ) -> Path:
     if not url_permitida(url):
         raise DescargaRechazada("URL de medio no permitida (host o esquema).")
@@ -122,6 +131,7 @@ def descargar_medio(
     ruta = (p.path or "/") + (f"?{p.query}" if p.query else "")
     destino_sin_ext = Path(destino_sin_ext)
     parcial = destino_sin_ext.with_name(destino_sin_ext.name + ".part")
+    limite = reloj() + PLAZO_TOTAL_S
     con = None
     try:
         con = conectar(ip, host)
@@ -137,9 +147,15 @@ def descargar_medio(
         tope = TIPOS[tipo]
         total = 0
         cabeza = b""
-        fd = os.open(parcial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        fd = os.open(
+            parcial,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
+            0o600,
+        )
         with os.fdopen(fd, "wb") as f:
             while True:
+                if reloj() > limite:
+                    raise DescargaRechazada("La descarga superó el plazo máximo.")
                 trozo = resp.read(_TROZO)
                 if not trozo:
                     break

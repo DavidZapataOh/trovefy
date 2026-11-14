@@ -31,6 +31,32 @@ def _utc(d: datetime) -> datetime:
     return d if d.tzinfo else d.replace(tzinfo=UTC)
 
 
+def _escribe_atomico(destino: Path, texto: str) -> None:
+    tmp = destino.with_name(destino.name + ".tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(texto)
+        os.replace(tmp, destino)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def _escribe_marca(
+    marca: Path, ahora: datetime, retencion_dias: int, extra: dict
+) -> None:
+    """Escribe caduca.json una sola vez (nunca se alarga) y de forma atómica."""
+    if marca.exists() or marca.is_symlink():
+        return
+    ahora = _utc(ahora)
+    datos = {
+        "descargado": ahora.isoformat(),
+        "caduca": (ahora + timedelta(days=retencion_dias)).isoformat(),
+        **extra,
+    }
+    _escribe_atomico(marca, json.dumps(datos, ensure_ascii=False))
+
+
 def carpeta_anuncio(
     p_id: str, library_id: str, ahora: datetime, retencion_dias: int
 ) -> Path:
@@ -41,26 +67,56 @@ def carpeta_anuncio(
     carpeta.mkdir(parents=True, exist_ok=True, mode=0o700)
     carpeta.parent.chmod(0o700)
     carpeta.chmod(0o700)
-    marca = carpeta / "caduca.json"
-    if not marca.exists():
-        ahora = _utc(ahora)
-        marca.write_text(
-            json.dumps(
-                {
-                    "descargado": ahora.isoformat(),
-                    "caduca": (ahora + timedelta(days=retencion_dias)).isoformat(),
-                    "producto": p_id,
-                    "library_id": library_id,
-                },
-                ensure_ascii=False,
-            )
-        )
+    _escribe_marca(
+        carpeta / "caduca.json",
+        ahora,
+        retencion_dias,
+        {"producto": p_id, "library_id": library_id},
+    )
     return carpeta
 
 
 def textos_path(p_id: str) -> Path:
     _valida_pid(p_id)
     return base_cache() / p_id / "textos.json"
+
+
+def guardar_textos(
+    p_id: str, contenido: str, ahora: datetime, retencion_dias: int
+) -> Path:
+    destino = textos_path(p_id)
+    carpeta = destino.parent
+    carpeta.mkdir(parents=True, exist_ok=True, mode=0o700)
+    carpeta.chmod(0o700)
+    _escribe_marca(carpeta / "caduca.json", ahora, retencion_dias, {"producto": p_id})
+    _escribe_atomico(destino, contenido)
+    return destino
+
+
+def _textos_vencidos(ahora: datetime) -> list[Path]:
+    ahora = _utc(ahora)
+    base = base_cache()
+    base_real = base.resolve()
+    salida: list[Path] = []
+    for nivel1 in sorted(base.iterdir()):
+        if nivel1.is_symlink() or not nivel1.is_dir():
+            continue
+        textos = nivel1 / "textos.json"
+        if textos.is_symlink() or not textos.is_file():
+            continue
+        if not textos.resolve().is_relative_to(base_real):
+            continue
+        try:
+            caduca = _utc(
+                datetime.fromisoformat(
+                    json.loads((nivel1 / "caduca.json").read_text())["caduca"]
+                )
+            )
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+        if caduca <= ahora:
+            salida.append(textos)
+    return salida
 
 
 def _recorrer(ahora: datetime):
@@ -108,4 +164,8 @@ def limpiar(ahora: datetime) -> list[Path]:
             continue
         shutil.rmtree(carpeta)
         borradas.append(carpeta)
+    for textos in _textos_vencidos(ahora):
+        textos.unlink(missing_ok=True)
+        (textos.parent / "caduca.json").unlink(missing_ok=True)
+        borradas.append(textos)
     return borradas
