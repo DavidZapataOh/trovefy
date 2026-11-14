@@ -1,8 +1,10 @@
 """Listado de anuncios de una página (lote MCP o Biblioteca pública) y sus medios.
 
 Con lote, el listado sale del MCP y solo los medios se leen en la pública (una lectura por
-Playwright, sin Firecrawl ni caché: los medios necesitan la página viva). Sin lote, esa misma
-lectura da también el listado. Un bloqueo de Meta o una racha de errores es una parada: no se
+Playwright, sin Firecrawl ni caché: los medios necesitan la página viva). Si el lote no da un
+listado (inválido, búsqueda fuera del lote, error o límite de Meta), no se abre el navegador ni se
+gasta una búsqueda; un límite de Meta dentro del lote para el día entero. Sin lote, la lectura
+pública da también el listado. Un bloqueo de Meta o una racha de errores es una parada: no se
 reintenta.
 """
 
@@ -32,6 +34,8 @@ from trovefy.referencia.medios import MediosAnuncio, medios_de_pagina
 MOTIVO_SIN_NAVEGADOR = "no medido: sin navegador (pedido por el usuario)"
 MOTIVO_CUOTA = "no medido: cuota del día agotada"
 MOTIVO_SIN_FUENTE = "no medido: sin lote del MCP y sin navegador"
+MOTIVO_SIN_LISTADO = "no medido: sin listado del MCP no se leen los medios"
+MOTIVO_PARADA_DIA = "Meta ya bloqueó hoy; vuelve mañana"
 
 
 class NavegadorQueGuarda:
@@ -79,10 +83,19 @@ def listar(
         except LoteInvalido as exc:
             # Sin cambio silencioso de fuente: el listado queda sin medir (los mensajes no llevan datos del lote).
             out.motivo = f"no medido: lote inválido ({exc})"
-        else:
-            r = ClienteMcp(busquedas).buscar(pais, None, page_id, "active")
-            out.anuncios, out.completo, out.url = list(r.anuncios), r.completo, r.url
-            out.motivo = r.motivo if r.estado in ("error", "bloqueado") else None
+            out.motivo_medios = MOTIVO_SIN_LISTADO
+            return out
+        r = ClienteMcp(busquedas).buscar(pais, None, page_id, "active")
+        out.anuncios, out.completo, out.url = list(r.anuncios), r.completo, r.url
+        if r.estado not in ("ok", "vacio"):
+            # Con lote, la pública nunca da el listado: ni se abre el navegador ni se gasta una búsqueda.
+            out.motivo = r.motivo
+            out.motivo_medios = MOTIVO_SIN_LISTADO
+            if r.estado == "bloqueado":
+                out.parada = "meta"
+                out.motivo_medios = r.motivo
+                Presupuesto.desde_umbrales(vault, hoy).registrar_parada(f"bloqueo de Meta: {r.motivo}")
+            return out
     if sin_navegador:
         out.motivo_medios = MOTIVO_SIN_NAVEGADOR
         if lote is None:
@@ -103,7 +116,7 @@ def listar(
         return out
     except ParadaDelDia:
         out.parada = "meta"
-        out.motivo_medios = MOTIVO_CUOTA
+        out.motivo_medios = MOTIVO_PARADA_DIA
         return out
     except PresupuestoAgotado:
         out.motivo_medios = MOTIVO_CUOTA

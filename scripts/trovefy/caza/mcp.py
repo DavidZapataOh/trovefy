@@ -29,6 +29,49 @@ class LoteInvalido(ValueError):
     """El lote del MCP no se puede aceptar."""
 
 
+# Códigos de Graph que son límite o bloqueo de Meta (como en la vía pública) y estados HTTP de límite.
+_CODIGOS_LIMITE = frozenset({4, 17, 32, 613})
+_HTTP_LIMITE = frozenset({403, 429})
+
+
+class ErrorMcp(Exception):
+    """La respuesta guardada en el lote es un error de Meta o del MCP, no un listado.
+
+    ``bloqueado`` es True con un límite de Meta (códigos 4, 17, 32, 613 o HTTP 403/429): es una parada.
+    El motivo nunca copia el mensaje de Meta."""
+
+    def __init__(self, bloqueado: bool, motivo: str):
+        super().__init__(motivo)
+        self.bloqueado = bloqueado
+        self.motivo = motivo
+
+
+def _entero(v: Any) -> int | None:
+    if isinstance(v, int) and not isinstance(v, bool):
+        return v
+    if isinstance(v, str) and v.strip().isdigit():
+        return int(v.strip())
+    return None
+
+
+def _comprobar_error(obj: dict) -> None:
+    err = obj.get("error")
+    if not err:
+        return
+    datos = err if isinstance(err, dict) else {}
+    codigo = _entero(datos.get("code"))
+    http = next(
+        (h for h in (_entero(d.get(k)) for d in (datos, obj) for k in ("http_status", "status_code", "status"))
+         if h is not None),
+        None,
+    )
+    if codigo in _CODIGOS_LIMITE or http in _HTTP_LIMITE:
+        detalle = f"código {codigo}" if codigo in _CODIGOS_LIMITE else f"HTTP {http}"
+        raise ErrorMcp(True, f"Meta limitó las consultas del MCP ({detalle})")
+    detalle = f" (código {codigo})" if codigo is not None else ""
+    raise ErrorMcp(False, f"no medido: el MCP devolvió un error de Meta{detalle}")
+
+
 @dataclass(frozen=True)
 class BusquedaMcp:
     pais: str
@@ -93,6 +136,8 @@ def consultas_del_lote(lote: list[BusquedaMcp]) -> list[tuple[str, str]]:
 
 def _desenvolver(respuesta: object) -> dict:
     obj = respuesta
+    if isinstance(obj, dict) and obj.get("isError") is True:
+        raise ErrorMcp(False, "no medido: el MCP devolvió un error")
     if isinstance(obj, dict) and isinstance(obj.get("content"), list):
         textos = [c.get("text") for c in obj["content"] if isinstance(c, dict) and c.get("type") == "text"]
         if len(textos) != 1 or not isinstance(textos[0], str):
@@ -113,11 +158,14 @@ def _desenvolver(respuesta: object) -> dict:
             raise FormatoDesconocido("results no es JSON") from exc
         if not isinstance(obj, dict):
             raise FormatoDesconocido("results no es un objeto")
+    _comprobar_error(obj)
     return obj
 
 
 def _fecha(valor: Any, campo: str) -> date:
-    if isinstance(valor, int) and not isinstance(valor, bool) and valor > 0:
+    if isinstance(valor, str) and re.fullmatch(r"\d{9,}(\.\d+)?", valor.strip()):
+        valor = float(valor.strip())
+    if isinstance(valor, (int, float)) and not isinstance(valor, bool) and valor > 0:
         try:
             return datetime.fromtimestamp(valor, UTC).date()
         except (OverflowError, OSError, ValueError) as exc:
@@ -244,6 +292,9 @@ class ClienteMcp:
         url = url_biblioteca(pais, b.q, b.page_id, estado)
         try:
             p = parsear_mcp(b.respuesta, pais, b.estado)
+        except ErrorMcp as exc:
+            estado = "bloqueado" if exc.bloqueado else "error"
+            return ResultadoBusqueda(estado, url, None, [], exc.motivo, b.capturado_en, via="mcp")
         except FormatoDesconocido:
             return ResultadoBusqueda("error", url, None, [], MOTIVO_FORMA, b.capturado_en, via="mcp")
         completo = p.hay_mas is False and p.descartados == 0

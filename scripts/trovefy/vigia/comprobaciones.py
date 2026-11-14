@@ -245,7 +245,11 @@ def referencia_cache(ahora: datetime, base: Path) -> Comprobacion:
     base = Path(base)
     if not base.is_dir():
         return Comprobacion("referencia", "ok", "sin medios de referencia")
-    n = len(cache_referencia_mod.vencidos(ahora, base))
+    try:
+        n = len(cache_referencia_mod.vencidos(ahora, base))
+    except OSError as e:
+        return Comprobacion(
+            "referencia", "aviso", f"no se pudo leer la caché de medios de referencia ({type(e).__name__})")
     if n:
         return Comprobacion(
             "referencia", "aviso",

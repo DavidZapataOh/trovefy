@@ -87,11 +87,25 @@ def _resumen(r) -> None:
             if t["motivo"]:
                 print(f"    {t['motivo']}")
     print("Siguiente paso: `trovefy ver-anuncios anotar --producto "
-          f"{ref.producto} --desde data/referencia/analisis-<fecha>.json`")
+          f"{ref.producto} --desde data/referencia/analisis-{ref.producto}.json`")
 
 
 def _validar_producto(producto: str) -> str | None:
     return None if _RE_PID.fullmatch(producto or "") else f"producto inválido: {producto!r} (p. ej. p-0001-nombre)"
+
+
+def _validar_lote(lote: Path) -> str | None:
+    """El lote del MCP solo se acepta dentro de la caché de la referencia (fuera del vault y del repo)."""
+    from trovefy.referencia import cache
+
+    base = cache.base_cache()
+    try:
+        dentro = lote.resolve().is_relative_to(base.resolve())
+    except (OSError, RuntimeError):
+        dentro = False
+    if dentro:
+        return None
+    return f"el lote del MCP debe estar en la caché de la referencia ({base}/<p-id>/mcp/), no en {lote}"
 
 
 def _ver(args: argparse.Namespace) -> int:
@@ -108,11 +122,16 @@ def _ver(args: argparse.Namespace) -> int:
             return _error(f"país inválido: {args.pais!r} (dos letras, p. ej. MX)")
     if args.top is not None and args.top < 1:
         return _error("--top debe ser al menos 1")
+    lote = None
+    if args.desde_mcp:
+        if msg := _validar_lote(Path(args.desde_mcp).expanduser()):
+            return _error(msg)
+        lote = Path(args.desde_mcp).expanduser()
     vault = vault_root()
     try:
         obj = orquestador.resolver_objetivo(vault, args.producto, args.pais, args.page_id)
         r = orquestador.ver(
-            vault, obj, top=args.top, lote=Path(args.desde_mcp) if args.desde_mcp else None,
+            vault, obj, top=args.top, lote=lote,
             sin_navegador=args.sin_navegador, ahora=_ahora(),
         )  # fmt: skip
     except (FileNotFoundError, ValueError, LoteInvalido, UmbralFaltante) as e:
@@ -121,7 +140,8 @@ def _ver(args: argparse.Namespace) -> int:
         return _error(f"no se pudo leer la referencia ({type(e).__name__})", 3)
     _resumen(r)
     if r.tipo_parada == "meta":
-        print(f"PARADA: {r.parada}. No se reintenta; vuelve mañana o usa --desde-mcp.", file=sys.stderr)
+        cola = "No se reintenta." if "mañana" in (r.parada or "") else "No se reintenta; vuelve mañana."
+        print(f"PARADA: {r.parada}. {cola}", file=sys.stderr)
         return 1
     if r.tipo_parada == "errores":
         print(f"INTERRUMPIDA: {r.parada}.", file=sys.stderr)
@@ -167,8 +187,14 @@ def _limpiar() -> int:
 
     ahora = _ahora()
     try:
+        from trovefy.referencia.config import cargar_umbrales_referencia
+
+        retencion = cargar_umbrales_referencia(vault_root()).retencion_dias
+    except Exception:  # noqa: BLE001 - sin umbrales legibles vale la retención por defecto
+        retencion = cache.RETENCION_DIAS
+    try:
         avisos = cache.avisos_limpieza(ahora)
-        borradas = cache.limpiar(ahora)
+        borradas = cache.limpiar(ahora, retencion)
     except OSError as e:
         return _error(f"no se pudo limpiar la caché ({type(e).__name__})")
     for b in borradas:

@@ -249,3 +249,45 @@ def test_parcial_symlink_no_se_sigue(tmp_path):
             conectar=ConexionFalsa(),
         )
     assert objetivo.read_text() == "intacto"
+
+
+class _RespRead1(_Resp):
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.read1_llamadas = 0
+
+    def read(self, n=-1):
+        raise AssertionError("con read1 no se usa read(n), que puede bloquear hasta llenar el trozo")
+
+    def read1(self, n=-1):
+        self.read1_llamadas += 1
+        return _Resp.read(self, min(n, 16))
+
+
+class _Sock:
+    def __init__(self):
+        self.timeouts = []
+
+    def settimeout(self, t):
+        self.timeouts.append(t)
+
+
+def test_usa_read1_si_existe(tmp_path):
+    resp = _RespRead1(200, {"Content-Type": "video/mp4"}, MP4)
+    con = ConexionFalsa()
+    con.getresponse = lambda: resp
+    res = descargar_medio(URL, tmp_path / "x", resolver=resolver_fijo("157.240.0.1"), conectar=con)
+    assert res.read_bytes() == MP4 and resp.read1_llamadas > 1
+
+
+def test_sin_read1_el_socket_espera_solo_lo_que_queda(tmp_path):
+    from trovefy.referencia.descarga import PLAZO_TOTAL_S, TIMEOUT_S
+
+    con = ConexionFalsa(cuerpo=MP4)
+    con.sock = _Sock()
+    res = descargar_medio(
+        URL, tmp_path / "x", resolver=resolver_fijo("157.240.0.1"), conectar=con, reloj=_Reloj(50.0)
+    )
+    assert res.read_bytes() == MP4
+    assert con.sock.timeouts and all(0 < t <= min(TIMEOUT_S, PLAZO_TOTAL_S) for t in con.sock.timeouts)
+    assert con.sock.timeouts[-1] < con.sock.timeouts[0]

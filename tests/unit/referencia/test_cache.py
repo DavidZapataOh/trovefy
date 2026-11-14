@@ -95,14 +95,14 @@ def test_textos_path(base):
         cache.textos_path("../x")
 
 
-def test_guardar_textos_crea_caduca_una_vez(base):
+def test_guardar_textos_renueva_caduca_al_reescribir(base):
     r = cache.guardar_textos(P_ID, '{"a": 1}', AHORA, 30)
     assert r == base / P_ID / "textos.json" and r.read_text() == '{"a": 1}'
     marca = base / P_ID / "caduca.json"
-    antes = marca.read_text()
-    assert json.loads(antes)["caduca"] == (AHORA + timedelta(days=30)).isoformat()
+    assert json.loads(marca.read_text())["caduca"] == (AHORA + timedelta(days=30)).isoformat()
     cache.guardar_textos(P_ID, '{"a": 2}', AHORA + timedelta(days=10), 30)
-    assert marca.read_text() == antes and r.read_text() == '{"a": 2}'
+    assert json.loads(marca.read_text())["caduca"] == (AHORA + timedelta(days=40)).isoformat()
+    assert r.read_text() == '{"a": 2}'
     assert not [p for p in (base / P_ID).iterdir() if p.name.endswith(".tmp")]
 
 
@@ -143,3 +143,55 @@ def test_limpiar_no_borra_textos_symlink(base, tmp_path):
     )
     assert cache.limpiar(AHORA) == []
     assert fuera.exists() and (d / "textos.json").is_symlink()
+
+
+def _lote(carpeta, nombre, dias):
+    carpeta.mkdir(parents=True, exist_ok=True)
+    lote = carpeta / nombre
+    lote.write_text("{}")
+    t = (AHORA - timedelta(days=dias)).timestamp()
+    os.utime(lote, (t, t))
+    return lote
+
+
+def test_lotes_mcp_caducan_por_antiguedad(base):
+    mcp = base / P_ID / "mcp"
+    viejo = _lote(mcp, "lote-a.json", 400)
+    nuevo = _lote(mcp, "lote-b.json", 1)
+    assert cache.vencidos(AHORA) == [viejo]
+    assert cache.avisos_limpieza(AHORA) == []
+    assert cache.limpiar(AHORA, 30) == [viejo]
+    assert not viejo.exists() and nuevo.exists()
+
+
+def test_retencion_de_lotes_configurable(base):
+    lote = _lote(base / P_ID / "mcp", "lote-a.json", 10)
+    assert cache.vencidos(AHORA, retencion_dias=30) == []
+    assert cache.vencidos(AHORA, retencion_dias=5) == [lote]
+
+
+def test_carpeta_mcp_vacia_se_borra(base):
+    mcp = base / P_ID / "mcp"
+    _lote(mcp, "lote-a.json", 400)
+    cache.limpiar(AHORA, 30)
+    assert not mcp.exists()
+
+
+def test_lotes_mcp_no_siguen_symlinks(base, tmp_path):
+    fuera = tmp_path / "fuera"
+    viejo = _lote(fuera, "lote-x.json", 400)
+    (base / P_ID).mkdir(parents=True)
+    os.symlink(fuera, base / P_ID / "mcp")
+    otro = base / "p-0002-otro" / "mcp"
+    otro.mkdir(parents=True)
+    os.symlink(viejo, otro / "lote-y.json")
+    assert cache.vencidos(AHORA) == []
+    assert cache.limpiar(AHORA, 30) == []
+    assert viejo.exists() and (otro / "lote-y.json").is_symlink()
+    assert cache.avisos_limpieza(AHORA) == []
+
+
+def test_caduca_de_anuncio(base):
+    cache.carpeta_anuncio(P_ID, "7", AHORA - timedelta(days=20), 30)
+    assert cache.caduca_anuncio(P_ID, "7") == (AHORA + timedelta(days=10)).date()
+    assert cache.caduca_anuncio(P_ID, "8") is None

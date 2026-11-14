@@ -134,6 +134,18 @@ def _cargar_ajenos(p_id: str) -> dict[str, list[str]]:
     return ajenos
 
 
+def _borrar_borrador(vault: Path, ruta_json: Path) -> None:
+    """Tras anotar, borra el borrador de Claude, pero solo si vive en ``<vault>/data/referencia/``."""
+    try:
+        zona = (Path(vault) / "data" / "referencia").resolve()
+        if ruta_json.is_symlink() or not ruta_json.is_file():
+            return
+        if ruta_json.resolve().parent.is_relative_to(zona):
+            ruta_json.unlink()
+    except OSError:
+        pass
+
+
 def anotar(vault: Path, p_id: str, ruta_json: Path, ahora: datetime) -> list[str]:
     ruta_json = Path(ruta_json)
     try:
@@ -154,6 +166,7 @@ def anotar(vault: Path, p_id: str, ruta_json: Path, ahora: datetime) -> list[str
             f.analisis = nuevos[f.library_id]
     escribir_referencia(vault, ref, ahora, log=False)
     ids = sorted(nuevos)
+    _borrar_borrador(vault, ruta_json)
     anadir_log(
         vault, "ver-anuncios", f"anotar análisis de {len(ids)} anuncios", [f"productos/{p_id}/referencia/anuncios.md"], ahora=ahora
     )

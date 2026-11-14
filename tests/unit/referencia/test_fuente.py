@@ -51,7 +51,9 @@ def test_lote_sin_la_busqueda_no_cae_a_publica(vault):
     nav = NavFalso([pag()])
     r = fuente.listar(vault, "RO", "800000000999", lote=FIX / "lote_pagina.json", sin_navegador=False, navegador=nav, hoy=HOY)
     assert r.via == "mcp" and r.anuncios == [] and "fuera del lote" in r.motivo
-    assert len(nav.llamadas) == 1  # solo los medios
+    assert nav.llamadas == []  # con lote, la vía pública nunca da el listado y sin listado no se gasta búsqueda
+    assert r.parada is None and r.motivo_medios
+    assert not (vault / "data/caza/presupuesto" / f"{HOY.isoformat()}.json").exists()
 
 
 def test_listar_sin_lote_una_sola_busqueda(vault):
@@ -90,3 +92,38 @@ def test_lote_invalido_es_no_medido(vault, tmp_path):
     assert r.via == "mcp" and r.anuncios == []
     assert r.motivo == "no medido: lote inválido (el lote no es JSON)"
     assert "no es json" not in r.motivo
+
+
+def _lote_con(tmp_path, respuesta):
+    d = json.loads((FIX / "lote_pagina.json").read_text())
+    for b in d["busquedas"]:
+        b["respuesta"] = respuesta
+    p = tmp_path / "lote-error.json"
+    p.write_text(json.dumps(d))
+    return p
+
+
+def test_lote_bloqueado_para_el_dia_sin_navegador(vault, tmp_path):
+    lote = _lote_con(tmp_path, {"results": json.dumps({"error": {"message": "limit", "code": 4}})})
+    nav = NavFalso([pag()])
+    r = fuente.listar(vault, "RO", PID, lote=lote, sin_navegador=False, navegador=nav, hoy=HOY)
+    assert r.parada == "meta" and r.anuncios == [] and nav.llamadas == []
+    datos = json.loads((vault / "data/caza/presupuesto" / f"{HOY.isoformat()}.json").read_text())
+    assert datos.get("parada") and datos.get("usadas", 0) == 0
+
+
+def test_lote_con_error_no_abre_navegador(vault, tmp_path):
+    lote = _lote_con(tmp_path, {"error": {"message": "bad", "code": 100}})
+    nav = NavFalso([pag()])
+    r = fuente.listar(vault, "RO", PID, lote=lote, sin_navegador=False, navegador=nav, hoy=HOY)
+    assert r.parada is None and r.anuncios == [] and "error" in r.motivo and nav.llamadas == []
+    assert not (vault / "data/caza/presupuesto" / f"{HOY.isoformat()}.json").exists()
+
+
+def test_parada_del_dia_tiene_su_motivo(vault):
+    d = vault / "data/caza/presupuesto"
+    d.mkdir(parents=True)
+    (d / f"{HOY.isoformat()}.json").write_text(json.dumps({"usadas": 1, "rutina": 0, "parada": "bloqueo de Meta: x"}))
+    nav = NavFalso([pag()])
+    r = fuente.listar(vault, "RO", PID, lote=None, sin_navegador=False, navegador=nav, hoy=HOY)
+    assert r.parada == "meta" and r.motivo_medios == "Meta ya bloqueó hoy; vuelve mañana" and nav.llamadas == []

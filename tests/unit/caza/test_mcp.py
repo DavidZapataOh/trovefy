@@ -149,3 +149,45 @@ def test_forma_desconocida_se_sigue_rechazando(resp):
 
     with pytest.raises(FormatoDesconocido):
         parsear_mcp(resp, "RO")
+
+
+def _con_respuesta(resp):
+    return [replace(cargar_lote(REAL)[0], respuesta=resp)]
+
+
+@pytest.mark.parametrize("codigo", [4, 17, 32, 613, "17"])
+@pytest.mark.parametrize("envuelto", [True, False])
+def test_error_de_limite_es_bloqueado(codigo, envuelto):
+    err = {"error": {"message": "(#4) Application request limit reached", "type": "OAuthException", "code": codigo}}
+    resp = {"results": json.dumps(err)} if envuelto else err
+    r = ClienteMcp(_con_respuesta(resp)).buscar("RO", page_id="800000000001")
+    assert r.estado == "bloqueado" and r.anuncios == [] and r.via == "mcp"
+    assert r.motivo and "limit reached" not in r.motivo
+
+
+@pytest.mark.parametrize("http", [403, 429])
+def test_error_http_limitado_es_bloqueado(http):
+    resp = {"results": json.dumps({"error": {"message": "x", "code": 1, "http_status": http}})}
+    r = ClienteMcp(_con_respuesta(resp)).buscar("RO", page_id="800000000001")
+    assert r.estado == "bloqueado"
+
+
+@pytest.mark.parametrize("err", [{"message": "Invalid parameter", "code": 100}, "algo falló"])
+def test_otro_error_es_error(err):
+    r = ClienteMcp(_con_respuesta({"results": json.dumps({"error": err})})).buscar("RO", page_id="800000000001")
+    assert r.estado == "error" and r.anuncios == [] and "error" in r.motivo
+
+
+def test_is_error_del_mcp_es_error():
+    resp = {"isError": True, "content": [{"type": "text", "text": "fallo"}]}
+    r = ClienteMcp(_con_respuesta(resp)).buscar("RO", page_id="800000000001")
+    assert r.estado == "error"
+
+
+@pytest.mark.parametrize("valor", [1789000000.0, "1789000000", 1789000000.7])
+def test_epoch_float_o_texto(valor):
+    cuerpo = json.loads(json.loads(REAL.read_text())["busquedas"][0]["respuesta"]["results"])
+    for a in cuerpo["ads"] if "ads" in cuerpo else cuerpo["data"]:
+        a["ad_delivery_start_time"] = valor
+    p = parsear_mcp(cuerpo, "RO")
+    assert p.descartados == 0 and p.anuncios[0].inicio.isoformat() == "2026-09-10"

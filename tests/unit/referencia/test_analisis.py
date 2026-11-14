@@ -191,3 +191,26 @@ def test_anotar_una_sola_linea_de_log(vault, tmp_path):
     antes = (vault / "log.md").read_text().count("ver-anuncios")
     anotar(vault, P, _json(tmp_path, [_e()]), AHORA)
     assert (vault / "log.md").read_text().count("ver-anuncios") == antes + 1
+
+
+def test_anotar_borra_el_borrador_del_vault(vault):
+    borrador = vault / "data/referencia" / f"analisis-{P}.json"
+    borrador.parent.mkdir(parents=True)
+    borrador.write_text(json.dumps([_e()]), encoding="utf-8")
+    anotar(vault, P, borrador, AHORA)
+    assert not borrador.exists()
+
+
+def test_anotar_no_borra_fuera_de_data_referencia(vault, tmp_path):
+    r = _json(tmp_path, [_e()])
+    anotar(vault, P, r, AHORA)
+    assert r.exists()
+
+
+def test_anotar_rechazado_conserva_el_borrador(vault):
+    borrador = vault / "data/referencia" / f"analisis-{P}.json"
+    borrador.parent.mkdir(parents=True)
+    borrador.write_text(json.dumps([_e(cta="mira https://x.test")]), encoding="utf-8")
+    with pytest.raises(AnalisisInvalido):
+        anotar(vault, P, borrador, AHORA)
+    assert borrador.exists()

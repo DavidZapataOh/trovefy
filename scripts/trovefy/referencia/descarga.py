@@ -152,11 +152,18 @@ def descargar_medio(
             os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW,
             0o600,
         )
+        # read(n) de http.client puede quedarse esperando hasta llenar el trozo; read1 vuelve con lo
+        # que llegue. Además, cada espera del socket se recorta a lo que queda del plazo total.
+        leer = getattr(resp, "read1", None) or resp.read
         with os.fdopen(fd, "wb") as f:
             while True:
-                if reloj() > limite:
+                restante = limite - reloj()
+                if restante <= 0:
                     raise DescargaRechazada("La descarga superó el plazo máximo.")
-                trozo = resp.read(_TROZO)
+                sock = getattr(con, "sock", None)
+                if sock is not None:
+                    sock.settimeout(min(TIMEOUT_S, restante))
+                trozo = leer(_TROZO)
                 if not trozo:
                     break
                 total += len(trozo)

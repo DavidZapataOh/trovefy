@@ -292,3 +292,22 @@ def test_ver_desde_lote_forma_real_no_es_p01(vault):
     r = _ver(vault, lote=Path(__file__).resolve().parents[2] / "fixtures/caza/mcp_real_forma.json")
     assert r.ref.via == "mcp" and r.ref.fichas
     assert all("P-01" not in (getattr(f, "motivo", None) or "") for f in r.ref.fichas)
+
+
+def test_medios_hasta_sale_de_caduca_json(vault):
+    from datetime import timedelta
+
+    cache.carpeta_anuncio(P, LIB, AHORA - timedelta(days=20), 30)
+    r = _ver(vault)
+    hasta = {f.library_id: f.medios_hasta for f in r.ref.fichas}
+    assert hasta[LIB] == (AHORA + timedelta(days=10)).date()
+
+
+def test_watch_fallido_que_limpia_no_deja_medios_hasta(vault):
+    def falla(cmd, **kw):
+        return subprocess.CompletedProcess(cmd, 1, "", "error")
+
+    r = _ver(vault, ejecutar=falla)
+    hasta = {f.library_id: f.medios_hasta for f in r.ref.fichas}
+    assert hasta[LIB] is None
+    assert not any((cache.base_cache() / P / LIB).rglob("video.*"))

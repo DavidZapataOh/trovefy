@@ -2,7 +2,7 @@
 name: ver-anuncios
 description: >-
   Mira los anuncios que usa el original de una oferta aprobada: ordena los ganadores y los que están en test, ve sus vídeos con /watch local (fotogramas y transcripción) y escribe con palabras propias el hook, el ángulo, el CTA y la objeción de cada uno. Úsala cuando el usuario diga «ver anuncios», «qué anuncios usa el original», «hooks del competidor» o «mirar los vídeos de la referencia», o pase un id de producto.
-allowed-tools: Read, Bash(trovefy ver-anuncios *), Bash(trovefy cerebro *), mcp__meta-ads__ads_library_search, Write(~/.cache/trovefy/referencia/**), Write(data/referencia/analisis-*.json)
+allowed-tools: Read, Bash(trovefy ver-anuncios *), Bash(trovefy cerebro *), mcp__meta-ads__ads_library_search, Write(~/.cache/trovefy/referencia/*/mcp/lote-*.json), Write(data/referencia/analisis-*.json)
 ---
 
 # /ver-anuncios: qué anuncios usa el original
@@ -41,7 +41,7 @@ Pasos:
    - Escribe en `data/referencia/analisis-<p-id>.json` una entrada por anuncio con estos campos: `library_id`, `transcripcion_resumida`, `hook_sujeto`, `hook_dolor_o_resultado`, `angulo`, `cta`, `objecion`.
    - Todo con palabras tuyas, sin copiar frases del anuncio ni de la transcripción.
    - Lo que no puedas ver o oír va como «no medido: <motivo>».
-5. **Anotar.** Ejecuta `trovefy ver-anuncios anotar --producto <p-id> --desde data/referencia/analisis-<p-id>.json`. Si lo rechaza por «copia», reescribe esa entrada con otras palabras. Nunca acortes la cita para colarla.
+5. **Anotar.** Ejecuta `trovefy ver-anuncios anotar --producto <p-id> --desde data/referencia/analisis-<p-id>.json`. Si lo rechaza por «copia», reescribe esa entrada con otras palabras. Nunca acortes la cita para colarla. Si lo acepta, el CLI borra el borrador `data/referencia/analisis-<p-id>.json`: lo anotado queda en `productos/<p-id>/referencia/`.
 6. **Presentar.** Lee `productos/<p-id>/referencia/anuncios.md` y `mezcla.md` y cuéntale:
    - los ganadores, con sus días y sus variantes;
    - los que están en test;

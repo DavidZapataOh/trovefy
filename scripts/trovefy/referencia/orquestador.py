@@ -147,6 +147,11 @@ def _escribir_salvo_vacio(vault: Path, ref: Referencia, listado: Listado, ahora:
     escribir_referencia(vault, ref, ahora)
 
 
+def _medios_hasta(producto: str, con_medios: set[str], defecto: date) -> dict[str, date]:
+    """Fecha en que se borran los medios de cada anuncio: la de su caduca.json (nunca se alarga)."""
+    return {lib: cache.caduca_anuncio(producto, lib) or defecto for lib in con_medios}
+
+
 def _busquedas_hoy(vault: Path, hoy: date) -> int | None:
     try:
         from trovefy.caza.presupuesto import Presupuesto
@@ -174,7 +179,7 @@ def ver(
     u = cargar_umbrales_referencia(vault)
     avisos: list[str] = []
     try:
-        cache.limpiar(ahora)
+        cache.limpiar(ahora, u.retencion_dias)
     except OSError as e:
         avisos.append(f"no se pudo limpiar la caché ({type(e).__name__})")
     ent = entorno or comprobar_entorno()
@@ -247,6 +252,8 @@ def ver(
             cache.carpeta_anuncio(objetivo.producto, p.library_id, ahora, u.retencion_dias)  # repone caduca.json
         except Exception as e:  # noqa: BLE001
             inf = InformeWatch(None, (), None, None, f"no medido: /watch falló ({type(e).__name__})")
+        if not ruta.exists():  # /watch falló y limpió la carpeta: ya no hay medios locales
+            con_medios.discard(p.library_id)
         informes[p.library_id] = inf
         item["fotogramas"] = [str(f) for f in inf.fotogramas]
         if inf.transcripcion:
@@ -260,7 +267,7 @@ def ver(
     ref = construir_referencia(
         objetivo.producto, objetivo.oferta_id, objetivo.page_id, objetivo.pais, ranking_hoy,
         listado, puestos, informes=informes, analisis=previos,
-        medios_hasta={lib: ranking_hoy + timedelta(days=u.retencion_dias) for lib in con_medios}, top_n=n,
+        medios_hasta=_medios_hasta(objetivo.producto, con_medios, ranking_hoy + timedelta(days=u.retencion_dias)), top_n=n,
     )  # fmt: skip
     for it in trabajo:
         f = next((x for x in ref.fichas if x.library_id == it["library_id"]), None)

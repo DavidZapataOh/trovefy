@@ -273,3 +273,31 @@ def test_vigilar_incluye_referencia(tmp_path):
     vault.mkdir()
     res = {x.nombre: x for x in c.vigilar(vault, AHORA, fu)}
     assert res["referencia"].nivel == "aviso"
+
+
+def test_vigia_referencia_cuenta_lotes_mcp_vencidos(tmp_path):
+    import os
+
+    base = tmp_path / "cache"
+    mcp = base / "p-0001-x" / "mcp"
+    mcp.mkdir(parents=True)
+    lote = mcp / "lote-a.json"
+    lote.write_text("{}")
+    t = (AHORA - timedelta(days=400)).timestamp()
+    os.utime(lote, (t, t))
+    r = c.referencia_cache(AHORA, base)
+    assert r.nivel == "aviso" and r.texto.startswith("1 ")
+
+
+def test_vigia_referencia_iterdir_falla_no_revienta(tmp_path, monkeypatch):
+    from trovefy.referencia import cache as cache_ref
+
+    base = tmp_path / "cache"
+    base.mkdir()
+
+    def falla(*a, **kw):
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(cache_ref, "vencidos", falla)
+    r = c.referencia_cache(AHORA, base)
+    assert r.nivel == "aviso" and "no se pudo leer" in r.texto and "PermissionError" in r.texto
