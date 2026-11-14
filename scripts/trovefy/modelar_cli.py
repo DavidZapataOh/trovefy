@@ -12,6 +12,8 @@ from trovefy.cli import registrar
 EJEMPLO = Path("skills") / "modelar" / "references" / "modelar-ejemplo.yaml"
 _RAIZ = Path(__file__).resolve().parents[2]
 _PRECIO_FRONT = re.compile(r"^([A-Za-z]{2}):(.+)$")
+_IMPORTE = re.compile(r"^\d+([.,]\d+)?$")
+_ESQUEMA = re.compile(r"^https?://", re.IGNORECASE)
 _ID_OFERTA = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 _SENAL = {True: "sí", False: "no", None: "no medida"}
 CIERRE = "Si no la rechazas en esta sesión, queda aprobada."
@@ -84,7 +86,7 @@ def precios_front(valores: list[str]) -> dict[str, Decimal]:
     for v in valores:
         m = _PRECIO_FRONT.match(v.strip())
         importe = None
-        if m:
+        if m and _IMPORTE.match(m.group(2)):
             try:
                 importe = Decimal(m.group(2).strip().replace(",", "."))
             except InvalidOperation:
@@ -131,8 +133,9 @@ def _precio_original(ficha: dict | None) -> str:
 
 def _landing_original(ficha: dict | None) -> str:
     dominio = (ficha or {}).get("dominio")
-    if isinstance(dominio, str) and dominio.strip():
-        return f"https://{dominio.strip().strip('/')}/"
+    if isinstance(dominio, str) and dominio.strip().strip("/"):
+        dominio = dominio.strip().strip("/")
+        return f"{dominio}/" if _ESQUEMA.match(dominio) else f"https://{dominio}/"
     return "no medida (la ficha de la oferta no trae dominio)"
 
 
@@ -311,7 +314,7 @@ def _ver(args: argparse.Namespace) -> int:
 def _recalcular(args: argparse.Namespace) -> int:
     from trovefy import fx
     from trovefy.economia.config import cargar_economia
-    from trovefy.modelar.recalculo import recalcular
+    from trovefy.modelar.recalculo import AVISO_ACTIVOS, recalcular
     from trovefy.modelar.salida import cargar_escalera
     from trovefy.vault.rutas import vault_root
 
@@ -323,8 +326,13 @@ def _recalcular(args: argparse.Namespace) -> int:
         print("No se recalcula: hoy no hay cambio del BCE y la economía en USD saldría «no medido». "
               "Vuelve a intentarlo más tarde.", file=sys.stderr)
         return 1
-    ruta, version = recalcular(vault, args.producto, config, cambio, hoy, _ahora())
-    print(f"Economía recalculada: {_rel(vault, ruta)} (la anterior en {_rel(vault, version)})")
+    r = recalcular(vault, args.producto, config, cambio, hoy, _ahora())
+    if r.activos_distintos:
+        print(f"Aviso: {AVISO_ACTIVOS} ({', '.join(r.activos_distintos)}).")
+    if r.version is None:
+        print(f"Economía de {_rel(vault, r.ruta)}: sin cambios; no se escribe nada.")
+        return 0
+    print(f"Economía recalculada: {_rel(vault, r.ruta)} (la anterior en {_rel(vault, r.version)})")
     print("Precios, pasos activos, OFERTA.md, aprobación y estado: sin cambios.")
     _resumen_escalera(cargar_escalera(vault, args.producto))
     return 0
@@ -366,17 +374,31 @@ def _cerrar(args: argparse.Namespace) -> int:
 
 
 def _excepcion(args: argparse.Namespace) -> int:
-    from trovefy.modelar.aprobacion import cerrar, registrar_excepcion
+    from trovefy.modelar.aprobacion import CitaInvalida, cerrar, registrar_excepcion
+    from trovefy.vault.producto import ruta_producto
     from trovefy.vault.rutas import vault_root
 
     vault = vault_root()
     ahora = _ahora()
+    # registrar_excepcion escribe la decisión y después intenta avanzar: si el avance falla, la decisión ya
+    # está escrita y hay que decirlo. Se compara la del día antes y después.
+    decision = ruta_producto(vault, args.producto).parent / "decisiones" / f"{ahora.date().isoformat()}-excepcion-r16.md"
+    antes = decision.read_bytes() if decision.is_file() else None
     try:
         ruta = registrar_excepcion(vault, args.producto, args.pais, args.cita, ahora)
-    except ValueError as e:  # gate no pasado (oferta rechazada, país que no es el elegido…): nada escrito
-        return _error(str(e), 1)
-    print(f"Excepción de R16 registrada con tu cita: {_rel(vault, ruta)}")
-    c = cerrar(vault, args.producto, ahora)  # idempotente: dice si el país pasa a modelado
+        print(f"Excepción de R16 registrada con tu cita: {_rel(vault, ruta)}")
+        c = cerrar(vault, args.producto, ahora)  # idempotente: dice si el país pasa a modelado
+    except CitaInvalida as e:  # error de entrada (R-T9c): nada escrito
+        return _error(str(e), 2)
+    except Exception as e:
+        escrita = decision.is_file() and decision.read_bytes() != antes
+        if not escrita:
+            if isinstance(e, ValueError):  # gate no pasado (oferta rechazada, país que no es el elegido…)
+                return _error(f"{e}; nada escrito", 1)
+            raise
+        motivo = str(e) if isinstance(e, ValueError) else f"fallo inesperado ({type(e).__name__})"
+        return _error(f"la excepción de R16 quedó registrada con tu cita en {_rel(vault, decision)}, pero "
+                      f"{args.pais.strip().upper()} no avanzó: {motivo}", 1)
     print(c)
     return 1 if c.bloqueado else 0
 

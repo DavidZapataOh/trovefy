@@ -306,12 +306,9 @@ def test_recalcular_sin_cambios_conserva_todo(vault, capsys):
     assert _main("escribir", "--producto", P) == 0
     assert _main("cerrar", "--producto", P) == 0
     c = _carpeta(vault)
-    antes_meta, antes_cuerpo = frontmatter.leer(c / "ESCALERA.md")
-    assert _main("recalcular", "--producto", P) == 0
-    meta, cuerpo = frontmatter.leer(c / "ESCALERA.md")
-    assert cuerpo == antes_cuerpo
-    meta.pop("economia_fecha")
-    assert meta == antes_meta
+    antes = (c / "ESCALERA.md").read_bytes()
+    assert _main("recalcular", "--producto", P) == 0  # misma config: la reconstrucción da el mismo texto
+    assert (c / "ESCALERA.md").read_bytes() == antes
 
 
 def test_recalcular_en_aprobado_se_niega(vault, capsys):
@@ -346,3 +343,183 @@ def test_subcomandos_registrados(capsys):
     assert e.value.code == 0
     out = capsys.readouterr().out
     assert "modelar" in out and "economia" in out
+
+
+# --- ronda de revisión de la Tarea 9 ----------------------------------------------------------------
+
+SECRETO = "sk" + "-" + "q" * 24
+
+
+def _foto(v):
+    """Todo el producto y el log, para comprobar que no se escribe nada."""
+    carpeta = _carpeta(v)
+    archivos = {r.relative_to(carpeta).as_posix(): r.read_bytes() for r in carpeta.rglob("*") if r.is_file()}
+    log = v / "log.md"
+    return archivos, log.read_bytes() if log.is_file() else b""
+
+
+def _sin_tercera_senal(vault):
+    ruta = _carpeta(vault) / "OFERTA.md"
+    meta, cuerpo = frontmatter.leer(ruta)
+    meta["se_puede_mejorar"], meta["se_puede_mejorar_motivo"] = False, "no: +2,0 puntos sobre el original"
+    frontmatter.escribir(ruta, meta, cuerpo)
+
+
+@pytest.mark.parametrize("accion", ["excepcion", "aprobar", "rechazar"])
+@pytest.mark.parametrize("cita", ["", "   ", "vale\x85sigue", f"sigue, mi clave es {SECRETO}"])
+def test_cita_invalida_sale_2_sin_escribir(vault, capsys, accion, cita):
+    """R-T9c: la cita vacía, con un carácter C1 o con un secreto es error de entrada → 2, nada escrito."""
+    assert _main("escribir", "--producto", P) == 0
+    _sin_tercera_senal(vault)
+    antes = _foto(vault)
+    capsys.readouterr()
+    extra = ["--pais", "XE"] if accion == "excepcion" else []
+    assert _main(accion, "--producto", P, *extra, "--cita", cita) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("Error: ") and SECRETO not in err
+    assert _foto(vault) == antes
+
+
+def test_excepcion_oferta_rechazada_sale_1(vault, capsys):
+    assert _main("escribir", "--producto", P) == 0
+    assert _main("rechazar", "--producto", P, "--cita", "no") == 0
+    capsys.readouterr()
+    assert _main("excepcion", "--producto", P, "--pais", "XE", "--cita", "sigue") == 1
+    assert "rechazada" in capsys.readouterr().err
+
+
+def test_excepcion_escrita_y_avance_fallido_lo_dice(vault, capsys, monkeypatch):
+    """L-6: si la decisión ya se escribió y el avance falla, el mensaje lo dice (nunca «nada escrito»)."""
+    from trovefy.modelar import aprobacion
+
+    assert _main("escribir", "--producto", P) == 0
+    _sin_tercera_senal(vault)
+    capsys.readouterr()
+
+    def _falla(*a, **k):
+        raise ValueError("PRODUCTO.md: estado inesperado de prueba")
+
+    monkeypatch.setattr(aprobacion, "_avanzar", _falla)
+    assert _main("excepcion", "--producto", P, "--pais", "XE", "--cita", "sigue igual") == 1
+    salida = capsys.readouterr()
+    texto = salida.out + salida.err
+    assert len(list((_carpeta(vault) / "decisiones").glob("*-excepcion-r16.md"))) == 1
+    assert "registrada" in texto and "decisiones/" in texto
+    assert "estado inesperado de prueba" in texto
+    assert "nada escrito" not in texto.lower()
+    assert estado_pais(vault, P, "XE") == "aprobado"
+
+
+def _a_modelado(vault):
+    assert _main("escribir", "--producto", P) == 0
+    assert _main("cerrar", "--producto", P) == 0
+
+
+def _poner_estado(vault, estado):
+    ruta = _carpeta(vault) / "PRODUCTO.md"
+    meta, cuerpo = frontmatter.leer(ruta)
+    meta["paises"]["XE"]["estado"] = estado
+    frontmatter.escribir(ruta, meta, cuerpo)
+
+
+@pytest.mark.parametrize("estado", ["producido", "con_landing", "listo"])
+def test_recalcular_en_estados_avanzados(vault, capsys, estado):
+    _a_modelado(vault)
+    _poner_estado(vault, estado)
+    c = _carpeta(vault)
+    oferta = (c / "OFERTA.md").read_bytes()
+    producto = (c / "PRODUCTO.md").read_bytes()
+    _fijar_comision(vault, "0.20")
+    capsys.readouterr()
+    assert _main("recalcular", "--producto", P) == 0
+    assert (c / "OFERTA.md").read_bytes() == oferta
+    assert (c / "PRODUCTO.md").read_bytes() == producto
+    assert estado_pais(vault, P, "XE") == estado
+    assert frontmatter.leer(c / "ESCALERA.md")[0]["economia_fecha"] == HOY.isoformat()
+
+
+def test_recalcular_be_pasa_de_no_medido_a_medido(vault, capsys, monkeypatch):
+    monkeypatch.setattr(fx, "cambio_del_dia", lambda vault, hoy, *a, **k: None)
+    _a_modelado(vault)
+    c = _carpeta(vault)
+    assert frontmatter.leer(c / "ESCALERA.md")[0]["paises"]["XE"]["be_usd"] is None
+    monkeypatch.setattr(fx, "cambio_del_dia", lambda vault, hoy, *a, **k: CAMBIO)
+    capsys.readouterr()
+    assert _main("recalcular", "--producto", P) == 0
+    xe = frontmatter.leer(c / "ESCALERA.md")[0]["paises"]["XE"]
+    assert xe["be_usd"] is not None
+    assert "BE 14,58 USD" in capsys.readouterr().out
+
+
+def test_recalcular_aviso_be_bajo_aparece_y_se_va(vault, capsys):
+    from trovefy.economia.calculo import AVISO_BE_BAJO
+
+    _a_modelado(vault)
+    c = _carpeta(vault)
+
+    def avisos():
+        return frontmatter.leer(c / "ESCALERA.md")[0]["paises"]["XE"].get("avisos") or []
+
+    assert AVISO_BE_BAJO not in avisos()
+    _fijar_comision(vault, "0.50")
+    assert _main("recalcular", "--producto", P) == 0
+    assert avisos().count(AVISO_BE_BAJO) == 1
+    assert _main("recalcular", "--producto", P) == 0  # sin cambios: sigue una sola vez
+    assert avisos().count(AVISO_BE_BAJO) == 1
+    _fijar_comision(vault, "0.10")
+    assert _main("recalcular", "--producto", P) == 0
+    assert AVISO_BE_BAJO not in avisos()
+
+
+def test_recalcular_sin_cambios_no_escribe(vault, capsys):
+    """L-3: con la misma economía, «sin cambios», salida 0, sin versión ni línea de log."""
+    _a_modelado(vault)
+    antes = _foto(vault)
+    capsys.readouterr()
+    assert _main("recalcular", "--producto", P) == 0
+    assert "sin cambios" in capsys.readouterr().out
+    assert _foto(vault) == antes
+    assert not (_carpeta(vault) / "versiones").exists() or not list(
+        (_carpeta(vault) / "versiones").glob("ESCALERA-*.md"))
+
+
+def test_recalcular_avisa_si_cambiarian_los_activos(vault, capsys):
+    """L-4: con otra config de upsells, avisa y no toca `activo`."""
+    _a_modelado(vault)
+    c = _carpeta(vault)
+    pasos = {p: b["pasos"] for p, b in frontmatter.leer(c / "ESCALERA.md")[0]["paises"].items()}
+    assert cli.main(["economia", "fijar", "--clave", "plataformas.impultienda.upsells_por_plan", "--valor", "3",
+                     "--fuente", "https://planes.impultienda.test/"]) == 0
+    capsys.readouterr()
+    assert _main("recalcular", "--producto", P) == 0
+    out = capsys.readouterr().out
+    assert ("con la config actual cambiaría qué pasos van activos: rehaz /modelar si el país sigue en "
+            "modelado") in out
+    despues = {p: b["pasos"] for p, b in frontmatter.leer(c / "ESCALERA.md")[0]["paises"].items()}
+    assert despues == pasos
+
+
+def test_recalcular_sin_aviso_de_activos_con_la_misma_config(vault, capsys):
+    _a_modelado(vault)
+    _fijar_comision(vault, "0.20")
+    capsys.readouterr()
+    assert _main("recalcular", "--producto", P) == 0
+    assert "cambiaría qué pasos van activos" not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("valor", ["XR:6_5", "XR:1e3", "XR:65,", "XR:,5", "XR:1.2.3"])
+def test_precio_front_solo_digitos(vault, capsys, valor):
+    assert _main("escribir", "--producto", P, "--precio-front", valor) == 2
+    assert capsys.readouterr().err.startswith("Error: ")
+    assert not (_carpeta(vault) / "OFERTA.md").exists()
+
+
+def test_precio_front_con_coma(vault, capsys):
+    assert modelar_cli.precios_front(["XR:65,50", "xe:14"]) == {"XR": modelar_cli.Decimal("65.50"),
+                                                                 "XE": modelar_cli.Decimal("14")}
+
+
+@pytest.mark.parametrize("dominio", ["https://oferta-demo.test", "http://oferta-demo.test/", "oferta-demo.test"])
+def test_landing_original_sin_doble_esquema(dominio):
+    landing = modelar_cli._landing_original({"dominio": dominio})
+    assert landing.count("://") == 1 and landing.endswith("oferta-demo.test/")

@@ -54,6 +54,13 @@ def _con_zona(ahora: datetime) -> datetime:
     return ahora.astimezone(ZONA_NEGOCIO)
 
 
+class CitaInvalida(ValueError):
+    """La cita del usuario no vale como entrada (vacía, con caracteres de control C1 o con un secreto).
+
+    Es un error de entrada (la CLI sale con 2), distinto de un gate no pasado (oferta rechazada…), que
+    es un ``ValueError`` normal (salida 1). Ruling R-T9c."""
+
+
 @dataclass(frozen=True)
 class Cierre:
     """Resultado de ``cerrar``: la línea para el usuario y si bloquea (oferta rechazada → salida 1)."""
@@ -67,10 +74,10 @@ class Cierre:
 
 def _cita(cita: str) -> str:
     if not isinstance(cita, str) or not cita.strip():
-        raise ValueError("hace falta la cita literal del usuario (--cita)")
+        raise CitaInvalida("hace falta la cita literal del usuario (--cita)")
     c1 = sorted({f"U+{ord(c):04X}" for c in cita if 0x80 <= ord(c) <= 0x9F})
     if c1:
-        raise ValueError(f"la cita lleva caracteres de control C1 ({', '.join(c1)}), que no se ven al leerla: "
+        raise CitaInvalida(f"la cita lleva caracteres de control C1 ({', '.join(c1)}), que no se ven al leerla: "
                          "escríbela de nuevo sin ellos (--cita)")
     return cita
 
@@ -107,6 +114,12 @@ def _sin_secretos(contenidos: dict[str, object]) -> None:
         patron = secreto_en(contenido)  # RevisionSecretosNoDisponible: no se escribe nada
         if patron:
             raise ValueError(f"{nombre}: aparece un secreto ({patron}); no se escribe nada")
+
+
+def _cita_sin_secretos(cita: str) -> None:
+    patron = secreto_en(cita)  # RevisionSecretosNoDisponible: no se escribe nada
+    if patron:
+        raise CitaInvalida(f"cita: aparece un secreto ({patron}); no se escribe nada")
 
 
 def _cita_md(cita: str) -> str:
@@ -294,7 +307,7 @@ def aprobar(vault: Path, p_id: str, cita: str, ahora: datetime) -> str:
     ruta, meta, cuerpo = _leer_oferta(vault, p_id)
     if meta["aprobacion"] == "rechazada":
         raise ValueError(MOTIVO_RECHAZADA)
-    _sin_secretos({"cita": cita})
+    _cita_sin_secretos(cita)
     if meta["aprobacion"] == "presentada":
         meta, cuerpo = _nueva_oferta(meta, cuerpo, "aprobada", ahora, cita)
         texto = frontmatter.renderizar(meta, cuerpo)
@@ -313,7 +326,7 @@ def rechazar(vault: Path, p_id: str, cita: str, ahora: datetime) -> Path:
         raise ValueError(MOTIVO_YA_APROBADA)
     if meta["aprobacion"] == "rechazada":
         raise ValueError("la oferta ya está rechazada: vuelve a /modelar")
-    _sin_secretos({"cita": cita})
+    _cita_sin_secretos(cita)
     hoy = ahora.date()
     pais = meta.get("pais")
     meta, cuerpo = _nueva_oferta(meta, cuerpo, "rechazada", ahora, cita)
@@ -385,7 +398,7 @@ def registrar_excepcion(vault: Path, p_id: str, pais: str, cita: str, ahora: dat
               "El usuario decide producir igual. Palabras del usuario (cita literal):", "",
               _cita_md(cita), "",
               f"Oferta: [[productos/{p_id}/OFERTA]] ({oferta.get('fecha')})", ""]
-    _sin_secretos({"cita": cita})
+    _cita_sin_secretos(cita)
     texto = frontmatter.renderizar(meta, "\n".join(lineas))
     _sin_secretos({"excepción de R16": meta, "excepción de R16 (texto)": texto})
     dir_ = _carpeta(vault, p_id) / "decisiones"

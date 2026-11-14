@@ -586,3 +586,27 @@ def test_log_de_registrar_excepcion(tmp_path):
         f"usuario · productos/{P}/decisiones/2026-11-13-excepcion-r16.md · — tokens"),
         f"- 2026-11-13 18:05 COT · modelar · {P} XE: aprobado → modelado · productos/{P}/PRODUCTO.md · — tokens",
     ]
+
+
+@pytest.mark.parametrize("cita", ["", "  ", "vale\x85sigue", "vale, mi clave es " + "sk" + "-" + "q" * 24])
+def test_cita_invalida_es_su_propio_error(tmp_path, cita):
+    """R-T9c: la cita vacía, con C1 o con un secreto es error de entrada (CitaInvalida, un ValueError)."""
+    from trovefy.modelar.aprobacion import CitaInvalida
+
+    assert issubclass(CitaInvalida, ValueError)
+    v = _vault(tmp_path, senal=False, motivo=MOTIVO_FLOJO)
+    antes = _foto(v)
+    for llamada in (lambda: aprobar(v, P, cita, AHORA), lambda: rechazar(v, P, cita, AHORA),
+                    lambda: registrar_excepcion(v, P, "XE", cita, AHORA)):
+        with pytest.raises(CitaInvalida):
+            llamada()
+    assert _foto(v) == antes
+
+
+def test_gate_no_es_cita_invalida(tmp_path):
+    from trovefy.modelar.aprobacion import CitaInvalida
+
+    v = _vault(tmp_path, aprobacion="rechazada")
+    with pytest.raises(ValueError, match="rechazada") as exc:
+        registrar_excepcion(v, P, "XE", "sigue", AHORA)
+    assert not isinstance(exc.value, CitaInvalida)

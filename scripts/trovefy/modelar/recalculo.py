@@ -9,6 +9,7 @@ toca precios, ``activo``, ``OFERTA.md``, la aprobación, ``PRODUCTO.md`` ni el e
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -16,12 +17,23 @@ from pathlib import Path
 import yaml
 
 from trovefy.economia.calculo import AVISO_BE_BAJO
-from trovefy.economia.config import ConfigEconomia, costes_de
-from trovefy.economia.escalera import PASOS, EscaleraPais, PasoEscalera
+from trovefy.economia.config import (
+    ConfigEconomia,
+    admite_downsell,
+    costes_de,
+    upsells_permitidos,
+)
+from trovefy.economia.escalera import (
+    PASOS,
+    EscaleraPais,
+    PasoEscalera,
+    _activo_downsell,
+    _activo_upsell,
+)
 from trovefy.economia.modelo import Cifra
 from trovefy.fx import Cambio
 from trovefy.modelar.esquema import PiezaEscalera
-from trovefy.modelar.salida import economia_pais, render_escalera
+from trovefy.modelar.salida import _version_libre, economia_pais, render_escalera
 from trovefy.secretos import buscar_secreto
 from trovefy.vault import frontmatter
 from trovefy.vault.escritura import anadir_log, escribir_atomico
@@ -34,6 +46,8 @@ from trovefy.vault.producto import (
 )
 
 ESTADOS_RECALCULO = ESTADOS_FASE2[ESTADOS_FASE2.index("modelado"):]
+AVISO_ACTIVOS = ("con la config actual cambiaría qué pasos van activos: rehaz /modelar si el país sigue en "
+                 "modelado")
 # Avisos que pone la economía (trovefy.economia.calculo); el resto de `avisos` es de la escalera y se conserva.
 _PREFIJO_AVISO_AOV = "AOV estimado "
 
@@ -79,21 +93,43 @@ def _partir(texto: str) -> tuple[dict, str]:
     return yaml.safe_load(texto[4:fin + 1]) or {}, texto[fin + 5:]
 
 
-def _version_libre(versiones: Path, hoy: date) -> Path:
-    base = f"ESCALERA-{hoy.isoformat()}"
-    ruta, n = versiones / f"{base}.md", 1
-    while ruta.exists():
-        n += 1
-        ruta = versiones / f"{base}-{n}.md"
-    return ruta
+@dataclass(frozen=True)
+class Recalculo:
+    """Resultado de ``recalcular``: ``version`` es None cuando la economía sale igual (nada escrito);
+    ``activos_distintos`` lista los ``<país>.<paso>`` cuyo ``activo`` cambiaría con la config actual."""
+
+    ruta: Path
+    version: Path | None
+    activos_distintos: tuple[str, ...] = ()
+
+
+def activos_distintos(escaleras: dict[str, EscaleraPais], config: ConfigEconomia) -> tuple[str, ...]:
+    """Pasos cuyo ``activo`` escrito no es el que daría la config actual (no se cambia: solo se avisa)."""
+    esperado = {
+        "front": True,
+        "bump": config.escalera.bump_activo_test1,
+        "u1": True,
+        "u2": _activo_upsell(2, upsells_permitidos(config))[0],
+        "u3": _activo_upsell(3, upsells_permitidos(config))[0],
+        "downsell": _activo_downsell(admite_downsell(config))[0],
+    }
+    return tuple(f"{p}.{n}" for p, e in escaleras.items() if e.pasos
+                 for n in PASOS if e.pasos[n].activo != esperado[n])
+
+
+def _sin_economia_fecha(texto: str) -> tuple[dict, str]:
+    meta, cuerpo = _partir(texto)
+    meta.pop("economia_fecha", None)
+    return meta, cuerpo
 
 
 def recalcular(vault: Path, p_id: str, config: ConfigEconomia, cambio: Cambio | None, hoy: date,
-               ahora: datetime) -> tuple[Path, Path]:
-    """Reescribe la economía de ``ESCALERA.md``; devuelve ``(ESCALERA.md, versión anterior)``.
+               ahora: datetime) -> Recalculo:
+    """Reescribe la economía de ``ESCALERA.md`` versionando la anterior; devuelve un ``Recalculo``.
 
-    ``EstadoInesperado`` si el país elegido no ha llegado a ``modelado``; ``FileNotFoundError`` sin
-    ``ESCALERA.md``. Nada se escribe si algo falla antes de la escritura.
+    Si el texto nuevo es igual al anterior (sin contar ``economia_fecha``) no escribe nada, ni versión ni
+    log (``version`` None). ``EstadoInesperado`` si el país elegido no ha llegado a ``modelado``;
+    ``FileNotFoundError`` sin ``ESCALERA.md``. Nada se escribe si algo falla antes de la escritura.
     """
     vault = Path(vault)
     pais, _, _ = pais_elegido(vault, p_id)
@@ -117,10 +153,17 @@ def recalcular(vault: Path, p_id: str, config: ConfigEconomia, cambio: Cambio | 
     except (KeyError, TypeError, ValueError, ArithmeticError) as e:
         raise ValueError(f"ESCALERA.md no se puede leer ({type(e).__name__}): rehaz /modelar") from None
 
+    distintos = activos_distintos(escaleras, config)
     economias = {p: economia_pais(e, config, cambio) for p, e in escaleras.items()}
     texto = render_escalera(escaleras, economias, cambio, fecha, producto=meta.get("producto") or p_id,
                             piezas=piezas, costes=costes_de(config))
     nuevo, cuerpo = _partir(texto)
+    try:
+        igual = _sin_economia_fecha(anterior) == (nuevo, cuerpo)
+    except (ValueError, yaml.YAMLError):
+        igual = False
+    if igual:
+        return Recalculo(ruta, None, distintos)
     con_fecha: dict = {}
     for k, v in nuevo.items():
         con_fecha[k] = v
@@ -131,9 +174,9 @@ def recalcular(vault: Path, p_id: str, config: ConfigEconomia, cambio: Cambio | 
     if patron:
         raise ValueError(f"ESCALERA.md: aparece un secreto ({patron}); no se escribe nada")
 
-    version = _version_libre(carpeta / "versiones", hoy)
+    version = _version_libre(carpeta / "versiones", "ESCALERA", hoy, set())
     escribir_atomico(version, anterior)
     escribir_atomico(ruta, texto)
     anadir_log(vault, "modelar", f"{p_id} {pais}: economía de la escalera recalculada",
                [ruta.relative_to(vault).as_posix(), version.relative_to(vault).as_posix()], ahora=ahora)
-    return ruta, version
+    return Recalculo(ruta, version, distintos)

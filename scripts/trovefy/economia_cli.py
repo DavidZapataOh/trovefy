@@ -1,6 +1,7 @@
 """Subcomando `trovefy economia`: comisiones, take rates y reglas de la economía del embudo."""
 
 import argparse
+import re
 import sys
 from datetime import date
 
@@ -41,14 +42,30 @@ def _iniciar() -> int:
     return 0
 
 
+_URL = re.compile(r"^https?://\S", re.IGNORECASE)
+
+
 def _fijar(args: argparse.Namespace) -> int:
-    from trovefy.economia.config import fijar
+    from trovefy.config.yaml_config import cargar_yaml
+    from trovefy.economia.config import RELATIVA, fijar
     from trovefy.vault.rutas import vault_root
 
+    if not args.valor.strip():
+        raise ValueError(f"{args.clave}: el valor está en blanco; usa `null` para no medido")
     valor = None if args.valor.strip().lower() in ("null", "~") else args.valor
+    if args.clave.startswith("plataformas.") and valor is not None and not _URL.match(args.fuente.strip()):
+        raise ValueError(f"{args.clave}: la fuente de una plataforma es la URL de su página oficial "
+                         "(empieza por http:// o https://)")
+    vault = vault_root()
     hoy = _hoy()
-    fijar(vault_root(), args.clave, valor, args.fuente, hoy)
-    print(f"{args.clave} = {_valor(valor)} (fuente: {args.fuente.strip()}; fecha: {hoy.isoformat()})")
+    try:
+        fijar(vault, args.clave, valor, args.fuente, hoy)
+    except KeyError as e:  # la clave no es una hoja de config/economia.yaml
+        raise ValueError(str(e.args[0]) if e.args else "clave desconocida") from None
+    nodo = cargar_yaml((vault / RELATIVA).read_text(encoding="utf-8"))
+    for parte in args.clave.split("."):
+        nodo = nodo[parte]
+    print(f"{args.clave} = {_valor(nodo['valor'])} (fuente: {nodo['fuente']}; fecha: {nodo['fecha']})")
     return 0
 
 
@@ -93,10 +110,11 @@ def _ejecutar(args: argparse.Namespace) -> int:
         return {"iniciar": _iniciar, "fijar": lambda: _fijar(args), "ver": _ver}[args.accion]()
     except RevisionSecretosNoDisponible as e:
         return _error(str(e))
-    except KeyError as e:
-        return _error(str(e.args[0]) if e.args else "clave desconocida")
     except (ValueError, FileNotFoundError) as e:  # EconomiaInvalida es un ValueError
         return _error(str(e))
+    except KeyboardInterrupt:
+        print("INTERRUMPIDA: cancelado por el usuario (Ctrl-C).", file=sys.stderr)
+        return 3
     except Exception as e:  # noqa: BLE001 - la CLI nunca muestra un traceback
         return _error(f"fallo inesperado ({type(e).__name__})", 3)
 
