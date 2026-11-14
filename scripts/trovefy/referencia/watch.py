@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import shlex
 import shutil
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -57,6 +60,56 @@ def _vendor_ok() -> bool:
         return False
 
 
+def _env_base() -> dict[str, str]:
+    return {
+        "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+        "HOME": os.environ.get("HOME", ""),
+        "LANG": "C.UTF-8",
+    }
+
+
+def _ejecutar_grupo(
+    cmd, *, timeout, env=None, capture_output=True, text=True, check=False
+):
+    """Como subprocess.run, pero en su propio grupo: al vencer el plazo mata todo el grupo."""
+    p = subprocess.Popen(
+        cmd, env=env, text=text, start_new_session=True,
+        stdout=subprocess.PIPE if capture_output else None,
+        stderr=subprocess.PIPE if capture_output else None,
+    )  # fmt: skip
+    try:
+        out, err = p.communicate(timeout=timeout)
+    except BaseException:
+        for sen, gracia in ((signal.SIGTERM, 3), (signal.SIGKILL, None)):
+            try:
+                os.killpg(p.pid, sen)
+            except (ProcessLookupError, PermissionError):
+                break
+            try:
+                p.wait(timeout=gracia) if gracia else p.wait()
+                break
+            except subprocess.TimeoutExpired:
+                continue
+        raise
+    return subprocess.CompletedProcess(cmd, p.returncode, out, err)
+
+
+def _limpiar(trabajo: Path) -> None:
+    """Borra lo parcial dentro de `trabajo` (nunca fuera, nunca siguiendo enlaces)."""
+    try:
+        hijos = list(trabajo.iterdir())
+    except OSError:
+        return
+    for h in hijos:
+        try:
+            if h.is_symlink() or h.is_file():
+                h.unlink()
+            else:
+                shutil.rmtree(h, ignore_errors=True)
+        except OSError:
+            pass
+
+
 def comprobar_entorno(which=shutil.which, ejecutar=subprocess.run) -> Entorno:
     vendor = _vendor_ok()
     whisperx, detalle = False, ""
@@ -68,6 +121,7 @@ def comprobar_entorno(which=shutil.which, ejecutar=subprocess.run) -> Entorno:
                 text=True,
                 timeout=60,
                 check=False,
+                env=_env_base(),
             )
             if p.returncode != 0:
                 detalle = f"setup.py terminó con código {p.returncode}"
@@ -95,7 +149,7 @@ def pasos_instalacion(e: Entorno) -> list[str]:
                 "WhisperX local: unos 1 GB de paquetes más el modelo small (464 MB), en "
                 "`~/.cache/watch/whisperx-venv`; pide 3 GB libres y 8 GB de RAM. Sin sudo."
             ),
-            f"Ejecuta tú: `{sys.executable} -s -E {RAIZ_VENDOR}/setup.py --install-whisperx`",
+            f"Ejecuta tú: `{shlex.quote(sys.executable)} -s -E {shlex.quote(str(RAIZ_VENDOR / 'setup.py'))} --install-whisperx`",
             "Después: `trovefy ver-anuncios comprobar`.",
         ]
     return pasos
@@ -105,7 +159,7 @@ def comando_watch(
     video: Path, trabajo: Path, whisperx: bool, max_fotogramas: int = 30
 ) -> list[str]:
     return [
-        sys.executable, "-s", "-E", str(RAIZ_VENDOR / "watch.py"), str(video),
+        sys.executable, "-s", "-E", str(RAIZ_VENDOR / "watch.py"), str(Path(video).resolve()),
         "--engine", "local", "--detail", "efficient",
         "--max-frames", str(max_fotogramas), "--out-dir", str(trabajo),
         *(["--whisper", "whisperx"] if whisperx else ["--no-whisper"]),
@@ -113,8 +167,6 @@ def comando_watch(
 
 
 def entorno_hijo(idioma: str | None, whisperx: bool) -> dict[str, str]:
-    import os
-
     env = {
         "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
         "HOME": os.environ.get("HOME", ""),
@@ -122,7 +174,7 @@ def entorno_hijo(idioma: str | None, whisperx: bool) -> dict[str, str]:
         "WATCH_ENGINE": "local",
         "WATCH_WHISPER_BACKEND": "whisperx" if whisperx else "none",
     }
-    if idioma:
+    if idioma and re.fullmatch(r"[a-z]{2}", idioma):
         env["WATCH_WHISPERX_LANGUAGE"] = idioma
     return env
 
@@ -168,28 +220,28 @@ def ejecutar_watch(
     trabajo: Path,
     idioma: str | None,
     entorno: Entorno,
-    ejecutar=subprocess.run,
+    ejecutar=_ejecutar_grupo,
 ) -> InformeWatch:
     if not entorno.vendor_ok:
         return _vacio(_NO_VENDOR)
     if not entorno.ffmpeg or not entorno.ffprobe:
         return _vacio("no medido: falta ffmpeg (trovefy ver-anuncios comprobar)")
     trabajo.mkdir(parents=True, exist_ok=True)
+    fallo = "no medido: /watch no dio evidencia"
     try:
         p = ejecutar(
             comando_watch(video, trabajo, entorno.whisperx),
             capture_output=True, text=True, timeout=TIMEOUT_S, check=False,
             env=entorno_hijo(idioma, entorno.whisperx),
         )  # fmt: skip
-    except (OSError, subprocess.SubprocessError):
-        return _vacio("no medido: /watch no dio evidencia")
-    if p.returncode != 0:
-        return _vacio("no medido: /watch no dio evidencia")
-    (trabajo / "watch.md").write_text(p.stdout, encoding="utf-8")
-    try:
+        if p.returncode != 0:
+            _limpiar(trabajo)
+            return _vacio(fallo)
+        (trabajo / "watch.md").write_text(p.stdout, encoding="utf-8")
         r = leer_informe(p.stdout, trabajo)
-    except ValueError:
-        return _vacio("no medido: /watch no dio evidencia")
+    except (OSError, subprocess.SubprocessError, ValueError):
+        _limpiar(trabajo)
+        return _vacio(fallo)
     if not entorno.whisperx and r.transcripcion is None:
         r = InformeWatch(
             r.duracion_s, r.fotogramas, None, None,

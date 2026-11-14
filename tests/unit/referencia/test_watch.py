@@ -116,3 +116,52 @@ def test_sin_ffmpeg_no_ejecuta(tmp_path):
     assert r.motivo.startswith("no medido:") and not r.fotogramas
     r = ejecutar_watch(tmp_path / "v.mp4", tmp_path, None, _ent(vendor_ok=False), falso)
     assert r.motivo.startswith("no medido:")
+
+
+def test_fallo_limpia_trabajo_y_no_toca_fuera(tmp_path):
+    trabajo = tmp_path / "t"
+    (trabajo / "frames").mkdir(parents=True)
+    (trabajo / "frames/f.jpg").write_text("x")
+    (trabajo / "parcial.txt").write_text("x")
+    fuera = tmp_path / "fuera.txt"
+    fuera.write_text("x")
+
+    def falso(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, 1)
+
+    r = ejecutar_watch(tmp_path / "v.mp4", trabajo, None, _ent(), falso)
+    assert r.motivo.startswith("no medido:") and not r.fotogramas
+    assert list(trabajo.iterdir()) == [] and fuera.exists()
+    (trabajo / "a").write_text("x")
+    ejecutar_watch(tmp_path / "v.mp4", trabajo, None, _ent(), lambda c, **k: _proc(2))
+    assert list(trabajo.iterdir()) == []
+
+
+def test_timeout_mata_el_grupo(monkeypatch):
+    import os
+
+    llamadas = []
+    real = os.killpg
+    monkeypatch.setattr(
+        os, "killpg", lambda pid, sen: (llamadas.append(sen), real(pid, sen))[1]
+    )
+    with pytest.raises(subprocess.TimeoutExpired):
+        watch._ejecutar_grupo(["sleep", "30"], timeout=0.3)
+    assert llamadas and llamadas[0].name == "SIGTERM"
+
+
+def test_idioma_validado_video_absoluto_y_quote(monkeypatch, tmp_path):
+    assert "WATCH_WHISPERX_LANGUAGE" not in entorno_hijo("es; rm", True)
+    assert "WATCH_WHISPERX_LANGUAGE" not in entorno_hijo("../", True)
+    monkeypatch.chdir(tmp_path)
+    assert comando_watch(Path("-v.mp4"), tmp_path, False)[4] == str(tmp_path / "-v.mp4")
+    monkeypatch.setattr(watch.sys, "executable", "/opt/mi python/bin/py")
+    assert any(
+        "'/opt/mi python/bin/py'" in p for p in pasos_instalacion(_ent(whisperx=False))
+    )
+    vistos = []
+    comprobar_entorno(
+        which=lambda n: n,
+        ejecutar=lambda c, **k: (vistos.append(k.get("env")), _proc(0, "{}"))[1],
+    )
+    assert vistos[0] is not None and not any(k.endswith("_API_KEY") for k in vistos[0])
