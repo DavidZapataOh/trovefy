@@ -59,6 +59,12 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
     q = sub.add_parser("qa", help="QA en Chromium (390/1280, peso, LCP 4G, hitos, clic con UTM) y QA.md")
     _comunes(q)
     q.add_argument("--publicada", action="store_true", help="mide la URL publicada (landing.yaml → url)")
+    _comunes(sub.add_parser("texto", help="texto visible de la landing guardada, para el agente nativo"))
+    n = sub.add_parser("nativo", help="registra el veredicto del agente nativo (ok|corregir) ligado a la versión")
+    _comunes(n)
+    n.add_argument("--veredicto", choices=("ok", "corregir"), default=None,
+                   help="el que dio el agente; si falta, se lee de su respuesta (VEREDICTO: …)")
+    n.add_argument("--notas-archivo", required=True, help="archivo con la respuesta del agente, tal cual")
     r = sub.add_parser("resena", help="añade una reseña real (con su pedido o email de origen)")
     _comunes(r)
     r.add_argument("--texto", required=True, help="texto literal de la reseña")
@@ -206,6 +212,36 @@ def _qa(args: argparse.Namespace, vault: Path) -> int:
     return 0 if r.ok else 1
 
 
+def _texto(args: argparse.Namespace, vault: Path) -> int:
+    from trovefy.landing.entrada import EntradaInvalida, cargar_datos, ruta_landing
+    from trovefy.landing.nativo import texto_visible
+
+    d = cargar_datos(vault, args.producto, args.pais, correr=_orden())
+    indice = ruta_landing(vault, d.p_id, d.pais) / "index.html"
+    if indice.is_symlink() or not indice.is_file():
+        raise EntradaInvalida(f"falta landing/{d.pais}/index.html: trovefy landing guardar")
+    print(texto_visible(indice.read_text(encoding="utf-8")), end="")
+    return 0
+
+
+def _nativo(args: argparse.Namespace, vault: Path) -> int:
+    from datetime import datetime
+
+    from trovefy.landing.entrada import EntradaInvalida, cargar_datos
+    from trovefy.landing.nativo import registrar_veredicto
+    from trovefy.producto.qc_registro import parsear_veredicto
+    from trovefy.vault.escritura import ZONA_NEGOCIO
+
+    d = cargar_datos(vault, args.producto, args.pais, correr=_orden())
+    notas = Path(args.notas_archivo).read_text(encoding="utf-8")
+    veredicto = args.veredicto or parsear_veredicto(notas)
+    if veredicto is None:
+        raise EntradaInvalida("no medido: la respuesta del nativo no termina en «VEREDICTO: ok|corregir»")
+    ruta = registrar_veredicto(vault, d.p_id, d.pais, veredicto, notas, datetime.now(ZONA_NEGOCIO))
+    print(f"Veredicto del nativo: {veredicto} ({ruta.relative_to(vault).as_posix()})")
+    return 0
+
+
 def _resena(args: argparse.Namespace, vault: Path) -> int:
     from datetime import date
 
@@ -221,7 +257,8 @@ def _resena(args: argparse.Namespace, vault: Path) -> int:
 
 
 _ACCIONES = {"estado": _estado, "medios": _medios, "preparar": _preparar, "guardar": _guardar,
-             "validar": _validar, "qa": _qa, "resena": _resena}
+             "validar": _validar, "qa": _qa, "texto": _texto, "nativo": _nativo,
+             "resena": _resena}
 
 
 def _ejecutar(args: argparse.Namespace) -> int:

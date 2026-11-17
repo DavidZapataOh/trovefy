@@ -564,10 +564,8 @@ def leer_hitos_esperados(vault: Path, datos: DatosLanding) -> list[dict]:
 
 
 def _nativo(vault: Path, datos: DatosLanding) -> tuple[str, str] | None:
-    try:
-        from trovefy.landing.nativo import veredicto_vigente  # Tarea 7
-    except ImportError:
-        return None
+    from trovefy.landing.nativo import veredicto_vigente
+
     return veredicto_vigente(vault, datos.p_id, datos.pais)
 
 
