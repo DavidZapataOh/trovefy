@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Panel de prueba</title>
+</head>
+<body>
+<h1>Diseño de tienda</h1>
+<h2>Contenido</h2>
+<label for="html">{{etiqueta}}</label>
+<textarea id="html" rows="10" cols="80">{{contenido}}</textarea>
+<button type="button" id="guardar">Guardar cambios</button>
+<p id="estado"></p>
+<script>
+document.getElementById("guardar").addEventListener("click", function () {
+  fetch("/guardar", {method: "POST", body: document.getElementById("html").value}).then(function () {
+    document.getElementById("estado").textContent = "Guardado";
+  });
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,161 @@
+"""Plan 18, Tarea 8: la sonda de Impultienda con Chromium real contra un panel falso en 127.0.0.1."""
+
+import os
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+import pytest
+
+pytestmark = pytest.mark.integracion
+
+AHORA = datetime(2026, 11, 17, 10, 30, tzinfo=ZoneInfo("America/Bogota"))
+
+
+@pytest.fixture(autouse=True)
+def _entorno(tmp_path, monkeypatch):
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH",
+                       os.environ.get("PLAYWRIGHT_BROWSERS_PATH", str(Path.home() / ".cache/ms-playwright")))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+
+def _sondar(tmp_path, estado):
+    from integracion.impultienda_falsa import impultienda_falsa, mapa_local
+    from trovefy.landing.hosting import sondear
+    from unit.landing.conftest import P, vault_demo
+
+    v = vault_demo(tmp_path)
+    with impultienda_falsa(estado) as base:
+        c = sondear(v, P, "ZZ", base + "/tienda", True, mapa=mapa_local(base), visible=False,
+                    dormir=lambda _s: None, ahora=AHORA)
+    return v, c
+
+
+def test_sonda_todo_bien(tmp_path):
+    from integracion.impultienda_falsa import Estado
+    from trovefy.landing.hosting import HTML_SONDA
+
+    estado = Estado()
+    original = estado.contenido
+    v, c = _sondar(tmp_path, estado)
+    assert (c.html_propio, c.script, c.estilos, c.titulo_propio, c.sin_marco) == (True,) * 5
+    assert c.limite_caracteres is None
+    assert estado.contenido == original  # restaurado byte a byte
+    assert estado.posts == [HTML_SONDA, original]
+    assert (v / "config" / "evidencia" / "p05-impultienda-2026-11-17.json").is_file()
+
+
+def test_sonda_script_quitado_es_false(tmp_path):
+    from integracion.impultienda_falsa import Estado
+
+    estado = Estado(sin_script=True)
+    original = estado.contenido
+    _, c = _sondar(tmp_path, estado)
+    assert c.script is False and c.estilos is True and c.titulo_propio is True
+    assert estado.contenido == original
+
+
+def test_sonda_detecta_recorte(tmp_path):
+    from integracion.impultienda_falsa import Estado
+
+    estado = Estado(recorte=50_000)
+    original = estado.contenido
+    _, c = _sondar(tmp_path, estado)
+    assert c.limite_caracteres == 50_000
+    assert estado.contenido == original
+
+
+def test_sonda_con_marco_es_false(tmp_path):
+    from integracion.impultienda_falsa import Estado
+
+    _, c = _sondar(tmp_path, Estado(marco=True))
+    assert c.sin_marco is False and c.html_propio is True
+
+
+def test_sonda_firma_ausente_no_toca(tmp_path):
+    from integracion.impultienda_falsa import Estado
+    from trovefy.tienda.conductor import FirmaNoCasa
+
+    estado = Estado(firma=False)
+    with pytest.raises(FirmaNoCasa, match="HTML completo de la tienda"):
+        _sondar(tmp_path, estado)
+    assert estado.posts == []
+
+
+def test_sonda_url_de_otro_host_rechazada(tmp_path):
+    from integracion.impultienda_falsa import Estado, impultienda_falsa, mapa_local
+    from trovefy.landing.hosting import sondear
+    from unit.landing.conftest import P, vault_demo
+
+    estado = Estado()
+    with impultienda_falsa(estado) as base, pytest.raises(ValueError, match="127.0.0.1"):
+        sondear(vault_demo(tmp_path), P, "ZZ", base + "/tienda", True, "https://otro.test/panel",
+                mapa=mapa_local(base), visible=False, dormir=lambda _s: None, ahora=AHORA)
+    assert estado.posts == []
+
+
+def test_capturar_pantalla_confirma_sin_clics(tmp_path, monkeypatch):
+    from integracion.impultienda_falsa import Estado, impultienda_falsa, mapa_local
+    from trovefy.landing.panel import capturar_pantalla
+    from trovefy.mapa import capturado_de
+    from trovefy.tienda.confirmacion import (
+        PNG_MAGICO,
+        mapa_con_confirmaciones,
+        ruta_confirmaciones,
+    )
+    from unit.landing.conftest import con_terminal
+
+    v = tmp_path / "v"
+    (v / "config").mkdir(parents=True)
+    con_terminal(monkeypatch)
+    estado = Estado()
+    avisos = []
+    with impultienda_falsa(estado) as base:
+        mapa = mapa_local(base, capturado=None)
+        entrada = capturar_pantalla(v, mapa=mapa, esperar=avisos.append, preguntar=lambda _t: "sí",
+                                    visible=False, dormir=lambda _s: None, ahora=AHORA)
+    assert estado.posts == []  # ni un guardado
+    assert entrada["url"] == base + "/panel" and avisos
+    assert entrada["evidencia"] == "config/evidencia/p05-diseno-contenido-2026-11-17.png"
+    assert (v / entrada["evidencia"]).read_bytes().startswith(PNG_MAGICO)
+    assert ruta_confirmaciones().is_file() and not (v / "config" / "pantallas-confirmadas.yaml").exists()
+    hoy = AHORA.date()
+    assert capturado_de(mapa_con_confirmaciones(v, "impultienda", mapa, hoy=hoy), "diseno_contenido") == "2026-11-17"
+
+
+def test_sonda_con_guardado_que_navega(tmp_path):
+    """T: «Guardar cambios» como formulario (POST + 303 a /panel): el guardado navega y todo sigue igual."""
+    from integracion.impultienda_falsa import Estado
+    from trovefy.landing.hosting import HTML_SONDA
+
+    estado = Estado(formulario=True)
+    original = estado.contenido
+    _, c = _sondar(tmp_path, estado)
+    assert (c.html_propio, c.script, c.estilos, c.titulo_propio, c.sin_marco) == (True,) * 5
+    assert c.limite_caracteres is None
+    assert estado.posts == [HTML_SONDA, original] and estado.contenido == original
+
+
+def test_sonda_con_el_campo_rellenado_tarde_respalda_y_restaura_lo_real(tmp_path):
+    """I3: el panel trae el campo vacío y lo rellena un fetch lento + setTimeout. Se espera a la red antes de
+    leer: el respaldo y la restauración son el contenido real, no un campo vacío."""
+    from integracion.impultienda_falsa import Estado
+    from trovefy.landing.entrada import ruta_landing
+    from trovefy.landing.hosting import HTML_SONDA
+    from unit.landing.conftest import P
+
+    estado = Estado(tarde=True)
+    original = estado.contenido
+    v, c = _sondar(tmp_path, estado)
+    respaldo = ruta_landing(v, P, "ZZ") / "respaldo" / "impultienda-2026-11-17T103000.html"
+    assert respaldo.read_text(encoding="utf-8") == original
+    assert estado.posts == [HTML_SONDA, original] and estado.contenido == original
+    assert c.html_propio is True and c.limite_caracteres is None
+
+
+def test_sonda_anota_los_hosts_que_carga_la_tienda(tmp_path):
+    """I-4: la evidencia lleva los hosts que cargó la tienda pública (aquí, el de la propia tienda)."""
+    from integracion.impultienda_falsa import Estado
+
+    _, c = _sondar(tmp_path, Estado())
+    assert c.hosts_tienda == ("127.0.0.1",)
