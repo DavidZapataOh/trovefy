@@ -44,13 +44,18 @@ def mapa_local(base: str) -> dict:
         "entrega": {"etiqueta": "Entregable", "tipo": "archivo"},
         "guardar": {"etiqueta": "Guardar", "rol": "button", "tipo": "boton"},
     }
+    confirmada = {"capturado": "2026-11-20"}  # R-1: cada pantalla con controles lleva su propio `capturado`
     return {
         "capturado": "2026-11-20",
         "fuente": "páginas de prueba propias",
         "hosts": ["127.0.0.1"],
         "pantallas": {
-            "producto": {"url": base + "/producto.html", "firma": ["Editar producto"], "controles": controles},
-            "cambiada": {"url": base + "/producto-cambiada.html", "firma": ["Editar producto"], "controles": controles},
+            "producto": {"url": base + "/producto.html", "firma": ["Editar producto"], "controles": controles, **confirmada},
+            "cambiada": {"url": base + "/producto-cambiada.html", "firma": ["Editar producto"], "controles": controles,
+                         **confirmada},
+            "redirige": {"url": base + "/guardar-y-redirige.html", "firma": ["Editar producto"], **confirmada,
+                         "controles": {"precio": {"etiqueta": "Precio", "tipo": "precio"},
+                                       "guardar": {"etiqueta": "Guardar", "rol": "button", "tipo": "boton"}}},
             "login": {"url": base + "/login.html", "firma": ["Iniciar sesión"]},
         },
     }
@@ -83,6 +88,54 @@ def test_conductor_rellena_y_relee_local(servidor_local, tmp_path):
         assert page.inner_text("#estado") == "Guardado"
         captura = c.capturar(tmp_path / "capturas" / "producto.png")
         assert captura.stat().st_size > 0 and stat.S_IMODE(captura.stat().st_mode) == 0o600
+        cajas = {sel: page.locator(sel).bounding_box() for sel in ("#token", "#precio", "h1")}
+    _cubierta(captura, cajas["#token"])  # el secreto, tapado
+    _cubierta(captura, cajas["#precio"])  # y, por defecto, cualquier campo
+    assert not _es_mascara(captura, cajas["h1"])  # el resto de la pantalla se ve
+
+
+MAGENTA = (255, 0, 255)  # color por defecto de las máscaras de Playwright
+
+
+def _pixeles(captura: Path, caja: dict, margen: int = 2) -> list[tuple[int, int, int]]:
+    from PIL import Image
+
+    with Image.open(captura) as img:
+        rgb = img.convert("RGB")
+        x0, y0 = int(caja["x"]) + margen, int(caja["y"]) + margen
+        x1, y1 = int(caja["x"] + caja["width"]) - margen, int(caja["y"] + caja["height"]) - margen
+        assert x1 > x0 and y1 > y0
+        return [rgb.getpixel((x, y)) for x in range(x0, x1) for y in range(y0, y1)]
+
+
+def _cubierta(captura: Path, caja: dict) -> None:
+    pixeles = _pixeles(captura, caja)
+    assert pixeles and all(px == MAGENTA for px in pixeles), "la región del campo no está tapada en la captura"
+
+
+def _es_mascara(captura: Path, caja: dict) -> bool:
+    return all(px == MAGENTA for px in _pixeles(captura, caja))
+
+
+def test_guardar_que_redirige_no_escribe_en_la_otra_pantalla(servidor_local):
+    # H-1 (repro de la revisión con Chromium real): «Guardar» desactiva el campo y lleva a otra pantalla con un
+    # campo de la misma etiqueta. Antes, `poner` comprobaba en A y `fill` reintentaba hasta escribir en B.
+    from trovefy.navegador import sesion
+    from trovefy.tienda.conductor import Parada
+
+    with sesion("prueba", visible=False) as page:
+        c = _conductor(page, servidor_local)
+        c.ir("redirige")
+        c.pulsar("redirige", "guardar")
+        with pytest.raises(Parada):
+            c.poner("redirige", "precio", "99.00")
+        page.wait_for_url("**/otra-pantalla.html", timeout=10_000)
+        page.wait_for_load_state("load")
+        assert page.inner_text("h1") == "Otra pantalla"
+        assert page.locator("#precio").input_value() == "B-original"
+        with pytest.raises(Parada):  # y nada más hasta volver a ir()
+            c.poner("redirige", "precio", "99.00")
+        assert page.locator("#precio").input_value() == "B-original"
 
 
 def test_conductor_para_si_la_pagina_cambia(servidor_local):

@@ -13,6 +13,9 @@ from trovefy.mapa import (
     control,
     hosts_de,
     limites_de_plan,
+    origen,
+    origenes_de,
+    palabra_prohibida,
     prohibida,
 )
 
@@ -107,17 +110,21 @@ def test_tipo_desconocido_invalido(tmp_path):
         cargar(escribir(tmp_path, con_controles(precio={"etiqueta": "Precio", "tipo": "slider"})))
 
 
-def test_capturado_por_pantalla_hereda_de_la_raiz(tmp_path):
+def test_capturado_de_pantalla_con_controles_no_hereda_de_la_raiz(tmp_path):
+    # R-1: confirmar el mapa (la raíz, p. ej. con el paso 09) no vuelve escribible una pantalla con controles
+    # que nadie ha visto: solo su propio `capturado` cuenta. Las pantallas de solo lectura sí heredan.
     pantallas = {
         "producto": dict(PANTALLA_PRODUCTO),
         "nueva": {**PANTALLA_PRODUCTO, "capturado": None},
         "otra": {**PANTALLA_PRODUCTO, "capturado": "2026-11-21"},
+        "lectura": {"url": "https://app.ejemplo.test/inicio", "firma": ["Inicio"]},
     }
     ruta = escribir(tmp_path, pantallas, capturado="2026-11-20")
     m = cargar(ruta)
-    assert capturado_de(m, "producto") == "2026-11-20"
+    assert capturado_de(m, "producto") is None
     assert capturado_de(m, "nueva") is None
     assert capturado_de(m, "otra") == "2026-11-21"
+    assert capturado_de(m, "lectura") == "2026-11-20"
 
 
 def test_capturado_por_pantalla_fecha_yaml_y_mala(tmp_path):
@@ -222,3 +229,136 @@ def test_huella_de_los_mapas_publicados_no_cambia(servicio, pantallas):
 
     m = cargar(RAIZ / f"templates/{servicio}/mapa.yaml")
     assert huella_mapa(m, pantallas) == HUELLAS_PUBLICADAS[(servicio, pantallas)]
+
+
+# --- M-2: palabras prohibidas que no se esquivan con mayúsculas, acentos, separadores ni %-codificación -----
+
+TERMINOS_MINIMOS = (
+    "pasarela", "impul pay", "retir", "tarjeta", "banco", "contraseña", "password", "payout", "withdraw",
+    "datos financieros",
+)
+TERMINOS_NUEVOS = (
+    "pago", "cobro", "payment", "billing", "bank", "bancari", "card", "tarjeta", "cbu", "cvu", "iban",
+    "mercadopago", "stripe", "paypal", "retiro", "withdraw", "payout", "impulpay",
+)
+
+
+def test_lista_minima_del_plan_y_terminos_nuevos():
+    for termino in TERMINOS_MINIMOS + TERMINOS_NUEVOS:
+        assert termino in PALABRAS_PROHIBIDAS, termino
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        "https://app.impultienda.ar/dashboard/impul%2Dpay",
+        "https://app.impultienda.ar/dashboard/impul%252Dpay",  # doble codificación
+        "https://app.impultienda.ar/dashboard/Impul_Pay",
+        "https://app.impultienda.ar/dashboard/impul.pay",
+        "https://app.impultienda.ar/dashboard/IMPULPAY",
+        "https://app.impultienda.ar/dashboard/impul%20pay",
+        "Tu CONTRASENA",
+        "Tu contraseña",  # ñ descompuesta (NFD)
+        "Tárjeta de crédito",
+        "ｐａｇｏｓ",  # ancho completo
+        "pa" + chr(0x200B) + "gos",  # espacio de ancho cero
+        "Datos-financieros",
+        "https://app.impultienda.ar/config/Mercado-Pago",
+        "https://app.impultienda.ar/config/medios_de_cobro",
+        "/settings/billing",
+        "Tu CBU o CVU",
+        "IBAN",
+        "/connect/stripe",
+        "PayPal",
+        "/account/payment-methods",
+        "Cuenta bancaria",
+    ],
+)
+def test_palabra_prohibida_normaliza(texto):
+    assert palabra_prohibida(texto) is not None, texto
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        "https://app.impultienda.ar/dashboard/diseno/contenido",
+        "Diseño de tienda HTML completo de la tienda Guardar cambios",
+        "https://app.impultienda.ar/dashboard/productos/p-0099-prueba-abc123",
+        "Editar producto Precio Moneda Guardar",
+    ],
+)
+def test_palabra_prohibida_no_salta_en_pantallas_normales(texto):
+    assert palabra_prohibida(texto) is None
+
+
+@pytest.mark.parametrize(
+    "control_malo",
+    [
+        {"etiqueta": "Conectar Mercado Pago", "rol": "button", "tipo": "boton"},
+        {"etiqueta": "Número de tarjeta", "tipo": "texto"},
+        {"css": "#stripe-key", "tipo": "texto"},
+        {"css": "input[name=cbu]", "tipo": "texto"},
+    ],
+)
+def test_palabra_prohibida_en_un_control(tmp_path, control_malo):
+    with pytest.raises(MapaInvalido, match="prohibida"):
+        cargar(escribir(tmp_path, con_controles(precio=control_malo)))
+
+
+def test_palabra_prohibida_codificada_en_la_url(tmp_path):
+    pantalla = {**PANTALLA_PRODUCTO, "url": "https://app.ejemplo.test/configuracion/impul%2Dpay"}
+    with pytest.raises(MapaInvalido, match="prohibida"):
+        cargar(escribir(tmp_path, {"producto": pantalla}))
+
+
+@pytest.mark.parametrize("servicio", ["impultienda", "whop", "hotmart"])
+def test_mapas_plantilla_siguen_cargando(servicio):
+    cargar(RAIZ / f"templates/{servicio}/mapa.yaml")
+
+
+# --- M-3: la huella del paso 09 es la de {url, firma, campos} de sus pantallas -----------------------------
+
+
+@pytest.mark.parametrize("extra", [{"prohibida": True}, {"capturado": "2026-11-20"}, {"prohibida": True, "capturado": None}])
+def test_huella_09_no_cambia_al_anotar_pasarelas(tmp_path, extra):
+    from trovefy.arranque.verificadores.base import huella_mapa
+
+    plantilla = yaml.safe_load((RAIZ / "templates/impultienda/mapa.yaml").read_text(encoding="utf-8"))
+    plantilla["pantallas"]["pasarelas"].update(extra)
+    ruta = tmp_path / "mapa.yaml"
+    ruta.write_text(yaml.safe_dump(plantilla, allow_unicode=True), encoding="utf-8")
+    pantallas = ("plan", "tiendas", "pasarelas")
+    assert huella_mapa(cargar(ruta), pantallas) == HUELLAS_PUBLICADAS[("impultienda", pantallas)]
+
+
+def test_huella_ignora_controles_pero_no_la_firma():
+    from trovefy.arranque.verificadores.base import huella_mapa
+
+    base = {"url": "https://app.ejemplo.test/inicio", "firma": ["Inicio"], "campos": {"n": {"patron": r"(\d+)"}}}
+    h = huella_mapa({"pantallas": {"inicio": base}})
+    assert huella_mapa({"pantallas": {"inicio": {**base, "controles": {"x": {"css": "a", "tipo": "boton"}}}}}) == h
+    assert huella_mapa({"pantallas": {"inicio": {**base, "firma": ["Otra"]}}}) != h
+    assert huella_mapa({"pantallas": {"inicio": {**base, "url": "https://app.ejemplo.test/otra"}}}) != h
+
+
+# --- L-1: orígenes (esquema, host, puerto); https salvo en 127.0.0.1 -------------------------------------
+
+
+def test_origen():
+    assert origen("https://app.ejemplo.test/x?y=1") == ("https", "app.ejemplo.test", 443)
+    assert origen("https://App.Ejemplo.test:8443/x") == ("https", "app.ejemplo.test", 8443)
+    assert origen("http://127.0.0.1:8123/a.html") == ("http", "127.0.0.1", 8123)
+    assert origen("http://app.ejemplo.test/x") is None  # http solo en 127.0.0.1
+    assert origen("http://localhost:8000/x") is None
+    assert origen("about:blank") is None
+    assert origen("https://app.ejemplo.test:99999/") is None
+
+
+def test_origenes_de(tmp_path):
+    m = cargar(escribir(tmp_path, {"producto": PANTALLA_PRODUCTO}))
+    assert origenes_de(m) == {("https", "app.ejemplo.test", 443)}
+    m = cargar(escribir(tmp_path, {"producto": PANTALLA_PRODUCTO}, hosts=["tienda.ejemplo.test"]))
+    assert origenes_de(m) == {("https", "tienda.ejemplo.test", 443)}  # la url de producto queda fuera de hosts
+    local = {"capturado": None, "fuente": "x", "hosts": ["127.0.0.1"],
+             "pantallas": {"a": {"url": "http://127.0.0.1:8123/a.html", "firma": ["A"]}}}
+    assert ("http", "127.0.0.1", 8123) in origenes_de(local)

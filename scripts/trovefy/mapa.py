@@ -7,7 +7,9 @@ Este módulo solo describe: no hace clics ni escribe en el servicio (eso lo hace
 
 `capturado` es la fecha en que el mapa se confirmó con la pantalla real del usuario; `None` significa
 que se construyó a partir de documentación o páginas públicas y no se puede certificar nada con él.
-Cada pantalla puede llevar su propio `capturado` (si falta, hereda el de la raíz).
+Cada pantalla puede llevar su propio `capturado`. Una pantalla de solo lectura (sin `controles`) hereda el
+de la raíz si no lo tiene; una pantalla con `controles` **nunca** hereda: sin `capturado` propio no se
+escribe en ella (ruling R-1: confirmar el paso 09 no vuelve escribible una pantalla que nadie ha visto).
 
 Claves opcionales (un mapa de la fase 0 carga igual):
 
@@ -18,17 +20,22 @@ Claves opcionales (un mapa de la fase 0 carga igual):
 """
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import yaml
 
 TIPOS = ("texto", "numero", "precio", "select", "interruptor", "archivo", "boton", "area")
+# Las diez primeras son la lista mínima del plan 19; el resto, de la revisión de las tareas 1–2 (M-2).
+# Se comparan normalizadas (ver `palabra_prohibida`), así que «impul pay» también casa con «Impul-Pay» o «impul%2Dpay».
 PALABRAS_PROHIBIDAS = (
     "pasarela", "impul pay", "retir", "tarjeta", "banco", "contraseña", "password", "payout", "withdraw",
     "datos financieros",
+    "pago", "cobro", "payment", "billing", "bank", "bancari", "card", "cbu", "cvu", "iban", "mercadopago",
+    "stripe", "paypal", "retiro", "impulpay",
 )
 _CLAVES_CONTROL = {"etiqueta", "rol", "css", "tipo", "secreto"}
 _CLAVES_LIMITES = {"tiendas": int, "bumps": int, "upsells": int, "downsell": bool}
@@ -99,15 +106,39 @@ def _validar_control(origen, pantalla: str, nombre: str, c) -> Control:
     return Control(pantalla, nombre, etiqueta, rol, css, tipo, secreto)
 
 
+def _normal(texto: str) -> str:
+    """Texto comparable: %-decodificado (hasta 3 veces), sin acentos (NFKD), en minúsculas y sin separadores.
+
+    Quitar todos los separadores (espacios, guiones, puntos, barras, caracteres de ancho cero…) hace que
+    «impul-pay», «Impul_Pay», «impul%20pay» e «IMPULPAY» sean lo mismo. El precio es que una palabra puede
+    casar a caballo de dos («mi banco» → «mibanco» contiene «iban»): es una guarda, y ante la duda se para.
+    """
+    t = str(texto)
+    for _ in range(3):
+        decodificado = unquote(t)
+        if decodificado == t:
+            break
+        t = decodificado
+    t = "".join(ch for ch in unicodedata.normalize("NFKD", t) if not unicodedata.combining(ch))
+    return re.sub(r"[\W_]+", "", t.casefold())
+
+
+_PROHIBIDAS_NORMALES = tuple((w, _normal(w)) for w in PALABRAS_PROHIBIDAS)
+
+
 def palabra_prohibida(texto: str) -> str | None:
-    """La primera de `PALABRAS_PROHIBIDAS` que aparece en `texto` (sin mayúsculas; «impul-pay» = «impul pay»)."""
-    normal = re.sub(r"[-_/.?=&+]+", " ", texto.lower())
-    return next((w for w in PALABRAS_PROHIBIDAS if w in normal), None)
+    """La primera de `PALABRAS_PROHIBIDAS` que aparece en `texto` (URL o texto), comparando ambos normalizados."""
+    normal = _normal(texto)
+    return next((w for w, n in _PROHIBIDAS_NORMALES if n in normal), None)
 
 
 def _zona_de_cobro(p: dict) -> str | None:
-    """La palabra prohibida que aparece en la url o la firma de la pantalla, o None."""
-    return palabra_prohibida(" ".join([p["url"], *p["firma"]]))
+    """La palabra prohibida que aparece en la url, la firma o la etiqueta/css de algún control, o None."""
+    textos = [p["url"], *p["firma"]]
+    for c in (p.get("controles") or {}).values():
+        if isinstance(c, dict):
+            textos += [str(c[k]) for k in ("etiqueta", "css") if c.get(k) is not None]
+    return next((w for w in map(palabra_prohibida, textos) if w), None)
 
 
 def _validar_limites(ruta: Path, mapa: dict) -> None:
@@ -220,9 +251,16 @@ def prohibida(mapa: dict, pantalla: str) -> bool:
 
 
 def capturado_de(mapa: dict, pantalla: str) -> str | None:
-    """Fecha de confirmación de la pantalla (la suya o, si no la tiene, la de la raíz); None = sin confirmar."""
+    """Fecha de confirmación de la pantalla; None = sin confirmar (se lee, no se escribe).
+
+    Una pantalla con `controles` solo cuenta con su propio `capturado` (nunca hereda la raíz: R-1); una de
+    solo lectura, si no lo tiene, hereda el de la raíz.
+    """
     p = _pantalla(mapa, pantalla)
-    valor = p["capturado"] if "capturado" in p else mapa.get("capturado")
+    if "capturado" in p:
+        valor = p["capturado"]
+    else:
+        valor = None if p.get("controles") else mapa.get("capturado")
     return _fecha(valor, Path("mapa"), f" de «{pantalla}»")
 
 
@@ -231,6 +269,29 @@ def hosts_de(mapa: dict) -> set[str]:
     if mapa.get("hosts"):
         return {h.strip().lower() for h in mapa["hosts"]}
     return {urlparse(p["url"]).hostname for p in mapa["pantallas"].values() if urlparse(p["url"]).hostname}
+
+
+_LOCAL = "127.0.0.1"  # único host donde se admite http (páginas de prueba propias)
+
+
+def origen(url: str) -> tuple[str, str, int] | None:
+    """(esquema, host, puerto) de `url`, o None si no es https (http solo en 127.0.0.1) o no se entiende."""
+    try:
+        u = urlparse(url)
+        puerto = u.port
+    except ValueError:
+        return None
+    esquema, host = u.scheme.lower(), (u.hostname or "").lower()
+    if not host or not (esquema == "https" or (esquema == "http" and host == _LOCAL)):
+        return None
+    return esquema, host, puerto or (443 if esquema == "https" else 80)
+
+
+def origenes_de(mapa: dict) -> set[tuple[str, str, int]]:
+    """Orígenes permitidos: los de las `url` del mapa cuyo host está en `hosts_de`, y https:443 de cada host."""
+    hosts = hosts_de(mapa)
+    salida = {o for p in mapa["pantallas"].values() if (o := origen(p["url"])) and o[1] in hosts}
+    return salida | {("https", h, 443) for h in hosts}
 
 
 def limites_de_plan(mapa: dict, plan: str) -> dict | None:

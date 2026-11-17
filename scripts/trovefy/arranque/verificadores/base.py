@@ -335,11 +335,19 @@ def _solo(mapa: dict, pantallas: tuple[str, ...] | None) -> dict:
 
 
 def huella_mapa(mapa: dict, pantallas: tuple[str, ...] | None = None) -> str:
-    """sha256 de las pantallas de un mapa (URL, firma y patrones), sin `capturado` ni `fuente`.
+    """sha256 de lo que el paso lee de cada pantalla: la proyección `{url, firma, campos}`.
 
-    Con `pantallas`, solo las que lee el paso: añadir al mapa pantallas de otra fase no invalida su confirmación.
+    Todo lo demás queda fuera: `capturado`, `fuente` y `hosts` de la raíz, y por pantalla `capturado`,
+    `prohibida` y `controles`. Así, marcar `pasarelas` como prohibida o confirmar una pantalla no invalida
+    la confirmación del usuario. Con `pantallas`, solo las que lee el paso: añadir al mapa pantallas de otra
+    fase tampoco la invalida. Para un mapa de la fase 0 la proyección es la pantalla entera, así que las
+    huellas ya guardadas siguen valiendo.
     """
-    datos = json.dumps(_solo(mapa, pantallas), sort_keys=True, ensure_ascii=False)
+    proyeccion = {
+        nombre: {"url": p["url"], "firma": p["firma"], "campos": p.get("campos", {})}
+        for nombre, p in _solo(mapa, pantallas).items()
+    }
+    datos = json.dumps(proyeccion, sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(datos.encode("utf-8")).hexdigest()
 
 

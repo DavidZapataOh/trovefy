@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import fcntl
 import os
+import random
 import re
 import time
 from collections.abc import Callable, Iterator
@@ -140,8 +141,26 @@ def sesion(
                     pass  # el usuario ya cerró la ventana
 
 
-# Última navegación por dominio (reloj monótono): 5 s como mínimo entre dos visitas al mismo dominio.
+# Última navegación por dominio registrable (reloj monótono).
 _ULTIMA_NAVEGACION: dict[str, float] = {}
+
+# Sufijos públicos de dos niveles que usan los servicios de Trovefy (aproximación sin la Public Suffix List,
+# que no está entre las dependencias): con ellos «x.impultienda.com.ar» cuenta como «impultienda.com.ar».
+_SUFIJOS_DOBLES = frozenset({
+    "com.ar", "net.ar", "org.ar", "gob.ar", "com.br", "net.br", "org.br", "com.mx", "org.mx", "com.co", "net.co",
+    "com.pe", "com.uy", "com.py", "com.bo", "com.ec", "com.ve", "com.es", "co.uk", "org.uk", "com.au", "co.jp",
+})
+_IPV4 = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}")
+
+
+def dominio_registrable(host: str) -> str:
+    """El dominio que se registra («app.impultienda.ar» → «impultienda.ar»); una IP o un nombre suelto, tal cual."""
+    h = host.strip().lower().rstrip(".")
+    if _IPV4.fullmatch(h) or ":" in h:
+        return h
+    partes = h.split(".")
+    n = 3 if len(partes) >= 3 and ".".join(partes[-2:]) in _SUFIJOS_DOBLES else 2
+    return ".".join(partes[-n:])
 
 
 def esperar_entre_navegaciones(
@@ -149,12 +168,20 @@ def esperar_entre_navegaciones(
     ahora: Callable[[], float] = time.monotonic,
     dormir: Callable[[float], None] = time.sleep,
     minimo_s: float = 5.0,
+    maximo_s: float = 8.0,
+    azar: Callable[[float, float], float] = random.uniform,
 ) -> None:
-    """Duerme lo que falte para que pasen `minimo_s` desde la última navegación a `dominio`, y la anota."""
-    clave = dominio.lower()
+    """Duerme lo que falte para que pasen entre `minimo_s` y `maximo_s` (al azar) desde la última navegación
+    al mismo dominio registrable (`dominio_registrable`), y la anota.
+
+    Contrato 8 del plan 19: 5–8 s entre navegaciones del mismo dominio, para no parecer un robot. `azar` se
+    inyecta en los tests; su resultado se acota a [`minimo_s`, `maximo_s`].
+    """
+    clave = dominio_registrable(dominio)
     anterior = _ULTIMA_NAVEGACION.get(clave)
     if anterior is not None:
-        falta = minimo_s - (ahora() - anterior)
+        intervalo = min(maximo_s, max(minimo_s, azar(minimo_s, maximo_s)))
+        falta = intervalo - (ahora() - anterior)
         if falta > 0:
             dormir(falta)
     _ULTIMA_NAVEGACION[clave] = ahora()
