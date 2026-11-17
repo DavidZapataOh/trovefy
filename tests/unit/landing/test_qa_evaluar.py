@@ -584,3 +584,21 @@ def test_qa_anota_el_manifiesto(montada):
     qa.ejecutar_qa(v, cargar(v))
     raiz = ruta_landing(v, P, "ZZ")
     assert frontmatter.leer(raiz / "QA.md")[0]["manifiesto"] == manifiesto_landing(raiz)
+
+
+def test_hosts_propios_incluye_la_plataforma_de_impultienda(tmp_path, monkeypatch):
+    """Impultienda sirve la tienda con sus fuentes, su almacenamiento de imágenes y la analítica de Cloudflare
+    (QA publicada real de BG, 2026-11-17): son de la plataforma, no terceros añadidos por la landing."""
+    from types import SimpleNamespace
+
+    from trovefy.landing import hosting
+    from trovefy.landing.constantes import casa_host
+
+    monkeypatch.setattr(hosting, "capacidades_vigentes", lambda _v: (_ for _ in ()).throw(ValueError("x")))
+    reglas = qa.hosts_propios(tmp_path, SimpleNamespace(tienda="https://somatika.impultienda.ar"))
+    for host in ("fonts.googleapis.com", "fonts.gstatic.com", "static.cloudflareinsights.com",
+                 "aekpgsbqjzqntlbucbts.supabase.co", "sb.impultienda.ar"):
+        assert casa_host(host, reglas), host
+    assert not casa_host("otro.supabase.co", reglas)
+    assert not casa_host("tracker.example.com", reglas)
+    assert qa.hosts_propios(tmp_path, SimpleNamespace(tienda=None)) == ()
