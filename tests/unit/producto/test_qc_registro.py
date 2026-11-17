@@ -96,6 +96,26 @@ def test_veredicto_corregir_con_problemas_vale():
     assert parsear_veredicto("- p3 · desborde · x\npatrón nuevo (salud): y\nVEREDICTO: corregir") == "corregir"
 
 
+@pytest.mark.parametrize("texto", [
+    "~ s-02 · «по-добре от нула» · по-добре от нищо\nVEREDICTO: ok",
+    ("~ p4 · vacío · el pie queda un poco suelto\n~ s-03 · «Това е напълно наред» · Няма нищо лошо в това\n"
+     "\nVEREDICTO: ok"),
+])
+def test_veredicto_ok_con_sugerencias_vale(texto):
+    assert parsear_veredicto(texto) == "ok"
+
+
+def test_veredicto_ok_con_sugerencia_y_problema_es_none():
+    assert parsear_veredicto("~ s-02 · «по-добре от нула» · по-добре от нищо\n"
+                             "- s-04 · «Вие» · ти\nVEREDICTO: ok") is None
+
+
+def test_veredicto_corregir_con_problemas_y_sugerencias_vale():
+    texto = ("- s-04 · «Вие можете» · ти можеш\n~ s-02 · «по-добре от нула» · по-добре от нищо\n"
+             "patrón nuevo (salud): лекува\nVEREDICTO: corregir")
+    assert parsear_veredicto(texto) == "corregir"
+
+
 def test_veredicto_en_bloque_de_codigo_es_none():
     assert parsear_veredicto("```\nVEREDICTO: ok\n```") is None
 
@@ -166,6 +186,16 @@ def test_texto_no_falsea_secciones(tmp_path):
     estado = estado_qc(tmp_path, 1)
     assert estado == {"gates": "ok", "maqueta": "ok", "revisor": "corregir", "nativo": None}
     assert len(leer_qc(tmp_path)) == 3
+
+
+def test_sugerencias_quedan_citadas_y_legibles(tmp_path):
+    _maqueta(tmp_path, 1)
+    texto = "~ s-02 · «по-добре от нула» · по-добре от нищо\nVEREDICTO: ok"
+    anotar_qc(tmp_path, 1, "nativo", parsear_veredicto(texto), texto, AHORA)
+    cuerpo = (tmp_path / "QC.md").read_text(encoding="utf-8")
+    assert "> ~ s-02 · «по-добре от нула» · по-добре от нищо" in cuerpo
+    nativo = leer_qc(tmp_path)[-1]
+    assert nativo.veredicto == "ok" and set(nativo.datos) == {"sha256"}
 
 
 @pytest.mark.parametrize("sep", ["\u2028", "\x85", "\x1c", "\r", "\v", "\f"])

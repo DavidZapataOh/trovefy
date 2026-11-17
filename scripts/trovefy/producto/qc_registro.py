@@ -8,6 +8,7 @@ El veredicto de ``revisor`` y ``nativo`` sale de la última línea no vacía de 
 (``VEREDICTO: ok|corregir``, resolución 17). Cualquier otra cosa es ``None``: «no medido: el agente no
 dio veredicto», que no deja cerrar la pieza (falla cerrado). También es ``None`` una respuesta con más de
 una línea de veredicto, o un ``ok`` con líneas de problema (``- …``) o con un ``patrón nuevo`` (Ruling M2).
+Las sugerencias de estilo (``~ …``) no bloquean: un ``ok`` con ellas sigue siendo ``ok``.
 
 Cada veredicto queda atado al PDF que se revisó: ``gates``, ``maqueta``, ``revisor`` y ``nativo`` anotan
 el ``sha256`` del PDF. Los agentes lo toman de la última sección ``maqueta`` de esa versión (sin ella no
@@ -60,7 +61,8 @@ def parsear_veredicto(texto: str | None) -> Veredicto | None:
 
     También None si hay más de una línea de veredicto (sin distinguir mayúsculas y quitando ``>``, ``*``
     y comillas invertidas) o si dice ``ok`` y el texto trae líneas de problema (``- …``) o un
-    ``patrón nuevo``: una respuesta que se contradice no vale como veredicto (Ruling M2).
+    ``patrón nuevo``: una respuesta que se contradice no vale como veredicto (Ruling M2). Las líneas de
+    sugerencia (``~ …``) no cuentan como problema.
     """
     if not isinstance(texto, str):
         return None
