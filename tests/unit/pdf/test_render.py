@@ -392,6 +392,47 @@ def test_ancla_que_falta_en_el_html_es_desborde(tmp_path):
     assert desbordes(anclas, fijas_esperadas(html)) == ("mapa", "portada")
 
 
+# --- 17b: fichas ilustradas -------------------------------------------------------------------------
+
+
+def _png_grande(ancho: int = 1024, alto: int = 1536) -> bytes:
+    from io import BytesIO
+
+    from PIL import Image
+
+    buf = BytesIO()
+    Image.new("RGB", (ancho, alto), (200, 170, 120)).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+@necesita_pdf
+@pytest.mark.parametrize("tamano", [(1024, 1536), (1536, 1024), (60, 90)])
+def test_ficha_ilustrada_es_apta(vault_respira, tamano):
+    """Una ilustración de 1k (más alta que la página a 96 ppp) cabe en la ficha con su tabla: la CSS la
+    acota a ~70 mm sin recortar nada, y las anclas siguen detectando desbordes."""
+    raiz = pieza(vault_respira, "p-0042-respira", "principal").raiz
+    sha = escribir_medio(raiz / "medios" / "f-01.png", _png_grande(*tamano))
+    registrar_medio(raiz, "f-01", "f-01.png", sha, "apimart", task_id="t-0002")
+    diario = raiz / "fuente" / "fichas" / "diario.yaml"
+    diario.write_text(diario.read_text(encoding="utf-8") + "imagen: f-01\n", encoding="utf-8")
+    r = producir_pdf(vault_respira, "p-0042-respira", "principal", CFG, ahora=AHORA)
+    assert 'src="medios/f-01.png"' in r.html.read_text(encoding="utf-8")
+    assert r.informe.pasa and r.desbordes == () and r.problemas == ()
+    assert r.apto
+
+
+@necesita_pdf
+def test_ficha_ilustrada_desbordada_se_detecta(vault_respira):
+    raiz = pieza(vault_respira, "p-0042-respira", "principal").raiz
+    sha = escribir_medio(raiz / "medios" / "f-01.png", _png_grande())
+    registrar_medio(raiz, "f-01", "f-01.png", sha, "apimart", task_id="t-0002")
+    diario = raiz / "fuente" / "fichas" / "diario.yaml"
+    texto = diario.read_text(encoding="utf-8").replace("filas: 7", "filas: 17")
+    diario.write_text(texto + "imagen: f-01\n", encoding="utf-8")
+    r = producir_pdf(vault_respira, "p-0042-respira", "principal", CFG, ahora=AHORA)
+    assert r.pdf is not None and "diario" in r.desbordes and not r.apto
+
+
 # --- revisión: escrituras sin seguir enlaces (M3) ---------------------------------------------------
 
 

@@ -316,6 +316,21 @@ def test_leer_peticiones(vault):
     assert ps[1].referencias == ()
 
 
+def test_leer_peticiones_admite_ilustraciones_de_fichas(vault):
+    """17b: las fichas llevan ilustraciones con ids ``f-NN``; un producto puede pedir hasta 80 imágenes
+    (el tope de US$ 2 sigue mandando en el gasto)."""
+    from trovefy.apimart.cliente import validar
+
+    ids = ["portada", "mockup", *[f"il-{n:02d}" for n in range(1, 11)], *[f"f-{n:02d}" for n in range(1, 69)]]
+    assert len(ids) == 80
+    _yaml(vault, [{"id": i, "pieza": "principal", "prompt": f"ilustración {i}, sin texto", "proporcion": "4:3",
+                   "resolucion": "1k"} for i in ids])
+    ps = leer_peticiones(vault, P)
+    assert [p.id for p in ps] == ids
+    for p in ps:
+        validar(p, {})
+
+
 @pytest.mark.parametrize("datos", [
     [{"id": "a", "pieza": "principal", "prompt": "x", "proporcion": "1:1", "resolucion": "1k"}] * 2,
     {"no": "lista"},

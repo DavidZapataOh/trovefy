@@ -61,3 +61,18 @@ def test_ayuda_y_readme_listan_producto():
 def test_cerebro_menciona_la_config_del_producto():
     assert "producto" in (RAIZ / "templates" / "cerebro" / "CLAUDE.md").read_text(encoding="utf-8").split(
         "3. `config/`")[1].splitlines()[0]
+
+
+def test_paso_1_titulos_locales_de_los_bonos():
+    paso1 = SKILL.split("\n1. **")[1].split("\n2. **")[0]
+    assert "--titulo 'bono-N=" in paso1
+    assert "idioma del país" in paso1
+    assert "título sin traducir" in paso1
+
+
+def test_references_fichas_ilustradas():
+    patron = (CARPETA / "references" / "patron-de-seccion.md").read_text(encoding="utf-8")
+    assert "imagen: f-01" in patron and "ficha-img" in patron
+    imagenes = (CARPETA / "references" / "imagenes.md").read_text(encoding="utf-8")
+    assert "f-01" in imagenes and "80" in imagenes
+    assert "il-01 … il-10 (minúsculas" not in imagenes

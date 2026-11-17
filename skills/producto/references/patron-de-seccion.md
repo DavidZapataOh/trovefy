@@ -39,10 +39,14 @@ Una ficha por archivo, `<pieza>/fuente/fichas/<id>.yaml`. Va en su propia págin
 id: diario
 titulo: Diario de sueño
 instrucciones: Cada mañana, anota a qué hora te acostaste y cuántos minutos tardaste en dormirte.
+imagen: f-01         # opcional: id de una ilustración de medios/medios.json de esta pieza
 tipo: tabla          # tabla | lineas | casillas
 columnas: [Día, Hora, Minutos]
-filas: 7
+filas: 7             # en casillas, también la lista de textos de cada casilla
 ```
+
+- `imagen` (opcional) ilustra la ficha: va entre las instrucciones y la tabla, las líneas o las casillas, como `<figure class="ficha-img">` con el título de la ficha de `alt`. Es el id de una imagen ya generada para **esa misma pieza** (`f-01`, `f-02`… en `entregable/imagenes.yaml`, ver `imagenes.md`). Si el id no está en `medios/medios.json` de la pieza, el ensamblado falla y lo nombra: genérala primero o quita la línea.
+- La imagen se acota a unos 70 mm de alto, centrada y sin deformar. Aun así, imagen y tabla comparten una página fija: con muchas filas, la maqueta lo marca como desborde; entonces quita filas o parte la ficha en dos.
 
 ## Tono
 

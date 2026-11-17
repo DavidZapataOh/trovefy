@@ -120,6 +120,8 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     f.add_argument("--pais", required=True, metavar="XX")
     f.add_argument("--exigencia", required=True, choices=("normal", "sanitario", "educativo"))
     f.add_argument("--tipo", required=True, choices=("ebook", "kit"))
+    f.add_argument("--titulo", action="append", default=[], metavar="PIEZA=TEXTO",
+                   help="título local de una pieza en el idioma del país (repetible): --titulo 'bono-1=…'")
 
     pl = sub.add_parser("plan", help="paso 2: cuenta las palabras de <pieza>/PLAN.md frente al objetivo")
     _p_id(pl)
@@ -181,14 +183,32 @@ def _iniciar(args: argparse.Namespace, vault: Path) -> int:
     return 0
 
 
-def _ficha(args: argparse.Namespace, vault: Path) -> int:
-    from trovefy.producto.ficha import crear_ficha, leer_ficha
+def _titulos(valores: list[str]) -> dict[str, str]:
+    """``--titulo pieza=texto`` (repetible) → {pieza: texto}. El texto lo valida ``crear_ficha``."""
+    titulos: dict[str, str] = {}
+    for valor in valores:
+        pieza, igual, texto = valor.partition("=")
+        pieza = pieza.strip()
+        if not igual or not pieza:
+            raise _Uso(f"--titulo mal escrito: «{valor[:60]}» (usa --titulo 'bono-1=<título en el idioma del país>')")
+        if pieza in titulos:
+            raise _Uso(f"--titulo {pieza} repetido: da un solo título por pieza")
+        titulos[pieza] = texto
+    return titulos
 
-    ruta = crear_ficha(vault, args.p_id, args.pais.strip().upper(), args.exigencia, args.tipo, _ahora())
+
+def _ficha(args: argparse.Namespace, vault: Path) -> int:
+    from trovefy.producto.ficha import crear_ficha, leer_ficha, sin_traducir
+
+    titulos = _titulos(args.titulo)
+    ruta = crear_ficha(vault, args.p_id, args.pais.strip().upper(), args.exigencia, args.tipo, _ahora(),
+                       titulos=titulos)
     ficha = leer_ficha(vault, args.p_id)
     _decir(f"Ficha: {_rel(vault, ruta)} · {ficha.pais} · {ficha.idioma} · {ficha.exigencia} · {ficha.tipo}")
     for p in ficha.piezas:
         _decir(f"- {p.id} ({p.tipo}): «{p.titulo}» · {p.paginas_objetivo} páginas objetivo")
+    for pieza in sin_traducir(ficha):
+        _decir(f"Aviso: {pieza}: título sin traducir (usa --titulo {pieza}=…)")
     return 0
 
 
