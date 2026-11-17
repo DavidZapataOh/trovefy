@@ -1,11 +1,13 @@
 """Cierre de ``/producto``: todas las piezas aptas, versiones en ``PRODUCTO.md`` y ``modelado → producido``.
 
 Falla cerrado: sin PDF, sin ``pdfinfo``, con un desborde, sin el veredicto ``ok`` de ``revisor`` y
-``nativo`` para esa misma versión, o con un PDF que cambió después del QC, no hay cierre. Las piezas
+``nativo`` para esa misma versión, o con un PDF que cambió después del QC, no hay cierre. Solo cuentan los
+veredictos (gates, maqueta, revisor, nativo) cuyo ``sha256`` es el del PDF que hay hoy en disco. Las piezas
 salen de ``FICHA.md`` (resolución 13); si la oferta o la escalera piden una pieza que la ficha no trae,
 tampoco. El estado va por ``trovefy.vault.producto.avanzar_estado`` y el resto por
 ``actualizar_producto`` (resoluciones 1 y 2). Si el país ya está después de ``producido``, se anotan las
-versiones y el estado no se toca.
+versiones y el estado no se toca. Otro país con el mismo idioma solo cierra si además paga en la misma
+moneda que el país de la ficha (Ruling L5).
 """
 
 import hashlib
@@ -18,7 +20,7 @@ from trovefy.config import mercados
 from trovefy.modelar.salida import cargar_escalera, cargar_oferta
 from trovefy.pdf.render import nombre_pdf
 from trovefy.producto.ficha import ESTADOS_PRODUCIBLES, Ficha, leer_ficha
-from trovefy.producto.qc_registro import estado_qc, leer_qc
+from trovefy.producto.qc_registro import REGISTROS, leer_qc
 from trovefy.producto.rutas import UPSELLS, pieza
 from trovefy.vault import frontmatter
 from trovefy.vault.escritura import ZONA_NEGOCIO, anadir_log
@@ -87,16 +89,20 @@ def _estado_pieza(vault: Path, p_id: str, ficha: Ficha, pieza_id: str) -> Estado
     if ultimo is None:
         return EstadoPieza(pieza_id, None, None, None, None, None, None, None)
     version, pdf = ultimo
-    qc = estado_qc(raiz, version)
-    secciones = [s for s in leer_qc(raiz) if s.version == version]
-    maqueta = next((s.datos for s in reversed(secciones) if s.agente == "maqueta"), {})
-    gates = next((s.datos for s in reversed(secciones) if s.agente == "gates"), {})
-    intacto = (pdf.is_file() and not pdf.is_symlink() and maqueta.get("pdf") == pdf.name
-               and maqueta.get("sha256") == hashlib.sha256(pdf.read_bytes()).hexdigest())
+    sha = hashlib.sha256(pdf.read_bytes()).hexdigest() if pdf.is_file() and not pdf.is_symlink() else None
+    # solo cuentan las anotaciones de esta versión hechas sobre este mismo PDF (Ruling M1)
+    secciones = [s for s in leer_qc(raiz) if s.version == version and sha is not None
+                 and s.datos.get("sha256") == sha]
+    ultima = {s.agente: s for s in secciones}
+    maqueta = ultima["maqueta"].datos if "maqueta" in ultima else {}
+    gates = ultima["gates"].datos if "gates" in ultima else {}
+    intacto = "maqueta" in ultima and maqueta.get("pdf") == pdf.name
+    veredicto = {a: (ultima[a].veredicto if a in ultima else None) for a in REGISTROS}
     rel = pdf.relative_to(ruta_producto(vault, p_id).parent).as_posix()
-    return EstadoPieza(pieza_id, version, rel, _entero(maqueta.get("pdfinfo")), qc["gates"], qc["revisor"],
-                       qc["nativo"], _entero(maqueta.get("desbordes")), maqueta=qc["maqueta"],
-                       puntuacion=_entero(gates.get("puntuacion")), pdf_intacto=intacto)
+    return EstadoPieza(pieza_id, version, rel, _entero(maqueta.get("pdfinfo")), veredicto["gates"],
+                       veredicto["revisor"], veredicto["nativo"], _entero(maqueta.get("desbordes")),
+                       maqueta=veredicto["maqueta"], puntuacion=_entero(gates.get("puntuacion")),
+                       pdf_intacto=intacto)
 
 
 def revisar(vault: Path, p_id: str) -> list[EstadoPieza]:
@@ -108,7 +114,8 @@ def revisar(vault: Path, p_id: str) -> list[EstadoPieza]:
 
 def _motivos(e: EstadoPieza, tipo: str) -> list[str]:
     if e.version is None:
-        return [f"{e.id}: sin PDF ({_SIN_PDF.get(tipo, 'cada pieza tiene su entregable real')})"]
+        clave = "principal" if e.id == "principal" else tipo
+        return [f"{e.id}: sin PDF ({_SIN_PDF.get(clave, 'cada pieza tiene su entregable real')})"]
     quien = f"{e.id} v{e.version}"
     motivos = []
     if not e.pdf_intacto:
@@ -148,8 +155,29 @@ def _ya_anotada(previa: object, e: EstadoPieza) -> bool:
             and previa.get("paginas") == e.paginas and isinstance(previa.get("fecha"), str))
 
 
+def _vigentes(vault: Path, p_id: str, idioma: str) -> dict:
+    meta, _ = frontmatter.leer(ruta_producto(vault, p_id))
+    previas = ((meta.get("entregable") if isinstance(meta, dict) else None) or {})
+    previas = previas.get(idioma) if isinstance(previas, dict) else None
+    return previas if isinstance(previas, dict) else {}
+
+
+def _vigente_perdido(previa: object, e: EstadoPieza) -> str | None:
+    """Motivo si ``PRODUCTO.md`` ya anotó una versión más alta que el último PDF que queda (Ruling L4)."""
+    version = previa.get("version") if isinstance(previa, dict) else None
+    if isinstance(version, bool) or not isinstance(version, int):
+        return None
+    if e.version is None or version > e.version:
+        return f"{e.id}: el PDF vigente v{version} ya no existe"
+    return None
+
+
 def cerrar(vault: Path, p_id: str, pais: str, ahora: datetime) -> tuple[bool, list[str]]:
-    """``(True, mensajes)`` si todas las piezas son aptas y se anotaron; ``(False, motivos)`` si no."""
+    """``(True, mensajes)`` si todas las piezas son aptas y se anotaron; ``(False, motivos)`` si no.
+
+    Las versiones se escriben en ``PRODUCTO.md`` antes que el estado: si ``avanzar_estado`` falla (otro
+    proceso movió el estado), las versiones ya anotadas se quedan, porque las piezas son aptas igual.
+    """
     vault, ahora = Path(vault), _con_zona(ahora)
     pais = pais.strip().upper() if isinstance(pais, str) else ""
     if not _PAIS.fullmatch(pais):
@@ -167,24 +195,34 @@ def cerrar(vault: Path, p_id: str, pais: str, ahora: datetime) -> tuple[bool, li
     if mercado.idioma != ficha.idioma:
         idioma = mercado.idioma
         return False, [f"{pais} habla {idioma} y el entregable está en {ficha.idioma}: produce la versión {idioma}"]
+    if pais != ficha.pais:
+        origen = mercados.cargar(ruta_mercados).get(ficha.pais)
+        if origen is None:
+            return False, [f"{ficha.pais} (el país de la ficha) no está en config/mercados.yaml"]
+        if origen.moneda != mercado.moneda:
+            motivo = (f"{pais} paga en {mercado.moneda} y el entregable se hizo para {ficha.pais} en "
+                      f"{origen.moneda}: produce la versión de {pais}")
+            return False, [motivo]
     estado = estado_pais(vault, p_id, pais)
     if estado not in ESTADOS_PRODUCIBLES:
         return False, [f"{pais} está en «{estado or 'sin estado'}»: primero /modelar"]
 
-    motivos = _piezas_pedidas(vault, p_id, pais, ficha)
+    try:
+        motivos = _piezas_pedidas(vault, p_id, pais, ficha)
+        estados = revisar(vault, p_id)
+    except (FileNotFoundError, ValueError) as exc:
+        return False, [str(exc)]
+    previas = _vigentes(vault, p_id, ficha.idioma)
     tipos = {p.id: p.tipo for p in ficha.piezas}
-    estados = revisar(vault, p_id)
     for e in estados:
+        if (perdido := _vigente_perdido(previas.get(e.id), e)) is not None:
+            motivos.append(perdido)
         if not e.apta:
             motivos += _motivos(e, tipos[e.id])
     if motivos:
         return False, motivos
 
     fecha = ahora.astimezone(ZONA_NEGOCIO).date().isoformat()
-    meta, _ = frontmatter.leer(ruta_producto(vault, p_id))
-    previas = ((meta.get("entregable") if isinstance(meta, dict) else None) or {})
-    previas = previas.get(ficha.idioma) if isinstance(previas, dict) else None
-    previas = previas if isinstance(previas, dict) else {}
     nuevas = [e for e in estados if not _ya_anotada(previas.get(e.id), e)]
     vigentes = {e.id: {"version": e.version, "pdf": e.pdf, "paginas": e.paginas, "fecha": fecha} for e in nuevas}
     lineas = [f"- {fecha} · {e.id} v{e.version} · {e.pdf} · {e.paginas} págs · gates {e.puntuacion} · "

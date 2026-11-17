@@ -6,10 +6,9 @@ paises:
   ZZ:
     estado: producido
     historial:
-    - desde: aprobado
-      hacia: modelado
+    - de: aprobado
+      a: modelado
       fecha: '2026-11-13T18:00:00-05:00'
-      skill: modelar
       evidencia:
       - productos/p-0042-respira/OFERTA.md
     - de: modelado

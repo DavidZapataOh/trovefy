@@ -6,7 +6,12 @@ citado con ``> `` línea a línea: así un texto del agente no puede fingir otra
 
 El veredicto de ``revisor`` y ``nativo`` sale de la última línea no vacía de su respuesta
 (``VEREDICTO: ok|corregir``, resolución 17). Cualquier otra cosa es ``None``: «no medido: el agente no
-dio veredicto», que no deja cerrar la pieza (falla cerrado).
+dio veredicto», que no deja cerrar la pieza (falla cerrado). También es ``None`` una respuesta con más de
+una línea de veredicto, o un ``ok`` con líneas de problema (``- …``) o con un ``patrón nuevo`` (Ruling M2).
+
+Cada veredicto queda atado al PDF que se revisó: ``gates``, ``maqueta``, ``revisor`` y ``nativo`` anotan
+el ``sha256`` del PDF. Los agentes lo toman de la última sección ``maqueta`` de esa versión (sin ella no
+se anotan) y una versión con maqueta no se vuelve a anotar: un PDF cambiado pide una versión nueva.
 """
 
 import fcntl
@@ -35,6 +40,10 @@ Veredicto = Literal["ok", "corregir"]
 _CABECERA = re.compile(r"^## v([1-9]\d*) · (gates|maqueta|revisor|nativo) · (\d{4}-\d{2}-\d{2} \d{2}:\d{2})$")
 _DATO = re.compile(r"^- ([a-z_0-9]+): (.*)$")
 _CLAVE = re.compile(r"[a-z_0-9]+")
+_SHA = re.compile(r"[0-9a-f]{64}")
+_ADORNO = re.compile(r"^[\s>*`]+|[\s>*`]+$")
+_LINEA_VEREDICTO = re.compile(r"veredicto\b", re.IGNORECASE)
+_PATRON_NUEVO = re.compile(r"patr[oó]n nuevo\b", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -47,14 +56,26 @@ class Seccion:
 
 
 def parsear_veredicto(texto: str | None) -> Veredicto | None:
-    """``ok`` o ``corregir`` si la última línea no vacía es exactamente ``VEREDICTO: …``; si no, None."""
+    """``ok`` o ``corregir`` si la última línea no vacía es exactamente ``VEREDICTO: …``; si no, None.
+
+    También None si hay más de una línea de veredicto (sin distinguir mayúsculas y quitando ``>``, ``*``
+    y comillas invertidas) o si dice ``ok`` y el texto trae líneas de problema (``- …``) o un
+    ``patrón nuevo``: una respuesta que se contradice no vale como veredicto (Ruling M2).
+    """
     if not isinstance(texto, str):
         return None
     lineas = [x for x in texto.splitlines() if x.strip()]
     if not lineas:
         return None
     m = VEREDICTO.match(lineas[-1])
-    return m.group(1) if m else None  # type: ignore[return-value]
+    if m is None:
+        return None
+    limpias = [_ADORNO.sub("", x) for x in lineas]
+    if sum(1 for x in limpias if _LINEA_VEREDICTO.match(x)) > 1:
+        return None
+    if m.group(1) == "ok" and any(x.startswith("- ") or _PATRON_NUEVO.match(x) for x in limpias):
+        return None
+    return m.group(1)  # type: ignore[return-value]
 
 
 def ruta_qc(raiz: Path) -> Path:
@@ -93,14 +114,6 @@ def _anotar(raiz: Path, version: int, agente: str, veredicto: str | None, texto:
     if buscar_secreto(texto) or secreto_en(datos):
         raise ValueError("el texto trae algo con forma de secreto; no se guarda")
 
-    lineas = [f"## v{version} · {agente} · {ahora.astimezone(ZONA_NEGOCIO):%Y-%m-%d %H:%M}", "",
-              f"- veredicto: {veredicto or NO_MEDIDO}"]
-    lineas += [f"- {k}: {v}" for k, v in datos.items()]
-    citado = _citar(texto)
-    if citado:
-        lineas += ["", *citado]
-    seccion = "\n".join(lineas) + "\n"
-
     raiz = Path(raiz)
     raiz.mkdir(parents=True, exist_ok=True)
     ruta = ruta_qc(raiz)
@@ -110,6 +123,12 @@ def _anotar(raiz: Path, version: int, agente: str, veredicto: str | None, texto:
             meta, cuerpo = frontmatter.leer(ruta) if ruta.is_file() else ({}, "")
             meta = dict(meta) if isinstance(meta, dict) else {}
             meta.setdefault("tipo", "qc")
+            previas = [x for x in _secciones(cuerpo) if x.version == version]
+            if agente == "maqueta" and any(x.agente == "maqueta" for x in previas):
+                raise ValueError(_YA_TIENE.format(version=version))
+            if agente in AGENTES:
+                datos["sha256"] = _sha_de_maqueta(previas, version)
+            seccion = _seccion(version, agente, veredicto, texto, ahora, datos)
             cuerpo = cuerpo.rstrip("\n")
             cuerpo = (cuerpo + "\n\n" if cuerpo else "") + seccion
             salida = frontmatter.renderizar(meta, cuerpo)
@@ -121,24 +140,62 @@ def _anotar(raiz: Path, version: int, agente: str, veredicto: str | None, texto:
     return ruta
 
 
+_YA_TIENE = "v{version} ya tiene maqueta en QC.md: un PDF nuevo va en una versión nueva"
+
+
+def _sha_de_maqueta(previas: list[Seccion], version: int) -> str:
+    maqueta = next((x for x in reversed(previas) if x.agente == "maqueta"), None)
+    sha = maqueta.datos.get("sha256", "") if maqueta is not None else ""
+    if not _SHA.fullmatch(sha):
+        raise ValueError(f"v{version} no tiene maqueta con PDF en QC.md: anota primero la maqueta "
+                         "(anotar_producido) y después los agentes")
+    return sha
+
+
+def _seccion(version: int, agente: str, veredicto: str | None, texto: str, ahora: datetime,
+             datos: dict[str, str]) -> str:
+    lineas = [f"## v{version} · {agente} · {ahora.astimezone(ZONA_NEGOCIO):%Y-%m-%d %H:%M}", "",
+              f"- veredicto: {veredicto or NO_MEDIDO}"]
+    lineas += [f"- {k}: {v}" for k, v in datos.items()]
+    citado = _citar(texto)
+    if citado:
+        lineas += ["", *citado]
+    return "\n".join(lineas) + "\n"
+
+
 def anotar_qc(raiz: Path, version: int, agente: Agente, veredicto: str | None, texto: str,
               ahora: datetime) -> Path:
-    """Añade a ``QC.md`` la sección ``## vN · <agente> · fecha`` con el veredicto y el texto citado."""
+    """Añade a ``QC.md`` la sección ``## vN · <agente> · fecha`` con el veredicto y el texto citado.
+
+    ``revisor`` y ``nativo`` anotan además el ``sha256`` de la última maqueta de esa versión; sin ella,
+    ValueError. Una segunda ``maqueta`` para la misma versión, también ValueError.
+    """
     return _anotar(raiz, version, agente, veredicto, texto, ahora)
 
 
 def anotar_producido(raiz: Path, r: Producido, ahora: datetime) -> Path:
-    """Anota ``gates`` (puntuación y hallazgos) y ``maqueta`` (páginas, pdfinfo, desbordes, problemas)."""
+    """Anota ``gates`` (puntuación y hallazgos) y ``maqueta`` (páginas, pdfinfo, desbordes, problemas).
+
+    Las dos llevan el ``sha256`` del PDF. Una versión que ya tiene maqueta no se vuelve a anotar.
+    """
+    if any(x.version == r.version and x.agente == "maqueta" for x in leer_qc(raiz)):
+        raise ValueError(_YA_TIENE.format(version=r.version))
+    sha = None
+    if r.pdf is not None and Path(r.pdf).is_file():
+        sha = hashlib.sha256(Path(r.pdf).read_bytes()).hexdigest()
     inf = r.informe
     hallazgos = [f"{h.gate} · {h.severidad} · {h.donde} · {h.texto}" for h in inf.hallazgos]
+    datos_gates: dict[str, object] = {"puntuacion": inf.puntuacion, "palabras": inf.palabras,
+                                      "paginas_estimadas": inf.paginas_estimadas}
+    if sha is not None:
+        datos_gates["sha256"] = sha
     _anotar(raiz, r.version, "gates", "ok" if inf.pasa else "corregir",
-            "\n".join(hallazgos) or "sin hallazgos", ahora,
-            {"puntuacion": inf.puntuacion, "palabras": inf.palabras, "paginas_estimadas": inf.paginas_estimadas})
+            "\n".join(hallazgos) or "sin hallazgos", ahora, datos_gates)
 
     datos: dict[str, object] = {}
-    if r.pdf is not None and Path(r.pdf).is_file():
+    if sha is not None:
         datos["pdf"] = Path(r.pdf).name
-        datos["sha256"] = hashlib.sha256(Path(r.pdf).read_bytes()).hexdigest()
+        datos["sha256"] = sha
     else:
         datos["pdf"] = "sin PDF"
     datos["paginas"] = "no medido" if r.paginas is None else r.paginas
@@ -160,6 +217,10 @@ def leer_qc(raiz: Path) -> list[Seccion]:
     if not ruta.is_file():
         return []
     _, cuerpo = frontmatter.leer(ruta)
+    return _secciones(cuerpo)
+
+
+def _secciones(cuerpo: str) -> list[Seccion]:
     secciones: list[Seccion] = []
     actual: dict | None = None
     en_datos = False

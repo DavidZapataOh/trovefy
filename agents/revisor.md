@@ -54,15 +54,15 @@ Una línea por problema, con este formato exacto:
 `<N>` es el número de página que se ve debajo de cada miniatura (en una landing o una tanda, el número de
 bloque o de creativo). Si no hay problemas, no escribas ninguna línea de problema.
 
-La **última línea** es exactamente una de estas dos, sin nada más:
+La **última línea** es exactamente una de estas dos, sola y sin nada más:
+sin comillas, sin negritas, sin bloque de código.
 
-```
 VEREDICTO: ok
-```
 
-```
 VEREDICTO: corregir
-```
+
+Ninguna otra línea empieza por `VEREDICTO`: con dos líneas de veredicto, o con `ok` y alguna línea de
+problema, la respuesta no vale como veredicto y la pieza no cierra.
 
 `VEREDICTO: ok` solo si no hay ningún problema. Con un problema, aunque sea pequeño, `VEREDICTO: corregir`.
 Si no puedes leer la imagen, di por qué en una línea y termina con `VEREDICTO: corregir`.

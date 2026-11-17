@@ -1,3 +1,4 @@
+import hashlib
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -25,6 +26,7 @@ MERCADOS = """\
 ZZ: {idioma: es, moneda: EUR, zona: Europe/Madrid, banda_eur: [9, 19], estado: activo}
 ZY: {idioma: bg, moneda: EUR, zona: Europe/Sofia, banda_eur: [9, 19], estado: activo}
 ZX: {idioma: es, moneda: EUR, zona: Europe/Madrid, banda_eur: [9, 19], estado: activo}
+ZW: {idioma: es, moneda: USD, zona: America/New_York, banda_eur: [9, 19], estado: activo}
 """
 PIEZAS = ("principal", "bono-1", "bono-2", "bump", "u1")
 
@@ -51,7 +53,7 @@ def _vault(tmp_path) -> Path:
 
 
 def _producir(v, pieza_id, version=1, *, desb=(), en_pdfinfo=24, revisor="ok", nativo="ok", pdf=True,
-              ahora=AHORA):
+              ahora=AHORA, gates=True):
     """Simula `producir_pdf` + `anotar_producido` + los dos agentes, sin WeasyPrint."""
     ficha = leer_ficha(v, P)
     raiz = pieza(v, P, pieza_id).raiz
@@ -60,13 +62,13 @@ def _producir(v, pieza_id, version=1, *, desb=(), en_pdfinfo=24, revisor="ok", n
     if pdf:
         ruta = raiz / nombre_pdf(ficha, pieza_id, version)
         ruta.write_bytes(f"%PDF-1.7 {pieza_id} v{version}".encode())
-    informe = Informe(hallazgos=(), puntuacion=92, pasa=True, palabras=8000, paginas_estimadas=24)
+    informe = Informe(hallazgos=(), puntuacion=92, pasa=gates, palabras=8000, paginas_estimadas=24)
     apto = pdf and not desb and en_pdfinfo == 24
     r = Producido(version, raiz / "fuente" / f"x-v{version}.html", ruta, informe, 24 if pdf else None,
                   en_pdfinfo if pdf else None, tuple(desb), (), apto)
     anotar_producido(raiz, r, ahora)
     for agente, veredicto in (("revisor", revisor), ("nativo", nativo)):
-        if veredicto != "falta":
+        if veredicto != "falta" and pdf:
             anotar_qc(raiz, version, agente, veredicto, f"VEREDICTO: {veredicto}", ahora)
     return raiz
 
@@ -289,3 +291,127 @@ def test_sin_zona_falla(tmp_path):
     v = _vault(tmp_path)
     with pytest.raises(ValueError, match="zona"):
         cerrar(v, P, "ZZ", datetime(2026, 11, 14, 10, 0))
+
+
+# --- ronda de revisión de las tareas 11–12 -----------------------------------------------------------
+
+
+def _pdf_principal(v, version=1) -> Path:
+    return v / "productos" / P / "entregable" / f"respira-lento-es-v{version}.pdf"
+
+
+def test_cambiar_el_pdf_y_reanotar_no_cierra(tmp_path):
+    v = _vault(tmp_path)
+    _todo_apto(v)
+    raiz = pieza(v, P, "principal").raiz
+    pdf = _pdf_principal(v)
+    pdf.write_bytes(b"%PDF-1.7 CONTENIDO NUEVO NO REVISADO")
+    inf = Informe(hallazgos=(), puntuacion=92, pasa=True, palabras=8000, paginas_estimadas=24)
+    with pytest.raises(ValueError, match="ya tiene maqueta"):
+        anotar_producido(raiz, Producido(1, raiz / "fuente" / "x.html", pdf, inf, 24, 24, (), (), True), LUEGO)
+    with pytest.raises(ValueError, match="ya tiene maqueta"):
+        anotar_qc(raiz, 1, "maqueta", "ok", "x", LUEGO)
+    anotar_qc(raiz, 1, "revisor", "ok", "VEREDICTO: ok", LUEGO)
+    ok, mensajes = cerrar(v, P, "ZZ", LUEGO)
+    assert not ok
+    assert any("cambió después del QC" in m for m in mensajes)
+
+
+def test_veredictos_de_otro_pdf_no_cuentan(tmp_path):
+    """Una maqueta añadida a mano con el sha del PDF nuevo no rescata los veredictos del PDF viejo."""
+    v = _vault(tmp_path)
+    _todo_apto(v)
+    pdf = _pdf_principal(v)
+    pdf.write_bytes(b"%PDF-1.7 CONTENIDO NUEVO NO REVISADO")
+    sha = hashlib.sha256(pdf.read_bytes()).hexdigest()
+    qc = pieza(v, P, "principal").raiz / "QC.md"
+    qc.write_text(qc.read_text(encoding="utf-8") + "\n## v1 · maqueta · 2026-11-15 12:00\n\n- veredicto: ok\n"
+                  f"- pdf: {pdf.name}\n- sha256: {sha}\n- paginas: 24\n- pdfinfo: 24\n- desbordes: 0\n",
+                  encoding="utf-8")
+    e = next(x for x in revisar(v, P) if x.id == "principal")
+    assert e.maqueta == "ok" and e.pdf_intacto
+    assert e.gates is None and e.revisor is None and e.nativo is None
+    ok, mensajes = cerrar(v, P, "ZZ", LUEGO)
+    assert not ok
+    assert {"principal v1: gates no medido", "principal v1: revisor no medido",
+            "principal v1: nativo no medido"} <= set(mensajes)
+
+
+def test_gates_corregir_no_cierra(tmp_path):
+    v = _vault(tmp_path)
+    _todo_apto(v, sin=("bono-2",))
+    _producir(v, "bono-2", gates=False)
+    ok, mensajes = cerrar(v, P, "ZZ", AHORA)
+    assert not ok
+    assert "bono-2 v1: gates pide corregir" in mensajes
+
+
+def test_sin_seccion_de_maqueta_no_cierra(tmp_path):
+    v = _vault(tmp_path)
+    _todo_apto(v, sin=("principal",))
+    raiz = pieza(v, P, "principal").raiz
+    raiz.mkdir(parents=True, exist_ok=True)
+    _pdf_principal(v).write_bytes(b"%PDF-1.7 sin maqueta")
+    anotar_qc(raiz, 1, "gates", "ok", "sin hallazgos", AHORA)
+    ok, mensajes = cerrar(v, P, "ZZ", AHORA)
+    assert not ok
+    assert "principal v1: maqueta no medido" in mensajes
+    assert any(m.startswith("principal v1: el PDF cambió después del QC o no tiene QC de maqueta") for m in mensajes)
+
+
+def test_principal_sin_pdf_dice_que_es_lo_que_se_vende(tmp_path):
+    v = _vault(tmp_path)
+    _todo_apto(v, sin=("principal",))
+    ok, mensajes = cerrar(v, P, "ZZ", AHORA)
+    assert not ok
+    assert "principal: sin PDF (es el producto que se vende)" in mensajes
+
+
+def test_falta_oferta_no_lanza(tmp_path):
+    v = _vault(tmp_path)
+    _todo_apto(v)
+    (v / "productos" / P / "OFERTA.md").unlink()
+    ok, mensajes = cerrar(v, P, "ZZ", AHORA)
+    assert not ok
+    assert mensajes == ["falta OFERTA.md: /modelar"]
+
+
+def test_pdf_vigente_borrado_no_cierra(tmp_path):
+    v = _vault(tmp_path)
+    _todo_apto(v)
+    _producir(v, "principal", 2)
+    assert cerrar(v, P, "ZZ", AHORA)[0]
+    _pdf_principal(v, 2).unlink()
+    ok, mensajes = cerrar(v, P, "ZZ", LUEGO)
+    assert not ok
+    assert "principal: el PDF vigente v2 ya no existe" in mensajes
+    assert _producto(v)[0]["entregable"]["es"]["principal"]["version"] == 2
+
+
+def test_otro_pais_con_otra_moneda_no_cierra(tmp_path):
+    v = _vault(tmp_path)
+    _todo_apto(v)
+    _estado(v, "modelado", "ZW")
+    ok, mensajes = cerrar(v, P, "ZW", AHORA)
+    assert not ok
+    assert mensajes == ["ZW paga en USD y el entregable se hizo para ZZ en EUR: produce la versión de ZW"]
+    assert _producto(v)[0]["paises"]["ZW"]["estado"] == "modelado"
+
+
+def test_otro_pais_mismo_idioma_y_moneda_cierra(tmp_path):
+    v = _vault(tmp_path)
+    _todo_apto(v)
+    _estado(v, "modelado", "ZX")
+    _editar(v, "ESCALERA", lambda m: m["paises"].update(ZX=m["paises"]["ZZ"]))
+    ok, mensajes = cerrar(v, P, "ZX", AHORA)
+    assert ok, mensajes
+    assert _producto(v)[0]["paises"]["ZX"]["estado"] == "producido"
+
+
+def test_historial_con_el_formato_de_avanzar_estado(tmp_path):
+    v = _vault(tmp_path)
+    _todo_apto(v)
+    assert cerrar(v, P, "ZZ", AHORA)[0]
+    historial = _producto(v)[0]["paises"]["ZZ"]["historial"]
+    assert [set(h) for h in historial] == [{"de", "a", "fecha", "evidencia"}] * 2
+    assert [(h["de"], h["a"]) for h in historial] == [("aprobado", "modelado"), ("modelado", "producido")]
