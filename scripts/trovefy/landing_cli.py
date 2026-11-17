@@ -54,6 +54,10 @@ def _configurar_impultienda(sub) -> None:
     s.add_argument("--url", default=None, help="URL de «Diseño de tienda → Contenido» si no es la del mapa")
     c = sub.add_parser("capturar", help="confirma tú la pantalla «Diseño de tienda → Contenido» (sin clics)")
     c.add_argument("--url", default=None, help="dónde abrir la ventana (de app.impultienda.ar)")
+    pu = sub.add_parser("publicar", help="publica (Impultienda) o verifica la subida (Cloudflare), QA publicada y "
+                                         "estado con_landing")
+    _comunes(pu)
+    pu.add_argument("--url", default=None, help="ruta Cloudflare: la URL https donde subiste la landing")
 
 
 def _configurar(parser: argparse.ArgumentParser) -> None:
@@ -94,6 +98,7 @@ def _con_paradas(accion):
     nada más), 2 si el navegador falló."""
     def envuelta(args: argparse.Namespace, vault: Path) -> int:
         from trovefy.landing.hosting import CapacidadNoMedida
+        from trovefy.landing.publicar import NoPublicable
         from trovefy.navegador import NavegadorError
         from trovefy.tienda.conductor import Parada
 
@@ -101,7 +106,7 @@ def _con_paradas(accion):
             return accion(args, vault)
         except Parada as e:
             return _error(e.motivo, 1)
-        except CapacidadNoMedida as e:
+        except (CapacidadNoMedida, NoPublicable) as e:
             return _error(e, 1)
         except NavegadorError as e:
             return _error(e, 2)
@@ -149,7 +154,19 @@ def _capturar(args: argparse.Namespace, vault: Path) -> int:
     return 0
 
 
-_ACCIONES_IMPULTIENDA = {"sonda": _sonda, "capturar": _capturar}
+@_con_paradas
+def _publicar(args: argparse.Namespace, vault: Path) -> int:
+    from trovefy.landing.entrada import cargar_datos
+    from trovefy.landing.publicar import publicar
+    from trovefy.vault.producto import estado_pais
+
+    d = cargar_datos(vault, args.producto, args.pais, correr=_orden())
+    url = publicar(vault, d, args.url)
+    print(f"{d.pais} → {estado_pais(vault, d.p_id, d.pais)}: {url}")
+    return 0
+
+
+_ACCIONES_IMPULTIENDA = {"sonda": _sonda, "capturar": _capturar, "publicar": _publicar}
 
 
 def _faltan(vault: Path, p_id: str, pais: str) -> list[str]:
