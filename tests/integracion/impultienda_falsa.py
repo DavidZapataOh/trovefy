@@ -3,7 +3,8 @@
 `/panel` sirve `tests/fixtures/landing/impultienda-contenido.html` con lo guardado en el `<textarea>`;
 «Guardar cambios» hace `POST /guardar`; `/tienda` sirve lo guardado como la tienda pública. Opciones para
 simular las manías posibles de Impultienda: recortar a N caracteres, quitar `<script>`, envolver con cabecera y
-pie propios, o cambiar la pantalla (sin «HTML completo de la tienda»).
+pie propios, cambiar la pantalla (sin «HTML completo de la tienda») o rellenar el campo tarde (`fetch` a
+`/contenido` + `setTimeout`).
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import html
 import http.server
 import re
 import threading
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,7 +31,18 @@ class Estado:
     marco: bool = False
     firma: bool = True
     formulario: bool = False  # «Guardar cambios» envía un <form> (POST + 303 a /panel): el guardado navega
+    tarde: bool = False  # el <textarea> llega vacío y lo rellena un fetch lento + setTimeout (I3)
     posts: list[str] = field(default_factory=list)
+
+
+# Con `tarde`: el panel llega con el campo vacío y lo rellena después, como un panel que carga por API.
+_RELLENO_TARDE = """<script>
+fetch("/contenido").then(function (r) { return r.text(); }).then(function (t) {
+  setTimeout(function () { document.getElementById("html").value = t; }, 200);
+});
+</script>
+</body>"""
+ESPERA_CONTENIDO_S = 0.6  # lo que tarda /contenido en responder
 
 
 # El mismo panel con un formulario de verdad: guardar es una navegación (POST /guardar → 303 → GET /panel).
@@ -69,7 +82,12 @@ def _manejador(estado: Estado):
                 etiqueta = "HTML completo de la tienda" if estado.firma else "Código de la portada"
                 plantilla = _FORMULARIO if estado.formulario else FIXTURE.read_text(encoding="utf-8")
                 pagina = plantilla.replace("{{etiqueta}}", etiqueta)
+                if estado.tarde:
+                    pagina = pagina.replace("{{contenido}}", "").replace("</body>", _RELLENO_TARDE, 1)
                 self._responder(200, pagina.replace("{{contenido}}", html.escape(estado.contenido, quote=False)))
+            elif ruta == "/contenido":
+                time.sleep(ESPERA_CONTENIDO_S)
+                self._responder(200, estado.contenido, "text/plain; charset=utf-8")
             elif ruta in ("/tienda", "/tienda/"):
                 cuerpo = estado.contenido
                 if estado.marco:

@@ -221,9 +221,9 @@ def mapa_con_confirmaciones(vault: Path, servicio: str, mapa: dict, *, hoy: date
     return salida
 
 
-def confirmada_en_vault(vault: Path, servicio: str, mapa: dict, nombre: str) -> str | None:
-    """La URL confirmada por el usuario si es esa confirmación (y no un `capturado` del mapa) la que hace
-    escribible la pantalla `nombre`; None si no."""
+def url_confirmada(vault: Path, servicio: str, mapa: dict, nombre: str) -> str | None:
+    """La URL confirmada por el usuario (en la configuración de trovefy, fuera del vault) si es esa confirmación
+    (y no un `capturado` del mapa) la que hace escribible la pantalla `nombre`; None si no."""
     if capturado_de(mapa, nombre) is not None:
         return None
     c = mapa_con_confirmaciones(vault, servicio, mapa)

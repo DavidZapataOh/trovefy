@@ -446,7 +446,7 @@ class TiendaFalsa:
 
     def __init__(self, contenido=ORIGINAL, recorte=None, sin_script=False, marco=False, firma=True,
                  restaura=True, tras_pegar=None, al_restaurar=None, fallo_tienda=None, vaciar=False,
-                 hosts=()):
+                 hosts=(), tarde=False):
         self.contenido, self.recorte, self.sin_script, self.marco = contenido, recorte, sin_script, marco
         self.firma, self.restaura = firma, restaura
         self.tras_pegar = tras_pegar  # excepción tras guardar lo pegado (el clic ya se hizo)
@@ -454,7 +454,9 @@ class TiendaFalsa:
         self.fallo_tienda = fallo_tienda  # excepción al abrir la tienda pública
         self.vaciar = vaciar  # el primer guardado deja el campo vacío
         self.hosts = tuple(hosts)  # hosts que carga la tienda pública
+        self.tarde = tarde  # el panel rellena el campo tarde (fetch/setTimeout): solo tras esperar a la red
         self.posts: list[str] = []
+        self.ultima_publica: PaginaTiendaFalsa | None = None
 
     def guardar(self, html: str) -> None:
         if self.al_restaurar is not None and self.posts:
@@ -481,13 +483,20 @@ class TiendaFalsa:
 
         def goto(url, **kw):
             ir(url, **kw)
-            area.valor = self.contenido  # recargar enseña lo guardado
+            area.valor = "" if self.tarde else self.contenido  # recargar enseña lo guardado
+
+        def esperar_red(estado, **_kw):
+            assert estado == "networkidle"
+            if self.tarde:
+                area.valor = self.contenido
 
         p.goto = goto
+        p.wait_for_load_state = esperar_red
         return p
 
     def publica(self):
-        return PaginaTiendaFalsa(self)
+        self.ultima_publica = PaginaTiendaFalsa(self)
+        return self.ultima_publica
 
 
 class _Marco:
@@ -503,22 +512,51 @@ class _Peticion:
         self.url = url
 
 
+class _Ruta:
+    def __init__(self, url):
+        self.request = _Peticion(url)
+        self.hecho: str | None = None
+
+    def abort(self):
+        self.hecho = "abortada"
+
+    def continue_(self):
+        self.hecho = "sigue"
+
+
+class _ContextoTienda:
+    def __init__(self):
+        self.rutas: list = []
+
+    def route(self, patron, f):
+        self.rutas.append((patron, f))
+
+
 class PaginaTiendaFalsa:
     def __init__(self, t: TiendaFalsa):
         self.t = t
         self.visitas: list[str] = []
         self.oyentes: dict[str, list] = {}
+        self.context = _ContextoTienda()
+        self.rutas_al_ir: int | None = None  # rutas del contexto puestas al llamar a goto
+        self.peticiones: dict[str, str | None] = {}  # url → abortada|sigue (lo que hizo la ruta)
 
     def on(self, evento, f):
         self.oyentes.setdefault(evento, []).append(f)
 
     def goto(self, url, **_kw):
         self.visitas.append(url)
+        self.rutas_al_ir = len(self.context.rutas)
         if self.t.fallo_tienda is not None:
             raise self.t.fallo_tienda
         for h in (urlsplit(url).hostname, *self.t.hosts):
+            u = f"https://{h}/recurso.js"
             for f in self.oyentes.get("request", []):
-                f(_Peticion(f"https://{h}/recurso.js"))
+                f(_Peticion(u))
+            ruta = _Ruta(u)
+            for _patron, f in self.context.rutas:
+                f(ruta)
+            self.peticiones[u] = ruta.hecho
         c = self.t.contenido
         r = None if 'id="tf-sonda"' not in c else {
             "ok": "<script>" in c, "color": COLOR if "<style>" in c else "rgb(0, 0, 0)",
@@ -539,6 +577,7 @@ def abridor(t: TiendaFalsa, sesiones: list):
         assert servicio == "impultienda"
         sesiones.append(perfil_persistente)
         yield t.panel() if perfil_persistente else t.publica()
+
     return abrir
 
 

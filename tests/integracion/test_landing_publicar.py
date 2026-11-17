@@ -74,6 +74,23 @@ def test_publicar_detecta_recorte(tmp_path):
     assert "con_landing" not in meta and "landing:" not in meta
 
 
+def test_publicar_con_el_campo_rellenado_tarde_respalda_y_restaura_lo_real(tmp_path):
+    """I3: con el campo rellenado tarde (fetch + setTimeout), el respaldo es el contenido real y, tras un
+    recorte, se restaura ese contenido (no un campo vacío)."""
+    from integracion.impultienda_falsa import Estado
+    from trovefy.landing.entrada import ruta_landing
+    from trovefy.landing.publicar import HtmlRecortado
+    from unit.landing.conftest import P
+
+    estado = Estado(tarde=True, recorte=50_000)
+    original = estado.contenido
+    with pytest.raises(HtmlRecortado, match="--hosting cloudflare"):
+        _publicar(tmp_path, estado, engordar=True)
+    respaldo = ruta_landing(tmp_path / "v", P, "ZZ") / "respaldo" / "impultienda-2026-11-17T103000.html"
+    assert respaldo.read_text(encoding="utf-8") == original
+    assert estado.contenido == original and estado.posts[-1] == original
+
+
 def test_publicar_firma_ausente_no_toca(tmp_path):
     from integracion.impultienda_falsa import Estado
     from trovefy.tienda.conductor import FirmaNoCasa

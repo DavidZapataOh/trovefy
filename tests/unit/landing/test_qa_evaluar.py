@@ -333,7 +333,7 @@ def montada(tmp_path, monkeypatch):
     falso = Falso()
     wf = qa.leer_hitos_esperados(v, cargar(v))
     falso.hitos = {s["orden"]: s["y_rel"] + 0.001 for s in wf}
-    falso.version = qa.version_guardada(v, cargar(v))
+    falso.version = qa.version_guardada(v, P, "ZZ")
     monkeypatch.setattr(qa, "medir", falso.medir)
     monkeypatch.setattr(qa, "probar_clic", falso.clic)
     return v, falso
@@ -364,7 +364,7 @@ def test_ejecutar_qa_cloudflare_silencia_el_pixel(tmp_path, monkeypatch):
     monkeypatch.setenv("TROVEFY_VAULT", str(v))  # T3: ni el HOME ni el vault reales
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     falso = Falso()
-    falso.hitos, falso.version = _hitos(), qa.version_guardada(v, cargar(v))
+    falso.hitos, falso.version = _hitos(), qa.version_guardada(v, P, "ZZ")
     monkeypatch.setattr(qa, "medir", falso.medir)
     monkeypatch.setattr(qa, "probar_clic", falso.clic)
     qa.ejecutar_qa(v, cargar(v))
@@ -378,7 +378,7 @@ def test_ejecutar_qa_publicada_mide_la_url(montada):
     qa.ejecutar_qa(v, cargar(v), url="https://ejemplo-demo.test/")
     medidas = [x for x in falso.llamadas if x[0] == "medir"]
     assert all(x[1] == "https://ejemplo-demo.test/" and x[3] == ("ejemplo-demo.test",) for x in medidas)
-    meta, _ = frontmatter.leer(ruta_landing(v, P, "ZZ") / "QA.md")
+    meta, _ = frontmatter.leer(ruta_landing(v, P, "ZZ") / "QA-publicada.md")
     assert meta["url"] == "https://ejemplo-demo.test/"
     clic = next(x for x in falso.llamadas if x[0] == "clic")
     assert clic[1] == "https://ejemplo-demo.test/" and "fbclid" not in clic[4]  # M6
@@ -423,7 +423,7 @@ def test_ejecutar_qa_cloudflare_admite_dominio_y_subdominio_del_pais(tmp_path, m
     monkeypatch.setenv("TROVEFY_VAULT", str(v))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     falso = Falso()
-    falso.hitos, falso.version = _hitos(), qa.version_guardada(v, cargar(v))
+    falso.hitos, falso.version = _hitos(), qa.version_guardada(v, P, "ZZ")
     monkeypatch.setattr(qa, "medir", falso.medir)
     monkeypatch.setattr(qa, "probar_clic", falso.clic)
     for url in ("https://ejemplo-demo.test/", "https://zz.ejemplo-demo.test/"):
@@ -534,7 +534,7 @@ def _publicada(tmp_path, monkeypatch, hosting, peticiones, hosts_tienda=()):
     ruta.parent.mkdir(parents=True, exist_ok=True)
     ruta.write_text(json.dumps(asdict(c)), encoding="utf-8")
     falso = Falso(peticiones=peticiones)
-    falso.hitos, falso.version = _hitos(), qa.version_guardada(v, cargar(v))
+    falso.hitos, falso.version = _hitos(), qa.version_guardada(v, P, "ZZ")
     monkeypatch.setattr(qa, "medir", falso.medir)
     monkeypatch.setattr(qa, "probar_clic", falso.clic)
     url = "https://ejemplo-demo.test/" if hosting == "impultienda" else "https://zz.ejemplo-demo.test/"
@@ -552,7 +552,7 @@ def test_qa_publicada_impultienda_tienda_aviso_tercero_falla(tmp_path, monkeypat
     assert not r.ok
     medidas = [x for x in falso.llamadas if x[0] == "medir"]
     assert all(set(x[5]) == set(HOSTS_META) and ".demo.test" in x[6] for x in medidas)
-    texto = (ruta_landing(v, P, "ZZ") / "QA.md").read_text(encoding="utf-8")
+    texto = (ruta_landing(v, P, "ZZ") / "QA-publicada.md").read_text(encoding="utf-8")
     assert "| Peticiones de la tienda (movil) | AVISO |" in texto
 
 

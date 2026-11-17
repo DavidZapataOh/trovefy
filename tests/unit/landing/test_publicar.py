@@ -47,16 +47,18 @@ def version(v: Path) -> str:
 
 
 def escribir_qa(v: Path, ok: bool = True, ver: str | None = None, url: str | None = None) -> Path:
-    """`QA.md` como lo deja `ejecutar_qa`: con la versión y el manifiesto de los archivos medidos (I-6)."""
+    """`QA.md` como lo deja `ejecutar_qa`: con la versión y el manifiesto de los archivos medidos (I-6). Con
+    `url`, la QA publicada: `QA-publicada.md` y capturas `-publicada` (M2)."""
     ver = ver or version(v)
     raiz = ruta_landing(v, P, "ZZ")
-    ruta = raiz / "QA.md"
+    nombre, sufijo = ("QA-publicada.md", "-publicada") if url is not None else ("QA.md", "")
+    ruta = raiz / nombre
     frontmatter.escribir(ruta, {
         "tipo": "qa_landing", "pais": "ZZ", "version": ver, "manifiesto": manifiesto_landing(raiz), "ok": ok,
         "fecha": AHORA.isoformat(), "url": url,
-        "movil_390": {"http": 200, "captura": f"landing/ZZ/qa/movil-{ver}.png"},
+        "movil_390": {"http": 200, "captura": f"landing/ZZ/qa/movil-{ver}{sufijo}.png"},
         "utm_checkout": {"ok": True, "destino": "https://x.test/checkout?utm_source=fb", "captura": None,
-                         "interceptado": True},
+                         "interceptado": True, "fuente": f"landing/ZZ/{nombre}"},
     }, "# QA\n")
     return ruta
 
@@ -228,9 +230,10 @@ def test_registrar_avanza_producido_a_con_landing(tmp_path):
     assert zz["landing"]["url"] == URL and zz["landing"]["hosting"] == "impultienda"
     assert zz["landing"]["version"] == ver and zz["landing"]["fecha"] == "2026-11-17"
     qa = zz["landing"]["qa"]
-    assert qa["archivo"] == "landing/ZZ/QA.md" and qa["version"] == ver
-    assert qa["movil_390"] == {"http": 200, "captura": f"landing/ZZ/qa/movil-{ver}.png"}
-    assert qa["utm_checkout"]["interceptado"] is True and qa["utm_checkout"]["fuente"] == "landing/ZZ/QA.md"
+    assert qa["archivo"] == "landing/ZZ/QA-publicada.md" and qa["version"] == ver  # M2: aparte de la local
+    assert qa["movil_390"] == {"http": 200, "captura": f"landing/ZZ/qa/movil-{ver}-publicada.png"}
+    assert qa["utm_checkout"]["interceptado"] is True
+    assert qa["utm_checkout"]["fuente"] == "landing/ZZ/QA-publicada.md"
     assert meta["paises"]["ZY"] == meta0["paises"]["ZY"]  # el resto de países, intacto
     assert meta["entregable"] == meta0["entregable"]
     assert cuerpo.startswith(cuerpo0.rstrip("\n"))  # el cuerpo previo, intacto
@@ -296,6 +299,7 @@ def _abrir(cuerpo: bytes, final: str | None = None, error: Exception | None = No
         if error is not None:
             raise error
         return _Resp(cuerpo, final or url)
+
     return abrir
 
 
@@ -406,12 +410,12 @@ def test_publicar_impultienda_completo(tmp_path):
 def test_qa_publicada_falla_no_registra(tmp_path):
     v = lista(tmp_path)
     antes = (v / "productos" / P / "PRODUCTO.md").read_bytes()
-    with pytest.raises(NoPublicable, match="QA.md"):
+    with pytest.raises(NoPublicable, match="QA-publicada.md"):
         publicar(v, cargar(v), qa=QAFalsa(LCP_ALTO), publicar_imp=lambda *a, **k: Pegada(URL, None), ahora=AHORA)
     assert (v / "productos" / P / "PRODUCTO.md").read_bytes() == antes
     ly = leer_landing_yaml(v, P, "ZZ")
     assert ly["url"] == URL and ly["publicada"] is None
-    assert frontmatter.leer(ruta_landing(v, P, "ZZ") / "QA.md")[0]["ok"] is False
+    assert frontmatter.leer(ruta_landing(v, P, "ZZ") / "QA-publicada.md")[0]["ok"] is False
 
 
 def test_publicar_no_listo_no_toca(tmp_path):
@@ -602,7 +606,7 @@ def test_qa_publicada_en_rojo_sin_pegar_nada_no_restaura(tmp_path):
 
     v = lista(tmp_path)
     restaurar = Restaurador()
-    with pytest.raises(NoPublicable, match="QA.md"):
+    with pytest.raises(NoPublicable, match="QA-publicada.md"):
         publicar(v, cargar(v), qa=QAFalsa(LCP_ALTO), publicar_imp=lambda *a, **k: Pegada(URL, None),
                  restaurar_imp=restaurar, ahora=AHORA)
     assert restaurar.llamadas == []
@@ -611,7 +615,7 @@ def test_qa_publicada_en_rojo_sin_pegar_nada_no_restaura(tmp_path):
 def test_qa_publicada_en_rojo_en_cloudflare_no_restaura(tmp_path):
     v = _cloudflare_lista(tmp_path)
     restaurar = Restaurador()
-    with pytest.raises(NoPublicable, match="QA.md"):
+    with pytest.raises(NoPublicable, match="QA-publicada.md"):
         publicar(v, cargar(v), f"https://zz.{DOMINIO}/", qa=QAFalsa(LCP_ALTO), verificar=lambda *_a: True,
                  restaurar_imp=restaurar, ahora=AHORA)
     assert restaurar.llamadas == []
@@ -798,11 +802,11 @@ def test_registrar_avanza_antes_de_escribir_la_landing(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(("ver", "url"), [(None, None), (None, "https://otra.test/"), ("000000000000", URL)])
 def test_registrar_qa_de_otra_publicacion_no_vale(tmp_path, ver, url):
-    """`landing.qa` solo sale del QA.md publicado de esta versión y esta URL."""
+    """`landing.qa` solo sale de QA-publicada.md de esta versión y esta URL."""
     v = lista(tmp_path)
     escribir_qa(v, ver=ver, url=url)
     antes = (v / "productos" / P / "PRODUCTO.md").read_bytes()
-    with pytest.raises(NoPublicable, match="QA.md"):
+    with pytest.raises(NoPublicable, match="QA-publicada.md"):
         registrar_publicacion(v, cargar(v), URL, Hosting("impultienda", "x"), version(v), VERDE, AHORA)
     assert (v / "productos" / P / "PRODUCTO.md").read_bytes() == antes
 

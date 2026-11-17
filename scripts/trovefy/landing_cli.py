@@ -52,12 +52,16 @@ def _configurar_impultienda(sub) -> None:
     s.add_argument("--dominio-propio", choices=("si", "no"), default=None,
                    help="tu respuesta: ¿Impultienda te deja conectar tu dominio en tu plan?")
     s.add_argument("--url", default=None, help="URL de «Diseño de tienda → Contenido» si no es la del mapa")
+    s.add_argument("--campo-vacio", action="store_true",
+                   help="el campo «HTML completo de la tienda» está vacío de verdad (lo has mirado tú): sin esto, un campo leído vacío para sin tocar nada")
     c = sub.add_parser("capturar", help="confirma tú la pantalla «Diseño de tienda → Contenido» (sin clics)")
     c.add_argument("--url", default=None, help="dónde abrir la ventana (de app.impultienda.ar)")
     pu = sub.add_parser("publicar", help="publica (Impultienda) o verifica la subida (Cloudflare), QA publicada y "
                                          "estado con_landing")
     _comunes(pu)
     pu.add_argument("--url", default=None, help="ruta Cloudflare: la URL https donde subiste la landing")
+    pu.add_argument("--campo-vacio", action="store_true",
+                    help="el campo «HTML completo de la tienda» está vacío de verdad (lo has mirado tú): sin esto, un campo leído vacío para sin tocar nada")
 
 
 def _configurar(parser: argparse.ArgumentParser) -> None:
@@ -74,7 +78,8 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
     pr.add_argument("--rehacer", action="store_true", help="vuelve a escribir el index.html del borrador")
     _comunes(sub.add_parser("guardar", help="copia el borrador al vault (sin secretos) y fija la versión"))
     _comunes(sub.add_parser("validar", help="comprobación estática de la landing guardada"))
-    q = sub.add_parser("qa", help="QA en Chromium (390/1280, peso, LCP 4G, hitos, clic con UTM) y QA.md")
+    q = sub.add_parser("qa", help="QA en Chromium (390/1280, peso, LCP 4G, hitos, clic con UTM): QA.md, o "
+                                  "QA-publicada.md con --publicada")
     _comunes(q)
     q.add_argument("--publicada", action="store_true", help="mide la URL publicada (landing.yaml → url)")
     _comunes(sub.add_parser("texto", help="texto visible de la landing guardada, para el agente nativo"))
@@ -100,6 +105,7 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
 def _con_paradas(accion):
     """Las paradas del navegador salen con su motivo: 1 si es «no medido» o una parada del conductor (no se tocó
     nada más), 2 si el navegador falló."""
+
     def envuelta(args: argparse.Namespace, vault: Path) -> int:
         from trovefy.landing.hosting import CapacidadNoMedida
         from trovefy.landing.publicar import NoPublicable
@@ -114,6 +120,7 @@ def _con_paradas(accion):
             return _error(e, 1)
         except NavegadorError as e:
             return _error(e, 2)
+
     return envuelta
 
 
@@ -138,7 +145,8 @@ def _sonda(args: argparse.Namespace, vault: Path) -> int:
     if guardar_tienda(vault, pais, args.tienda, ahora):
         print(f"Tienda de {pais} guardada en config/mercados.yaml (palabra tuya, {ahora:%Y-%m-%d}).")
     dominio = {"si": True, "no": False, None: None}[args.dominio_propio]
-    c = sondear(vault, args.producto, pais, args.tienda.strip().rstrip("/"), dominio, args.url, ahora=ahora)
+    c = sondear(vault, args.producto, pais, args.tienda.strip().rstrip("/"), dominio, args.url, ahora=ahora,
+                campo_vacio=args.campo_vacio)
     print(f"Capacidades ({c.fecha}): {elegir_resumen(c)}")
     print(f"Tu contenido de Impultienda está restaurado (respaldo en landing/{pais}/respaldo/).")
     try:
@@ -169,7 +177,7 @@ def _publicar(args: argparse.Namespace, vault: Path) -> int:
     d = cargar_datos(vault, args.producto, args.pais, correr=_orden())
     for aviso in avisos_publicacion(vault, d):
         print(f"Aviso: {aviso}")
-    url = publicar(vault, d, args.url)
+    url = publicar(vault, d, args.url, campo_vacio=args.campo_vacio)
     print(f"{d.pais} → {estado_pais(vault, d.p_id, d.pais)}: {url}")
     return 0
 
@@ -198,6 +206,25 @@ def _faltan(vault: Path, p_id: str, pais: str) -> list[str]:
     return faltan
 
 
+def _linea_hosting(vault: Path) -> str:
+    """`Hosting:` según la sonda (`capacidades_vigentes` + `elegir_hosting`): la ruta y su motivo, o «no medido»
+    (sin sonda, con algo sin medir o con la evidencia rota) y la orden de la sonda. La skill decide con esto si
+    hay que medir Impultienda (M4)."""
+    from trovefy.landing.hosting import (
+        CapacidadNoMedida,
+        capacidades_vigentes,
+        elegir_hosting,
+    )
+
+    try:
+        h = elegir_hosting(capacidades_vigentes(vault))
+    except CapacidadNoMedida as e:
+        return f"Hosting: {e}"
+    except ValueError as e:
+        return f"Hosting: no medido: {e} (trovefy landing sonda)"
+    return f"Hosting: {h.ruta} — {h.motivo}"
+
+
 def _estado(args: argparse.Namespace, vault: Path) -> int:
     from trovefy.landing.entrada import EstadoNoPermite, cargar_datos
 
@@ -211,6 +238,7 @@ def _estado(args: argparse.Namespace, vault: Path) -> int:
     print(f"PDF vigente: {d.pdf.name} ({d.pdf_paginas} páginas)")
     print(f"Precio: {d.precio} {d.moneda} · secciones: {len(d.secciones)} · marca: {d.marca}")
     print(f"Dominio: {d.dominio or 'no medido: falta el paso 07'} · tienda: {d.tienda or 'no medida'}")
+    print(_linea_hosting(vault))
     faltan = _faltan(vault, d.p_id, d.pais)
     print("falta: " + ("; ".join(faltan) if faltan else "nada"))
     return 0
@@ -299,7 +327,7 @@ def _validar(args: argparse.Namespace, vault: Path) -> int:
 def _qa(args: argparse.Namespace, vault: Path) -> int:
     from trovefy.landing.entrada import EntradaInvalida, cargar_datos
     from trovefy.landing.plantilla import leer_landing_yaml
-    from trovefy.landing.qa import ejecutar_qa
+    from trovefy.landing.qa import archivo_qa, ejecutar_qa
 
     d = cargar_datos(vault, args.producto, args.pais, correr=_orden())
     url = None
@@ -310,7 +338,7 @@ def _qa(args: argparse.Namespace, vault: Path) -> int:
     r = ejecutar_qa(vault, d, url)
     for comprobacion, estado, detalle in r.filas:
         print(f"[{estado}] {comprobacion}: {detalle}")
-    print(f"QA {'apta' if r.ok else 'no apta'}: landing/{d.pais}/QA.md")
+    print(f"QA {'apta' if r.ok else 'no apta'}: landing/{d.pais}/{archivo_qa(url is not None)}")
     return 0 if r.ok else 1
 
 

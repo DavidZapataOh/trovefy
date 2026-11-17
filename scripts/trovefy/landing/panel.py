@@ -36,10 +36,10 @@ from trovefy.tienda import confirmacion
 from trovefy.tienda.conductor import Conductor, FirmaNoCasa, MapaSinConfirmar
 from trovefy.tienda.confirmacion import (
     SIN_TERMINAL,
-    confirmada_en_vault,
     confirmar_pantalla,
     mapa_con_confirmaciones,
     ruta_evidencia,
+    url_confirmada,
 )
 from trovefy.vault.escritura import ZONA_NEGOCIO, anadir_log
 
@@ -73,7 +73,7 @@ def preparar_mapa(vault: Path, mapa: dict | None = None, url_pantalla: str | Non
     Si quien da el `capturado` es la confirmación del usuario (no el mapa del repo), `url_pantalla` tiene que ser
     la URL confirmada (I-2): se confirmó esa pantalla, no otra."""
     if mapa is None:
-        confirmada = confirmada_en_vault(vault, SERVICIO, cargar_mapa(MAPA_IMPULTIENDA), PANTALLA)
+        confirmada = url_confirmada(vault, SERVICIO, cargar_mapa(MAPA_IMPULTIENDA), PANTALLA)
         if (url_pantalla is not None and confirmada is not None
                 and (not isinstance(url_pantalla, str) or urldefrag(url_pantalla.strip()).url != confirmada)):
             raise ValueError(f"esa URL no es la que confirmaste: vuelve a capturar (`trovefy landing capturar "
@@ -87,7 +87,8 @@ def preparar_mapa(vault: Path, mapa: dict | None = None, url_pantalla: str | Non
 
 
 def _esperar_red(page) -> None:
-    """Deja terminar el guardado (petición en curso) antes de releer; no hace clics."""
+    """Espera a que no haya peticiones en curso (el guardado, o el `fetch` que rellena el campo) antes de leer;
+    no hace clics."""
     esperar = getattr(page, "wait_for_load_state", None)
     if esperar is not None:
         with contextlib.suppress(Exception):
@@ -102,12 +103,15 @@ class Panel:
         self.conductor = Conductor(page, mapa, SERVICIO, dormir=dormir)
 
     def abrir(self) -> None:
-        """Va a la pantalla y comprueba sesión, origen y firma; si la firma no casa, para sin tocar nada."""
+        """Va a la pantalla y comprueba sesión, origen y firma; si la firma no casa, para sin tocar nada. Después
+        espera a que la red quede quieta: el panel puede rellenar el campo tarde (un `fetch`), y leerlo antes
+        daría un campo vacío que no lo está (I3)."""
         try:
             self.conductor.ir(PANTALLA)
         except FirmaNoCasa as e:
             raise FirmaNoCasa(PANTALLA, f"{e.motivo} Abre tú «Diseño de tienda → Contenido» y vuelve a lanzar con "
                                         "--url <la de esa pantalla>.") from e
+        _esperar_red(self.page)
 
     def leer(self) -> str:
         """Lo que tiene ahora el campo «HTML completo de la tienda» (puede llevar datos: revisa secretos)."""
@@ -127,7 +131,21 @@ class CampoCambiado(NavegadorError):
     """Al ir a restaurar, el campo no tenía lo que se pegó: no se pega nada (F2-1)."""
 
 
-def _sha(texto: str) -> str:
+class CampoVacio(NavegadorError):
+    """El campo se leyó vacío y nadie dijo que lo estuviera (`--campo-vacio`): no se toca nada (I3)."""
+
+
+def parar_si_vacio(original: str, campo_vacio: bool) -> None:
+    """`CampoVacio` (sin tocar nada) si el campo se lee vacío y el usuario no dijo, con `--campo-vacio`, que de
+    verdad lo está: un campo que la pantalla rellena tarde se respaldaría vacío y se «restauraría» vacío."""
+    if original == "" and not campo_vacio:
+        raise CampoVacio("el campo «HTML completo de la tienda» se lee vacío: puede que la pantalla aún no haya "
+                         "cargado tu contenido. No he tocado nada. Mira en la ventana si tu tienda tiene algo en ese "
+                         "campo; si de verdad está vacío, vuelve a lanzar la orden con --campo-vacio.")
+
+
+def sha_texto(texto: str) -> str:
+    """SHA-256 (hex) de un texto en UTF-8: con él se compara lo pegado con lo releído."""
     return hashlib.sha256(texto.encode("utf-8")).hexdigest()
 
 
@@ -195,7 +213,7 @@ def restaurar(abrir, mapa: dict, original: str, ruta: Path, *, esperado: str | t
     comparado por SHA-256), pega `original`; si tiene otra cosa, la guarda junto a `ruta`, no pega nada y lanza
     `CampoCambiado` con los dos archivos. Si no queda igual, `NavegadorError` con la ruta del respaldo."""
     vault = Path(vault)
-    esperados = {_sha(e) for e in ((esperado,) if isinstance(esperado, str) else esperado) if isinstance(e, str)}
+    esperados = {sha_texto(e) for e in ((esperado,) if isinstance(esperado, str) else esperado) if isinstance(e, str)}
     motivo = f"no pude restaurar el contenido: pégalo tú desde {ruta}"
     try:
         with abrir(SERVICIO, visible=visible) as page:
@@ -204,7 +222,7 @@ def restaurar(abrir, mapa: dict, original: str, ruta: Path, *, esperado: str | t
             actual = panel.leer()
             if actual == original:
                 return
-            if _sha(actual) not in esperados:
+            if sha_texto(actual) not in esperados:
                 _campo_cambiado(vault, ruta, actual, ahora)
             releido = panel.guardar(original)
     except CampoCambiado:

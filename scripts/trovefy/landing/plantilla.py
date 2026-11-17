@@ -228,6 +228,17 @@ def leer_landing_yaml(vault: Path, p_id: str, pais: str) -> dict:
     return _leer_yaml(raiz / "landing.yaml")
 
 
+def version_guardada(vault: Path, p_id: str, pais: str, *, exigir: bool = True) -> str | None:
+    """La versión de ``landing.yaml`` (la fija ``guardar``): el único lector de la versión (QA, nativo y
+    publicar). Sin ella, ``EntradaInvalida`` (o ``None`` con ``exigir=False``)."""
+    version = leer_landing_yaml(vault, p_id, pais).get("version")
+    if isinstance(version, str) and version:
+        return version
+    if exigir:
+        raise EntradaInvalida(f"la landing de {pais} no está guardada: trovefy landing guardar")
+    return None
+
+
 def _no_cambia_publicada(previo: dict, hosting: str, checkout: str, pais: str) -> None:
     """M7: una landing publicada no cambia de hosting ni de checkout sin ``rehacer`` (los anuncios apuntan ahí)."""
     if not (previo.get("url") or previo.get("publicada")):

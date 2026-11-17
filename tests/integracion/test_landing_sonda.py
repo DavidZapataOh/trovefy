@@ -136,6 +136,23 @@ def test_sonda_con_guardado_que_navega(tmp_path):
     assert estado.posts == [HTML_SONDA, original] and estado.contenido == original
 
 
+def test_sonda_con_el_campo_rellenado_tarde_respalda_y_restaura_lo_real(tmp_path):
+    """I3: el panel trae el campo vacío y lo rellena un fetch lento + setTimeout. Se espera a la red antes de
+    leer: el respaldo y la restauración son el contenido real, no un campo vacío."""
+    from integracion.impultienda_falsa import Estado
+    from trovefy.landing.entrada import ruta_landing
+    from trovefy.landing.hosting import HTML_SONDA
+    from unit.landing.conftest import P
+
+    estado = Estado(tarde=True)
+    original = estado.contenido
+    v, c = _sondar(tmp_path, estado)
+    respaldo = ruta_landing(v, P, "ZZ") / "respaldo" / "impultienda-2026-11-17T103000.html"
+    assert respaldo.read_text(encoding="utf-8") == original
+    assert estado.posts == [HTML_SONDA, original] and estado.contenido == original
+    assert c.html_propio is True and c.limite_caracteres is None
+
+
 def test_sonda_anota_los_hosts_que_carga_la_tienda(tmp_path):
     """I-4: la evidencia lleva los hosts que cargó la tienda pública (aquí, el de la propia tienda)."""
     from integracion.impultienda_falsa import Estado

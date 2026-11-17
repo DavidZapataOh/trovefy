@@ -29,9 +29,10 @@ pantallas:
     campos:
       pasarelas: {patron: 'Pasarelas conectadas:\s*([^<\n]+)'}
   # Plan 18 (/landing): «Diseño de tienda › Contenido», campo «HTML completo de la tienda» (captura del usuario,
-  # config/evidencia/09-captura-usuario-2026-11-12.png). La ruta es una suposición: la sonda del plan 18 guarda la
-  # URL real. capturado: null hasta confirmarla (`trovefy checkout capturar diseno_contenido`); mientras tanto el
-  # conductor lee pero no escribe. Resolución 20 del contrato de la fase 2.
+  # config/evidencia/09-captura-usuario-2026-11-12.png). La ruta es una suposición: la URL real la guarda la
+  # confirmación del usuario. capturado: null hasta que un commit lo fije; mientras tanto vale la confirmación de
+  # `trovefy landing capturar` (fuera del vault, 90 días, atada a la captura config/evidencia/p05-diseno-contenido-
+  # <fecha>.png); sin ella, el conductor lee pero no escribe. Resolución 20 del contrato de la fase 2.
   diseno_contenido:
     url: https://app.impultienda.ar/dashboard/diseno/contenido
     firma: ["Diseño de tienda", "HTML completo de la tienda", "Guardar cambios"]

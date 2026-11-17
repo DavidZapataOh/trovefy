@@ -140,15 +140,6 @@ def texto_visible(html: str, css: str = "", esperadas: int | None = None) -> str
     return "\n".join(salida) + "\n"
 
 
-def _version_actual(vault: Path, p_id: str, pais: str) -> str:
-    from trovefy.landing.plantilla import leer_landing_yaml
-
-    version = leer_landing_yaml(vault, p_id, pais).get("version")
-    if not isinstance(version, str) or not version:
-        raise EntradaInvalida(f"la landing de {pais} no está guardada: trovefy landing guardar")
-    return version
-
-
 def _leer(ruta: Path) -> str | None:
     return None if ruta.is_symlink() or not ruta.is_file() else ruta.read_text(encoding="utf-8")
 
@@ -168,10 +159,10 @@ def texto_landing(vault: Path, p_id: str, pais: str) -> TextoLanding:
     """El texto de la landing guardada para el nativo (``index.html`` + ``assets/estilo.css``), con su versión y
     su SHA-256. ``EntradaInvalida`` si no está guardada, si ``index.html`` no es la versión de ``landing.yaml``
     (editado a mano) o si no tiene las secciones del wireframe."""
-    from trovefy.landing.plantilla import version_de
+    from trovefy.landing.plantilla import version_de, version_guardada
 
     vault = Path(vault)
-    version = _version_actual(vault, p_id, pais)
+    version = version_guardada(vault, p_id, pais)
     raiz = ruta_landing(vault, p_id, pais)
     html = _leer(raiz / "index.html")
     if html is None:

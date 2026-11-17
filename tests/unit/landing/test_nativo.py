@@ -265,7 +265,7 @@ def test_qa_con_nativo_vigente_es_apta(v, tmp_path, monkeypatch, capsys):
 
     falso = Falso()
     falso.hitos = {s["orden"]: s["y_rel"] + 0.001 for s in qa.leer_hitos_esperados(v, cargar(v))}
-    falso.version = qa.version_guardada(v, cargar(v))
+    falso.version = qa.version_guardada(v, P, "ZZ")
     monkeypatch.setattr(qa, "medir", falso.medir)
     monkeypatch.setattr(qa, "probar_clic", falso.clic)
     args = ["landing", "qa", "--producto", P, "--pais", "ZZ"]

@@ -1,5 +1,6 @@
 import json
 import pathlib
+import re
 
 import yaml
 
@@ -48,7 +49,7 @@ def test_skill_landing_existe_con_sus_herramientas():
     for disparo in ("«landing»", "«página de venta»", "«publicar la landing»"):
         assert disparo in meta["description"], disparo
     herramientas = {t.strip() for t in meta["allowed-tools"].split(",")}
-    assert {"Read", "Bash(trovefy landing *)", "Agent", "Skill",
+    assert {"Read", "Agent", "Skill",
             "Write(~/.cache/trovefy/landing/**)", "Edit(~/.cache/trovefy/landing/**)"} <= herramientas
     # Solo escribe en el borrador: nada del vault ni de la configuración.
     assert all(not t.startswith(("Write", "Edit")) or "~/.cache/trovefy/landing/" in t for t in herramientas)
@@ -72,6 +73,46 @@ def test_skill_landing_nunca_ejecuta_capturar_ni_confirma_por_el_usuario():
     assert "nunca escribes ni editas su confirmación" in cuerpo
     assert "nunca respondes «sí» por él" in cuerpo
     assert "Nunca cambies `TROVEFY_VAULT`" in cuerpo
+
+
+SEGUROS_LANDING = ("estado", "medios", "preparar", "guardar", "validar", "texto", "nativo", "qa", "resena")
+
+
+def _subcomandos_landing() -> set[str]:
+    import argparse
+
+    from trovefy import landing_cli
+
+    p = argparse.ArgumentParser()
+    landing_cli._configurar(p)
+    sub = next(a for a in p._actions if isinstance(a, argparse._SubParsersAction))
+    return set(sub.choices)
+
+
+def test_skill_landing_preautoriza_solo_los_subcomandos_seguros():
+    """M5: sonda, capturar y publicar los lanza el usuario en su terminal: no van en allowed-tools."""
+    meta, _ = _skill_landing()
+    herramientas = {t.strip() for t in meta["allowed-tools"].split(",")}
+    landing = {t for t in herramientas if t.startswith("Bash(trovefy landing")}
+    assert landing == {f"Bash(trovefy landing {s} *)" for s in SEGUROS_LANDING}
+    reales = _subcomandos_landing()
+    assert set(SEGUROS_LANDING) <= reales  # cada uno existe en `trovefy landing --help`
+    assert reales - set(SEGUROS_LANDING) == {"sonda", "capturar", "publicar"}
+    for peligroso in ("sonda", "capturar", "publicar"):
+        assert peligroso not in meta["allowed-tools"]
+
+
+def test_skill_landing_decide_la_sonda_por_estado_y_guia_el_dominio():
+    """M4: la sonda hace falta según la línea `Hosting:` de `trovefy landing estado` (capacidades_vigentes +
+    elegir_hosting), no por si hay un archivo; conectar el dominio es un paso guiado (resolución 25)."""
+    _, cuerpo = _skill_landing()
+    assert "p05-impultienda-*.json" not in cuerpo
+    paso2 = next(linea for linea in cuerpo.splitlines() if linea.startswith("2. **Hosting"))
+    assert "`Hosting:`" in paso2 and "no medido" in paso2 and "trovefy landing estado" in paso2
+    assert re.search(r"^\d+\. \*\*Conectar el dominio", cuerpo, re.MULTILINE)
+    assert "--hosting cloudflare" in cuerpo  # I1: la salida cuando Impultienda no la guarda entera
+    assert "--campo-vacio" in cuerpo
+    assert "QA-publicada.md" in cuerpo and "-publicada.png" in cuerpo  # M2
 
 
 def test_skill_landing_cloudflare_sube_solo_la_carpeta_limpia():

@@ -14,7 +14,8 @@ Tres capas:
   ``fbclid`` (ruling M6) y solo mide https del dominio propio o de la tienda (:func:`comprobar_url_publicada`).
 - **Evaluar** (`evaluar`): pura. Cada comprobación da una fila ``(comprobación, OK|FALLA|AVISO|NO MEDIDO,
   detalle)``; un dato ausente es «NO MEDIDO» con su motivo y bloquea igual que un fallo (contrato 9).
-- **Escribir** (`render_qa`, `ejecutar_qa`): `landing/<PAIS>/QA.md` con las capturas en `qa/` (0640).
+- **Escribir** (`render_qa`, `ejecutar_qa`): `landing/<PAIS>/QA.md` (local) o `QA-publicada.md` (publicada), con las
+  capturas en `qa/` (0640).
 """
 
 from __future__ import annotations
@@ -51,6 +52,7 @@ from trovefy.landing.entrada import (
     ruta_landing,
     wireframe,
 )
+from trovefy.landing.plantilla import version_guardada
 from trovefy.landing.validar import Resultado, validar
 
 UTM_PUBLICADA = "?utm_source=fb&utm_medium=paid&utm_campaign=QA%7C0&utm_term=QA%7C0&utm_content=QA%7C0"
@@ -62,6 +64,7 @@ ESPERA_CLIC_MS = 5000  # tope para ver salir la navegación del botón
 TIEMPO_CARGA_MS = 60_000  # tope de una carga (en 4G simulado una página pesada tarda)
 SERVICIO_QA = "qa-landing"  # nombre del contexto efímero (no hay perfil: perfil_persistente=False)
 OK, FALLA, AVISO, NO_MEDIDO = "OK", "FALLA", "AVISO", "NO MEDIDO"
+QA_LOCAL, QA_PUBLICADA = "QA.md", "QA-publicada.md"  # la publicada va aparte: una QA local no la pisa (M2)
 _VISIBLE = False  # la QA no necesita ventana: nadie inicia sesión
 
 
@@ -439,18 +442,23 @@ def medir(url: str, vista: str, captura: Path, permitidos: tuple[str, ...], red_
     )
 
 
-def probar_clic(url: str, checkout_url: str, interceptar: bool = True, utm: str = UTM_PRUEBA) -> Clic:
+def probar_clic(url: str, checkout_url: str, interceptar: bool = True, utm: str | None = None) -> Clic:
     """Abre ``url + utm`` a 390 px y pulsa el primer ``a[data-tf-checkout]``. ``utm`` es :data:`UTM_PRUEBA`
-    (local, con ``fbclid``) o :data:`UTM_PUBLICADA` (sin ``fbclid``, ruling M6).
+    (local, con ``fbclid``) o :data:`UTM_PUBLICADA` (sin ``fbclid``, ruling M6); por defecto, la de prueba si se
+    intercepta y la publicada si no (una navegación real nunca lleva ``fbclid``).
 
     Con ``interceptar`` (QA de la landing) la navegación de la página que sale del clic se responde con un 204
     sin salir a la red; toda petición a otro host que no sea el de la landing, o de otra ventana, se aborta, y
     tras la carga también todo lo que no sea un GET (beacons, fetch POST); devuelve la URL pedida. Sin
-    ``interceptar`` (``/listo``, plan 20) sigue la navegación real y devuelve la URL final."""
+    ``interceptar`` (``/listo``, plan 20) sigue la navegación real y devuelve la URL final; aun así los hosts de
+    Meta (:data:`HOSTS_META`) se abortan: la prueba no manda eventos a Meta (el píxel de la tienda, o el de la
+    landing en Cloudflare, no se carga). Ojo: una navegación real puede crear un carrito o una visita en la
+    tienda, y la CAPI de Impultienda (en su servidor) puede emitir eventos por cualquier visita."""
     from playwright.sync_api import Error as PlaywrightError
 
     from trovefy.navegador import NavegadorError
 
+    utm = utm if utm is not None else (UTM_PRUEBA if interceptar else UTM_PUBLICADA)
     host = (urlsplit(url).hostname or "").lower()
     destino = url.split("#", 1)[0]
     destino = destino + ("&" + utm[1:] if "?" in destino else utm)
@@ -474,9 +482,17 @@ def probar_clic(url: str, checkout_url: str, interceptar: bool = True, utm: str 
                 else:
                     route.abort()
 
+            def sin_meta(route):
+                if casa_host((urlsplit(route.request.url).hostname or "").lower(), HOSTS_META):
+                    route.abort()
+                else:
+                    route.continue_()
+
             if interceptar:
                 _blindar(page)
                 page.context.route("**/*", ruta)
+            else:
+                page.context.route("**/*", sin_meta)
             page.goto(destino, wait_until="load", timeout=TIEMPO_CARGA_MS)
             cargada["si"] = True
             boton = page.locator("a[data-tf-checkout]")
@@ -626,6 +642,16 @@ def evaluar(validacion: Resultado, mediciones: list[Medicion], clic: Clic, wiref
 # --- QA.md ---------------------------------------------------------------------------------------
 
 
+def archivo_qa(publicada: bool) -> str:
+    """``QA.md`` (la local, la que pide publicar) o ``QA-publicada.md`` (la de la URL publicada)."""
+    return QA_PUBLICADA if publicada else QA_LOCAL
+
+
+def nombre_captura(vista: str, version: str, publicada: bool) -> str:
+    """``qa/<vista>-<version>.png`` en local y ``qa/<vista>-<version>-publicada.png`` en la publicada."""
+    return f"{vista}-{version}{'-publicada' if publicada else ''}.png"
+
+
 def _celda(texto: str) -> str:
     return str(texto).replace("|", "\\|").replace("\n", " ")
 
@@ -644,8 +670,9 @@ def _captura_rel(m: Medicion, raiz_producto: Path | None) -> str | None:
 def render_qa(datos: DatosLanding, r: ResultadoQA, mediciones: list[Medicion], ahora: datetime, url: str | None,
               *, clic: Clic | None = None, version: str | None = None, raiz_producto: Path | None = None,
               manifiesto: str | None = None) -> str:
-    """``QA.md``: frontmatter ``{tipo: qa_landing, pais, version, ok, fecha, url, movil_390, utm_checkout}``
-    (las dos últimas, con la forma de ``landing.qa`` de la resolución 3), tabla de filas y medidas."""
+    """``QA.md`` (o ``QA-publicada.md`` con ``url``): frontmatter ``{tipo: qa_landing, pais, version, ok, fecha,
+    url, movil_390, utm_checkout}`` (las dos últimas, con la forma de ``landing.qa`` de la resolución 3), tabla
+    de filas y medidas."""
     from trovefy.vault.frontmatter import renderizar
 
     vistas = {m.vista: m for m in mediciones}
@@ -657,12 +684,12 @@ def render_qa(datos: DatosLanding, r: ResultadoQA, mediciones: list[Medicion], a
                       "captura": _captura_rel(movil, raiz_producto) if movil else None},
         "utm_checkout": {"ok": _clic_ok(clic, url is not None),
                          "destino": clic.url_pedida if clic else None, "captura": None, "interceptado": True,
-                         "fuente": f"landing/{datos.pais}/QA.md"},
+                         "fuente": f"landing/{datos.pais}/{archivo_qa(url is not None)}"},
     }
     if manifiesto is not None:  # I-6: los archivos medidos (index.html y assets/), para publicar solo eso
         meta = {"tipo": meta.pop("tipo"), "pais": meta.pop("pais"), "version": meta.pop("version"),
                 "manifiesto": manifiesto, **meta}
-    donde =f"publicada en {url}" if url else "local (127.0.0.1)"
+    donde = f"publicada en {url}" if url else "local (127.0.0.1)"
     lineas = [f"# QA de la landing · {datos.p_id} · {datos.pais}", "",
               f"Versión `{version}` · {donde} · {'apta' if r.ok else 'no apta'}.", "",
               perfil_red() + ".", "",
@@ -717,16 +744,6 @@ def servir_local(carpeta: Path) -> Iterator[str]:
         srv.server_close()
 
 
-def version_guardada(vault: Path, datos: DatosLanding) -> str:
-    """La versión de ``landing.yaml`` (la fija ``guardar``); sin ella, ``EntradaInvalida``."""
-    from trovefy.landing.plantilla import leer_landing_yaml
-
-    version = leer_landing_yaml(vault, datos.p_id, datos.pais).get("version")
-    if not isinstance(version, str) or not version:
-        raise EntradaInvalida(f"la landing de {datos.pais} no está guardada: trovefy landing guardar")
-    return version
-
-
 def leer_hitos_esperados(vault: Path, datos: DatosLanding) -> list[dict]:
     """Las secciones de ``wireframe.yaml`` (las que valida ``validar``); sin archivo, las de la oferta."""
     import yaml
@@ -772,7 +789,9 @@ def hosts_propios(vault: Path, datos: DatosLanding) -> tuple[str, ...]:
 def ejecutar_qa(vault: Path, datos: DatosLanding, url: str | None = None, *,
                 ahora: datetime | None = None) -> ResultadoQA:
     """Mide la landing (local en ``127.0.0.1`` sin ``url``; la publicada con ``url``), la evalúa y escribe
-    ``landing/<PAIS>/QA.md`` con las capturas ``qa/<vista>-<version>.png`` y su línea de log."""
+    ``landing/<PAIS>/QA.md`` con las capturas ``qa/<vista>-<version>.png`` (la local) o
+    ``landing/<PAIS>/QA-publicada.md`` con ``qa/<vista>-<version>-publicada.png`` (la publicada; una QA local
+    posterior no la pisa, M2), y su línea de log."""
     from trovefy.landing.plantilla import leer_landing_yaml, manifiesto_landing
     from trovefy.producto.medios import carpeta_segura
     from trovefy.secretos import buscar_secreto
@@ -780,7 +799,7 @@ def ejecutar_qa(vault: Path, datos: DatosLanding, url: str | None = None, *,
     from trovefy.vault.producto import ruta_producto
 
     vault = Path(vault)
-    version = version_guardada(vault, datos)
+    version = version_guardada(vault, datos.p_id, datos.pais)
     landing = leer_landing_yaml(vault, datos.p_id, datos.pais)
     checkout = landing.get("checkout_url")
     if not isinstance(checkout, str) or not checkout:
@@ -803,7 +822,7 @@ def ejecutar_qa(vault: Path, datos: DatosLanding, url: str | None = None, *,
 
     def _medir_todo(pagina: str) -> tuple[list[Medicion], Clic]:
         permitidos = ((urlsplit(pagina).hostname or "").lower(),)
-        meds = [medir(pagina, vista, raiz / "qa" / f"{vista}-{version}.png", permitidos,
+        meds = [medir(pagina, vista, raiz / "qa" / nombre_captura(vista, version, url is not None), permitidos,
                       red_4g=(vista == "movil"), silenciar=silenciar, propios=propios) for vista in VIEWPORTS]
         return meds, probar_clic(pagina, checkout, utm=UTM_PRUEBA if url is None else UTM_PUBLICADA)
 
@@ -816,12 +835,14 @@ def ejecutar_qa(vault: Path, datos: DatosLanding, url: str | None = None, *,
     ahora = ahora or datetime.now(ZONA_NEGOCIO)
     texto = render_qa(datos, r, mediciones, ahora, url, clic=clic, version=version,
                       raiz_producto=ruta_producto(vault, datos.p_id).parent, manifiesto=manifiesto)
+    archivo = archivo_qa(url is not None)
     patron = buscar_secreto(texto)
     if patron:
-        raise EntradaInvalida(f"QA.md: aparece algo con forma de secreto ({patron}); no se guarda")
-    escribir_atomico(raiz / "QA.md", texto)
+        raise EntradaInvalida(f"{archivo}: aparece algo con forma de secreto ({patron}); no se guarda")
+    escribir_atomico(raiz / archivo, texto)
     rel = raiz.relative_to(vault).as_posix()
     anadir_log(vault, "landing", f"{datos.p_id} {datos.pais}: QA {'apta' if r.ok else 'no apta'} "
                f"(versión {version}, {'publicada' if url else 'local'})",
-               [f"{rel}/QA.md", *(f"{rel}/qa/{vista}-{version}.png" for vista in VIEWPORTS)])
+               [f"{rel}/{archivo}",
+                *(f"{rel}/qa/{nombre_captura(vista, version, url is not None)}" for vista in VIEWPORTS)])
     return r

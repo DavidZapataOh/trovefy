@@ -30,14 +30,16 @@ from trovefy.landing.panel import (
     SERVICIO,
     Panel,
     mapa_impultienda,
+    parar_si_vacio,
     preparar_mapa,
     respaldar,
     restaurar,
     ultimo_respaldo,
 )
-from trovefy.landing.plantilla import UTM_JS, tienda_valida
+from trovefy.landing.plantilla import PIXEL_PLANTILLA, UTM_JS, tienda_valida
 from trovefy.mapa import origen
 from trovefy.navegador import NavegadorError, esperar_entre_navegaciones, sesion
+from trovefy.secretos import buscar_secreto
 from trovefy.vault.escritura import ZONA_NEGOCIO, anadir_log, escribir_atomico
 
 __all__ = [
@@ -103,6 +105,8 @@ def parar_si_sonda_colgada(vault: Path, pais: str, contenido: str) -> None:
              f"no hay respaldos en productos/*/landing/{pais}/respaldo/: pega tú lo que tenías")
     raise NavegadorError(f"el campo «HTML completo de la tienda» tiene restos de una sonda anterior: {donde} en "
                          "«Diseño de tienda → Contenido» y vuelve a lanzar. No he tocado nada.")
+
+
 FUERA_MAX = 40  # caracteres visibles fuera de #tf-sonda que aún no son «marco» (un aviso de cookies corto)
 
 _EVIDENCIA = re.compile(r"p05-impultienda-([0-9]{4}-[0-9]{2}-[0-9]{2})\.json")
@@ -198,6 +202,9 @@ _SECCION = re.compile(r"(<section\b[^>]*>)(.*?)(</section>)", re.DOTALL)
 _IMG = re.compile(r"<(?:img|source)\b[^>]*>", re.IGNORECASE)
 _URL_CSS = re.compile(r"url\(\s*(['\"]?)(.*?)\1\s*\)", re.IGNORECASE | re.DOTALL)
 _NOMBRE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+# pixel.js es la plantilla con un dataset_id de Meta (6–20 dígitos, el mismo en todas sus apariciones)
+_PIXEL = re.compile(re.escape(PIXEL_PLANTILLA.read_text(encoding="utf-8")).replace(
+    re.escape("{{dataset_id}}"), "(?P<d>[0-9]{6,20})", 1).replace(re.escape("{{dataset_id}}"), "(?P=d)"))
 
 
 def _attr(etiqueta: str, nombre: str) -> str | None:
@@ -273,10 +280,31 @@ def _en_linea(fragmento: str, datos: _Datos, hero: bool) -> str:
     return _IMG.sub(lambda m: _imagen(m.group(0), datos, hero), fragmento)
 
 
+def _script_del_vault(assets: Path, nombre: str, *, obligatorio: bool) -> str | None:
+    """`assets/<nombre>` tal cual está en el vault (lo que cubre el manifiesto de la QA), si es la plantilla del
+    repo byte a byte (`utm.js`; `pixel.js` con un `dataset_id` numérico). `ValueError` si no lo es."""
+    ruta = assets / nombre
+    if ruta.is_symlink():
+        raise ValueError(f"assets/{nombre} es un enlace simbólico: no se empaqueta")
+    if not ruta.is_file():
+        if obligatorio:
+            raise ValueError(f"falta assets/{nombre}: vuelve a trovefy landing guardar")
+        return None
+    texto = ruta.read_bytes().decode("utf-8")
+    igual = (texto == UTM_JS.read_text(encoding="utf-8") if nombre == "utm.js"
+             else _PIXEL.fullmatch(texto) is not None)
+    if not igual:
+        raise ValueError(f"assets/{nombre} no es la plantilla de templates/landing/ byte a byte: vuelve a trovefy "
+                         "landing guardar (y después validar, nativo y qa)")
+    return texto
+
+
 def empaquetar_en_linea(dir_landing: Path) -> str:
     """Fragmento para el campo «HTML completo de la tienda»: `<title>`, `<meta>`, `<style>` (con
     `estilo.css`), el `<main id="tf-landing">` con las imágenes en `data:` (fuera del *hero*, solo la de 480 px)
-    y, al final, `<script>` con `utm.js`. Mantiene `data-tf-version`. `ValueError` si algo no se puede meter."""
+    y, al final, `<script>` con el `utm.js` del vault (y otro con `pixel.js` si lo hay), los mismos archivos que
+    midió la QA (M10), comprobados contra su plantilla. Mantiene `data-tf-version`. `ValueError` si algo no se
+    puede meter."""
     raiz = Path(dir_landing)
     datos = _Datos(raiz / "assets")
     html = (raiz / "index.html").read_text(encoding="utf-8")
@@ -292,9 +320,10 @@ def empaquetar_en_linea(dir_landing: Path) -> str:
     css = css_ruta.read_text(encoding="utf-8")
     css = _URL_CSS.sub(lambda m: f"url('{datos(m.group(2))}')" if not m.group(2).startswith("data:") else m.group(0),
                        css)
-    utm = UTM_JS.read_text(encoding="utf-8")
-    if re.search(r"</style", css, re.IGNORECASE) or re.search(r"</script", utm, re.IGNORECASE):
-        raise ValueError("estilo.css o utm.js cierran su propia etiqueta: no se pueden meter en línea")
+    scripts = [s for s in (_script_del_vault(raiz / "assets", "utm.js", obligatorio=True),
+                           _script_del_vault(raiz / "assets", "pixel.js", obligatorio=False)) if s is not None]
+    if re.search(r"</style", css, re.IGNORECASE) or any(re.search(r"</script", s, re.IGNORECASE) for s in scripts):
+        raise ValueError("estilo.css, utm.js o pixel.js cierran su propia etiqueta: no se pueden meter en línea")
 
     def seccion(m: re.Match) -> str:
         hero = 'data-tf-tipo="hero"' in m.group(1)
@@ -302,7 +331,7 @@ def empaquetar_en_linea(dir_landing: Path) -> str:
 
     main = _SECCION.sub(seccion, mains[0])
     partes = [*([titulo.group(0)] if titulo else []), *metas, f"<style>\n{css.strip()}\n</style>", main,
-              f"<script>\n{utm.strip()}\n</script>"]
+              *(f"<script>\n{s.strip()}\n</script>" for s in scripts)]
     salida = "\n".join(partes)  # sin salto final (L-6): el campo de Impultienda lo puede comer
     if "assets/" in salida:
         raise ValueError("quedan rutas assets/ en el fragmento: algún recurso no se ha podido meter en línea")
@@ -420,9 +449,21 @@ def _host_anotable(url: str) -> str | None:
     return host
 
 
+def _silenciar_meta(route) -> None:
+    """Ruta del contexto de la sonda: lo de Meta (`HOSTS_META`) se aborta, lo demás sigue. Mirar la tienda no
+    manda eventos a Meta (I2)."""
+    from urllib.parse import urlsplit
+
+    if casa_host((urlsplit(route.request.url).hostname or "").lower(), HOSTS_META):
+        route.abort()
+    else:
+        route.continue_()
+
+
 def _medir_tienda(page, tienda: str, dormir) -> dict:
     """Abre la tienda (sin perfil) y mide lo que hizo Impultienda con el fragmento de la sonda; anota también los
-    hosts que carga la página (ruling I-4: la QA publicada los da como propios de la tienda)."""
+    hosts que carga la página (ruling I-4: la QA publicada los da como propios de la tienda). Antes de ir, una
+    ruta en el contexto aborta toda petición a Meta (el píxel de la tienda no llega a cargarse, I2)."""
     from urllib.parse import urlparse
 
     hosts: set[str] = set()
@@ -431,6 +472,7 @@ def _medir_tienda(page, tienda: str, dormir) -> dict:
         if (h := _host_anotable(getattr(req, "url", ""))) is not None:
             hosts.add(h)
 
+    page.context.route("**/*", _silenciar_meta)
     if callable(getattr(page, "on", None)):
         page.on("request", anotar)
     esperar_entre_navegaciones(urlparse(tienda).hostname or "", dormir=dormir)
@@ -455,15 +497,30 @@ def _medir_tienda(page, tienda: str, dormir) -> dict:
     return {**medidas, "hosts_tienda": tuple(sorted(hosts))}
 
 
+def _sin_query(url: str) -> str:
+    """La URL sin query ni fragmento (un id de tienda o un token en la query no van a la evidencia, M9)."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    p = urlsplit(url)
+    return urlunsplit((p.scheme, p.netloc, p.path, "", ""))
+
+
 def _escribir_evidencia(vault: Path, c: Capacidades, ahora: datetime) -> str:
+    """`config/evidencia/p05-impultienda-<fecha>.json`, solo si no lleva nada con forma de secreto (M9)."""
     rel = f"config/evidencia/p05-impultienda-{c.fecha}.json"
-    escribir_atomico(Path(vault) / rel, json.dumps(asdict(c), ensure_ascii=False, indent=2) + "\n")
+    texto = json.dumps(asdict(c), ensure_ascii=False, indent=2) + "\n"
+    patron = buscar_secreto(texto)
+    if patron:
+        raise ValueError(f"la evidencia de la sonda lleva algo con forma de secreto ({patron}): no la guardo. Tu "
+                         "contenido de Impultienda ya está restaurado; repite la sonda sin --url")
+    escribir_atomico(Path(vault) / rel, texto)
     anadir_log(vault, "landing", f"sonda de Impultienda: {elegir_resumen(c)}", [rel], ahora=ahora)
     return rel
 
 
 def elegir_resumen(c: Capacidades) -> str:
     """Una línea con las capacidades (sí/no/no medido) para el log y la CLI."""
+
     def txt(v):
         return "no medido" if v is None else ("sí" if v is True else ("no" if v is False else str(v)))
 
@@ -472,17 +529,19 @@ def elegir_resumen(c: Capacidades) -> str:
 
 def sondear(vault: Path, p_id: str, pais: str, tienda: str, dominio_propio: bool | None,
             url_pantalla: str | None = None, *, mapa: dict | None = None, abrir=None, visible: bool = True,
-            dormir=time.sleep, ahora: datetime | None = None) -> Capacidades:
+            dormir=time.sleep, ahora: datetime | None = None, campo_vacio: bool = False) -> Capacidades:
     """Mide en la tienda real qué admite «HTML completo de la tienda» y restaura su contenido.
 
     1. Comprueba (sin navegador) la URL de la pantalla y que `diseno_contenido` está confirmada.
-    2. Perfil `impultienda` visible: firma, respaldo en `landing/<PAIS>/respaldo/`, pega `HTML_SONDA`, guarda y
-       relee (un recorte da `limite_caracteres`).
+    2. Perfil `impultienda` visible: firma, espera a la red y lee el campo (vacío: para sin tocar nada, salvo
+       `campo_vacio`, el `--campo-vacio` del usuario, I3), respaldo en `landing/<PAIS>/respaldo/`, pega
+       `HTML_SONDA`, guarda y relee (un recorte da `limite_caracteres`).
     3. La tienda en un contexto **sin perfil**: script, estilos, título y marco.
     4. Siempre que se haya pegado algo: restaura (solo si el campo tiene lo que se pegó, F2-1; si no, guarda lo
        que hay y para con `CampoCambiado`), relee y compara; si no queda igual, `NavegadorError` con la ruta del
        respaldo.
-    5. Escribe `config/evidencia/p05-impultienda-<fecha>.json`.
+    5. Escribe `config/evidencia/p05-impultienda-<fecha>.json` (con `url_pantalla` sin query ni fragmento y
+       solo si no lleva nada con forma de secreto, M9).
 
     `dominio_propio` es la respuesta del usuario (no se mide aquí; lo confirma la QA publicada).
     """
@@ -499,6 +558,7 @@ def sondear(vault: Path, p_id: str, pais: str, tienda: str, dominio_propio: bool
             panel = Panel(page, m, dormir)
             panel.abrir()
             original = panel.leer()
+            parar_si_vacio(original, campo_vacio)  # I3: vacío no es «nada que respaldar» sin la palabra del usuario
             parar_si_sonda_colgada(vault, pais.upper(), original)  # I-5: restos de una sonda a medias
             respaldo = respaldar(vault, p_id, pais.upper(), original, ahora)
             pegado = True  # desde aquí, pase lo que pase, se restaura
@@ -518,7 +578,7 @@ def sondear(vault: Path, p_id: str, pais: str, tienda: str, dominio_propio: bool
     palabra = {True: "sí", False: "no", None: "no preguntado"}[dominio_propio]
     c = Capacidades(
         **medidas, dominio_propio=dominio_propio, limite_caracteres=limite, tienda=tienda,
-        url_pantalla=m["pantallas"][PANTALLA]["url"], fecha=fecha,
+        url_pantalla=_sin_query(m["pantallas"][PANTALLA]["url"]), fecha=fecha,
         fuente=(f"sonda del {fecha} en la tienda (respaldo {respaldo.relative_to(vault).as_posix()}); "
                 f"dominio propio: palabra del usuario ({palabra}), la confirma la QA publicada"),
     )
