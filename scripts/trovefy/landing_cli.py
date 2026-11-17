@@ -56,6 +56,9 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
     pr.add_argument("--rehacer", action="store_true", help="vuelve a escribir el index.html del borrador")
     _comunes(sub.add_parser("guardar", help="copia el borrador al vault (sin secretos) y fija la versión"))
     _comunes(sub.add_parser("validar", help="comprobación estática de la landing guardada"))
+    q = sub.add_parser("qa", help="QA en Chromium (390/1280, peso, LCP 4G, hitos, clic con UTM) y QA.md")
+    _comunes(q)
+    q.add_argument("--publicada", action="store_true", help="mide la URL publicada (landing.yaml → url)")
     r = sub.add_parser("resena", help="añade una reseña real (con su pedido o email de origen)")
     _comunes(r)
     r.add_argument("--texto", required=True, help="texto literal de la reseña")
@@ -185,6 +188,24 @@ def _validar(args: argparse.Namespace, vault: Path) -> int:
     return 0 if r.ok else 1
 
 
+def _qa(args: argparse.Namespace, vault: Path) -> int:
+    from trovefy.landing.entrada import EntradaInvalida, cargar_datos
+    from trovefy.landing.plantilla import leer_landing_yaml
+    from trovefy.landing.qa import ejecutar_qa
+
+    d = cargar_datos(vault, args.producto, args.pais, correr=_orden())
+    url = None
+    if args.publicada:
+        url = leer_landing_yaml(vault, d.p_id, d.pais).get("url")
+        if not isinstance(url, str) or not url.startswith("https://"):
+            raise EntradaInvalida(f"la landing de {d.pais} no tiene URL publicada: trovefy landing publicar")
+    r = ejecutar_qa(vault, d, url)
+    for comprobacion, estado, detalle in r.filas:
+        print(f"[{estado}] {comprobacion}: {detalle}")
+    print(f"QA {'apta' if r.ok else 'no apta'}: landing/{d.pais}/QA.md")
+    return 0 if r.ok else 1
+
+
 def _resena(args: argparse.Namespace, vault: Path) -> int:
     from datetime import date
 
@@ -200,7 +221,7 @@ def _resena(args: argparse.Namespace, vault: Path) -> int:
 
 
 _ACCIONES = {"estado": _estado, "medios": _medios, "preparar": _preparar, "guardar": _guardar,
-             "validar": _validar, "resena": _resena}
+             "validar": _validar, "qa": _qa, "resena": _resena}
 
 
 def _ejecutar(args: argparse.Namespace) -> int:
