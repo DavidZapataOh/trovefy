@@ -8,6 +8,8 @@ con código 0. Salir con 0 sin imprimir nada es «allow» (sin decisión).
 """
 from __future__ import annotations
 
+import fnmatch
+import glob
 import json
 import os
 import pathlib
@@ -281,3 +283,77 @@ _DEPOSITO = re.compile(r"\btrovefy\b[\w\s./-]*?\bbuzon\s+depositar\b|/var/spool/
 def es_deposito(comando: str) -> bool:
     """¿El comando invoca ``trovefy buzon depositar`` (también ``python -m trovefy …``, con comillas)?"""
     return bool(_DEPOSITO.search(re.sub(r"[\"'\\]", "", comando)))
+
+
+# --- Rutas que alcanza un comando Bash (por ruta resuelta, globs incluidos) ---------------------------
+
+_GLOB = re.compile(r"[*?\[]")
+SEPARADORES_RUTA = re.compile(r"[\s;&|()<>`=,]+")
+
+
+def tiene_glob(texto: str) -> bool:
+    return bool(_GLOB.search(texto))
+
+
+def traducir_ruta(ficha: str, bases: set[str], vault_res: pathlib.Path) -> str | None:
+    """``~``, ``$HOME`` y las grafías del vault traducidas a ruta; ``None`` si es otra variable."""
+    return _destino_cd(ficha, bases, vault_res)
+
+
+def directorios_recorridos(comando: str, bases: set[str], vault_res: pathlib.Path,
+                           cwd: str | None) -> list[pathlib.Path]:
+    """El cwd y cada destino de ``cd``/``pushd``/``git -C`` en orden (dentro o fuera del vault)."""
+    actual = resolver(cwd, None) if cwd else resolver(os.getcwd(), None)
+    recorrido = [actual]
+    for m in re.finditer(r"\b(?:cd|pushd)\s+(?:--\s+)?([^\s;&|()]+)|\bgit\s+(?:-\S+\s+)*?-C\s*([^\s;&|()]+)",
+                         comando):
+        destino = traducir_ruta(m.group(1) or m.group(2), bases, vault_res)
+        if destino is None:
+            continue
+        actual = resolver(destino, str(actual))
+        recorrido.append(actual)
+    return list(dict.fromkeys(recorrido))
+
+
+def rutas_de_ficha(ficha: str, directorios: list[pathlib.Path], bases: set[str],
+                   vault_res: pathlib.Path) -> list[pathlib.Path]:
+    """Rutas resueltas a las que puede referirse ``ficha``: contra cada directorio, con el glob expandido.
+
+    La ruta con el patrón sin expandir se conserva (un glob que aún no casa con nada puede crear archivos).
+    """
+    if not ficha or ficha.startswith("-"):
+        return []
+    destino = traducir_ruta(ficha, bases, vault_res)
+    if destino is None:
+        return []
+    bases_rel = [None] if pathlib.Path(destino).is_absolute() else directorios
+    salida: list[pathlib.Path] = []
+    for base in bases_rel:
+        ruta = resolver(destino, str(base) if base else None)
+        salida.append(ruta)
+        if tiene_glob(str(ruta)):
+            salida.extend(resolver(p, None) for p in glob.glob(str(ruta), include_hidden=True)[:200])
+    return salida
+
+
+def parte_coincide(ficha: str, patron: str) -> bool:
+    """¿Un componente de ruta (quizá con glob) puede ser el del patrón (quizá con glob)?"""
+    if fnmatch.fnmatchcase(ficha, patron):
+        return True
+    return tiene_glob(ficha) and (tiene_glob(patron) or fnmatch.fnmatchcase(patron, ficha))
+
+
+def coincide_patron(partes: tuple[str, ...], patron: tuple[str, ...]) -> bool:
+    """¿``partes`` casa con ``patron`` componente a componente? ``**`` vale por cero o más componentes."""
+    if not patron:
+        return not partes
+    if patron[0] == "**":
+        return any(coincide_patron(partes[i:], patron[1:]) for i in range(len(partes) + 1))
+    return bool(partes) and parte_coincide(partes[0], patron[0]) and coincide_patron(partes[1:], patron[1:])
+
+
+def es_ancestro_de_patron(partes: tuple[str, ...], patron: tuple[str, ...]) -> bool:
+    """¿``partes`` es un antecesor estricto de lo que casa con ``patron`` (sin ``**``)?"""
+    if "**" in patron or len(partes) >= len(patron):
+        return False
+    return all(parte_coincide(a, b) for a, b in zip(partes, patron, strict=False))

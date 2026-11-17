@@ -117,9 +117,15 @@ def _producto(v, **meta):
     frontmatter.escribir(v / "productos" / P / "PRODUCTO.md", {"tipo": "producto", **meta}, "# x\n")
 
 
-def _decision(v, nombre, nuevo, cita="súbelo a 3", producto=P):
+def _registrada(nombre, zona="-05:00"):
+    """``registrada`` coherente con el nombre ``AAAA-MM-DD-HHMMSS`` (hora local de la zona dada)."""
+    return f"{nombre[:10]}T{nombre[11:13]}:{nombre[13:15]}:{nombre[15:17]}{zona}"
+
+
+def _decision(v, nombre, nuevo, cita="súbelo a 3", producto=P, registrada=None):
     meta = {"tipo": "decision", "producto": producto, "decision": "tope_apimart", "tope_anterior_usd": "2.00",
-            "tope_nuevo_usd": nuevo, "cita": cita}
+            "tope_nuevo_usd": nuevo, "cita": cita,
+            "registrada": _registrada(nombre) if registrada is None else registrada}
     frontmatter.escribir(v / "productos" / P / "decisiones" / f"{nombre}-tope-apimart.md", meta, "# Tope\n")
 
 
@@ -170,6 +176,78 @@ def test_tope_decision_de_otro_producto_no_vale(tmp_path):
     _decision(tmp_path, "2026-11-14-100000", "3", "a 3", producto="p-0043-dishai")
     with pytest.raises(ConfigInvalida):
         tope_de(tmp_path, P, cfg)
+
+
+def test_tope_ordena_por_registrada_y_no_por_el_nombre(tmp_path):
+    """La decisión de las 06:00:05-05:00 (11:00:05Z) es posterior a la de las 10:00:01Z aunque su nombre ordene antes."""
+    iniciar_config(tmp_path)
+    cfg = cargar_config(tmp_path)
+    _decision(tmp_path, "2026-11-16-100000", "3", "a 3", registrada="2026-11-16T10:00:00+00:00")
+    _decision(tmp_path, "2026-11-16-100001", "4.5", "a 4.5", registrada="2026-11-16T10:00:01+00:00")
+    _decision(tmp_path, "2026-11-16-060005", "6", "a 6", registrada="2026-11-16T06:00:05-05:00")
+    _producto(tmp_path, apimart_tope_usd="6")
+    assert tope_de(tmp_path, P, cfg) == Decimal(6)
+    _producto(tmp_path, apimart_tope_usd="4.5")
+    with pytest.raises(ConfigInvalida):
+        tope_de(tmp_path, P, cfg)
+
+
+def test_tope_no_depende_de_la_zona_del_proceso(tmp_path, monkeypatch):
+    import time
+
+    iniciar_config(tmp_path)
+    cfg = cargar_config(tmp_path)
+    _decision(tmp_path, "2026-11-16-100000", "3", "a 3", registrada="2026-11-16T10:00:00+00:00")
+    _decision(tmp_path, "2026-11-16-060005", "6", "a 6", registrada="2026-11-16T06:00:05-05:00")
+    _producto(tmp_path, apimart_tope_usd="6")
+    for zona in ("UTC", "Asia/Tokyo", "America/Bogota"):
+        monkeypatch.setenv("TZ", zona)
+        time.tzset()
+        assert tope_de(tmp_path, P, cfg) == Decimal(6), zona
+    monkeypatch.delenv("TZ")
+    time.tzset()
+
+
+@pytest.mark.parametrize("registrada", [
+    "2099-01-01T00:00:00+00:00",   # futura
+    None,                           # sin registrada
+    "2026-11-14T10:00:00",          # sin zona
+    "ayer",                          # ilegible
+])
+def test_tope_rechaza_decisiones_futuras_o_sin_registrada(tmp_path, registrada):
+    iniciar_config(tmp_path)
+    cfg = cargar_config(tmp_path)
+    _decision(tmp_path, "2026-11-14-100000", "3", "a 3")
+    nombre = "2099-01-01-000000" if registrada and registrada.startswith("2099") else "2026-11-15-100000"
+    _decision(tmp_path, nombre, "50", "a 50", registrada=registrada or "")
+    if registrada is None:
+        ruta = tmp_path / "productos" / P / "decisiones" / f"{nombre}-tope-apimart.md"
+        meta, cuerpo = frontmatter.leer(ruta)
+        del meta["registrada"]
+        frontmatter.escribir(ruta, meta, cuerpo)
+    _producto(tmp_path, apimart_tope_usd="50")
+    with pytest.raises(ConfigInvalida):
+        tope_de(tmp_path, P, cfg)
+    _producto(tmp_path, apimart_tope_usd="3")
+    assert tope_de(tmp_path, P, cfg) == Decimal(3)
+
+
+def test_tope_rechaza_nombre_que_no_cuadra_con_registrada(tmp_path):
+    iniciar_config(tmp_path)
+    cfg = cargar_config(tmp_path)
+    _decision(tmp_path, "2026-11-14-100000", "3", "a 3")
+    _decision(tmp_path, "2026-11-15-100000", "50", "a 50", registrada="2026-11-15T11:00:00-05:00")
+    _producto(tmp_path, apimart_tope_usd="50")
+    with pytest.raises(ConfigInvalida):
+        tope_de(tmp_path, P, cfg)
+
+
+def test_mensaje_de_desajuste_explica_la_recuperacion(tmp_path):
+    iniciar_config(tmp_path)
+    _decision(tmp_path, "2026-11-14-100000", "3", "a 3")
+    _producto(tmp_path, apimart_tope_usd="2.50")
+    with pytest.raises(ConfigInvalida, match="mismo importe"):
+        tope_de(tmp_path, P, cargar_config(tmp_path))
 
 
 def test_tope_por_defecto(tmp_path):

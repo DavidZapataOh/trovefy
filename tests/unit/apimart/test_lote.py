@@ -121,7 +121,7 @@ def poner_tope(vault, usd):
     meta, cuerpo = frontmatter.leer(ruta)
     frontmatter.escribir(ruta.parent / "decisiones" / "2026-11-14-090000-tope-apimart.md",
                          {"tipo": "decision", "producto": P, "decision": "tope_apimart", "tope_nuevo_usd": usd,
-                          "cita": f"tope de {usd}"}, "# Tope\n")
+                          "cita": f"tope de {usd}", "registrada": "2026-11-14T09:00:00-05:00"}, "# Tope\n")
     frontmatter.escribir(ruta, {**meta, "apimart_tope_usd": usd}, cuerpo)
 
 

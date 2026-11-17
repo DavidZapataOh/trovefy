@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from types import MappingProxyType
@@ -133,27 +134,76 @@ def iniciar_config(vault: Path) -> Path:
     return ruta
 
 
-def _tope_decidido(dir_producto: Path, p_id: str) -> Decimal | None:
-    """``tope_nuevo_usd`` de la última ``decisiones/*-tope-apimart.md`` del producto con ``cita`` no vacía."""
+_NOMBRE_DECISION = re.compile(r"(\d{4}-\d{2}-\d{2}-\d{6})-tope-apimart\.md")
+
+
+def _registrada(meta: dict, nombre: str, ahora: datetime) -> datetime | None:
+    """Instante de ``registrada`` (con zona) si cuadra con el nombre del archivo y no es futuro; si no, None.
+
+    El nombre lleva la hora local de ``registrada`` en su propia zona (así lo escribe ``subir_tope``); el
+    orden se hace con el instante, de modo que no depende de la zona del proceso ni de la de cada decisión.
+    """
+    m = _NOMBRE_DECISION.fullmatch(nombre)
+    valor = meta.get("registrada")
+    if m is None or isinstance(valor, bool):
+        return None
+    if isinstance(valor, str):
+        try:
+            valor = datetime.fromisoformat(valor)
+        except ValueError:
+            return None
+    if not isinstance(valor, datetime) or valor.tzinfo is None or valor.utcoffset() is None:
+        return None
+    if valor.strftime("%Y-%m-%d-%H%M%S") != m.group(1) or valor > ahora:
+        return None
+    return valor
+
+
+def ultima_decision(dir_producto: Path, p_id: str, ahora: datetime | None = None) -> tuple[Decimal, Path] | None:
+    """``(tope_nuevo_usd, ruta)`` de la última ``decisiones/*-tope-apimart.md`` del producto con ``cita`` no vacía.
+
+    «Última» es la de ``registrada`` más reciente (instante con zona), no la que ordena última por nombre.
+    Se descartan las decisiones sin ``registrada`` legible con zona, las fechadas en el futuro y aquellas
+    cuyo nombre no cuadra con ``registrada``. Si dos válidas empatan en el instante con importes distintos,
+    o la última tiene un importe ilegible, no hay decisión clara: ``None`` (falla cerrado).
+    """
     carpeta = dir_producto / "decisiones"
     if not carpeta.is_dir():
         return None
-    for ruta in sorted(carpeta.glob("*-tope-apimart.md"), reverse=True):  # AAAA-MM-DD-HHMMSS: orden = fecha
+    ahora = ahora or datetime.now(UTC)
+    validas: list[tuple[datetime, Path, dict]] = []
+    for ruta in carpeta.glob("*-tope-apimart.md"):
         if ruta.is_symlink() or not ruta.is_file():
             continue
         try:
             meta, _ = frontmatter.leer(ruta)
         except (OSError, ValueError, yaml.YAMLError):
             continue
-        meta = meta or {}
+        meta = meta if isinstance(meta, dict) else {}
         cita = meta.get("cita")
         if meta.get("producto") != p_id or not isinstance(cita, str) or not cita.strip():
             continue
+        cuando = _registrada(meta, ruta.name, ahora)
+        if cuando is not None:
+            validas.append((cuando, ruta, meta))
+    if not validas:
+        return None
+    ultima = max(c for c, _, _ in validas)
+    elegidas: dict[Decimal, Path] = {}
+    for cuando, ruta, meta in sorted(validas, key=lambda v: v[1].name):
+        if cuando != ultima:
+            continue
         try:
-            return importe_usd(meta.get("tope_nuevo_usd"), f"decisiones/{ruta.name}: tope_nuevo_usd")
+            elegidas[importe_usd(meta.get("tope_nuevo_usd"), f"decisiones/{ruta.name}: tope_nuevo_usd")] = ruta
         except ConfigInvalida:
             return None
-    return None
+    return next(iter(elegidas.items())) if len(elegidas) == 1 else None
+
+
+def _tope_decidido(dir_producto: Path, p_id: str, ahora: datetime | None = None) -> Decimal | None:
+    """Importe de :func:`ultima_decision` (``None`` si no hay ninguna válida)."""
+    decision = ultima_decision(dir_producto, p_id, ahora)
+    return None if decision is None else decision[0]
 
 
 def tope_de(vault: Path, p_id: str, cfg: ConfigProducto) -> Decimal:
@@ -175,5 +225,7 @@ def tope_de(vault: Path, p_id: str, cfg: ConfigProducto) -> Decimal:
         raise ConfigInvalida(
             f"productos/{p_id}/PRODUCTO.md: apimart_tope_usd ({tope} USD) no coincide con la última decisión "
             "con la cita del usuario (decisiones/*-tope-apimart.md); no se genera nada. El tope solo se sube "
-            "con la cita literal del usuario: pide ayuda si no sabes de dónde sale ese valor")
+            "con la cita literal del usuario. Si una subida del tope se cortó a medias (la decisión está escrita "
+            "y PRODUCTO.md no), repite la subida con el mismo importe y la cita del usuario: termina de escribir "
+            "PRODUCTO.md sin otra decisión. Si no, pide ayuda: no sabes de dónde sale ese valor")
     return tope

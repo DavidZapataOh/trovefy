@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -17,7 +17,12 @@ from trovefy.apimart.gasto import (
     subir_tope,
 )
 from trovefy.aprobaciones.fuentes import BuzonNoDisponible
-from trovefy.producto.config import cargar_config, iniciar_config, tope_de
+from trovefy.producto.config import (
+    ConfigInvalida,
+    cargar_config,
+    iniciar_config,
+    tope_de,
+)
 from trovefy.vault import frontmatter
 from trovefy_ejecutor.esquema import cargar_propuesta
 
@@ -233,6 +238,62 @@ def test_subir_tope_sin_cita_o_menor_falla(vault, usd, cita):
         subir_tope(vault, P, usd, cita, AHORA)
     assert not (vault / "productos" / P / "decisiones").exists()
     assert "apimart_tope_usd" not in frontmatter.leer(vault / "productos" / P / "PRODUCTO.md")[0]
+
+
+def test_subir_tope_independiente_de_la_zona(vault):
+    """st.py: subidas desde zonas distintas; manda la última en el tiempo, no la que ordena último por nombre."""
+    utc = UTC
+    t0 = datetime(2026, 11, 14, 10, 0, 0, tzinfo=utc)
+    subir_tope(vault, P, Decimal(3), "sube a 3", t0)
+    subir_tope(vault, P, Decimal("4.5"), "sube a 4.5", t0 + timedelta(seconds=1))
+    subir_tope(vault, P, Decimal(6), "sube a 6", datetime(2026, 11, 14, 6, 0, 5, tzinfo=COT))
+    assert tope_de(vault, P, cargar_config(vault)) == Decimal(6)
+
+
+def test_subir_tope_cortado_se_termina_repitiendo(vault, monkeypatch):
+    """L-A: si subir_tope se corta tras la decisión y antes de PRODUCTO.md, repetirlo con el mismo importe termina."""
+    import trovefy.apimart.gasto as g
+
+    subir_tope(vault, P, Decimal(3), "sube a 3", AHORA)
+
+    def corte(*a, **k):
+        raise OSError("corte de luz")
+
+    monkeypatch.setattr(g, "actualizar_producto", corte)
+    with pytest.raises(OSError):
+        subir_tope(vault, P, Decimal(5), "sube a 5", AHORA + timedelta(minutes=1))
+    monkeypatch.undo()
+    with pytest.raises(ConfigInvalida, match="mismo importe"):
+        tope_de(vault, P, cargar_config(vault))
+    assert "mismo importe" in g.subir_tope.__doc__
+    with pytest.raises(ConfigInvalida):  # otro importe con la subida cortada pendiente no vale
+        subir_tope(vault, P, Decimal(7), "sube a 7", AHORA + timedelta(minutes=2))
+    ruta = subir_tope(vault, P, Decimal(5), "sube a 5", AHORA + timedelta(minutes=3))
+    assert ruta.name == "2026-11-14-100100-tope-apimart.md"  # la decisión ya escrita; no se duplica
+    assert len(list((vault / "productos" / P / "decisiones").glob("*-tope-apimart.md"))) == 2
+    assert tope_de(vault, P, cargar_config(vault)) == Decimal(5)
+    with pytest.raises(ValueError):  # ya terminada: el mismo importe ya no es mayor que el actual
+        subir_tope(vault, P, Decimal(5), "otra vez", AHORA + timedelta(minutes=4))
+
+
+def test_leer_costes_falla_cerrado_sin_costes_y_con_intentos(vault):
+    entregable = vault / "productos" / P / "entregable"
+    entregable.mkdir(parents=True)
+    (entregable / ".apimart-intentos.jsonl").write_text('{"intento": "i-1"}\n', encoding="utf-8")
+    with pytest.raises(CostesCorruptos, match="apimart-intentos"):
+        leer_costes(vault, P)
+    (entregable / "costes.csv").write_text("", encoding="utf-8")
+    with pytest.raises(CostesCorruptos, match="pide ayuda"):
+        leer_costes(vault, P)
+    anotar_coste(vault, P, fila())
+    assert len(leer_costes(vault, P)) == 1
+
+
+def test_nombre_de_intentos_coincide_con_lote():
+    import trovefy.apimart.gasto as g
+    from trovefy.apimart import lote
+
+    assert g.INTENTOS == lote.INTENTOS
 
 
 def test_subir_tope_con_secreto_falla(vault):

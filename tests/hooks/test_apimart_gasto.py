@@ -117,7 +117,7 @@ def test_comandos_permitidos(correr_hook, vault_tmp, cmd):
     'cat ~/.config/trovefy/claude"".env',
     "grep KEY ~/.config/trovefy/claude.env",
     "rg . ~/.config/trovefy/claude.env",
-    "git show HEAD:claude.env",
+    "git show HEAD:claude.env > /tmp/clave",  # L-B: git show sin escribir es lectura y pasa
     "uv run pytest --confcutdir ~/.config/trovefy/claude.env",
 ])
 def test_leer_claude_env_denegado(correr_hook, vault_tmp, cmd):
@@ -198,11 +198,16 @@ def test_decision_de_tope_a_mano_denegada(correr_hook, vault_tmp):
 @pytest.mark.parametrize("cmd", [
     "sed -i 's/apimart_tope_usd: 3/apimart_tope_usd: 300/' productos/p-0042-respira/PRODUCTO.md",
     "echo 'apimart_tope_usd: 300' >> PRODUCTO.md",
-    "rm config/producto.yaml",
-    "sed -i s/2.00/200/ config/producto.yaml",
 ])
 def test_bash_que_toca_el_tope_denegado(correr_hook, vault_tmp, cmd):
     assert correr_hook("apimart_gasto", _bash(cmd), vault_tmp)[0] == "deny", cmd
+
+
+@pytest.mark.parametrize("cmd", ["rm config/producto.yaml", "sed -i s/2.00/200/ config/producto.yaml"])
+def test_bash_que_toca_la_config_del_vault_denegado(correr_hook, vault_tmp, cmd):
+    """H-B: por ruta resuelta; la ruta relativa cuenta desde el cwd (aquí, el vault)."""
+    entrada = {"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": str(vault_tmp)}
+    assert correr_hook("apimart_gasto", entrada, vault_tmp)[0] == "deny", cmd
 
 
 # --- M3: el registro del gasto no se toca a mano --------------------------------------------------

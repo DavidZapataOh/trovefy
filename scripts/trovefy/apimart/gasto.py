@@ -25,7 +25,13 @@ from pathlib import Path
 
 from trovefy.aprobaciones import fuentes
 from trovefy.aprobaciones.fuentes import BuzonNoDisponible
-from trovefy.producto.config import cargar_config, importe_usd, tope_de
+from trovefy.producto.config import (
+    ConfigInvalida,
+    cargar_config,
+    importe_usd,
+    tope_de,
+    ultima_decision,
+)
 from trovefy.producto.rutas import entregable, validar_p_id
 from trovefy.secretos import buscar_secreto
 from trovefy.vault import frontmatter
@@ -37,6 +43,7 @@ CABECERA = ["fecha", "producto", "pieza", "imagen", "intento", "task_id", "model
 ESTADOS = ("enviando", "enviada", "completada", "fallida", "pendiente", "tope", "simulada")
 ESTADOS_QUE_GASTAN = ("enviando", "enviada", "completada", "fallida", "pendiente")
 ARCHIVO = "costes.csv"
+INTENTOS = ".apimart-intentos.jsonl"  # el mismo nombre que ``trovefy.apimart.lote.INTENTOS`` (lote importa gasto)
 SKILL = "/producto"
 
 
@@ -146,13 +153,25 @@ def _leer(texto: str) -> list[FilaCoste]:
 
 
 def leer_costes(vault: Path, p_id: str) -> list[FilaCoste]:
+    """Filas de ``costes.csv`` (``[]`` si el producto aún no gastó nada).
+
+    Falla cerrado: si existe ``.apimart-intentos.jsonl`` (ya hubo envíos) y ``costes.csv`` falta o está
+    vacío, el registro del gasto se perdió o se vació: ``CostesCorruptos``, nunca «cero gastado».
+    """
     ruta = ruta_costes(vault, p_id)
+    intentos = (ruta.parent / INTENTOS).exists()
     if not ruta.is_file():
+        if intentos:
+            raise CostesCorruptos(f"falta {ARCHIVO} pero existe {INTENTOS}: hubo envíos a APIMart y su gasto "
+                                  "no está registrado")
         return []
     try:
         texto = ruta.read_text(encoding="utf-8")
     except UnicodeDecodeError:
         raise CostesCorruptos(f"{ARCHIVO}: no es UTF-8") from None
+    if intentos and not texto.strip():
+        raise CostesCorruptos(f"{ARCHIVO} está vacío pero existe {INTENTOS}: hubo envíos a APIMart y su gasto "
+                              "no está registrado")
     return _leer(texto)
 
 
@@ -284,9 +303,16 @@ def _cita_md(cita: str) -> str:
 def subir_tope(vault: Path, p_id: str, usd: Decimal, cita: str, ahora: datetime) -> Path:
     """Sube el tope de APIMart del producto con la cita literal del usuario.
 
-    Escribe primero ``productos/<p>/decisiones/AAAA-MM-DD-HHMMSS-tope-apimart.md`` y después
-    ``PRODUCTO.md`` → ``apimart_tope_usd`` (fusión con ``actualizar_producto``: conserva el resto y el cuerpo).
+    Escribe primero ``productos/<p>/decisiones/AAAA-MM-DD-HHMMSS-tope-apimart.md`` (hora local de ``ahora``,
+    la misma que su ``registrada``) y después ``PRODUCTO.md`` → ``apimart_tope_usd`` (fusión con
+    ``actualizar_producto``: conserva el resto y el cuerpo).
     ``ValueError`` si falta la cita, trae un secreto o el tope nuevo no es mayor que el actual.
+
+    Recuperación tras un corte: si el proceso muere después de escribir la decisión y antes de
+    ``PRODUCTO.md``, ``tope_de`` falla cerrado (``ConfigInvalida``: no coinciden) y no se genera nada.
+    Para terminar, repite ``subir_tope`` con el mismo importe y la cita del usuario: al ver que la última
+    decisión ya es ese importe, solo escribe ``PRODUCTO.md`` (no crea otra decisión) y devuelve la ruta de
+    esa decisión. Con otro importe sigue fallando: hay que terminar antes la subida cortada.
     """
     vault, ahora = Path(vault), _con_zona(ahora)
     validar_p_id(p_id)
@@ -297,7 +323,17 @@ def subir_tope(vault: Path, p_id: str, usd: Decimal, cita: str, ahora: datetime)
     if buscar_secreto(cita):
         raise ValueError("la cita trae algo con forma de secreto; no se guarda")
     nuevo = importe_usd(str(usd) if isinstance(usd, Decimal) else usd, "tope nuevo")
-    anterior = tope_de(vault, p_id, cargar_config(vault))
+    try:
+        anterior = tope_de(vault, p_id, cargar_config(vault))
+    except ConfigInvalida:
+        pendiente = ultima_decision(ruta_producto(vault, p_id).parent, p_id, ahora)
+        if pendiente is None or pendiente[0] != nuevo:
+            raise
+        rel = pendiente[1].relative_to(vault).as_posix()
+        anadir_log(vault, SKILL, f"{p_id}: termina la subida del tope de APIMart a {nuevo} USD que se cortó", [rel],
+                   ahora=ahora)
+        actualizar_producto(vault, p_id, {"apimart_tope_usd": str(nuevo)}, [], SKILL, ahora)
+        return pendiente[1]
     if nuevo <= anterior:
         raise ValueError(f"el tope nuevo ({nuevo} USD) debe ser mayor que el actual ({anterior} USD)")
     meta = {"tipo": "decision", "fecha": ahora.date().isoformat(), "registrada": ahora.isoformat(timespec="seconds"),
