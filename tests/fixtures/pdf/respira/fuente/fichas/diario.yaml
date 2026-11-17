@@ -1,0 +1,6 @@
+id: diario
+titulo: Diario de sueño
+instrucciones: Cada mañana, anota a qué hora te acostaste y cuántos minutos tardaste en dormirte.
+tipo: tabla
+columnas: [Día, Hora, Minutos]
+filas: 7

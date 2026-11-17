@@ -1,0 +1,29 @@
+/* Maqueta A4 de Trovefy (§4.7; reglas de cap-voyage reescritas). Colores y tipos solo con var(--…):
+   los tokens salen de BRANDBOOK.md (tokens_css). Nunca se oculta el desborde: una página fija que desborda
+   se detecta por sus anclas ini-/fin- en el PDF, no se recorta. */
+@page{size:A4;margin:0}
+@page flujo{size:A4;margin:20mm 18mm 22mm;@bottom-center{content:counter(page);font-family:var(--fuente-texto);font-size:9pt;color:var(--color-primario)}}
+*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+html{font-family:var(--fuente-texto);font-size:11pt;line-height:1.5;color:var(--color-texto, var(--color-primario))}
+body{margin:0}
+h1,h2,h3,h4{font-family:var(--fuente-titulos);color:var(--color-primario);line-height:1.2}
+.flujo{page:flujo}
+.page{width:210mm;height:296.8mm;display:flex;flex-direction:column;break-after:page;box-sizing:border-box;padding:20mm 18mm}
+.push{margin-top:auto}
+.seccion{break-before:page}
+.fuentes{break-before:page;font-size:9pt}
+figure,.plantilla,.ejercicio{break-inside:avoid}
+figure img{max-width:100%}
+.portada{justify-content:center;text-align:center;background:var(--color-fondo)}
+.portada h1{font-size:30pt}
+.portada img{max-width:100%;max-height:150mm;margin:10mm auto 0}
+.indice ol{padding-left:6mm}
+.aviso-salud{font-size:9pt;border-top:0.5pt solid var(--color-primario);margin-top:8mm}
+.lograr,.recordar,.ejercicio,.plantilla{border-left:3pt solid var(--color-acento, var(--color-primario));padding:2mm 4mm;margin:4mm 0}
+.instrucciones{margin:0 0 5mm}
+.ficha table{width:100%;border-collapse:collapse}
+.ficha th,.ficha td{border:0.5pt solid var(--color-primario);padding:1.5mm 2mm;height:7mm;text-align:left}
+.ficha .linea{border-bottom:0.5pt solid var(--color-primario);height:9mm}
+.ficha .casillas{list-style:none;padding:0;margin:0}
+.ficha .casillas li{min-height:9mm}
+.casilla{display:inline-block;width:4mm;height:4mm;border:0.5pt solid var(--color-primario);margin-right:3mm}
