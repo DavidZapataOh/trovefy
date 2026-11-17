@@ -38,6 +38,7 @@ from trovefy.landing.constantes import (
     CPU_X,
     DPR_MOVIL,
     HOSTS_META,
+    HOSTS_PLATAFORMA_IMPULTIENDA,
     LATENCIA_MS,
     LCP_MAX_MS,
     RONDAS_LCP,
@@ -782,6 +783,8 @@ def hosts_propios(vault: Path, datos: DatosLanding) -> tuple[str, ...]:
     for tienda in dict.fromkeys((datos.tienda, c.tienda if c else None)):
         if (host := host_tienda(tienda)) is not None:
             reglas.append("." + dominio_registrable(host))
+            if casa_host(host, (".impultienda.ar",)):
+                reglas += HOSTS_PLATAFORMA_IMPULTIENDA
     reglas += list(c.hosts_tienda) if c else []
     return tuple(dict.fromkeys(r for r in reglas if not casa_host(r.lstrip("."), HOSTS_META)))
 

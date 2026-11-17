@@ -20,6 +20,11 @@ ESTADOS_LANDING = ("producido", "con_landing", "con_checkout", "listo")  # contr
 # Hosts de Meta (ruling I-4): la QA los aborta sin contarlos en las dos rutas (una QA nunca manda eventos a Meta)
 # y la sonda no los anota como hosts de la tienda. Un «.» delante = ese dominio y todos sus subdominios.
 HOSTS_META = (".facebook.com", ".facebook.net", ".fbcdn.net", ".fbsbx.com", ".instagram.com")
+# Lo que carga la propia plataforma Impultienda alrededor de la landing (QA publicada real de BG, 2026-11-17):
+# las fuentes de su plantilla, su almacenamiento de imágenes (adonde mueve las imágenes en línea) y la analítica
+# de Cloudflare que tiene delante. En la QA publicada de la ruta Impultienda son AVISO, no terceros (FALLA).
+HOSTS_PLATAFORMA_IMPULTIENDA = ("fonts.googleapis.com", "fonts.gstatic.com", "static.cloudflareinsights.com",
+                                "aekpgsbqjzqntlbucbts.supabase.co")
 
 
 def casa_host(host: str, reglas) -> bool:
