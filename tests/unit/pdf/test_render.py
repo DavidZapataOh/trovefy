@@ -827,6 +827,21 @@ def _ids_por_pagina(paginas) -> list[set[str]]:
     return salida
 
 
+def _relleno_de_pagina(pagina) -> float:
+    """Fracción del área de texto de una página en flujo (márgenes 20 mm arriba y 22 mm abajo) que llega
+    hasta la caja de contenido más baja."""
+    fondo = max(c.position_y + c.margin_height() for c in _cajas(pagina._page_box)
+                if getattr(c, "element_tag", "") in {"p", "li", "h2", "h3", "h4", "div", "table"})
+    return (fondo - 20 * _MM) / (pagina.height - 42 * _MM)
+
+
+def _ultima_caja_de_la_pagina(pagina) -> str:
+    """Etiqueta del bloque más bajo de la página (sin contar el texto dentro de los recuadros)."""
+    bloques = [c for c in _cajas(pagina._page_box)
+               if getattr(c, "element_tag", "") in {"p", "h2", "h3", "h4", "div", "ul", "ol", "table"}]
+    return max(bloques, key=lambda c: (c.position_y + c.margin_height(), -c.position_y)).element_tag
+
+
 @necesita_pdf
 def test_recuadros_no_se_separan_de_su_texto(vault_respira):
     raiz = pieza(vault_respira, "p-0042-respira", "principal").raiz
@@ -837,14 +852,55 @@ def test_recuadros_no_se_separan_de_su_texto(vault_respira):
     paginas = _documento(r.html.read_text(encoding="utf-8"), raiz).pages
     ids = _ids_por_pagina(paginas)
     for k in range(1, len(rellenos) + 1):
-        for recuadro in (f"e-{k}", f"r-{k}"):
-            pagina = next(i for i, s in enumerate(ids) if recuadro in s)
-            # el final del párrafo anterior está en la misma página que el recuadro
-            assert f"antes-{k}" in ids[pagina], (recuadro, pagina)
-    # y sin huecos grandes: ninguna página de texto (salvo la última antes de las fichas) por debajo de
-    # media página
+        pagina_e = next(i for i, s in enumerate(ids) if f"e-{k}" in s)
+        pagina_r = next(i for i, s in enumerate(ids) if f"r-{k}" in s)
+        # el recordatorio nunca abre página solo con su ejercicio en la página anterior
+        assert pagina_r == pagina_e, (k, pagina_e, pagina_r)
+    # y sin huecos grandes: ninguna página de texto (salvo la última antes de las fichas) por debajo del 80 %
     primera_ficha = next(i for i, p in enumerate(paginas) if "ini-diario" in p.anchors)
     for i in range(2, primera_ficha - 1):
-        cajas = [c for c in _cajas(paginas[i]._page_box) if getattr(c, "element_tag", "") == "p"]
-        fondo = max(c.position_y + c.margin_height() for c in cajas)
-        assert fondo >= paginas[i].height * 0.6, (i, fondo / _MM)
+        assert _relleno_de_pagina(paginas[i]) >= 0.8, (i, _relleno_de_pagina(paginas[i]))
+
+
+def _secciones_con_cadena(raiz: Path, rellenos: list[int]) -> None:
+    """Como «Ако нищо не ти харесва» del primer producto: cada sección acaba en un h3 con un solo párrafo,
+    un ``ejercicio`` y un ``recordar``. Con rellenos distintos, la cadena cae en el corte de página."""
+    carpeta = raiz / "fuente" / "secciones"
+    for f in carpeta.glob("*.html"):
+        f.unlink()
+    for k, n in enumerate(rellenos, 1):
+        (carpeta / f"{k:02d}-cadena.html").write_text(
+            f"<h2>Cadena {k}</h2>\n"
+            f'<div class="lograr"><p>Al terminar la cadena {k} sabrás elegir tu postura.</p></div>\n'
+            f"<h3>Antes de la cadena {k}</h3>\n{_parrafos(n, f'Cadena {k}')}\n"
+            f"<h3>Entre medias {k}</h3>\n{_parrafos(1, f'Medio {k}')}\n"
+            f'<h3 id="h-{k}">Si nada te gusta {k}</h3>\n'
+            f"<p>Si ninguna postura te sirve en la noche {k}, prueba otra: tumbado de lado, sentado con la "
+            f"espalda apoyada o de pie junto a la ventana. Lo que importa es que la salida sea más larga que "
+            f"la entrada y que {_COSAS[k % len(_COSAS)]} se quede suelta.</p>\n"
+            f'<div class="ejercicio" id="e-{k}"><p>Ejercicio {k}: elige dos posturas de la lista, prueba cada '
+            f"una tres minutos con la mano en la tripa y apunta en la ficha cuál te dejó más tranquilo y por "
+            f"qué; repítelo mañana con las otras dos.</p></div>\n"
+            f'<div class="recordar" id="r-{k}"><p>Recuerda {k}: no hay postura correcta, hay la que te deja '
+            f"respirar despacio; si te duermes en mitad del ejercicio, ha funcionado.</p></div>\n",
+            encoding="utf-8")
+
+
+@necesita_pdf
+def test_cadena_de_titulo_parrafo_y_recuadros_no_deja_hueco_al_pie(vault_respira):
+    raiz = pieza(vault_respira, "p-0042-respira", "principal").raiz
+    rellenos = [1, 2, 3, 2, 1, 3, 2, 4, 1, 2, 3, 1]
+    _secciones_con_cadena(raiz, rellenos)
+    r = producir_pdf(vault_respira, "p-0042-respira", "principal", CFG, ahora=AHORA)
+    assert r.apto, r.informe.hallazgos
+    paginas = _documento(r.html.read_text(encoding="utf-8"), raiz).pages
+    ids = _ids_por_pagina(paginas)
+    primera_ficha = next(i for i, p in enumerate(paginas) if "ini-diario" in p.anchors)
+    for i in range(2, primera_ficha - 1):
+        relleno = _relleno_de_pagina(paginas[i])
+        assert relleno >= 0.8, (i, round(relleno, 2))  # nunca más de un 20 % vacío al pie
+    for i in range(1, primera_ficha):
+        assert _ultima_caja_de_la_pagina(paginas[i]) not in {"h2", "h3"}, i  # un título no cierra página
+    for k in range(1, len(rellenos) + 1):
+        pagina_e = next(i for i, s in enumerate(ids) if f"e-{k}" in s)
+        assert f"r-{k}" in ids[pagina_e], k  # el recordatorio va con su ejercicio
