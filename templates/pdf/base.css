@@ -21,9 +21,12 @@ a{color:var(--color-primario);text-decoration:none}
 .seccion>h2:first-child{margin-top:0;padding-top:5mm;border-top:0.75pt solid var(--color-primario)}
 .fuentes{break-before:page;font-size:9pt}
 figure,.plantilla,.ejercicio,.recordar,.lograr{break-inside:avoid}
-/* Un ejercicio o un recordatorio nunca abre página solo: se lleva consigo las últimas líneas del texto que
-   lo precede (el párrafo se corta antes; no queda hueco de página). */
-.ejercicio,.recordar{break-before:avoid}
+/* Cadenas cortas: un ejercicio puede abrir página (si se pegara al párrafo, el título, su párrafo y los dos
+   recuadros saltarían enteros y dejarían un hueco de media página al pie). Solo el recordatorio que sigue a
+   un ejercicio va con él: nunca abre página solo. */
+.ejercicio+.recordar{break-before:avoid}
+/* Ni una línea suelta al pie ni al principio de página: el párrafo se corta con al menos dos a cada lado. */
+p,li{orphans:2;widows:2}
 figure img{max-width:100%}
 .portada{justify-content:center;text-align:center;background:var(--color-fondo)}
 .portada h1{font-size:30pt}
