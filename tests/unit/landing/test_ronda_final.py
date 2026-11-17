@@ -336,8 +336,8 @@ def test_publicar_no_pisa_la_qa_local(tmp_path):
 
 
 @pytest.mark.parametrize(("sonda", "linea"), [
-    (None, "Hosting: no medido"),
-    ("rota", "Hosting: no medido"),
+    (None, "Hosting: impultienda (pegado manual)"),
+    ("rota", "Hosting: impultienda (pegado manual)"),
     ("impultienda", "Hosting: impultienda"),
     ("cloudflare", "Hosting: cloudflare"),
 ])
@@ -351,8 +351,8 @@ def test_estado_dice_el_hosting(entorno, capsys, sonda, linea):
     assert cli.main(["landing", "estado", "--producto", P, "--pais", "ZZ"]) == 0
     salida = capsys.readouterr().out
     assert linea in salida, salida
-    if linea.endswith("no medido"):
-        assert "trovefy landing sonda" in salida
+    if sonda in (None, "rota"):  # plan 18b: sin sonda, el pegado manual; la sonda automática sigue «no medido»
+        assert "--manual" in salida and "no medido" in salida
 
 
 # --- M7: un solo lector de la versión y un solo SHA ------------------------------------------------

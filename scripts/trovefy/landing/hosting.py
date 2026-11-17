@@ -380,7 +380,7 @@ def _linea_flujo(lineas: list[str], i: int, tienda: str, nota: str) -> bool:
     return True
 
 
-def guardar_tienda(vault: Path, pais: str, tienda: str, ahora: datetime) -> bool:
+def guardar_tienda(vault: Path, pais: str, tienda: str, ahora: datetime, orden: str = "trovefy landing sonda") -> bool:
     """Escribe `<PAIS>.tienda` en `config/mercados.yaml` (palabra del usuario, con su fecha en un comentario).
 
     Solo cambia esa clave (el resto del archivo, comentarios incluidos, queda igual). `False` si ya estaba;
@@ -404,7 +404,7 @@ def guardar_tienda(vault: Path, pais: str, tienda: str, ahora: datetime) -> bool
         raise ValueError(f"{pais} ya tiene otra tienda en config/mercados.yaml ({actual}): si es a propósito, "
                          "cámbiala tú a mano")
     fecha = ahora.astimezone(ZONA_NEGOCIO).date().isoformat()
-    nota = f"  # usuario, {fecha} (trovefy landing sonda)"
+    nota = f"  # usuario, {fecha} ({orden})"
     lineas = texto.splitlines(keepends=True)
     hecho = False
     for i, linea in enumerate(lineas):
