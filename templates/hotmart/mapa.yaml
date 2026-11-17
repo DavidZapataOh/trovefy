@@ -17,6 +17,7 @@ pantallas:
   datos_financieros:
     url: https://app.hotmart.com/account/financial
     firma: ["Datos financieros"]
+    prohibida: true  # pantalla de pagos: se lee, nunca se escribe ni se captura
     campos:
       cuentas: {patron: 'Cuentas registradas:\s*(\d+)'}
       pais: {patron: 'País de la cuenta:\s*([^<\n]+)'}

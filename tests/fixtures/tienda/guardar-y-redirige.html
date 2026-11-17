@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Editar producto (redirige al guardar)</title></head>
+<body>
+  <h1>Editar producto</h1>
+  <!-- Caso de la revisión H-1: «Guardar» desactiva el campo y, 1,5 s después, lleva a otra pantalla que tiene
+       un campo con la misma etiqueta. Nada de lo que se escriba después de pulsar debe acabar en esa pantalla. -->
+  <label for="precio">Precio</label><input id="precio" value="13.90">
+  <button onclick="document.getElementById('precio').disabled = true; setTimeout(() => location.href = '/otra-pantalla.html', 1500)">Guardar</button>
+</body>
+</html>

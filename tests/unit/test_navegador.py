@@ -109,3 +109,86 @@ def test_sesion_caducada_otras_rutas_de_login(url):
 def test_sesion_caducada_no_confunde_rutas_parecidas():
     assert not sesion_caducada("https://blog.example.com/authors/ana")
     assert not sesion_caducada("https://app.impultienda.ar/dashboard/plan")
+
+
+class _PlaywrightFalso:
+    """`sync_playwright()` falso: devuelve un MagicMock como `p` y anota si se cerró."""
+
+    def __init__(self):
+        from unittest.mock import MagicMock
+
+        self.p = MagicMock()
+        self.ctx = self.p.chromium.launch_persistent_context.return_value
+        self.ctx.pages = []
+        self.navegador = self.p.chromium.launch.return_value
+        self.efimero = self.navegador.new_context.return_value
+        self.efimero.pages = []
+
+    def __call__(self):
+        return self
+
+    def __enter__(self):
+        return self.p
+
+    def __exit__(self, *_a):
+        return None
+
+
+@pytest.fixture
+def pw_falso(tmp_path, monkeypatch):
+    import playwright.sync_api
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    falso = _PlaywrightFalso()
+    monkeypatch.setattr(playwright.sync_api, "sync_playwright", falso)
+    return falso
+
+
+def test_sesion_con_perfil_y_viewport(pw_falso, tmp_path):
+    from trovefy.navegador import sesion
+
+    with sesion("impultienda", visible=True, viewport=(390, 844)) as page:
+        assert page is pw_falso.ctx.new_page.return_value
+        pw_falso.ctx.close.assert_not_called()
+    kw = pw_falso.p.chromium.launch_persistent_context.call_args.kwargs
+    assert kw["user_data_dir"] == str(tmp_path / ".config/trovefy/pw-impultienda")
+    assert kw["headless"] is False and kw["chromium_sandbox"] is True
+    assert kw["viewport"] == {"width": 390, "height": 844}
+    pw_falso.ctx.close.assert_called_once()
+
+
+def test_sesion_sin_perfil_es_efimera(pw_falso, tmp_path):
+    from trovefy.navegador import sesion
+
+    with sesion("comprador", visible=False, perfil_persistente=False) as page:
+        assert page is pw_falso.efimero.new_page.return_value
+    pw_falso.p.chromium.launch_persistent_context.assert_not_called()
+    assert pw_falso.p.chromium.launch.call_args.kwargs == {"headless": True, "chromium_sandbox": True}
+    assert pw_falso.navegador.new_context.call_args.kwargs == {}
+    pw_falso.efimero.close.assert_called_once()
+    pw_falso.navegador.close.assert_called_once()
+    assert not (tmp_path / ".config/trovefy/pw-comprador").exists()
+
+
+def test_sesion_cierra_aunque_falle_y_suelta_el_candado(pw_falso):
+    from trovefy.navegador import sesion
+
+    with pytest.raises(RuntimeError), sesion("impultienda"):
+        raise RuntimeError("parada")
+    pw_falso.ctx.close.assert_called_once()
+    with sesion("impultienda"):  # el candado quedó libre
+        pass
+
+
+def test_sesion_un_navegador_a_la_vez(pw_falso):
+    from trovefy.navegador import sesion
+
+    with sesion("impultienda"), pytest.raises(NavegadorError, match="ya hay un navegador"), sesion("meta"):
+        pass
+
+
+def test_sesion_rechaza_servicio_invalido(pw_falso):
+    from trovefy.navegador import sesion
+
+    with pytest.raises(ValueError), sesion("../x", perfil_persistente=False):
+        pass
