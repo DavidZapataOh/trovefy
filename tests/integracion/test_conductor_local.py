@@ -57,6 +57,14 @@ def mapa_local(base: str) -> dict:
                          "controles": {"precio": {"etiqueta": "Precio", "tipo": "precio"},
                                        "guardar": {"etiqueta": "Guardar", "rol": "button", "tipo": "boton"}}},
             "login": {"url": base + "/login.html", "firma": ["Iniciar sesión"]},
+            # segunda revisión
+            "spa": {"url": base + "/spa-cambia.html", "firma": ["Editar producto"], **confirmada,
+                    "controles": {"precio": {"etiqueta": "Precio", "tipo": "precio"},
+                                  "guardar": {"etiqueta": "Guardar", "rol": "button", "tipo": "boton"}}},
+            "ventana": {"url": base + "/ventana.html", "firma": ["Editar producto"], **confirmada,
+                        "controles": {"guardar": {"etiqueta": "Guardar", "rol": "button", "tipo": "boton"}}},
+            "configuraciones": {"url": base + "/configuraciones.html", "firma": ["Pasarelas de pago"]},  # sin marca
+            "con_marco": {"url": base + "/con-marco.html", "firma": ["Editar producto"]},
         },
     }
 
@@ -166,3 +174,91 @@ def test_sesion_efimera_con_viewport(servidor_local, tmp_path):
         page.goto(servidor_local + "/producto.html")
         assert page.evaluate("window.innerWidth") == 390
     assert not (tmp_path / ".config/trovefy/pw-comprador").exists()
+
+
+# --- Segunda revisión: casos de probe.py / probe2.py con Chromium real -------------------------------------------
+
+
+def test_spa_que_cambia_la_pantalla_bajo_el_campo_para(servidor_local):
+    # L-a: el campo (el mismo nodo) acaba en una pantalla «Cuenta para cobrar» con URL inocente (/cuenta)
+    from trovefy.navegador import sesion
+    from trovefy.tienda.conductor import FirmaNoCasa, Parada
+
+    with sesion("prueba", visible=False) as page:
+        c = _conductor(page, servidor_local)
+        c.ir("spa")
+        with pytest.raises(FirmaNoCasa, match="sí se hizo"):
+            c.poner("spa", "precio", "99")
+        assert page.inner_text("h1") == "Cuenta para cobrar"
+        with pytest.raises(Parada):  # y nada más hasta volver a ir()
+            c.poner("spa", "precio", "77")
+        assert page.locator("#precio").input_value() == "99"
+        c.ir("spa")
+        with pytest.raises(FirmaNoCasa, match="sí se hizo"):
+            c.pulsar("spa", "guardar")
+
+
+def test_archivo_en_un_campo_sustituido_es_incierto(servidor_local, tmp_path, monkeypatch):
+    # L-b (probe.py, caso 3): la página sustituye el campo de archivo justo después de fijarlo
+    from trovefy.navegador import sesion
+    from trovefy.tienda.conductor import AccionIncierta, Conductor
+
+    original = Conductor._recomprobar
+
+    def y_sustituye(self, pantalla, zona):
+        original(self, pantalla, zona)
+        self.page.evaluate("""() => { const o = document.getElementById('entrega'); const n = document.createElement('input');
+            n.type = 'file'; n.id = 'entrega2'; n.setAttribute('aria-label', 'Entregable'); o.replaceWith(n); }""")
+
+    monkeypatch.setattr(Conductor, "_recomprobar", y_sustituye)
+    pdf = tmp_path / "e.pdf"
+    pdf.write_bytes(b"%PDF-1.4 prueba")
+    with sesion("prueba", visible=False) as page:
+        c = _conductor(page, servidor_local)
+        c.ir("producto")
+        with pytest.raises(AccionIncierta, match="archivo"):
+            c.poner("producto", "entrega", pdf)
+        assert page.evaluate("document.getElementById('entrega2').files.length") == 0
+
+
+def test_pulsar_que_abre_una_ventana_la_cierra_y_para(servidor_local):
+    # popups (probe.py, caso 9): la ventana nueva se cierra y el conductor para
+    from trovefy.navegador import sesion
+    from trovefy.tienda.conductor import Parada
+
+    with sesion("prueba", visible=False) as page:
+        c = _conductor(page, servidor_local)
+        c.ir("ventana")
+        with pytest.raises(Parada, match="se abrió otra ventana; la cerré y paro"):
+            c.pulsar("ventana", "guardar")
+        page.wait_for_timeout(500)
+        assert [p.url for p in page.context.pages] == [page.url]
+        with pytest.raises(Parada):
+            c.pulsar("ventana", "guardar")
+
+
+def test_no_captura_una_pantalla_de_pagos_sin_marca(servidor_local, tmp_path):
+    # M-a (probe2.py): «Pasarelas de pago» sin `prohibida: true` ni controles; el token está en texto plano
+    from trovefy.navegador import sesion
+    from trovefy.tienda.conductor import ZonaProhibida
+
+    with sesion("prueba", visible=False) as page:
+        c = _conductor(page, servidor_local)
+        c.ir("configuraciones")
+        with pytest.raises(ZonaProhibida):
+            c.capturar(tmp_path / "pagos.png")
+    assert list(tmp_path.glob("*.png")) == []
+
+
+def test_no_captura_una_pagina_con_marcos(servidor_local, tmp_path):
+    # M-b (probe2.py): el token está dentro de un iframe, donde las máscaras no llegan
+    from trovefy.navegador import sesion
+    from trovefy.tienda.conductor import Parada
+
+    with sesion("prueba", visible=False) as page:
+        c = _conductor(page, servidor_local)
+        c.ir("con_marco")
+        page.wait_for_function("document.querySelector('iframe').contentDocument?.readyState === 'complete'")
+        with pytest.raises(Parada, match="marcos"):
+            c.capturar(tmp_path / "marco.png")
+    assert list(tmp_path.glob("*.png")) == []

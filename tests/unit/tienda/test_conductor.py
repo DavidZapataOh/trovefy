@@ -6,6 +6,7 @@ import stat
 import pytest
 from trovefy import navegador
 from trovefy.tienda.conductor import (
+    AccionIncierta,
     Conductor,
     ControlSecreto,
     FirmaNoCasa,
@@ -701,3 +702,100 @@ def test_la_espera_es_por_dominio_registrable():
     reloj.t += 1.0
     navegador.esperar_entre_navegaciones("mitienda.impultienda.ar", **kw)
     assert reloj.dormido == [4.0]
+
+
+# --- Segunda ronda de revisión ---------------------------------------------------------------------------------
+
+MAPA_AJUSTES = copy.deepcopy(MAPA)
+MAPA_AJUSTES["pantallas"]["ajustes"] = {"url": BASE + "/configuraciones", "firma": ["Pasarelas de pago"]}  # sin marca
+
+
+def test_capturar_pantalla_de_cobro_sin_marca_para(tmp_path):
+    # M-a: sin `prohibida: true` y sin controles, pero la firma es de cobros: no se captura
+    p = PaginaFalsa(texto="Pasarelas de pago · APP_USR-123")
+    c = conductor(p, MAPA_AJUSTES)
+    c.ir("ajustes")
+    with pytest.raises(ZonaProhibida):
+        c.capturar(tmp_path / "t.png")
+    assert p.capturas == [] and not (tmp_path / "t.png").exists()
+
+
+def test_capturar_con_marcos_incrustados_para(tmp_path):
+    # M-b: lo que hay dentro de un iframe no se comprueba ni se tapa: no se captura
+    p = pagina_tracking()
+    p.frames.append("iframe")
+    c = conductor(p)
+    c.ir("tracking")
+    with pytest.raises(Parada, match="marco"):
+        c.capturar(tmp_path / "t.png")
+    assert p.capturas == [] and not (tmp_path / "t.png").exists()
+
+
+def test_tras_escribir_la_pantalla_cambia_bajo_el_elemento_para():
+    # L-a: una SPA del mismo origen cambia la pantalla y conserva el nodo fijado (probe.py, casos 4 y 5)
+    def cambia(pagina, _clave, _accion):
+        pagina.texto = "Cuenta para cobrar · CBU destino"
+
+    p, c = en_producto()
+    p.al_actuar = cambia
+    with pytest.raises(FirmaNoCasa, match="sí se hizo"):
+        c.poner("producto", "precio", "14.90")
+    assert p.acciones == [("fill", "Precio", "14.90")]
+    p.al_actuar = None
+    p.texto = "Editar producto"
+    with pytest.raises(Parada):
+        c.poner("producto", "nombre", "Guía nueva")
+    assert len(p.acciones) == 1
+
+
+def test_tras_pulsar_la_pantalla_cambia_para():
+    def cambia(pagina, _clave):
+        pagina.texto = "Cuenta para cobrar"
+
+    p, c = en_producto()
+    p.al_pulsar = cambia
+    with pytest.raises(FirmaNoCasa, match="sí se hizo"):
+        c.pulsar("producto", "guardar")
+
+
+@pytest.mark.parametrize("cambio", ["sustituye", "vacia"])
+def test_archivo_que_no_queda_en_el_elemento_es_incierto(tmp_path, cambio):
+    # L-b: set_input_files sobre un nodo ya sustituido no falla en Chromium; hay que comprobar que quedó
+    def tras_subir(pagina, clave, _accion):
+        if cambio == "sustituye":
+            pagina.elementos[clave] = [ElementoFalso()]
+        else:
+            pagina.elementos[clave][0].valor = ""
+
+    pdf = tmp_path / "e.pdf"
+    pdf.write_bytes(b"%PDF")
+    p, c = en_producto()
+    p.al_actuar = tras_subir
+    with pytest.raises(AccionIncierta, match="archivo"):
+        c.poner("producto", "entrega", pdf)
+    with pytest.raises(Parada):
+        c.leer("producto", "precio")
+
+
+def test_pulsar_que_abre_otra_ventana_la_cierra_y_para():
+    ventanas = []
+
+    def abre(pagina, _clave):
+        ventanas.append(pagina.context.abrir("https://localhost/pagos.html"))
+
+    p, c = en_producto()
+    p.al_pulsar = abre
+    with pytest.raises(Parada, match="se abrió otra ventana; la cerré y paro"):
+        c.pulsar("producto", "guardar")
+    assert ventanas and all(v.cerrada for v in ventanas)
+    assert p.context.oyentes.get("page") == []  # el oyente se quita
+    p.al_pulsar = None
+    with pytest.raises(Parada):  # _actual se borró
+        c.poner("producto", "precio", "13.90")
+    assert p.acciones == [("click", "Guardar")]
+
+
+def test_pulsar_sin_ventanas_nuevas_no_deja_oyentes():
+    p, c = en_producto()
+    c.pulsar("producto", "guardar")
+    assert p.context.oyentes.get("page") == []

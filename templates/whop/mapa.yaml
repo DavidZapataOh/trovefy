@@ -11,5 +11,6 @@ pantallas:
   balances:
     url: https://whop.com/dashboard/balance/
     firma: ["Balances", "Payout methods"]
+    prohibida: true  # pantalla de pagos: se lee, nunca se escribe ni se captura
     campos:
       kyc: {patron: '(?:Identity verification|Verificación de identidad):\s*([^<\n]+)'}

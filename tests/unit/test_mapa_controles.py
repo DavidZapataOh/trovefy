@@ -155,7 +155,8 @@ def test_pantalla_de_cobro_prohibida_o_sin_controles_carga(tmp_path):
         "solo_lectura": base,
         "prohibida": {**base, "prohibida": True, "controles": {"x": {"css": "button", "tipo": "boton"}}},
     }))
-    assert prohibida(m, "solo_lectura") is False and prohibida(m, "prohibida") is True
+    # M-a (segunda ronda): una pantalla de cobro es prohibida aunque no lo diga ni tenga controles
+    assert prohibida(m, "solo_lectura") is True and prohibida(m, "prohibida") is True
 
 
 def test_prohibida_no_booleana_invalida(tmp_path):
@@ -362,3 +363,98 @@ def test_origenes_de(tmp_path):
     local = {"capturado": None, "fuente": "x", "hosts": ["127.0.0.1"],
              "pantallas": {"a": {"url": "http://127.0.0.1:8123/a.html", "firma": ["A"]}}}
     assert ("http", "127.0.0.1", 8123) in origenes_de(local)
+
+
+# --- Segunda ronda, M-a: prohibida = marcada o con aspecto de cobro (url, firma, etiquetas, css) -------------
+
+
+@pytest.mark.parametrize(
+    "pantalla",
+    [
+        {"url": "https://app.ejemplo.test/configuracion/impul%2Dpay", "firma": ["Ajustes"]},
+        {"url": "https://app.ejemplo.test/configuracion", "firma": ["Pasarelas de pago"]},
+        {"url": "https://app.ejemplo.test/configuracion", "firma": ["Ajustes"], "prohibida": True,
+         "controles": {"x": {"css": "input[name=cbu]", "tipo": "texto"}}},
+    ],
+)
+def test_prohibida_sin_marca_si_parece_de_cobro(tmp_path, pantalla):
+    m = cargar(escribir(tmp_path, {"p": pantalla}))
+    assert prohibida(m, "p") is True
+
+
+def test_prohibida_en_un_mapa_en_memoria_sin_marca():
+    m = {"pantallas": {"p": {"url": "https://x.test/a", "firma": ["Ajustes"],
+                             "controles": {"x": {"etiqueta": "Número de tarjeta", "tipo": "texto"}}}}}
+    assert prohibida(m, "p") is True
+    m["pantallas"]["p"]["controles"]["x"]["etiqueta"] = "Precio"
+    assert prohibida(m, "p") is False
+
+
+@pytest.mark.parametrize(("servicio", "pantalla"),
+                         [("impultienda", "pasarelas"), ("whop", "balances"), ("hotmart", "datos_financieros")])
+def test_plantillas_marcan_sus_pantallas_de_pago(servicio, pantalla):
+    crudo = yaml.safe_load((RAIZ / f"templates/{servicio}/mapa.yaml").read_text(encoding="utf-8"))
+    assert crudo["pantallas"][pantalla].get("prohibida") is True
+    assert prohibida(cargar(RAIZ / f"templates/{servicio}/mapa.yaml"), pantalla) is True
+
+
+@pytest.mark.parametrize(("servicio", "pantalla"),
+                         [("impultienda", "plan"), ("impultienda", "tiendas"), ("impultienda", "diseno_contenido"),
+                          ("hotmart", "productos")])
+def test_plantillas_pantallas_normales_no_prohibidas(servicio, pantalla):
+    assert prohibida(cargar(RAIZ / f"templates/{servicio}/mapa.yaml"), pantalla) is False
+
+
+# --- Segunda ronda, L-c: más términos, homoglifos y términos cortos solo como palabra entera ------------------
+
+TERMINOS_SEGUNDA_RONDA = (
+    "financial", "balance", "pagamento", "saque", "senha", "cartao", "clave", "facturacion", "credencial",
+    "apikey", "wallet", "saldo",
+)
+
+
+def test_terminos_de_la_segunda_ronda():
+    for termino in TERMINOS_SEGUNDA_RONDA:
+        assert termino in PALABRAS_PROHIBIDAS, termino
+
+
+def test_checkout_no_es_palabra_prohibida(tmp_path):
+    # Las pantallas `checkout` / `checkout_hotmart` de los planes 18/19 se configuran con el conductor (idioma,
+    # campos, temporizador…): «checkout» como palabra prohibida las haría imposibles de cargar con controles.
+    assert "checkout" not in PALABRAS_PROHIBIDAS
+    pantalla = {**PANTALLA_PRODUCTO, "url": "https://app.ejemplo.test/dashboard/checkout", "firma": ["Diseño de checkout"]}
+    m = cargar(escribir(tmp_path, {"checkout": pantalla}))
+    assert prohibida(m, "checkout") is False
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        # lista de la segunda revisión (palabras.py, con Chromium real)
+        "Impul-Pay", "impul%2Dpay", "impul%252Dpay", "IMPUL_PAY", "impul pay", "impul.pay", "impul\u200bpay",
+        "contrase%C3%B1a", "Contrasena", "CONTRASE\u00d1A", "\uff50\uff41\uff53\uff53\uff57\uff4f\uff52\uff44", "p%61ssword", "pass\u00adword",
+        "/settings/payments", "/billing", "/retiros", "/withdrawals", "/payouts", "/datos-financieros",
+        "/cuenta-bancaria", "/tarjetas", "/mercado-pago", "/mercado_pago", "/MercadoPago", "/pagamentos", "/saque",
+        "/senha", "/cartao", "/cartão", "/clave", "/cambiar-clave", "/facturacion", "/facturación", "/wallet",
+        "/saldo", "/credenciales", "/api-keys", "/account/financial", "/dashboard/balance/",
+        # homoglifos cirílicos y griegos
+        "p\u0430ssword", "\u0440\u0430ssword", "\u0456mpul p\u0430y", "\u0441ard", "/s\u0435tting/\u0441ard",
+        "\u0391PI-KEY", "B\u0391NK", "c\u0430rtao",
+        # términos cortos como palabra entera (también en plural)
+        "/connect/stripe", "Tu CBU o CVU", "IBAN", "/settings/cards", "card-number", "Bank account", "c%61rd",
+    ],
+)
+def test_palabra_prohibida_casa_tras_la_segunda_ronda(texto):
+    assert palabra_prohibida(texto) is not None, texto
+
+
+@pytest.mark.parametrize(
+    "texto",
+    [
+        "/productos/cardio-max/editar", "/store/ScoreCard", "/p/7xCbUq9", "Ibáñez", "/striped-tee", "/discard",
+        "Mi cardigan", "/tienda/ivan-k", "/pagina/inicio", "https://app.hotmart.com/products/manage",
+        "https://whop.com/dashboard/biz_x/", "Plan actual", "Tiendas activas",
+    ],
+)
+def test_terminos_cortos_no_casan_dentro_de_otras_palabras(texto):
+    assert palabra_prohibida(texto) is None, texto

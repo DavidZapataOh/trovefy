@@ -15,7 +15,8 @@ Claves opcionales (un mapa de la fase 0 carga igual):
 
 - raíz `hosts: [str]`: hosts permitidos (por defecto, los de las `url` de las pantallas);
 - raíz `limites_plan: {<Plan>: {tiendas, bumps, upsells, downsell}}` con `fuente_limites` obligatoria;
-- por pantalla `prohibida: bool` (cobros, pasarelas, retiros…: nunca se escribe en ella) y
+- por pantalla `prohibida: bool` (cobros, pasarelas, retiros…: nunca se escribe en ella ni se captura; una
+  pantalla con una palabra prohibida en la url, la firma o un control cuenta como prohibida aunque no lo diga) y
   `controles: {<nombre>: {etiqueta | css, rol?, tipo, secreto?}}`.
 """
 
@@ -29,14 +30,22 @@ from urllib.parse import unquote, urlparse
 import yaml
 
 TIPOS = ("texto", "numero", "precio", "select", "interruptor", "archivo", "boton", "area")
-# Las diez primeras son la lista mínima del plan 19; el resto, de la revisión de las tareas 1–2 (M-2).
-# Se comparan normalizadas (ver `palabra_prohibida`), así que «impul pay» también casa con «Impul-Pay» o «impul%2Dpay».
+# Las diez primeras son la lista mínima del plan 19; las siguientes, de la revisión de las tareas 1–2 (M-2), y
+# la última línea, de la segunda revisión (L-c). Se comparan normalizadas (ver `palabra_prohibida`), así que
+# «impul pay» también casa con «Impul-Pay», «impul%2Dpay» o «impul pаy» (con «а» cirílica).
+# «checkout» NO está: las pantallas `checkout` y `checkout_hotmart` de los planes 18/19 tienen controles que el
+# conductor configura (idioma, campos, temporizador…); como palabra prohibida harían inválidos esos mapas.
 PALABRAS_PROHIBIDAS = (
     "pasarela", "impul pay", "retir", "tarjeta", "banco", "contraseña", "password", "payout", "withdraw",
     "datos financieros",
     "pago", "cobro", "payment", "billing", "bank", "bancari", "card", "cbu", "cvu", "iban", "mercadopago",
     "stripe", "paypal", "retiro", "impulpay",
+    "financial", "balance", "pagamento", "saque", "senha", "cartao", "clave", "facturacion", "credencial",
+    "apikey", "wallet", "saldo",
 )
+# Términos cortos que aparecen dentro de palabras corrientes («cardio», «ScoreCard», «Ibáñez», «striped», un id
+# como «7xCbUq9»): solo casan como palabra entera (o su plural en -s), nunca dentro de otra.
+_PALABRA_ENTERA = frozenset({"card", "cbu", "cvu", "iban", "bank", "stripe"})
 _CLAVES_CONTROL = {"etiqueta", "rol", "css", "tipo", "secreto"}
 _CLAVES_LIMITES = {"tiendas": int, "bumps": int, "upsells": int, "downsell": bool}
 
@@ -106,12 +115,27 @@ def _validar_control(origen, pantalla: str, nombre: str, c) -> Control:
     return Control(pantalla, nombre, etiqueta, rol, css, tipo, secreto)
 
 
-def _normal(texto: str) -> str:
-    """Texto comparable: %-decodificado (hasta 3 veces), sin acentos (NFKD), en minúsculas y sin separadores.
+# Letras cirílicas y griegas que se confunden con latinas (mayúsculas y minúsculas por separado: la «ν» griega
+# minúscula parece una «v», la «Ν» mayúscula una «N»).
+_HOMOGLIFOS = str.maketrans({
+    # cirílico
+    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O", "Р": "P", "С": "C", "Т": "T",
+    "У": "Y", "Х": "X", "Ѕ": "S", "І": "I", "Ј": "J", "Ү": "Y", "Ԛ": "Q", "Ԝ": "W",
+    "а": "a", "в": "b", "е": "e", "к": "k", "м": "m", "н": "h", "о": "o", "р": "p", "с": "c", "т": "t",
+    "у": "y", "х": "x", "ѕ": "s", "і": "i", "ј": "j", "ԁ": "d", "һ": "h", "ԛ": "q", "ԝ": "w", "ӏ": "l",
+    "ү": "y", "ɡ": "g",
+    # griego
+    "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N", "Ο": "O",
+    "Ρ": "P", "Τ": "T", "Υ": "Y", "Χ": "X",
+    "α": "a", "β": "b", "ε": "e", "η": "n", "ι": "i", "κ": "k", "ν": "v", "ο": "o", "ρ": "p", "τ": "t",
+    "υ": "u", "χ": "x", "ω": "w", "ϲ": "c",
+})
 
-    Quitar todos los separadores (espacios, guiones, puntos, barras, caracteres de ancho cero…) hace que
-    «impul-pay», «Impul_Pay», «impul%20pay» e «IMPULPAY» sean lo mismo. El precio es que una palabra puede
-    casar a caballo de dos («mi banco» → «mibanco» contiene «iban»): es una guarda, y ante la duda se para.
+
+def _fichas(texto: str) -> list[str]:
+    """Las palabras de `texto`, comparables: %-decodificado (hasta 3 veces), sin acentos (NFKD), homoglifos
+    cirílicos y griegos pasados a latín, en minúsculas, sin caracteres invisibles (ancho cero, guion blando) y
+    partido por cualquier separador (espacios, guiones, puntos, barras, «_»…).
     """
     t = str(texto)
     for _ in range(3):
@@ -120,16 +144,33 @@ def _normal(texto: str) -> str:
             break
         t = decodificado
     t = "".join(ch for ch in unicodedata.normalize("NFKD", t) if not unicodedata.combining(ch))
-    return re.sub(r"[\W_]+", "", t.casefold())
+    t = t.translate(_HOMOGLIFOS).casefold()
+    t = "".join(ch for ch in t if unicodedata.category(ch) != "Cf")
+    return [f for f in re.split(r"[\W_]+", t) if f]
+
+
+def _normal(texto: str) -> str:
+    """Texto comparable y sin separadores: «impul-pay», «Impul_Pay», «impul%20pay» e «IMPULPAY» son lo mismo.
+
+    El precio es que una palabra puede casar a caballo de dos («mi banco» → «mibanco»); por eso los términos
+    cortos de `_PALABRA_ENTERA` se buscan solo como palabra entera. Es una guarda: ante la duda se para.
+    """
+    return "".join(_fichas(texto))
 
 
 _PROHIBIDAS_NORMALES = tuple((w, _normal(w)) for w in PALABRAS_PROHIBIDAS)
 
 
 def palabra_prohibida(texto: str) -> str | None:
-    """La primera de `PALABRAS_PROHIBIDAS` que aparece en `texto` (URL o texto), comparando ambos normalizados."""
-    normal = _normal(texto)
-    return next((w for w, n in _PROHIBIDAS_NORMALES if n in normal), None)
+    """La primera de `PALABRAS_PROHIBIDAS` que aparece en `texto` (URL o texto), comparando ambos normalizados.
+
+    Las de `_PALABRA_ENTERA` deben ser una palabra entera de `texto` (o su plural en -s); las demás pueden ir
+    dentro de otra palabra o partidas por separadores.
+    """
+    fichas = _fichas(texto)
+    normal = "".join(fichas)
+    enteras = set(fichas) | {f[:-1] for f in fichas if f.endswith("s")}
+    return next((w for w, n in _PROHIBIDAS_NORMALES if (n in enteras if w in _PALABRA_ENTERA else n in normal)), None)
 
 
 def _zona_de_cobro(p: dict) -> str | None:
@@ -246,8 +287,12 @@ def controles_de(mapa: dict, pantalla: str) -> list[Control]:
 
 
 def prohibida(mapa: dict, pantalla: str) -> bool:
-    """True si en la pantalla nunca se escribe (cobros, pasarelas, retiros, tarjetas, bancos, contraseñas)."""
-    return _pantalla(mapa, pantalla).get("prohibida", False) is not False
+    """True si en la pantalla nunca se escribe ni se captura (cobros, pasarelas, retiros, tarjetas, bancos,
+    contraseñas): marcada `prohibida: true` o con una palabra prohibida en la url, la firma o la etiqueta/css de
+    algún control, tenga o no controles.
+    """
+    p = _pantalla(mapa, pantalla)
+    return p.get("prohibida", False) is not False or _zona_de_cobro(p) is not None
 
 
 def capturado_de(mapa: dict, pantalla: str) -> str | None:

@@ -13,9 +13,14 @@ Comprobar y actuar no son atómicos (la página puede navegar entre medias: H-1 
    concreto y, si la página navega, fallan en vez de caer en un campo de otra pantalla con la misma etiqueta;
 2. con el elemento fijado se vuelven a comprobar firma, sesión, origen y zona de cobro (la URL, la última);
 3. se actúa con un tiempo corto (la página entera tiene un tiempo por defecto de pocos segundos);
-4. después de cada acción se mira otra vez el origen y las palabras prohibidas de la URL: si cambiaron,
-   `Parada` (la acción sí se hizo; lo siguiente no);
-5. si Playwright falla a mitad de una acción, `AccionIncierta`: no sé si se aplicó, y no sigo.
+4. después de cada acción se mira otra vez el origen, las palabras prohibidas de la URL y la firma (una SPA
+   del mismo origen puede cambiar la pantalla bajo el elemento fijado): si algo cambió, `Parada` (la acción
+   sí se hizo; lo siguiente no). Un archivo se da por subido solo si sigue en un campo conectado;
+5. si Playwright falla a mitad de una acción, `AccionIncierta`: no sé si se aplicó, y no sigo;
+6. si un clic abre otra ventana o pestaña, se cierra y `VentanaNueva` (una `Parada`).
+
+`capturar` no captura pantallas prohibidas (marcadas o con aspecto de cobro: `trovefy.mapa.prohibida`) ni
+páginas con marcos incrustados (iframes), cuyo contenido no se comprueba ni se tapa.
 
 Espera entre navegaciones: 5–8 s al azar por dominio registrable, en `ir()` y también tras un `pulsar` que
 navega. Lo segundo es *best effort*: solo se ve la navegación que ya empezó cuando `click` devuelve (Playwright
@@ -101,6 +106,10 @@ class AccionIncierta(Parada):
     """Playwright falló a mitad de una acción (o de una lectura): no sé si se aplicó."""
 
 
+class VentanaNueva(Parada):
+    """Un clic abrió otra ventana o pestaña: se cierra y no sigo."""
+
+
 _VALOR_URL = re.compile(r"[A-Za-z0-9._~-]+")
 _CON_VALOR = ("texto", "numero", "precio", "area")
 _JS_TIENE_VALOR = "e => (e.value || '').trim().length > 0"
@@ -112,7 +121,10 @@ _TIMEOUT_FIJAR_MS = 2_000
 _TIMEOUT_ACCION_MS = 3_000
 _TIMEOUT_CAPTURA_MS = 10_000
 _CSS_CAMPOS = "input, textarea, [contenteditable]"  # se tapan siempre en las capturas (input incluye contraseñas)
-_PARADAS_DE_PANTALLA = (FirmaNoCasa, SelectorAusente, HostNoPermitido, SesionCaducada, ZonaProhibida, AccionIncierta)
+_PARADAS_DE_PANTALLA = (
+    FirmaNoCasa, SelectorAusente, HostNoPermitido, SesionCaducada, ZonaProhibida, AccionIncierta, VentanaNueva,
+)
+_JS_ARCHIVO_PUESTO = "e => e.isConnected && e.files.length > 0"
 
 
 def _donde(url: str) -> str:
@@ -235,7 +247,8 @@ class Conductor:
         self._comprobar_url(pantalla, zona)
 
     def _tras_accion(self, pantalla: str, que: str) -> None:
-        """Después de actuar: si la URL salió de los orígenes o es de cobros, paro (lo anterior sí se hizo)."""
+        """Después de actuar: si la URL salió de los orígenes o es de cobros, o la firma ya no está (una SPA del
+        mismo origen cambió la pantalla bajo el elemento fijado), paro. Lo anterior sí se hizo."""
         url = self.page.url
         if origen(url) not in self._origenes:
             raise self._parar(HostNoPermitido(
@@ -247,6 +260,13 @@ class Conductor:
             raise self._parar(ZonaProhibida(
                 pantalla, f"después de {que}, la página fue a una zona de cobros o datos sensibles («{palabra}»): "
                 "lo anterior sí se hizo; no sigo. Revisa la pantalla tú.",
+            ))
+        texto = self._texto()  # un solo intento: justo después de actuar la pantalla debe seguir siendo la misma
+        faltan = [t for t in self._pantalla(pantalla)["firma"] if texto is None or t not in texto]
+        if faltan:
+            raise self._parar(FirmaNoCasa(
+                pantalla, f"después de {que}, la pantalla ya no casa con el mapa (falta: "
+                f"{', '.join(f'«{t}»' for t in faltan)}): lo anterior sí se hizo; no sigo. Revisa la pantalla tú.",
             ))
 
     def _localizador(self, c: Control):
@@ -393,7 +413,16 @@ class Conductor:
         elif c.tipo == "interruptor":
             self._actuar(c, "cambiar", lambda: h.check(timeout=t) if valor else h.uncheck(timeout=t))
         else:  # archivo
-            self._actuar(c, "subir el archivo a", lambda: h.set_input_files(valor, timeout=t))
+            def subir() -> None:
+                h.set_input_files(valor, timeout=t)
+                # Chromium no falla si el nodo ya no está en la página (una SPA lo sustituyó): compruébalo
+                if not h.evaluate(_JS_ARCHIVO_PUESTO):
+                    raise self._parar(AccionIncierta(
+                        pantalla, f"el archivo no quedó puesto en «{nombre}» (el campo cambió o se vació): no sé "
+                        "qué se subió. Revisa la pantalla tú antes de seguir; no toco nada más.",
+                    ))
+
+            self._actuar(c, "subir el archivo a", subir)
         self._tras_accion(pantalla, f"escribir en «{nombre}»")
 
     def pulsar(self, pantalla: str, nombre: str) -> None:
@@ -404,8 +433,26 @@ class Conductor:
         self._en(pantalla, zona=True)
         h = self._fijar(c, zona=True)
         antes = urldefrag(self.page.url).url
-        self._actuar(c, "pulsar", lambda: h.click(timeout=_TIMEOUT_ACCION_MS))
-        self._tras_accion(pantalla, f"pulsar «{nombre}»")
+        contexto = self.page.context
+        nuevas: list = []
+
+        def oyente(ventana) -> None:  # una función de verdad: Playwright le pone atributos al registrarla
+            nuevas.append(ventana)
+
+        contexto.on("page", oyente)  # ventanas emergentes o pestañas que abra el clic
+        try:
+            self._actuar(c, "pulsar", lambda: h.click(timeout=_TIMEOUT_ACCION_MS))
+            self._tras_accion(pantalla, f"pulsar «{nombre}»")  # lee la página: deja llegar los eventos pendientes
+        finally:
+            contexto.remove_listener("page", oyente)
+            if nuevas:
+                for ventana in nuevas:
+                    with contextlib.suppress(Exception):
+                        ventana.close()
+                self._actual = None
+        if nuevas:
+            raise VentanaNueva(pantalla, "se abrió otra ventana; la cerré y paro. Lo pulsado sí se hizo; revisa la "
+                                         "pantalla tú.")
         despues = self.page.url
         if urldefrag(despues).url != antes:
             self._esperar(despues)
@@ -413,9 +460,11 @@ class Conductor:
     def capturar(self, ruta: Path) -> Path:
         """Captura de la pantalla actual (archivo nuevo 0600, sin seguir enlaces) con secretos y campos tapados.
 
-        Para (`Parada`) si no hay pantalla comprobada, si es `prohibida`, si la URL no es de un origen del mapa o
-        es de cobros, si la firma no casa, si un control secreto de la pantalla no casa con un solo elemento (no
-        se podría tapar) o si la página se fue a otro sitio durante la captura (entonces no se guarda nada).
+        Para (`Parada`) si no hay pantalla comprobada, si es `prohibida` (marcada o con aspecto de cobro en su
+        url, firma o controles), si la URL no es de un origen del mapa o es de cobros, si la firma no casa, si un
+        control secreto de la pantalla no casa con un solo elemento (no se podría tapar), si la página tiene
+        marcos incrustados (lo de dentro de un iframe no se comprueba ni se tapa) o si la página se fue a otro
+        sitio durante la captura (entonces no se guarda nada).
         """
         pantalla = self._actual
         if pantalla is None:
@@ -424,6 +473,7 @@ class Conductor:
             raise ZonaProhibida(pantalla, "pantalla prohibida (cobros, pasarelas, retiros, tarjetas, bancos o "
                                           "contraseñas): no se captura.")
         self._en(pantalla, zona=True)
+        self._sin_marcos(pantalla)
         for c in controles_de(self.mapa, pantalla):
             if c.secreto:
                 self._uno(c)
@@ -436,7 +486,15 @@ class Conductor:
                 pantalla, f"no he podido hacer la captura ({type(exc).__name__}); no se ha guardado nada."
             )) from exc
         self._tras_accion(pantalla, "capturar")
+        self._sin_marcos(pantalla)
         return _guardar_privado(Path(ruta), datos)
+
+    def _sin_marcos(self, pantalla: str) -> None:
+        if len(self.page.frames) > 1:
+            raise self._parar(ZonaProhibida(
+                pantalla, "la página tiene marcos incrustados (iframes): lo que hay dentro no lo puedo comprobar ni "
+                "tapar, así que no capturo.",
+            ))
 
 
 def _guardar_privado(ruta: Path, datos: bytes) -> Path:

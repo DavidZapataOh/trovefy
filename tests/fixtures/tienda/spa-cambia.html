@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Editar producto (SPA que cambia la pantalla)</title></head>
+<body>
+  <h1>Editar producto</h1>
+  <!-- Segunda revisión (probe.py, casos 4 y 5): una SPA del mismo origen sustituye la pantalla por otra de cobros
+       pero conserva el campo y el botón (el mismo nodo), con una URL inocente. Lo dispara el propio campo o botón. -->
+  <div id="main">
+    <label>Precio <input id="precio" value="10" oninput="cambia()"></label>
+    <button id="g" onclick="cambia()">Guardar</button>
+  </div>
+  <script>
+    function cambia() {
+      if (window.__cambiada) return;
+      window.__cambiada = true;
+      const inp = document.getElementById('precio');
+      const b = document.getElementById('g');
+      document.body.innerHTML = '<h1>Cuenta para cobrar</h1><div id="sens"></div>';
+      const l = document.createElement('label');
+      l.append('CBU destino ', inp);
+      document.getElementById('sens').append(l, b);
+      history.pushState({}, '', '/cuenta');
+    }
+  </script>
+</body>
+</html>

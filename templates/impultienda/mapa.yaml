@@ -25,6 +25,7 @@ pantallas:
   pasarelas:
     url: https://app.impultienda.ar/dashboard/configuraciones
     firma: ["Pasarelas de pago"]
+    prohibida: true  # pantalla de pagos: se lee, nunca se escribe ni se captura
     campos:
       pasarelas: {patron: 'Pasarelas conectadas:\s*([^<\n]+)'}
   # Plan 18 (/landing): «Diseño de tienda › Contenido», campo «HTML completo de la tienda» (captura del usuario,

@@ -8,7 +8,8 @@ Como en Playwright, `element_handle()` fija el elemento concreto: si después la
 pantalla), las acciones sobre el manejador fallan («not attached») en vez de caer en el elemento nuevo.
 Ganchos para simular carreras: `al_fijar(pagina, clave)` justo después de fijar, `al_actuar(pagina, clave,
 accion)` justo después de aplicar una acción, `al_pulsar(pagina, clave)` tras un clic, `al_capturar(pagina)`
-tras la captura; `fallar` = claves cuya acción lanza una excepción a mitad.
+tras la captura; `fallar` = claves cuya acción lanza una excepción a mitad. `context.abrir(url)` simula una
+ventana emergente (el evento «page» del contexto) y `frames` lista los marcos (el primero, el principal).
 """
 
 from __future__ import annotations
@@ -57,6 +58,9 @@ class ManejadorFalso:
         return self._vivo().marcado
 
     def evaluate(self, expresion: str):
+        if "isConnected" in expresion:  # como en el navegador: un elemento desconectado responde, no falla
+            conectado = any(e is self.elemento for e in self.pagina.elementos.get(self.clave, []))
+            return conectado and bool(self.elemento.valor)
         e = self._vivo()
         if "selectedIndex" in expresion:
             return e.opcion
@@ -120,6 +124,36 @@ class LocalizadorFalso:
         raise AttributeError(nombre)
 
 
+class VentanaFalsa:
+    def __init__(self, url: str):
+        self.url = url
+        self.cerrada = False
+
+    def close(self) -> None:
+        self.cerrada = True
+
+
+class ContextoFalso:
+    """BrowserContext falso: solo el evento «page» (ventanas nuevas)."""
+
+    def __init__(self):
+        self.oyentes: dict[str, list] = {}
+        self.pages: list = []
+
+    def on(self, evento: str, f) -> None:
+        self.oyentes.setdefault(evento, []).append(f)
+
+    def remove_listener(self, evento: str, f) -> None:
+        self.oyentes[evento].remove(f)
+
+    def abrir(self, url: str) -> VentanaFalsa:
+        v = VentanaFalsa(url)
+        self.pages.append(v)
+        for f in list(self.oyentes.get("page", [])):
+            f(v)
+        return v
+
+
 class PaginaFalsa:
     def __init__(self, texto: str = "", url: str = "about:blank", elementos=None, destinos=None, al_pulsar=None,
                  al_fijar=None, al_actuar=None, al_capturar=None):
@@ -139,6 +173,8 @@ class PaginaFalsa:
         self.timeout_por_defecto: float | None = None
         self.mascaras: list[str] | None = None
         self.capturas: list[str | None] = []
+        self.context = ContextoFalso()
+        self.frames: list = ["principal"]
 
     def set_default_timeout(self, ms: float) -> None:
         self.timeout_por_defecto = ms
