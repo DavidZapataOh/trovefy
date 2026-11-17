@@ -21,6 +21,9 @@ a{color:var(--color-primario);text-decoration:none}
 .seccion>h2:first-child{margin-top:0;padding-top:5mm;border-top:0.75pt solid var(--color-primario)}
 .fuentes{break-before:page;font-size:9pt}
 figure,.plantilla,.ejercicio,.recordar,.lograr{break-inside:avoid}
+/* Un ejercicio o un recordatorio nunca abre página solo: se lleva consigo las últimas líneas del texto que
+   lo precede (el párrafo se corta antes; no queda hueco de página). */
+.ejercicio,.recordar{break-before:avoid}
 figure img{max-width:100%}
 .portada{justify-content:center;text-align:center;background:var(--color-fondo)}
 .portada h1{font-size:30pt}
@@ -40,9 +43,21 @@ figure img{max-width:100%}
 .ficha-img img{display:block;max-height:115mm;max-width:100%;width:auto;height:auto;margin:0 auto;object-fit:contain}
 .ficha table{width:100%;border-collapse:collapse}
 .ficha th,.ficha td{border:0.5pt solid var(--color-primario);padding:1.5mm 2mm;height:7mm;text-align:left}
-/* Tablas sin ilustración y con pocas filas: filas más altas para llenar la página (clase de la maqueta). */
-.ficha table.filas-pocas td{height:17mm}
-.ficha table.filas-medias td{height:11mm}
+/* Tablas sin ilustración y de hasta 12 filas (clase filas-N de la maqueta): las filas se reparten 200 mm, lo
+   que deja la página fija (256,8 mm útiles) menos título, instrucciones de hasta tres líneas y cabecera de
+   dos. 3,2 mm = el relleno vertical de la celda (2 × 1,5 mm) más el borde. */
+.ficha table.filas-1 td{height:calc(200mm / 1 - 3.2mm)}
+.ficha table.filas-2 td{height:calc(200mm / 2 - 3.2mm)}
+.ficha table.filas-3 td{height:calc(200mm / 3 - 3.2mm)}
+.ficha table.filas-4 td{height:calc(200mm / 4 - 3.2mm)}
+.ficha table.filas-5 td{height:calc(200mm / 5 - 3.2mm)}
+.ficha table.filas-6 td{height:calc(200mm / 6 - 3.2mm)}
+.ficha table.filas-7 td{height:calc(200mm / 7 - 3.2mm)}
+.ficha table.filas-8 td{height:calc(200mm / 8 - 3.2mm)}
+.ficha table.filas-9 td{height:calc(200mm / 9 - 3.2mm)}
+.ficha table.filas-10 td{height:calc(200mm / 10 - 3.2mm)}
+.ficha table.filas-11 td{height:calc(200mm / 11 - 3.2mm)}
+.ficha table.filas-12 td{height:calc(200mm / 12 - 3.2mm)}
 .ficha .linea{border-bottom:0.5pt solid var(--color-primario);height:9mm}
 .ficha .casillas{list-style:none;padding:0;margin:0}
 .ficha .casillas li{min-height:12mm;padding:1mm 0}
@@ -50,4 +65,7 @@ figure img{max-width:100%}
 /* Notas (campo «notas» de la ficha): llena el hueco que queda hasta el pie con líneas para escribir. */
 .ficha .notas{flex-grow:1;display:flex;flex-direction:column;margin-top:5mm;min-height:15mm}
 .ficha .notas-titulo{margin:0 0 1mm;font-family:var(--fuente-titulos);color:var(--color-primario)}
-.ficha .notas-lineas{flex-grow:1;background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 8.5mm,var(--color-primario) 8.5mm,var(--color-primario) 9mm)}
+/* Una sola tanda de líneas cada 9 mm hasta el pie. El trazo mide 0,7 mm (más que un píxel de la hoja de
+   contactos, 0,635 mm a 40 ppp): con 0,5 mm el rasterizado se saltaba líneas y el área parecía partida en
+   dos. La opacidad lo deja suave en papel. */
+.ficha .notas-lineas{flex-grow:1;opacity:.5;background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 8.3mm,var(--color-primario) 8.3mm,var(--color-primario) 9mm)}

@@ -34,9 +34,10 @@ ETIQUETAS = frozenset([
 ATRIBUTOS = frozenset(("class", "id", "href", "src", "alt"))
 TIPOS_FICHA = ("tabla", "lineas", "casillas")
 FILAS_MAX = 500  # una ficha de más de una página se detecta por anclas; esto solo corta lo absurdo
-# Tablas de ficha sin ilustración: hasta tantas filas, filas más altas (clase de templates/pdf/base.css)
-# para que la tabla llene la página. Con ilustración, la altura normal: comparten la página fija.
-FILAS_POCAS, FILAS_MEDIAS = 8, 12
+# Tablas de ficha sin ilustración: hasta tantas filas, la clase ``filas-N`` de templates/pdf/base.css reparte
+# el alto de la página entre las N filas para que la tabla la llene. Con ilustración, la altura normal:
+# comparten la página fija.
+FILAS_LLENAS = 12
 PORTADA = "portada.png"
 
 _ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
@@ -299,12 +300,7 @@ def generar_ficha_imprimible(spec: dict, manifiesto: dict | None = None) -> str:
             raise ValueError(f"ficha {ident}: una tabla necesita columnas (lista de textos)")
         cabecera = "".join(f"<th>{_e(c)}</th>" for c in columnas)
         vacia = "<tr>" + "<td></td>" * len(columnas) + "</tr>"
-        clase = ""
-        if "imagen" not in spec:
-            if filas <= FILAS_POCAS:
-                clase = ' class="filas-pocas"'
-            elif filas <= FILAS_MEDIAS:
-                clase = ' class="filas-medias"'
+        clase = f' class="filas-{filas}"' if "imagen" not in spec and filas <= FILAS_LLENAS else ""
         lineas += [f"<table{clase}>", f"<thead><tr>{cabecera}</tr></thead>", "<tbody>", *[vacia] * filas,
                    "</tbody>", "</table>"]
     elif tipo == "lineas":
