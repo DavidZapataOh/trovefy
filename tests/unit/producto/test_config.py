@@ -145,3 +145,43 @@ def test_tope_de_producto_mal_escrito(tmp_path):
     iniciar_config(tmp_path)
     with pytest.raises(ValueError):
         tope_de(tmp_path, "../x", cargar_config(tmp_path))
+
+
+def test_valor_null_es_no_medido(tmp_path):
+    iniciar_config(tmp_path)
+    _editar(tmp_path, "plan.palabras_por_pagina", None)
+    with pytest.raises(ConfigInvalida) as exc:
+        cargar_config(tmp_path)
+    assert str(exc.value) == "no medido: falta plan.palabras_por_pagina en config/producto.yaml"
+
+
+def test_paginas_min_inmutable(tmp_path):
+    iniciar_config(tmp_path)
+    c = cargar_config(tmp_path)
+    with pytest.raises(TypeError):
+        c.paginas_min["ebook"] = 1  # type: ignore[index]
+
+
+@pytest.mark.parametrize("malo", [["-modelo"], ["con espacio"], ["x" * 65], ["a;b"], [3]])
+def test_modelos_imagen_mal_escritos(tmp_path, malo):
+    iniciar_config(tmp_path)
+    _editar(tmp_path, "apimart.modelos_imagen", malo)
+    with pytest.raises(ConfigInvalida, match="modelos_imagen"):
+        cargar_config(tmp_path)
+
+
+def test_modelos_imagen_validos(tmp_path):
+    iniciar_config(tmp_path)
+    _editar(tmp_path, "apimart.modelos_imagen", ["gpt-image-2", "openai/gpt-4o_image.v1"])
+    assert cargar_config(tmp_path).modelos_imagen == ("gpt-image-2", "openai/gpt-4o_image.v1")
+
+
+def test_usa_hojas_publicas_de_economia():
+    import inspect
+
+    import trovefy.producto.config as pc
+    from trovefy.economia import config as ec
+
+    assert ec.es_hoja is ec._es_hoja and ec.revisar_hojas is ec._revisar_hojas
+    fuente = inspect.getsource(pc)
+    assert "_es_hoja" not in fuente and "_revisar_hojas" not in fuente

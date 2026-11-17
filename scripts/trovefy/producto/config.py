@@ -7,15 +7,18 @@ decimales como mucho y mayores que 0; nunca ``float``.
 
 from __future__ import annotations
 
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 import yaml
 
 from trovefy.config.yaml_config import cargar_yaml
-from trovefy.economia.config import EconomiaInvalida, _es_hoja, _revisar_hojas
+from trovefy.economia.config import EconomiaInvalida, es_hoja, revisar_hojas
 from trovefy.producto.rutas import validar_p_id
 from trovefy.vault import frontmatter
 from trovefy.vault.escritura import escribir_atomico
@@ -25,6 +28,7 @@ RELATIVA = Path("config") / "producto.yaml"
 RESOLUCIONES = ("1k", "2k", "4k")
 # Claves de plan.paginas_min: tipo de la pieza principal (ebook|kit) y tipo de las demás piezas.
 TIPOS_PAGINAS = ("ebook", "kit", "bono", "bump", "upsell")
+MODELO = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,63}", re.ASCII)
 
 
 class ConfigInvalida(ValueError):
@@ -37,7 +41,7 @@ class ConfigProducto:
     modelos_imagen: tuple[str, ...]
     resolucion: str
     palabras_por_pagina: int
-    paginas_min: dict[str, int]
+    paginas_min: Mapping[str, int]  # MappingProxyType: de solo lectura
     seccion_palabras_min: int
     puntuacion_min: int
 
@@ -60,11 +64,13 @@ def importe_usd(v: Any, clave: str) -> Decimal:
 def _valor(datos: dict, clave: str) -> Any:
     actual: Any = datos
     for parte in clave.split("."):
-        if not isinstance(actual, dict) or _es_hoja(actual) or parte not in actual:
+        if not isinstance(actual, dict) or es_hoja(actual) or parte not in actual:
             raise ConfigInvalida(f"falta {clave} en config/producto.yaml")
         actual = actual[parte]
-    if not _es_hoja(actual):
+    if not es_hoja(actual):
         raise ConfigInvalida(f"{clave}: no es una hoja {{valor, fuente, fecha}}")
+    if actual["valor"] is None:
+        raise ConfigInvalida(f"no medido: falta {clave} en config/producto.yaml")
     return actual["valor"]
 
 
@@ -80,17 +86,21 @@ def _construir(datos: Any) -> ConfigProducto:
     if not isinstance(datos, dict):
         raise ConfigInvalida("config/producto.yaml no es un mapa")
     try:
-        _revisar_hojas(datos, "")
+        revisar_hojas(datos, "")
     except EconomiaInvalida as exc:
         raise ConfigInvalida(f"config/producto.yaml: {exc}") from None
 
     modelos = _valor(datos, "apimart.modelos_imagen")
     if not isinstance(modelos, list) or not modelos or not all(isinstance(m, str) and m.strip() for m in modelos):
         raise ConfigInvalida("apimart.modelos_imagen: debe ser una lista de modelos no vacía")
+    malos = [m for m in modelos if not MODELO.fullmatch(m.strip())]
+    if malos:
+        raise ConfigInvalida(f"apimart.modelos_imagen: nombre de modelo mal escrito ({malos[0]!r}); "
+                             "letras, cifras y . _ / - (hasta 64)")
     resolucion = _valor(datos, "apimart.resolucion")
     if resolucion not in RESOLUCIONES:
         raise ConfigInvalida(f"apimart.resolucion: {resolucion!r} no es {', '.join(RESOLUCIONES)}")
-    paginas = {t: _entero(datos, f"plan.paginas_min.{t}") for t in TIPOS_PAGINAS}
+    paginas = MappingProxyType({t: _entero(datos, f"plan.paginas_min.{t}") for t in TIPOS_PAGINAS})
 
     return ConfigProducto(
         tope_usd=importe_usd(_valor(datos, "apimart.tope_producto_usd"), "apimart.tope_producto_usd"),
