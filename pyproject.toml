@@ -19,6 +19,7 @@ classifiers = [
 ]
 dependencies = [
     "lingua-language-detector==2.2.0",
+    "pillow==13.0.0",
     "playwright==1.65.0",
     "pyyaml==6.0.3",
 ]
