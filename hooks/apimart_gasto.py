@@ -15,6 +15,9 @@ las grafías del vault y los globs, expandidos y como patrón), al modo de ``raw
   ``.apimart-intentos.jsonl`` y ``.apimart.lock``; sus carpetas (``entregable/``, el producto,
   ``productos/``, el vault) no se borran, mueven ni sobrescriben en bloque (``rm -r``, ``mv``, ``cp -r``,
   ``rsync``, intérpretes…). Por nombre, además, cualquier escritura que mencione esos archivos.
+- ``productos/*/entregable/**/QC.md``, ``.QC.md.lock`` y ``entregable/**/*.pdf`` (M3 de las Tareas 11–12):
+  solo los escribe ``trovefy producto``; ni Write/Edit/MultiEdit ni Bash (``>``, ``cp``, ``mv``, ``rm``,
+  ``sed -i``, intérpretes…), tampoco en bloque sobre una carpeta que los contenga. Leerlos sí.
 - ``.trovefy/STOP``: crearlo sí; borrarlo o moverlo no (lo quita el usuario).
 - ``git checkout|restore|stash|reset|clean|switch…`` con el vault como directorio (cwd, ``cd``, ``-C``) o
   sobre una ruta del vault cuentan como escritura y se deniegan.
@@ -74,6 +77,8 @@ MOTIVO_CONFIG = "config/producto.yaml no se edita desde Claude: sus valores los 
 MOTIVO_GASTO = ("costes.csv, .apimart-intentos.jsonl y .apimart.lock (y su carpeta entregable/) son el registro del "
                 "gasto: solo los escribe `trovefy producto`; no se editan, mueven ni borran (si algo falla, pide ayuda)")
 MOTIVO_STOP = ".trovefy/STOP lo quita el usuario: Claude no lo borra ni lo mueve"
+MOTIVO_QC = ("QC.md, su cerrojo y los PDF del entregable solo los escribe `trovefy producto` (maquetar, qc, "
+             "anotar-qc): no se editan, crean, mueven ni borran a mano")
 MOTIVO_GIT = ("git checkout/restore/stash/reset/clean sobre el vault puede reescribir el registro del gasto, el tope "
               "o STOP: si hace falta, que lo haga el usuario")
 
@@ -103,6 +108,12 @@ _DECISION = (("productos", "*", "decisiones", "*-tope-apimart.md"),)
 _CONFIG = (("config", "producto.yaml"),)
 _STOP = ((".trovefy", "STOP"),)
 _PRODUCTO = (("productos", "*", "PRODUCTO.md"),)
+# M3 (Tareas 11–12): el registro de QC y los PDF que el cierre da por buenos. Solo `trovefy producto`.
+_QC = (("productos", "*", "entregable", "**", "QC.md"),
+       ("productos", "*", "entregable", "**", ".QC.md.lock"),
+       ("productos", "*", "entregable", "**", "*.[pP][dD][fF]"))
+_QC_NOMBRE = re.compile(r"(?:QC\.md|\.QC\.md\.lock|.*\.pdf)", re.IGNORECASE)
+_QC_MAX_RECORRIDO = 5000
 
 # Clases de escritura de cada ruta alcanzada por un comando.
 _EN_BLOQUE = frozenset({"borra", "mueve", "copia_r", "rsync", "git", "interprete", "bloque"})
@@ -245,6 +256,21 @@ def _toca(partes: tuple[str, ...], patrones: tuple[tuple[str, ...], ...], en_blo
     return en_bloque and any(es_ancestro_de_patron(partes, p) for p in patrones)
 
 
+def _contiene_qc(ruta: pathlib.Path, partes: tuple[str, ...]) -> bool:
+    """¿Una operación en bloque sobre ``ruta`` (``rm -r``, ``mv``, ``cp -r``…) alcanza QC.md o un PDF?
+
+    Solo dentro de ``productos/``; se mira en disco (como mucho ``_QC_MAX_RECORRIDO`` entradas; si hay
+    más, se da por alcanzado: falla cerrado)."""
+    if len(partes) < 2 or partes[0] != "productos" or not ruta.is_dir():
+        return False
+    vistos = 0
+    for _raiz, _dirs, archivos in os.walk(ruta):
+        vistos += len(archivos) + len(_dirs)
+        if any(_QC_NOMBRE.fullmatch(a) for a in archivos) or vistos > _QC_MAX_RECORRIDO:
+            return True
+    return False
+
+
 def _sed_cambia_tope(original: str, segmento: str) -> bool:
     """¿Este ``sed -i`` puede cambiar el tope? Sí si lo menciona, usa escapes o no muestra ninguna clave."""
     if _TOPE_SUELTO.search(original) or "\\" in original:
@@ -275,6 +301,8 @@ def _bash_rutas(original: str, c: str, cwd: str | None) -> str | None:
                 return MOTIVO_TOPE
             if _toca(partes, _CONFIG, en_bloque):
                 return MOTIVO_CONFIG
+            if _toca(partes, _QC, False) or (en_bloque and _contiene_qc(ruta, partes)):
+                return MOTIVO_QC
             if clase in _QUITA and _toca(partes, _STOP, True):
                 return MOTIVO_STOP
             if any(coincide_patron(partes, p) for p in _PRODUCTO):
@@ -558,6 +586,8 @@ def _escritura(nombre: str, datos: dict, cwd: str | None) -> tuple[str, str]:
         return "deny", MOTIVO_GASTO
     if any(coincide_patron(partes, p) for p in _DECISION):
         return "deny", MOTIVO_TOPE
+    if any(coincide_patron(partes, p) for p in _QC):
+        return "deny", MOTIVO_QC
     if len(partes) == 3 and partes[2] == "PRODUCTO.md" and (
             nombre == "notebookedit" or _cambia_tope(nombre, datos, resolver(ruta, cwd))):
         return "deny", MOTIVO_TOPE

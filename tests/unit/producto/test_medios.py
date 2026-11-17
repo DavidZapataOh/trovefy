@@ -251,3 +251,12 @@ def test_manifiesto_admite_extensiones(tmp_path, archivo):
     _medio(raiz, archivo)
     registrar_medio(raiz, "m", archivo, SHA, "propio")
     assert leer_manifiesto(raiz, verificar=True)["m"]["archivo"] == archivo
+
+
+def test_carpeta_segura_es_publica_con_alias_privado():
+    """Ruling de la Tarea 13: ``carpeta_segura`` es pública; ``_carpeta_segura`` queda como alias."""
+    from trovefy.pdf import render
+    from trovefy.producto import medios
+
+    assert medios._carpeta_segura is medios.carpeta_segura
+    assert render.carpeta_segura is medios.carpeta_segura

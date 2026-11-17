@@ -37,9 +37,9 @@ from trovefy.pdf.fuentes import comprobar_fuentes
 from trovefy.pdf.gates import Informe, evaluar
 from trovefy.pdf.maqueta import ensamblar, familias_brandbook, tokens_brandbook
 from trovefy.producto.config import ConfigProducto
-from trovefy.producto.ficha import Ficha, leer_ficha
-from trovefy.producto.medios import MODO_MEDIO, _carpeta_segura, leer_manifiesto
-from trovefy.producto.rutas import PIEZA, pieza
+from trovefy.producto.ficha import Ficha, PiezaFicha, leer_ficha
+from trovefy.producto.medios import MODO_MEDIO, carpeta_segura, leer_manifiesto
+from trovefy.producto.rutas import PIEZA, Pieza, pieza
 from trovefy.vault.escritura import anadir_log
 from trovefy.vault.producto import ruta_producto, secreto_en
 
@@ -127,7 +127,7 @@ def escribir_exclusivo(ruta: Path, datos: bytes, *, base: Path) -> None:
     (también si es un enlace colgante). El temporal se borra siempre.
     """
     ruta = Path(os.path.abspath(ruta))
-    _carpeta_segura(Path(base), ruta.parent, crear=True)
+    carpeta_segura(Path(base), ruta.parent, crear=True)
     tmp = ruta.parent / f".{ruta.name}.{secrets.token_hex(8)}.tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     try:
@@ -286,8 +286,19 @@ def paginas_pdfinfo(pdf: Path, correr=subprocess.run) -> int:
 # --- producir ---------------------------------------------------------------------------------------
 
 
-def producir_pdf(vault: Path, p_id: str, pieza_id: str, cfg: ConfigProducto, correr=subprocess.run, *,
-                 ahora: datetime) -> Producido:
+@dataclass(frozen=True)
+class Ensamblado:
+    html: str
+    ficha: Ficha
+    pieza_ficha: PiezaFicha
+    pieza: Pieza
+    familias: tuple[str, str]
+
+
+def ensamblar_pieza(vault: Path, p_id: str, pieza_id: str) -> Ensamblado:
+    """El HTML de la pieza tal como lo maqueta ``producir_pdf``, sin escribir nada (``trovefy producto gates``).
+
+    ``ValueError`` si la pieza no está en ``FICHA.md`` o si el HTML trae algo con forma de secreto."""
     vault = Path(vault)
     ficha = leer_ficha(vault, p_id)
     pieza_ficha = next((x for x in ficha.piezas if x.id == pieza_id), None)
@@ -302,6 +313,15 @@ def producir_pdf(vault: Path, p_id: str, pieza_id: str, cfg: ConfigProducto, cor
                      sorted((fuente / "fichas").glob("*.yaml")), leer_manifiesto(p.raiz))
     if secreto_en(html):
         raise ValueError("el HTML de la pieza trae algo con forma de secreto: no se escribe nada")
+    return Ensamblado(html, ficha, pieza_ficha, p, familias)
+
+
+def producir_pdf(vault: Path, p_id: str, pieza_id: str, cfg: ConfigProducto, correr=subprocess.run, *,
+                 ahora: datetime) -> Producido:
+    vault = Path(vault)
+    e = ensamblar_pieza(vault, p_id, pieza_id)
+    html, ficha, pieza_ficha, p, familias = e.html, e.ficha, e.pieza_ficha, e.pieza, e.familias
+    fuente = p.raiz / "fuente"
 
     version, ruta_html = _reservar_html(fuente, vault, ficha, pieza_id, html)
     nombre = nombre_pdf(ficha, pieza_id, version)

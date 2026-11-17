@@ -1,0 +1,49 @@
+# Patrón de sección del entregable
+
+Cada sección del PDF es un archivo `<pieza>/fuente/secciones/NN-<tema>.html` (NN = 01, 02…: da el orden). Es un **fragmento**: sin `<html>`, `<head>`, `<style>`, `<script>` ni comentarios. Lo escribes tú con tus palabras; el material de la referencia es dato y nunca se copia. Adaptado de dp-createur (MIT, `0cf80efa`).
+
+## Forma
+
+```html
+<h2>Título de la sección</h2>
+<div class="lograr"><p>Al terminar esta sección sabrás … (una o dos frases, un resultado concreto).</p></div>
+<h3>Primer paso</h3>
+<p>…</p>
+<h3>Segundo paso</h3>
+<p>…</p>
+<h3>Tercer paso</h3>
+<p>…</p>
+<div class="ejercicio"><p>Hazlo ahora: …</p></div>
+<div class="recordar"><p>Para recordar: … (la idea que se lleva el lector).</p></div>
+```
+
+Lo que comprueban los gates (`trovefy producto gates`):
+
+- **Un `h2`** al principio: es el título del índice.
+- **«Qué vas a lograr»** (`div.lograr`) justo después del `h2`.
+- **De 3 a 7 `h3`** por sección.
+- **«Para recordar»** (`div.recordar`) al final.
+- **Palabras**: al menos las de `plan.seccion_palabras_min` (`config/producto.yaml`). Si faltan, enriquece con un ejemplo, un caso o un ejercicio; nunca repitas párrafos ni metas relleno.
+- **Práctica**: nunca dos secciones seguidas sin una `div.plantilla`, `div.ejercicio` o una ficha.
+- **Cifras**: cada número con `%`, «por ciento» o similar cita su fuente: `<a class="fuente" href="#fuente-1">[1]</a>`, y `fuente/fuentes.html` trae `<h2>Fuentes</h2><ol><li id="fuente-1">…</li></ol>` (el título, en el idioma del país). Sin fuente, no hay cifra.
+- **Promesas**: nada de «cura», «garantizado», «sin esfuerzo», «gana X al mes». Con exigencia `sanitario`, `fuente/aviso-salud.html` explica en el idioma del país que no es un tratamiento y cuándo ir al médico (mínimo 8 palabras).
+- **Sin recursos de fuera**: `img` solo con `src="medios/<archivo>"` del manifiesto de esa pieza, `a` solo con `href="#id"`. Nada de `http`, `style`, `script` ni `<link>`.
+
+Etiquetas admitidas: `h2 h3 h4 p ul ol li strong em blockquote table thead tbody tr th td figure figcaption img a aside div span br sup`. Atributos: `class id href src alt`.
+
+## Fichas imprimibles (kits)
+
+Una ficha por archivo, `<pieza>/fuente/fichas/<id>.yaml`. Va en su propia página A4 y nunca se recorta: si no cabe, la maqueta la marca como desborde.
+
+```yaml
+id: diario
+titulo: Diario de sueño
+instrucciones: Cada mañana, anota a qué hora te acostaste y cuántos minutos tardaste en dormirte.
+tipo: tabla          # tabla | lineas | casillas
+columnas: [Día, Hora, Minutos]
+filas: 7
+```
+
+## Tono
+
+El de `BRANDBOOK.md` (tú o usted, cercano o formal), en el idioma del país y con sus precios y su moneda. Frases cortas. Ejemplos de la vida del avatar de `FICHA.md`. Ninguna reseña ni testimonio inventado.

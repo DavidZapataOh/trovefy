@@ -552,3 +552,35 @@ def test_dos_procesos_compiten_de_verdad_por_el_cerrojo(vault, tmp_path_factory)
     assert len(posts) == 2
     filas = leer_costes(vault, P)
     assert sum(f.estado == "completada" for f in filas) == 2 and gastado_usd(filas) <= Decimal("0.02")
+
+
+def test_fila_de_costes_antes_que_la_linea_de_intentos(vault, monkeypatch):
+    """Ruling de la Tarea 13: la fila ``enviando`` de costes.csv va antes que .apimart-intentos.jsonl.
+
+    Si anotar el coste falla, no queda una línea de intento huérfana (que haría fallar cerrado al libro); si
+    falla la línea de intento, el gasto ya está registrado.
+    """
+    import trovefy.apimart.lote as modulo
+
+    orden = []
+    real_coste, real_intento = modulo.anotar_coste, modulo._anotar_intento
+    monkeypatch.setattr(modulo, "anotar_coste", lambda *a, **k: (orden.append(("coste", a[2].estado)),
+                                                                 real_coste(*a, **k))[1])
+    monkeypatch.setattr(modulo, "_anotar_intento", lambda *a, **k: (orden.append(("intento", None)),
+                                                                    real_intento(*a, **k))[1])
+    lote(vault, [pet("portada")])
+    assert orden[:2] == [("coste", "enviando"), ("intento", None)]
+
+
+def test_si_falla_la_fila_de_costes_no_queda_intento(vault, monkeypatch):
+    import trovefy.apimart.lote as modulo
+
+    def falla(*_a, **_k):
+        raise OSError("disco lleno")
+
+    monkeypatch.setattr(modulo, "anotar_coste", falla)
+    falso = APIMartFalso()
+    with pytest.raises(OSError):
+        lote(vault, [pet("portada")], abrir=falso)
+    assert not (vault / "productos" / P / "entregable" / ".apimart-intentos.jsonl").exists()
+    assert leer_costes(vault, P) == [] and falso.cuerpos == []

@@ -18,6 +18,7 @@ Trovefy es un plugin de Claude Code y una CLI en Python para operar un negocio d
 | `/trovefy:arranque` | Puesta en marcha guiada (fase 0): entorno, cerebro, perfil, Business, página, cuenta publicitaria, dominio, tienda y cobro; cada paso se da por bueno solo cuando un verificador lo comprueba. |
 | `/trovefy:cazar` | Caza ofertas en la Biblioteca de anuncios por nicho, en barrido por mercado e idioma, en vigilancia de las fichas guardadas o por página concreta; escribe el informe y las fichas en el cerebro. |
 | `/trovefy:auditar` | Audita una oferta cazada país por país (competencia, hueco y precio), escribe `productos/<p-id>/AUDITORIA.md` y registra el país que elige el usuario con sus palabras literales. |
+| `/trovefy:producto` | Hace el entregable de un producto modelado: ficha, plan, texto, imágenes propias con APIMart (tope de US$ 2 por producto), PDF A4 con WeasyPrint, gates, revisión de los agentes `revisor` y `nativo`, bonos y upsells; al cerrar, el país pasa a `producido`. |
 | `/trovefy:consultar` | Responde solo con el contenido del cerebro, citando cada página; si no está, dice «Esto no está en el cerebro». |
 | `/trovefy:recordar` | Convierte una corrección del usuario en una regla fechada `R-nnn`, actualiza los umbrales y detecta contradicciones. |
 | `/trovefy:destilar` | Destila las fuentes pendientes de `raw/` en páginas de método de `wiki/metodo/`, con cita obligatoria. |

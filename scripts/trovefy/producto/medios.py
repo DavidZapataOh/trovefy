@@ -38,7 +38,7 @@ _SHA = re.compile(r"[0-9a-f]{64}", re.ASCII)
 # --- carpetas y escritura ------------------------------------------------------------------------
 
 
-def _carpeta_segura(base: Path, carpeta: Path, *, crear: bool) -> bool:
+def carpeta_segura(base: Path, carpeta: Path, *, crear: bool) -> bool:
     """Revisa cada componente de ``carpeta`` por debajo de ``base``: ninguno puede ser un enlace.
 
     Con ``crear`` crea los que faltan (uno a uno, revisándolos). Sin ``crear`` devuelve ``False`` en
@@ -71,9 +71,12 @@ def _carpeta_segura(base: Path, carpeta: Path, *, crear: bool) -> bool:
     return True
 
 
+_carpeta_segura = carpeta_segura  # alias privado: nombre anterior (ruling de la Tarea 13)
+
+
 def _escribir(ruta: Path, datos: bytes, base: Path) -> None:
     carpeta = ruta.parent
-    _carpeta_segura(base, carpeta, crear=True)
+    carpeta_segura(base, carpeta, crear=True)
     tmp = carpeta / f".{ruta.name}.{secrets.token_hex(8)}.tmp"
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
     try:
@@ -174,7 +177,7 @@ def leer_manifiesto(raiz: Path, *, verificar: bool = False) -> dict[str, dict]:
     ``ValueError`` en la primera entrada mala, si el manifiesto está roto o si hay un enlace por medio.
     """
     raiz = Path(raiz)
-    if not _carpeta_segura(raiz.parent, raiz / CARPETA, crear=False):
+    if not carpeta_segura(raiz.parent, raiz / CARPETA, crear=False):
         return {}
     try:
         fd = _abrir_sin_enlace(ruta_manifiesto(raiz), f"{CARPETA}/{MANIFIESTO}")
@@ -220,7 +223,7 @@ def registrar_medio(raiz: Path, id_: str, archivo: str, sha256: str, origen: Lit
     """
     raiz = Path(raiz)
     _validar(id_, archivo, sha256, origen, datos)
-    if not _carpeta_segura(raiz.parent, raiz / CARPETA, crear=False):
+    if not carpeta_segura(raiz.parent, raiz / CARPETA, crear=False):
         raise ValueError(f"el medio {CARPETA}/{archivo} no existe")
     if _hash_medio(raiz, archivo) != sha256:
         raise ValueError(f"el sha256 de {CARPETA}/{archivo} no coincide con el archivo")

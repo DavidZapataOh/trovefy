@@ -3,7 +3,8 @@
 Orden de cada lote (plan 17, Tarea 5): STOP → precio medido → ``flock`` exclusivo sobre
 ``entregable/.apimart.lock`` durante todo el lote → por cada petición: omitir si ya está generada con el
 mismo prompt, proporción y resolución; no reenviar si tiene una tarea ``pendiente``/``enviada``;
-``comprobar_tope``; anotar ``enviando`` **antes** del POST; ``enviada`` con su ``task_id``; sondear;
+``comprobar_tope``; anotar ``enviando`` en ``costes.csv`` (y después el prompt en
+``.apimart-intentos.jsonl``) **antes** del POST; ``enviada`` con su ``task_id``; sondear;
 descargar sin clave y registrar el medio. El saldo de ``/v1/balance`` nunca se consulta: el tope manda.
 
 STOP se mira otra vez dentro del cerrojo justo antes de cada llamada que cuesta (cada subida y cada POST),
@@ -368,8 +369,10 @@ def generar_imagenes(vault: Path, p_id: str, peticiones: list[PeticionImagen], *
                                                            "no se envió nada", cred))
             if _stop(vault):
                 return _parar_por_stop(vault, p_id, cuenta, ahora)
-            _anotar_intento(vault, p_id, base.intento, prompt_sha)
+            # Primero la fila del gasto y después la del prompt (ruling de la Tarea 13): un corte entre las dos
+            # deja el gasto registrado; nunca una línea de intento sin su fila en costes.csv.
             anotar_coste(vault, p_id, base)
+            _anotar_intento(vault, p_id, base.intento, prompt_sha)
             try:
                 task_id = enviar(cred, cuerpo_envio(p, precio.modelo, urls), abrir)
             except (ErrorApimart, OSError) as exc:
