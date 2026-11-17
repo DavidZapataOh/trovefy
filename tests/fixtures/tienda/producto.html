@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Editar producto (prueba)</title></head>
+<body>
+  <h1>Editar producto</h1>
+  <form onsubmit="event.preventDefault(); document.getElementById('estado').textContent = 'Guardado';">
+    <label for="precio">Precio</label>
+    <input id="precio" name="precio" type="text" value="13.90">
+    <label for="moneda">Moneda</label>
+    <select id="moneda" name="moneda"><option>USD</option><option selected>EUR</option></select>
+    <label><input id="bump" type="checkbox" checked> Activar bump</label>
+    <label for="token">Token de acceso</label>
+    <input id="token" name="token" type="text" value="EAABtokenDePrueba000">
+    <label for="entrega">Entregable</label>
+    <input id="entrega" type="file">
+    <button type="submit">Guardar</button>
+  </form>
+  <p id="estado"></p>
+</body>
+</html>

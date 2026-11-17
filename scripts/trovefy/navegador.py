@@ -9,6 +9,8 @@ from __future__ import annotations
 import fcntl
 import os
 import re
+import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,16 +77,87 @@ def _un_navegador_a_la_vez():
             fcntl.flock(f, fcntl.LOCK_UN)
 
 
-def _lanzar(p, servicio: str, visible: bool):
+def _viewport(viewport: tuple[int, int] | None) -> dict:
+    return {} if viewport is None else {"viewport": {"width": int(viewport[0]), "height": int(viewport[1])}}
+
+
+def _lanzar(p, servicio: str, visible: bool, viewport: tuple[int, int] | None = None):
     try:
         return p.chromium.launch_persistent_context(
-            user_data_dir=str(perfil(servicio)), headless=not visible, chromium_sandbox=True
+            user_data_dir=str(perfil(servicio)), headless=not visible, chromium_sandbox=True, **_viewport(viewport)
         )
     except Exception as exc:
-        raise NavegadorError(
-            f"no se pudo iniciar Chromium ({type(exc).__name__}); comprueba que está instalado "
-            "(en una terminal de Ubuntu aparte: cd ~/trovefy/trovefy && uv run playwright install chromium) y que tiene sus librerías de sistema"
-        ) from exc
+        raise _sin_chromium(exc) from exc
+
+
+def _sin_chromium(exc: Exception) -> NavegadorError:
+    return NavegadorError(
+        f"no se pudo iniciar Chromium ({type(exc).__name__}); comprueba que está instalado "
+        "(en una terminal de Ubuntu aparte: cd ~/trovefy/trovefy && uv run playwright install chromium) y que tiene sus librerías de sistema"
+    )
+
+
+@contextmanager
+def sesion(
+    servicio: str,
+    visible: bool = True,
+    perfil_persistente: bool = True,
+    viewport: tuple[int, int] | None = None,
+) -> Iterator:
+    """Página viva de Playwright con el perfil del servicio, bajo el mismo candado que `capturar`.
+
+    Con `perfil_persistente=False` usa un contexto efímero sin perfil (vista de comprador, QA): no hay sesión
+    iniciada ni se guarda nada. Cierra el contexto (y el navegador) al salir, también si algo falla dentro.
+    La página no hace clics por su cuenta: quien escribe o pulsa es `trovefy.tienda.conductor.Conductor`.
+    """
+    from playwright.sync_api import Error as PlaywrightError
+    from playwright.sync_api import sync_playwright
+
+    if perfil_persistente:
+        perfil(servicio)  # valida el nombre antes de arrancar nada
+    elif not _SERVICIO.fullmatch(servicio):
+        raise ValueError("el servicio solo admite minúsculas, dígitos y guiones (a-z, 0-9, -)")
+    with _un_navegador_a_la_vez(), sync_playwright() as p:
+        navegador = None
+        if perfil_persistente:
+            ctx = _lanzar(p, servicio, visible, viewport)
+        else:
+            try:
+                navegador = p.chromium.launch(headless=not visible, chromium_sandbox=True)
+                ctx = navegador.new_context(**_viewport(viewport))
+            except Exception as exc:
+                if navegador is not None:
+                    navegador.close()
+                raise _sin_chromium(exc) from exc
+        try:
+            yield ctx.pages[0] if ctx.pages else ctx.new_page()
+        finally:
+            for cerrar in (ctx.close, navegador.close if navegador is not None else None):
+                try:
+                    if cerrar is not None:
+                        cerrar()
+                except PlaywrightError:
+                    pass  # el usuario ya cerró la ventana
+
+
+# Última navegación por dominio (reloj monótono): 5 s como mínimo entre dos visitas al mismo dominio.
+_ULTIMA_NAVEGACION: dict[str, float] = {}
+
+
+def esperar_entre_navegaciones(
+    dominio: str,
+    ahora: Callable[[], float] = time.monotonic,
+    dormir: Callable[[float], None] = time.sleep,
+    minimo_s: float = 5.0,
+) -> None:
+    """Duerme lo que falte para que pasen `minimo_s` desde la última navegación a `dominio`, y la anota."""
+    clave = dominio.lower()
+    anterior = _ULTIMA_NAVEGACION.get(clave)
+    if anterior is not None:
+        falta = minimo_s - (ahora() - anterior)
+        if falta > 0:
+            dormir(falta)
+    _ULTIMA_NAVEGACION[clave] = ahora()
 
 
 def capturar(
