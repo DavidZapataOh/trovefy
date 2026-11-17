@@ -10,10 +10,13 @@ Códigos de salida: 0 bien · 1 una puerta no pasa (estado, validación) · 2 er
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 from pathlib import Path
 
 from trovefy.cli import registrar
+
+_ejecutar_orden = subprocess.run  # punto de inyección de los tests (pdftoppm, ffmpeg, pdfinfo)
 
 
 def _error(msg: object, codigo: int = 2) -> int:
@@ -29,6 +32,9 @@ def _comunes(p: argparse.ArgumentParser) -> None:
 def _configurar(parser: argparse.ArgumentParser) -> None:
     sub = parser.add_subparsers(dest="accion", metavar="<acción>", required=True)
     _comunes(sub.add_parser("estado", help="estado del país, PDF vigente y lo que falta"))
+    m = sub.add_parser("medios", help="vistas previas reales del PDF e imágenes propias a assets/")
+    _comunes(m)
+    m.add_argument("--paginas", default="1,2,3", help="páginas del PDF para la vista previa (1,4,7)")
 
 
 # --- acciones ------------------------------------------------------------------------------------
@@ -77,7 +83,28 @@ def _estado(args: argparse.Namespace, vault: Path) -> int:
     print("falta: " + ("; ".join(faltan) if faltan else "nada"))
     return 0
 
-_ACCIONES = {"estado": _estado}
+
+def _paginas(texto: str) -> tuple[int, ...]:
+    try:
+        paginas = tuple(int(x) for x in texto.split(",") if x.strip())
+    except ValueError:
+        raise ValueError(f"--paginas mal escrito: «{texto}» (números separados por comas: 1,4,7)") from None
+    if not paginas:
+        raise ValueError("--paginas vacío: hace falta al menos una página")
+    return paginas
+
+
+def _medios(args: argparse.Namespace, vault: Path) -> int:
+    from trovefy.landing.entrada import cargar_datos
+    from trovefy.landing.medios import preparar_medios
+
+    d = cargar_datos(vault, args.producto, args.pais, correr=_ejecutar_orden)
+    assets = preparar_medios(vault, d, _paginas(args.paginas), ejecutar=_ejecutar_orden)
+    print(f"Medios listos en {assets.relative_to(vault).as_posix()} (vistas de {d.pdf.name})")
+    return 0
+
+
+_ACCIONES = {"estado": _estado, "medios": _medios}
 
 
 def _ejecutar(args: argparse.Namespace) -> int:
@@ -91,6 +118,10 @@ def _ejecutar(args: argparse.Namespace) -> int:
         return _error(e, 1)
     except (EntradaInvalida, RevisionSecretosNoDisponible, ValueError, FileNotFoundError) as e:
         return _error(e)
+    except subprocess.CalledProcessError as e:
+        return _error(f"falló la orden {e.cmd[0] if isinstance(e.cmd, list) else e.cmd} (código {e.returncode})")
+    except subprocess.TimeoutExpired as e:
+        return _error(f"la orden {e.cmd[0] if isinstance(e.cmd, list) else e.cmd} tardó demasiado")
     except KeyboardInterrupt:
         print("INTERRUMPIDA: cancelado por el usuario (Ctrl-C).", file=sys.stderr)
         return 3
