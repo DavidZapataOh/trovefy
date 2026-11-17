@@ -1,0 +1,59 @@
+{
+  "data": {
+    "actual_discount": 80,
+    "default_spec": "default",
+    "default_spec_source": "unit_price",
+    "discount_percent": 20,
+    "discount_rate": 1,
+    "membership": {
+      "available": true,
+      "category": "image",
+      "enabled": true,
+      "group_ratio": 0.8,
+      "levels": [
+        {
+          "level": "gold",
+          "rate_bps": 8000,
+          "discounted": true,
+          "factor": 1,
+          "saving_percent": 20
+        },
+        {
+          "level": "platinum",
+          "rate_bps": 7600,
+          "discounted": true,
+          "factor": 0.95,
+          "saving_percent": 24
+        },
+        {
+          "level": "diamond",
+          "rate_bps": 7200,
+          "discounted": true,
+          "factor": 0.9,
+          "saving_percent": 28
+        }
+      ]
+    },
+    "model_name": "gpt-image-2",
+    "model_price": 0.010625,
+    "paid_price": 0.0085,
+    "quota_type": 1,
+    "resolution_discounts": {
+      "1K": 4.03,
+      "2K": 3.5,
+      "4K": 3.09
+    },
+    "resolution_enabled": true,
+    "resolution_paid_prices": {
+      "1K": 0.0085,
+      "2K": 0.015,
+      "4K": 0.022
+    },
+    "resolution_prices": {
+      "1K": 0.2109,
+      "2K": 0.4283,
+      "4K": 0.7117
+    }
+  },
+  "success": true
+}
