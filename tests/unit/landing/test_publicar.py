@@ -864,3 +864,22 @@ def test_manifiesto_con_enlace_es_error(tmp_path):
     with pytest.raises(ValueError, match="enlace"):
         manifiesto_landing(raiz)
     assert any("enlace" in m for m in listo_para_publicar(v, cargar(v)))
+
+
+def test_abrir_seguro_se_presenta_como_navegador(monkeypatch):
+    """Impultienda está detrás de Cloudflare, que responde 403 al agente por defecto de urllib."""
+    import urllib.request
+
+    from trovefy.landing import publicar as mod
+
+    vistos = []
+
+    class Opener:
+        def open(self, req, timeout=None):
+            vistos.append(req)
+            return "respuesta"
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *a: Opener())
+    assert mod._abrir_seguro("https://tienda.demo.test/") == "respuesta"
+    ua = vistos[0].get_header("User-agent")
+    assert ua and "Mozilla/5.0" in ua and "Python-urllib" not in ua
