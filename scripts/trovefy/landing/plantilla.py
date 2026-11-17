@@ -44,6 +44,10 @@ PLANTILLAS = Path(__file__).resolve().parents[3] / "templates" / "landing"
 BASE_HTML = PLANTILLAS / "base.html"
 BASE_CSS = PLANTILLAS / "base.css"
 UTM_JS = PLANTILLAS / "utm.js"
+PIXEL_PLANTILLA = PLANTILLAS / "pixel.js"  # R1 / resolución 23: solo en la ruta Cloudflare
+PIXEL_ETIQUETA = '<script src="assets/pixel.js" defer></script>'
+_UTM_ETIQUETA = '<script src="assets/utm.js" defer></script>'
+_DATASET = re.compile(r"\d{6,20}")
 HOSTINGS = ("impultienda", "cloudflare")
 TEXTO_PROPIO = "<!-- texto propio -->"
 _VERSION = re.compile(r'data-tf-version="[^"]*"')
@@ -84,6 +88,35 @@ def precio_texto(precio: Decimal, moneda: str, idioma: str | None = None) -> str
 def version_de(html: str) -> str:
     """SHA-256 (12 hex) del HTML con ``data-tf-version`` vaciado."""
     return hashlib.sha256(_VERSION.sub('data-tf-version=""', html).encode("utf-8")).hexdigest()[:12]
+
+
+def ruta_tracking(vault: Path, p_id: str, pais: str) -> Path:
+    """``productos/<p-id>/checkout/<PAIS>/TRACKING.md`` (lo escribe ``trovefy tracking preparar``, plan 19)."""
+    return Path(vault) / "productos" / p_id / "checkout" / pais.upper() / "TRACKING.md"
+
+
+def pixel_js(vault: Path, datos: DatosLanding) -> bytes | None:
+    """``assets/pixel.js`` de la ruta Cloudflare: la plantilla con el ``dataset_id`` de ``TRACKING.md``.
+
+    ``None`` si aún no hay ``TRACKING.md``; ``EntradaInvalida`` si lo hay y su ``dataset_id`` no es un id
+    numérico de Meta (6–20 dígitos) o el archivo es un enlace."""
+    from trovefy.vault import frontmatter
+
+    ruta = ruta_tracking(vault, datos.p_id, datos.pais)
+    _sin_enlace(ruta)
+    if not ruta.is_file():
+        return None
+    try:
+        meta, _ = frontmatter.leer(ruta)
+    except (yaml.YAMLError, UnicodeDecodeError) as exc:
+        raise EntradaInvalida(f"{ruta.name} no se puede leer: {type(exc).__name__}") from None
+    dataset = meta.get("dataset_id") if isinstance(meta, dict) else None
+    if isinstance(dataset, int) and not isinstance(dataset, bool):
+        dataset = str(dataset)
+    if not isinstance(dataset, str) or not _DATASET.fullmatch(dataset):
+        raise EntradaInvalida(f"checkout/{datos.pais}/TRACKING.md: dataset_id «{dataset}» no es un id de Meta "
+                              "(6–20 dígitos): termina trovefy tracking preparar y dataset")
+    return PIXEL_PLANTILLA.read_text(encoding="utf-8").replace("{{dataset_id}}", dataset).encode("utf-8")
 
 
 def _e(texto: object) -> str:
@@ -202,6 +235,7 @@ def preparar(vault: Path, datos: DatosLanding, hosting: str, borrador: Path, *, 
                "precio": str(datos.precio), "angulo": datos.angulo, "promesa_h1": datos.promesa_h1,
                "hosting": hosting, "checkout_url": checkout,
                "version": previo.get("version"), "url": previo.get("url"), "publicada": previo.get("publicada")}
+    pixel = pixel_js(vault, datos) if hosting == "cloudflare" else None
     meta_w = {"p_id": datos.p_id, "pais": datos.pais, "secciones": w}
     textos_vault = {raiz / "wireframe.yaml": _yaml_texto(raiz / "wireframe.yaml", meta_w),
                     ruta_ly: _yaml_texto(ruta_ly, landing)}
@@ -210,17 +244,26 @@ def preparar(vault: Path, datos: DatosLanding, hosting: str, borrador: Path, *, 
     borrador.mkdir(parents=True, exist_ok=True)
     _carpetas(borrador, borrador / "assets", crear=True)
     indice, css, utm = borrador / "index.html", borrador / "assets" / "estilo.css", borrador / "assets" / "utm.js"
-    for ruta in (indice, css, utm):
+    pix = borrador / "assets" / "pixel.js"
+    for ruta in (indice, css, utm, pix):
         _sin_enlace(ruta)
     if rehacer or not indice.exists():
         secciones = "\n".join(_seccion(s, datos, checkout, _vistas(vault, datos)) for s in w)
         base = BASE_HTML.read_text(encoding="utf-8")
+        if pixel is not None:
+            base = base.replace(_UTM_ETIQUETA, f"{_UTM_ETIQUETA}\n{PIXEL_ETIQUETA}", 1)
         escribir_medio(indice, base.replace("{{idioma}}", _e(datos.idioma)).replace("{{secciones}}", secciones)
                        .encode("utf-8"), base=borrador)
     if rehacer or not css.exists():
         escribir_medio(css, (datos.tokens_css + "\n" + BASE_CSS.read_text(encoding="utf-8")).encode("utf-8"),
                        base=borrador)
     escribir_medio(utm, UTM_JS.read_bytes(), base=borrador)
+    if pixel is not None:
+        escribir_medio(pix, pixel, base=borrador)
+        _carpetas(vault, raiz / "assets", crear=True)
+        textos_vault[raiz / "assets" / "pixel.js"] = pixel
+    elif pix.exists():
+        pix.unlink()  # de una preparación anterior en Cloudflare: sin TRACKING.md no va
 
     for ruta, contenido in textos_vault.items():
         escribir_medio(ruta, contenido, base=vault)
@@ -262,6 +305,9 @@ def guardar(vault: Path, datos: DatosLanding, borrador: Path) -> str:
     if not landing:
         raise EntradaInvalida(f"falta landing/{datos.pais}/landing.yaml: trovefy landing preparar")
 
+    pixel = pixel_js(vault, datos) if landing.get("hosting") == "cloudflare" else None
+    pix = raiz / "assets" / "pixel.js"
+    _sin_enlace(pix)
     version = version_de(html)
     html = _VERSION.sub(f'data-tf-version="{version}"', html)
     landing["version"] = version
@@ -269,6 +315,10 @@ def guardar(vault: Path, datos: DatosLanding, borrador: Path) -> str:
 
     escribir_medio(raiz / "assets" / "estilo.css", textos["assets/estilo.css"].encode("utf-8"), base=vault)
     escribir_medio(raiz / "assets" / "utm.js", UTM_JS.read_bytes(), base=vault)
+    if pixel is not None:
+        escribir_medio(pix, pixel, base=vault)
+    elif pix.exists():
+        pix.unlink()  # de una preparación anterior en Cloudflare: sin TRACKING.md no va
     escribir_medio(raiz / "index.html", html.encode("utf-8"), base=vault)
     escribir_medio(ruta_ly, landing_bytes, base=vault)
     rel = raiz.relative_to(vault).as_posix()

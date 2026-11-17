@@ -45,6 +45,7 @@ from trovefy.landing.plantilla import (
     UTM_JS,
     host_tienda,
     leer_landing_yaml,
+    pixel_js,
     precio_texto,
     version_de,
 )
@@ -675,12 +676,38 @@ def _r_scripts(raiz: Path, lec: _Lector, pixel: bool, fallos: list[str]) -> None
     utm = raiz / "assets" / "utm.js"
     if utm.is_symlink() or not utm.is_file() or utm.read_bytes() != UTM_JS.read_bytes():
         fallos.append("assets/utm.js no es el de templates/landing/: vuelve a trovefy landing guardar")
-    pixel_js = raiz / "assets" / PIXEL_JS
-    if pixel and pixel_js.is_file() and not pixel_js.is_symlink():
-        eventos = set(_EVENTO_PIXEL.findall(pixel_js.read_text(encoding="utf-8")))
+    archivo = raiz / "assets" / PIXEL_JS
+    if pixel and archivo.is_file() and not archivo.is_symlink():
+        eventos = set(_EVENTO_PIXEL.findall(archivo.read_text(encoding="utf-8")))
         if eventos - {"PageView", "ViewContent"}:
             fallos.append(f"assets/{PIXEL_JS}: solo PageView y ViewContent (lleva {', '.join(sorted(eventos))})")
     fallos.extend(dict.fromkeys(lec.fuera))
+
+
+def _r_pixel(vault: Path, raiz: Path, datos: DatosLanding, lec: _Lector, fallos: list[str],
+             avisos: list[str]) -> None:
+    """R1: en Cloudflare, ``assets/pixel.js`` es byte a byte la plantilla con el dataset de ``TRACKING.md`` y el
+    HTML lo carga; sin ``TRACKING.md`` no va (aviso: publicar lo exige)."""
+    try:
+        esperado = pixel_js(vault, datos)
+    except EntradaInvalida as e:
+        fallos.append(str(e))
+        return
+    archivo = raiz / "assets" / PIXEL_JS
+    hay = archivo.is_file() and not archivo.is_symlink()
+    carga = any(src == f"assets/{PIXEL_JS}" for src, _ in lec.scripts)
+    if esperado is None:
+        if hay:
+            fallos.append(f"assets/{PIXEL_JS} sin checkout/{datos.pais}/TRACKING.md: sobra (vuelve a trovefy "
+                          "landing preparar y guardar)")
+        avisos.append(f"sin píxel: falta checkout/{datos.pais}/TRACKING.md con dataset_id (trovefy tracking "
+                      "preparar); publicar en Cloudflare lo exige")
+        return
+    if not hay or archivo.read_bytes() != esperado:
+        fallos.append(f"assets/{PIXEL_JS} no es el de la plantilla con el dataset de TRACKING.md: vuelve a "
+                      "trovefy landing guardar")
+    if not carga:
+        fallos.append(f'index.html no carga assets/{PIXEL_JS} (<script src="assets/{PIXEL_JS}" defer>)')
 
 
 def _leer_texto(ruta: Path, fallos: list[str], nombre: str) -> str:
@@ -737,6 +764,8 @@ def validar(vault: Path, datos: DatosLanding) -> Resultado:
         if (motivo := origen.motivo(url, carga)) is not None:
             fallos.append(f"{donde}: «{url}»: {motivo}")
     _r_scripts(raiz, lec, pixel, fallos)
+    if pixel:
+        _r_pixel(vault, raiz, datos, lec, fallos, avisos)
     if len(lec.versiones) != 1:
         fallos.append('falta <main id="tf-landing" data-tf-version="…"> (uno solo)')
     elif lec.versiones[0] != version_de(html):

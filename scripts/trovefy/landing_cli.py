@@ -43,9 +43,23 @@ def _comunes(p: argparse.ArgumentParser) -> None:
     p.add_argument("--pais", required=True, help="código del país (BG, RO…)")
 
 
+def _configurar_impultienda(sub) -> None:
+    """Subcomandos de hosting y publicación (Tareas 8–9)."""
+    s = sub.add_parser("sonda", help="mide qué admite Impultienda: pega una prueba, mira la tienda y restaura "
+                                     "tu contenido")
+    _comunes(s)
+    s.add_argument("--tienda", required=True, help="URL pública de tu tienda (https://…); se guarda en mercados.yaml")
+    s.add_argument("--dominio-propio", choices=("si", "no"), default=None,
+                   help="tu respuesta: ¿Impultienda te deja conectar tu dominio en tu plan?")
+    s.add_argument("--url", default=None, help="URL de «Diseño de tienda → Contenido» si no es la del mapa")
+    c = sub.add_parser("capturar", help="confirma tú la pantalla «Diseño de tienda → Contenido» (sin clics)")
+    c.add_argument("--url", default=None, help="dónde abrir la ventana (de app.impultienda.ar)")
+
+
 def _configurar(parser: argparse.ArgumentParser) -> None:
     sub = parser.add_subparsers(dest="accion", metavar="<acción>", required=True)
     _comunes(sub.add_parser("estado", help="estado del país, PDF vigente y lo que falta"))
+    _configurar_impultienda(sub)
     m = sub.add_parser("medios", help="vistas previas reales del PDF e imágenes propias a assets/")
     _comunes(m)
     m.add_argument("--paginas", default="1,2,3", help="páginas del PDF para la vista previa (1,4,7)")
@@ -73,6 +87,69 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
 
 
 # --- acciones ------------------------------------------------------------------------------------
+
+
+def _con_paradas(accion):
+    """Las paradas del navegador salen con su motivo: 1 si es «no medido» o una parada del conductor (no se tocó
+    nada más), 2 si el navegador falló."""
+    def envuelta(args: argparse.Namespace, vault: Path) -> int:
+        from trovefy.landing.hosting import CapacidadNoMedida
+        from trovefy.navegador import NavegadorError
+        from trovefy.tienda.conductor import Parada
+
+        try:
+            return accion(args, vault)
+        except Parada as e:
+            return _error(e.motivo, 1)
+        except CapacidadNoMedida as e:
+            return _error(e, 1)
+        except NavegadorError as e:
+            return _error(e, 2)
+    return envuelta
+
+
+@_con_paradas
+def _sonda(args: argparse.Namespace, vault: Path) -> int:
+    from datetime import datetime
+
+    from trovefy.landing.hosting import (
+        CapacidadNoMedida,
+        elegir_hosting,
+        elegir_resumen,
+        guardar_tienda,
+        sondear,
+    )
+    from trovefy.vault.escritura import ZONA_NEGOCIO
+    from trovefy.vault.producto import ruta_producto
+
+    if not ruta_producto(vault, args.producto).is_file():
+        raise FileNotFoundError(f"no existe productos/{args.producto}/PRODUCTO.md")
+    pais = args.pais.strip().upper()
+    ahora = datetime.now(ZONA_NEGOCIO)
+    if guardar_tienda(vault, pais, args.tienda, ahora):
+        print(f"Tienda de {pais} guardada en config/mercados.yaml (palabra tuya, {ahora:%Y-%m-%d}).")
+    dominio = {"si": True, "no": False, None: None}[args.dominio_propio]
+    c = sondear(vault, args.producto, pais, args.tienda.strip().rstrip("/"), dominio, args.url, ahora=ahora)
+    print(f"Capacidades ({c.fecha}): {elegir_resumen(c)}")
+    print(f"Tu contenido de Impultienda está restaurado (respaldo en landing/{pais}/respaldo/).")
+    try:
+        h = elegir_hosting(c)
+        print(f"Hosting: {h.ruta} — {h.motivo}")
+    except CapacidadNoMedida as e:
+        print(f"Hosting: {e}")
+    return 0
+
+
+@_con_paradas
+def _capturar(args: argparse.Namespace, vault: Path) -> int:
+    from trovefy.landing.panel import capturar_pantalla
+
+    entrada = capturar_pantalla(vault, args.url)
+    print(f"Pantalla «Diseño de tienda → Contenido» confirmada ({entrada['fecha']}): {entrada['url']}")
+    return 0
+
+
+_ACCIONES_IMPULTIENDA = {"sonda": _sonda, "capturar": _capturar}
 
 
 def _faltan(vault: Path, p_id: str, pais: str) -> list[str]:
@@ -134,18 +211,18 @@ def _medios(args: argparse.Namespace, vault: Path) -> int:
     return 0
 
 
-def _hosting_por_defecto() -> tuple[str, str | None]:
-    """(hosting, aviso). Hasta que exista la sonda (Tarea 8), Cloudflare provisional."""
-    try:
-        from trovefy.landing.hosting import elegir_hosting  # Tarea 8
-    except ImportError:
-        return "cloudflare", "hosting no medido: cloudflare provisional (mide Impultienda con trovefy landing sonda)"
-    from trovefy.vault.rutas import vault_root
+def _hosting_por_defecto(vault: Path) -> tuple[str, str | None]:
+    """(hosting, aviso): el que elija la sonda; con algo «no medido», Cloudflare provisional (R6)."""
+    from trovefy.landing.hosting import (
+        CapacidadNoMedida,
+        capacidades_vigentes,
+        elegir_hosting,
+    )
 
-    hosting = elegir_hosting(vault_root())
-    if hosting not in ("impultienda", "cloudflare"):
-        return "cloudflare", f"hosting {hosting}: cloudflare provisional (trovefy landing sonda)"
-    return hosting, None
+    try:
+        return elegir_hosting(capacidades_vigentes(vault)).ruta, None
+    except CapacidadNoMedida as e:
+        return "cloudflare", f"hosting {e}; de momento cloudflare provisional"
 
 
 def _preparar(args: argparse.Namespace, vault: Path) -> int:
@@ -153,7 +230,7 @@ def _preparar(args: argparse.Namespace, vault: Path) -> int:
     from trovefy.landing.plantilla import preparar
 
     d = cargar_datos(vault, args.producto, args.pais, correr=_orden())
-    hosting, aviso = (args.hosting, None) if args.hosting else _hosting_por_defecto()
+    hosting, aviso = (args.hosting, None) if args.hosting else _hosting_por_defecto(vault)
     if aviso:
         print(f"Aviso: {aviso}")
     destino = _borrador(d.p_id, d.pais)
@@ -284,3 +361,6 @@ def _ejecutar(args: argparse.Namespace) -> int:
 
 
 registrar("landing", _configurar, _ejecutar, ayuda="landing propia por país: preparar, QA y publicar")
+
+# Tareas 8–9 (sonda, captura y publicación): se registran aparte de las de arriba.
+_ACCIONES.update(_ACCIONES_IMPULTIENDA)
