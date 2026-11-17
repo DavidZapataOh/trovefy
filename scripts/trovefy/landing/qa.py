@@ -330,6 +330,9 @@ def _filtro(page, permitidos: tuple[str, ...], silenciar: tuple[str, ...], exter
             return
         if clase == "propia" and propias is not None and url not in propias:
             propias.append(url)
+        if clase == "propia" and req.method != "GET":  # como probar_clic: a la tienda solo se lee (F2-4)
+            route.abort()
+            return
         route.continue_()
 
     _blindar(page)

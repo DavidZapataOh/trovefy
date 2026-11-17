@@ -55,7 +55,7 @@ def test_publicar_impultienda_relee_igual(tmp_path):
     v, url = _publicar(tmp_path, estado)
     assert url == f"https://{DOMINIO}/"
     assert estado.contenido == empaquetar_en_linea(ruta_landing(v, P, "ZZ"))
-    respaldo = ruta_landing(v, P, "ZZ") / "respaldo" / "impultienda-2026-11-17.html"
+    respaldo = ruta_landing(v, P, "ZZ") / "respaldo" / "impultienda-2026-11-17T103000.html"
     assert respaldo.read_text(encoding="utf-8") == original
 
 

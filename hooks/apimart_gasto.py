@@ -11,9 +11,17 @@ las grafías del vault y los globs, expandidos y como patrón), al modo de ``raw
   pasa. Bash: se deniega reescribirlo (``>``, ``cp``, ``mv``, ``tee``, intérpretes…), añadirle algo que
   mencione el tope y ``sed -i`` que mencione el tope, use escapes o no muestre ninguna clave.
 - ``config/producto.yaml``: no se escribe (lo decide el usuario).
-- ``config/pantallas-confirmadas.yaml`` (I-1 del plan 18): solo lo escribe ``trovefy landing capturar``, que
-  exige una terminal con la persona delante; ni Write/Edit/MultiEdit ni Bash (``>``, ``cp``, ``mv``, ``tee``,
-  ``sed -i``, intérpretes…), tampoco en bloque sobre ``config/``. Leerlo sí.
+- ``config/pantallas-confirmadas.yaml`` (I-1 del plan 18; la copia antigua, que ya no se lee): ni
+  Write/Edit/MultiEdit ni Bash (``>``, ``cp``, ``mv``, ``tee``, ``sed -i``, intérpretes…), tampoco en bloque
+  sobre ``config/``. Leerlo sí.
+- ``config/evidencia/p05-*`` (F1-4 del plan 18): la evidencia de la sonda (``p05-impultienda-<fecha>.json``,
+  de la que sale el hosting) y las capturas de las pantallas confirmadas; solo las escribe ``trovefy landing
+  sonda|capturar``. Ni Write/Edit/MultiEdit ni Bash. Leerlas sí.
+- La confirmación de pantallas (F1-1 del plan 18) vive en ``~/.config/trovefy/pantallas-confirmadas.yaml``
+  (abajo) y la escribe solo el usuario, en su terminal: se deniega cualquier Bash que mencione
+  ``landing capturar``, ``tienda.confirmacion``, ``confirmar_pantalla`` o ``capturar_pantalla`` (salvo un
+  segmento de solo lectura/desarrollo: ``rg``, ``grep``, ``uv run pytest``, ``git log|diff|show|commit``…),
+  y ``TROVEFY_VAULT=``/``env … TROVEFY_VAULT`` junto a ``trovefy landing sonda|publicar`` (un segundo vault).
 - El libro de gasto: ``productos/*/entregable/costes.csv`` (también en subcarpetas),
   ``.apimart-intentos.jsonl`` y ``.apimart.lock``; sus carpetas (``entregable/``, el producto,
   ``productos/``, el vault) no se borran, mueven ni sobrescriben en bloque (``rm -r``, ``mv``, ``cp -r``,
@@ -24,9 +32,14 @@ las grafías del vault y los globs, expandidos y como patrón), al modo de ``raw
 - ``.trovefy/STOP``: crearlo sí; borrarlo o moverlo no (lo quita el usuario).
 - ``git checkout|restore|stash|reset|clean|switch…`` con el vault como directorio (cwd, ``cd``, ``-C``) o
   sobre una ruta del vault cuentan como escritura y se deniegan.
-- ``~/.config/trovefy`` y lo que cuelga de él: ni Read, ni Grep (``path`` y ``glob``), ni Bash
-  (``cat``, ``grep``, ``head``, globs, ``grep -r`` sobre ``~/.config``…), salvo un segmento que empieza
-  por ``trovefy …`` (o ``uv run trovefy …``).
+- ``~/.config/trovefy`` y lo que cuelga de él: ni Read, ni Grep (``path`` y ``glob``), ni Write/Edit/
+  MultiEdit/NotebookEdit, ni Bash (``cat``, ``grep``, ``head``, globs, ``grep -r`` sobre ``~/.config``…),
+  salvo un segmento que empieza por ``trovefy …`` (o ``uv run trovefy …``) y no redirige hacia allí.
+
+Escrituras por Bash que se reconocen (F1-2): ``>``, ``>>``, ``>|``, ``tee``, ``sed -i``, ``cp``/``mv``/
+``install``/``ln`` (también ``-t DIR``/``--target-directory``: ``DIR/<nombre del origen>``), ``curl -o|-O``,
+``wget`` (``-O``, o el nombre de la URL), ``awk`` con ``print >``/``|``/``system``, ``rm``, ``tar``…; y una
+palabra con llaves ``{a,b}`` cuenta con todas sus expansiones.
 
 Bash que menciona APIMart (``apimart.ai``, ``APIMART…``, ``trovefy.apimart``, ``claude.env`` o
 ``apimart_tope_usd``; el comando se normaliza: sin comillas ni barras invertidas, y decodificado ``%xx``):
@@ -79,8 +92,14 @@ MOTIVO_CLAVE = "claude.env guarda la clave de APIMart: solo la lee `trovefy prod
 MOTIVO_CONF = "~/.config/trovefy guarda las claves: solo lo lee `trovefy …`; ni Read, ni Grep, ni cat"
 MOTIVO_TOPE = "el tope de APIMart solo lo sube `trovefy producto` con la cita literal del usuario"
 MOTIVO_CONFIG = "config/producto.yaml no se edita desde Claude: sus valores los decide el usuario"
-MOTIVO_PANTALLAS = ("config/pantallas-confirmadas.yaml solo lo escribe `trovefy landing capturar`, lanzado por el "
-                    "usuario en su terminal con la pantalla delante: no se crea, edita, mueve ni borra a mano")
+MOTIVO_PANTALLAS = ("las confirmaciones de pantalla las escribe solo `trovefy landing capturar`, lanzado por el "
+                    "usuario en su terminal con la pantalla delante: no se crean, editan, mueven ni borran a mano")
+MOTIVO_CAPTURAR = ("`trovefy landing capturar` (la confirmación de la pantalla) lo ejecuta el usuario en su "
+                   "terminal, no Claude: dale la orden y espera a que te diga que terminó")
+MOTIVO_OTRO_VAULT = ("`trovefy landing sonda|publicar` se lanza con el vault de siempre, sin cambiar TROVEFY_VAULT: "
+                     "lo ejecuta el usuario en su terminal")
+MOTIVO_EVIDENCIA = ("config/evidencia/p05-* (la evidencia de la sonda y las capturas de las pantallas confirmadas) "
+                    "solo la escriben `trovefy landing sonda|capturar`: no se crea, edita, mueve ni borra a mano")
 MOTIVO_GASTO = ("costes.csv, .apimart-intentos.jsonl y .apimart.lock (y su carpeta entregable/) son el registro del "
                 "gasto: solo los escribe `trovefy producto`; no se editan, mueven ni borran (si algo falla, pide ayuda)")
 MOTIVO_STOP = ".trovefy/STOP lo quita el usuario: Claude no lo borra ni lo mueve"
@@ -104,6 +123,10 @@ _INTERPRETE = re.compile(
     r"(?:sudo\s+)?(?:sh|bash|zsh|dash|ksh|fish|python[\d.]*|perl|ruby|node|deno|bun|php|xargs|eval|source|\.|exec"
     r"|env|printenv|nohup|timeout|parallel|busybox|uv\s+run\s+python[\d.]*)(?:\s|$)")
 _GASTO = re.compile(r"costes\.csv|\.apimart-intentos\.jsonl|\.apimart\.lock", re.IGNORECASE)
+_CAPTURAR = re.compile(r"landing\w*\s+capturar|tienda\.confirmacion|tienda\s+import\s+confirmacion"
+                       r"|confirmar_pantalla|capturar_pantalla")
+_OTRO_VAULT = re.compile(r"\bTROVEFY_VAULT\s*=|\benv\b[^;&|\n]*\bTROVEFY_VAULT\b")
+_SONDA_PUBLICAR = re.compile(r"landing\w*\s+(?:sonda|publicar)\b")
 _ARCHIVOS_GASTO = (".apimart-intentos.jsonl", ".apimart.lock")
 
 # Patrones relativos al vault (componentes; ``*`` es un componente cualquiera, ``**`` cero o más).
@@ -114,6 +137,7 @@ _LIBRO = (("productos", "*", "entregable", "costes.csv"),
 _DECISION = (("productos", "*", "decisiones", "*-tope-apimart.md"),)
 _CONFIG = (("config", "producto.yaml"),)
 _PANTALLAS = (("config", "pantallas-confirmadas.yaml"),)  # I-1 del plan 18: la confirmación exige un humano
+_EVIDENCIA = (("config", "evidencia", "p05-*"),)  # F1-4 del plan 18: la sonda y las capturas confirmadas
 _STOP = ((".trovefy", "STOP"),)
 _PRODUCTO = (("productos", "*", "PRODUCTO.md"),)
 # M3 (Tareas 11–12): el registro de QC y los PDF que el cierre da por buenos. Solo `trovefy producto`.
@@ -136,7 +160,8 @@ _CLAVE_VISIBLE = re.compile(r"[A-Za-z_][\w-]*\s*:")
 
 
 def _normalizar(comando: str) -> str:
-    return re.sub(r"[\"'\\]", "", comando)
+    """Sin comillas ni barras invertidas, y ``>|`` como ``>`` (antes de partir por ``|``)."""
+    return re.sub(r">\s*\|", ">", re.sub(r"[\"'\\]", "", comando))
 
 
 def _host(url: str) -> str:
@@ -189,6 +214,96 @@ def _fichas(texto: str) -> list[str]:
     return [f for f in SEPARADORES_RUTA.split(texto) if f and not f.startswith("-")]
 
 
+_LLAVES = re.compile(r"\{([^{}]*,[^{}]*)\}")
+_MAX_LLAVES = 64
+
+
+def _expandir_llaves(palabra: str) -> list[str]:
+    """Las expansiones de ``{a,b}`` de una palabra (como bash, hasta ``_MAX_LLAVES``); ``[]`` si no tiene."""
+    if not _LLAVES.search(palabra):
+        return []
+    pendientes, hechas = [palabra], []
+    while pendientes and len(hechas) + len(pendientes) <= _MAX_LLAVES:
+        p = pendientes.pop()
+        m = _LLAVES.search(p)
+        if m is None:
+            hechas.append(p)
+            continue
+        pendientes += [p[:m.start()] + alt + p[m.end():] for alt in m.group(1).split(",")]
+    return hechas + pendientes
+
+
+def _fichas_con_llaves(texto: str) -> list[str]:
+    """``_fichas`` más las de cada expansión de llaves (``cp x ~/.config/{trovefy,y}/z``)."""
+    salida = _fichas(texto)
+    for palabra in texto.split():
+        for exp in _expandir_llaves(palabra):
+            salida += _fichas(exp)
+    return salida
+
+
+def _dir_destino(palabras: list[str]) -> str | None:
+    """El ``DIR`` de ``-t DIR``, ``-tDIR`` o ``--target-directory[=]DIR`` (cp, mv, install, ln)."""
+    for i, w in enumerate(palabras):
+        if w in ("-t", "--target-directory") and i + 1 < len(palabras):
+            return palabras[i + 1]
+        if w.startswith("--target-directory="):
+            return w.split("=", 1)[1]
+        if re.fullmatch(r"-[a-zA-Z]*t\S+", w) and not w.startswith("--"):
+            return w[w.index("t", 1) + 1:]
+    return None
+
+
+def _nombre_url(url: str) -> str | None:
+    if "://" not in url:
+        return None
+    nombre = url.split("?", 1)[0].split("#", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+    return nombre or None
+
+
+def _valor_corto(palabras: list[str], letra: str, largas: tuple[str, ...]) -> list[str]:
+    """Valores de una opción con argumento: ``-o X``, ``-oX``, ``-so X`` (agrupada), ``--output X``,
+    ``--output=X``."""
+    valores = []
+    for i, w in enumerate(palabras):
+        siguiente = palabras[i + 1] if i + 1 < len(palabras) else None
+        if w in largas and siguiente:
+            valores.append(siguiente)
+        elif any(w.startswith(f"{larga}=") for larga in largas):
+            valores.append(w.split("=", 1)[1])
+        elif re.fullmatch(r"-[a-zA-Z]+\S*", w) and not w.startswith("--") and letra in w[1:]:
+            j = w.index(letra, 1)
+            if not w[1:j].isalpha():
+                continue
+            resto = w[j + 1:]
+            if resto:
+                valores.append(resto)
+            elif siguiente:
+                valores.append(siguiente)
+    return valores
+
+
+def _descargas(orden: str, palabras: list[str]) -> list[str]:
+    """Archivos que escriben ``curl``/``wget``."""
+    urls = [w for w in palabras[1:] if "://" in w]
+    if orden == "curl":
+        destinos = _valor_corto(palabras, "o", ("--output",))
+        remoto = any(w in ("--remote-name", "--remote-name-all") or
+                     (re.fullmatch(r"-[a-zA-Z]+", w) and "O" in w) for w in palabras[1:])
+        carpeta = (_valor_corto(palabras, "\0", ("--output-dir",)) or [None])[0]
+    else:
+        destinos = (_valor_corto(palabras, "O", ("--output-document",))
+                    + _valor_corto(palabras, "o", ("--output-file",))
+                    + _valor_corto(palabras, "a", ("--append-output",)))
+        remoto = not _valor_corto(palabras, "O", ("--output-document",))
+        carpeta = (_valor_corto(palabras, "P", ("--directory-prefix",)) or [None])[0]
+    if remoto:
+        for u in urls:
+            if (nombre := _nombre_url(u)) is not None:
+                destinos.append(f"{carpeta}/{nombre}" if carpeta else nombre)
+    return destinos
+
+
 def _objetivos(c: str) -> tuple[list[tuple[str, str, str]], bool]:
     """``([(ficha, clase, segmento)], hay_git_que_escribe)`` de un comando ya normalizado.
 
@@ -199,10 +314,11 @@ def _objetivos(c: str) -> tuple[list[tuple[str, str, str]], bool]:
     git = False
     segmentos = _segmentos(c)
     if any(_INTERPRETE.match(s) for s in segmentos):  # un intérprete puede escribir cualquier ruta del comando
-        objetivos += [(f, "interprete", c) for f in _fichas(c)]
+        objetivos += [(f, "interprete", c) for f in _fichas_con_llaves(c)]
     for seg in segmentos:
+        antes = len(objetivos)
         for m in _REDIRECCION.finditer(seg):
-            destino = m.group(2)
+            destino = m.group(2).rstrip("})")
             if destino.startswith("&") or destino == "/dev/null":
                 continue
             objetivos.append((destino, "anade" if m.group(1) == ">>" else "redir", seg))
@@ -218,15 +334,25 @@ def _objetivos(c: str) -> tuple[list[tuple[str, str, str]], bool]:
         elif orden == "mv":
             objetivos += [(a, "mueve", seg) for a in args]
             objetivos += [(f"{d}/{os.path.basename(a)}", "mueve", seg) for d in args for a in args if a != d]
+        elif orden in ("curl", "wget"):
+            objetivos += [(a, "escribe", seg) for a in _descargas(orden, palabras)]
+        elif orden in ("awk", "gawk", "mawk", "nawk") and re.search(r">|\||\bsystem\b", seg):
+            objetivos += [(f, "interprete", seg) for f in re.split(r"[\s;&|()<>`=,{}]+", seg) if f
+                          and not f.startswith("-")]
         elif orden in ("cp", "install", "ln", "rsync"):
             recursivo = orden == "rsync" or any(re.fullmatch(r"-[a-zA-Z]*[rRa][a-zA-Z]*|--recursive|--archive", o)
                                                 for o in opciones)
             clase = "rsync" if orden == "rsync" else ("copia_r" if recursivo else "copia")
-            if args:
+            dir_t = _dir_destino(palabras[1:]) if orden != "rsync" else None
+            if dir_t is not None:  # -t DIR: DIR/<nombre de cada origen>
+                origenes = [a for a in args if a != dir_t]
+                objetivos.append((dir_t, clase, seg))
+                objetivos += [(f"{dir_t}/{os.path.basename(a.rstrip('/'))}", clase, seg) for a in origenes]
+            elif args:
                 destino = args[-1]
                 objetivos.append((destino, clase, seg))
                 objetivos += [(f"{destino}/{os.path.basename(a)}", clase, seg) for a in args[:-1]]
-            if "-t" in palabras or (orden == "rsync" and "--remove-source-files" in palabras):
+            if orden == "rsync" and "--remove-source-files" in palabras:
                 objetivos += [(a, clase, seg) for a in args]
         elif orden in ("truncate", "touch", "dd", "chmod", "chown", "patch"):
             objetivos += [(a, "escribe", seg) for a in args]
@@ -242,6 +368,9 @@ def _objetivos(c: str) -> tuple[list[tuple[str, str, str]], bool]:
         elif orden == "git" and _subcomando_git(palabras) in _GIT_ESCRIBE:
             git = True
             objetivos += [(a, "git", seg) for a in args]
+        if len(objetivos) > antes:  # un segmento que escribe: cada expansión de llaves cuenta (F1-2)
+            objetivos += [(f, "bloque", seg) for palabra in seg.split() for exp in _expandir_llaves(palabra)
+                          for f in _fichas(exp)]
     return objetivos, git
 
 
@@ -311,6 +440,8 @@ def _bash_rutas(original: str, c: str, cwd: str | None) -> str | None:
                 return MOTIVO_CONFIG
             if _toca(partes, _PANTALLAS, en_bloque):
                 return MOTIVO_PANTALLAS
+            if _toca(partes, _EVIDENCIA, en_bloque):
+                return MOTIVO_EVIDENCIA
             if _toca(partes, _QC, False) or (en_bloque and _contiene_qc(ruta, partes)):
                 return MOTIVO_QC
             if clase in _QUITA and _toca(partes, _STOP, True):
@@ -352,11 +483,14 @@ def _bash_conf(c: str, cwd: str | None) -> bool:
     bases = bases_vault(vault, vault_res)
     dirs = directorios_recorridos(c, bases, vault_res, cwd)
     for seg in _segmentos(c):
-        if _TROVEFY_CUALQUIERA.match(seg):
+        if _TROVEFY_CUALQUIERA.match(seg):  # `trovefy …` lee su config, pero no se le redirige la salida allí
+            fichas = [m.group(2).rstrip("})") for m in _REDIRECCION.finditer(seg)]
+            if any(_relacion_conf(r) for f in fichas for r in rutas_de_ficha(f, dirs, bases, vault_res)):
+                return True
             continue
         palabras = _palabras(seg)
         recorre = bool(palabras) and (os.path.basename(palabras[0]) in _RECORRE or bool(_RECURSIVO.search(seg)))
-        for ficha in _fichas(seg):
+        for ficha in _fichas_con_llaves(seg):
             for ruta in rutas_de_ficha(ficha, dirs, bases, vault_res):
                 relacion = _relacion_conf(ruta)
                 if relacion == "dentro" or (relacion == "ancestro" and recorre and len(ruta.parts) > 1):
@@ -415,11 +549,28 @@ def _sin_cuerpo_qc(comando: str) -> str:
     return primera  # sin línea de cierre, bash lee el cuerpo hasta el final
 
 
+def _capturar(c: str, segmentos: list[str]) -> bool:
+    """¿El comando lanza (o importa) la confirmación de pantallas? Solo la lanza el usuario (F1-1)."""
+    if not _CAPTURAR.search(c):
+        return False
+    if _SUBCOMANDO.search(c) or _fondo(c):
+        return True
+    for seg in segmentos:
+        if _INTERPRETE.match(seg) or _CAPTURAR.search(seg) and not (
+                _LECTURA.match(seg) and not _OPCION_PELIGROSA.search(seg) and not _escribe(seg)):
+            return True
+    return False
+
+
 def _bash(comando: str, cwd: str | None = None) -> tuple[str, str]:
     comando = _sin_cuerpo_qc(comando)
     for variante in dict.fromkeys((comando, unquote(comando))):
         c = _normalizar(variante)
         segmentos = _segmentos(c)
+        if _capturar(c, segmentos):
+            return "deny", MOTIVO_CAPTURAR
+        if _OTRO_VAULT.search(c) and _SONDA_PUBLICAR.search(c):
+            return "deny", MOTIVO_OTRO_VAULT
         motivo = _bash_rutas(variante, c, cwd)
         if motivo:
             return "deny", motivo
@@ -611,6 +762,8 @@ def _escritura(nombre: str, datos: dict, cwd: str | None) -> tuple[str, str]:
     ruta = datos.get("notebook_path" if nombre == "notebookedit" else "file_path")
     if not isinstance(ruta, str) or not ruta:
         return "allow", ""
+    if _relacion_conf(resolver(ruta, cwd)) == "dentro":
+        return "deny", MOTIVO_CONF
     partes = _relativa(ruta, cwd)
     if partes is None:
         return "allow", ""
@@ -618,6 +771,8 @@ def _escritura(nombre: str, datos: dict, cwd: str | None) -> tuple[str, str]:
         return "deny", MOTIVO_CONFIG
     if any(coincide_patron(partes, p) for p in _PANTALLAS):
         return "deny", MOTIVO_PANTALLAS
+    if any(coincide_patron(partes, p) for p in _EVIDENCIA):
+        return "deny", MOTIVO_EVIDENCIA
     if len(partes) < 3 or partes[0] != "productos":
         return "allow", ""
     if partes[2] == "entregable" and (partes[-1] == "costes.csv" or partes[-1] in _ARCHIVOS_GASTO):

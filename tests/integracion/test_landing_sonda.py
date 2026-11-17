@@ -94,24 +94,33 @@ def test_sonda_url_de_otro_host_rechazada(tmp_path):
     assert estado.posts == []
 
 
-def test_capturar_pantalla_confirma_sin_clics(tmp_path):
+def test_capturar_pantalla_confirma_sin_clics(tmp_path, monkeypatch):
     from integracion.impultienda_falsa import Estado, impultienda_falsa, mapa_local
     from trovefy.landing.panel import capturar_pantalla
     from trovefy.mapa import capturado_de
-    from trovefy.tienda.confirmacion import mapa_con_confirmaciones
+    from trovefy.tienda.confirmacion import (
+        PNG_MAGICO,
+        mapa_con_confirmaciones,
+        ruta_confirmaciones,
+    )
+    from unit.landing.conftest import con_terminal
 
     v = tmp_path / "v"
     (v / "config").mkdir(parents=True)
+    con_terminal(monkeypatch)
     estado = Estado()
     avisos = []
     with impultienda_falsa(estado) as base:
         mapa = mapa_local(base, capturado=None)
-        entrada = capturar_pantalla(v, mapa=mapa, esperar=avisos.append, preguntar=lambda _t: "sí", terminal=lambda: True,
+        entrada = capturar_pantalla(v, mapa=mapa, esperar=avisos.append, preguntar=lambda _t: "sí",
                                     visible=False, dormir=lambda _s: None, ahora=AHORA)
     assert estado.posts == []  # ni un guardado
     assert entrada["url"] == base + "/panel" and avisos
-    assert (v / entrada["evidencia"]).stat().st_size > 0
-    assert capturado_de(mapa_con_confirmaciones(v, "impultienda", mapa), "diseno_contenido") == "2026-11-17"
+    assert entrada["evidencia"] == "config/evidencia/p05-diseno-contenido-2026-11-17.png"
+    assert (v / entrada["evidencia"]).read_bytes().startswith(PNG_MAGICO)
+    assert ruta_confirmaciones().is_file() and not (v / "config" / "pantallas-confirmadas.yaml").exists()
+    hoy = AHORA.date()
+    assert capturado_de(mapa_con_confirmaciones(v, "impultienda", mapa, hoy=hoy), "diseno_contenido") == "2026-11-17"
 
 
 def test_sonda_con_guardado_que_navega(tmp_path):

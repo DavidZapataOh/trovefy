@@ -71,6 +71,31 @@ def cargar(v: Path, pais: str = "ZZ", **kw):
 
 
 @pytest.fixture(autouse=True)
+def _home_de_prueba(tmp_path, monkeypatch):
+    """Nunca el HOME real: las confirmaciones de pantalla viven en el directorio de configuración de trovefy."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+
+class _Tty(io.StringIO):
+    def __init__(self, fd: int):
+        super().__init__()
+        self.fd = fd
+
+    def fileno(self):
+        return self.fd
+
+
+def con_terminal(monkeypatch, stdin: bool = True, stdout: bool = True) -> None:
+    """stdin/stdout que `trovefy.tienda.confirmacion.hay_terminal` ve como terminal (o no)."""
+    import types
+
+    from trovefy.tienda import confirmacion
+
+    monkeypatch.setattr(confirmacion, "sys", types.SimpleNamespace(stdin=_Tty(100), stdout=_Tty(101)))
+    monkeypatch.setattr(confirmacion.os, "isatty", lambda fd: {100: stdin, 101: stdout}.get(fd, False))
+
+
+@pytest.fixture(autouse=True)
 def _sin_binarios_reales(monkeypatch):
     """Un unitario que llegue a ``pdfinfo``/``pdftoppm``/``ffmpeg`` reales falla: hay que inyectarlos."""
     real = subprocess.run

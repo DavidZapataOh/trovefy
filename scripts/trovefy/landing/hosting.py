@@ -93,14 +93,14 @@ def es_sonda_colgada(contenido: str) -> bool:
     return len(contenido) >= _PREFIJO_SONDA_MIN and HTML_SONDA.startswith(contenido)
 
 
-def parar_si_sonda_colgada(vault: Path, p_id: str, pais: str, contenido: str) -> None:
+def parar_si_sonda_colgada(vault: Path, pais: str, contenido: str) -> None:
     """`NavegadorError` (sin tocar nada) si el campo tiene restos de una sonda: que el usuario pegue antes el
-    último respaldo."""
+    último respaldo de la tienda de `pais` (de cualquier producto, F2-3), con su ruta completa."""
     if not es_sonda_colgada(contenido):
         return
-    ultimo = ultimo_respaldo(vault, p_id, pais)
-    donde = (f"pega tú el último respaldo ({Path(ultimo).relative_to(vault).as_posix()})" if ultimo else
-             f"no hay respaldos en landing/{pais}/respaldo/: pega tú lo que tenías")
+    ultimo = ultimo_respaldo(vault, pais)
+    donde = (f"pega tú el último respaldo ({ultimo})" if ultimo else
+             f"no hay respaldos en productos/*/landing/{pais}/respaldo/: pega tú lo que tenías")
     raise NavegadorError(f"el campo «HTML completo de la tienda» tiene restos de una sonda anterior: {donde} en "
                          "«Diseño de tienda → Contenido» y vuelve a lanzar. No he tocado nada.")
 FUERA_MAX = 40  # caracteres visibles fuera de #tf-sonda que aún no son «marco» (un aviso de cookies corto)
@@ -479,8 +479,9 @@ def sondear(vault: Path, p_id: str, pais: str, tienda: str, dominio_propio: bool
     2. Perfil `impultienda` visible: firma, respaldo en `landing/<PAIS>/respaldo/`, pega `HTML_SONDA`, guarda y
        relee (un recorte da `limite_caracteres`).
     3. La tienda en un contexto **sin perfil**: script, estilos, título y marco.
-    4. Siempre que se haya pegado algo: restaura, relee y compara; si no queda igual, `NavegadorError` con la
-       ruta del respaldo.
+    4. Siempre que se haya pegado algo: restaura (solo si el campo tiene lo que se pegó, F2-1; si no, guarda lo
+       que hay y para con `CampoCambiado`), relee y compara; si no queda igual, `NavegadorError` con la ruta del
+       respaldo.
     5. Escribe `config/evidencia/p05-impultienda-<fecha>.json`.
 
     `dominio_propio` es la respuesta del usuario (no se mide aquí; lo confirma la QA publicada).
@@ -491,14 +492,14 @@ def sondear(vault: Path, p_id: str, pais: str, tienda: str, dominio_propio: bool
         raise ValueError(f"la tienda tiene que ser una URL https: «{tienda}»")
     m = preparar_mapa(vault, mapa, url_pantalla)
     abrir = abrir or sesion
-    original = respaldo = None
+    original = respaldo = releido = None
     pegado = False
     try:
         with abrir(SERVICIO, visible=visible) as page:
             panel = Panel(page, m, dormir)
             panel.abrir()
             original = panel.leer()
-            parar_si_sonda_colgada(vault, p_id, pais.upper(), original)  # I-5: restos de una sonda a medias
+            parar_si_sonda_colgada(vault, pais.upper(), original)  # I-5: restos de una sonda a medias
             respaldo = respaldar(vault, p_id, pais.upper(), original, ahora)
             pegado = True  # desde aquí, pase lo que pase, se restaura
             releido = panel.guardar(HTML_SONDA)
@@ -506,7 +507,9 @@ def sondear(vault: Path, p_id: str, pais: str, tienda: str, dominio_propio: bool
             medidas = _medir_tienda(page, tienda, dormir)
     finally:
         if pegado:
-            restaurar(abrir, m, original, respaldo, visible=visible, dormir=dormir)
+            esperado = tuple(x for x in (HTML_SONDA, releido) if x is not None)
+            restaurar(abrir, m, original, respaldo, esperado=esperado, vault=vault, visible=visible, dormir=dormir,
+                      ahora=ahora)
     if not releido:  # L-3: un campo vacío tras guardar no es un límite de 0 caracteres: no guarda HTML propio
         limite, medidas = None, {**medidas, "html_propio": False}
     else:

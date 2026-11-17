@@ -241,13 +241,162 @@ def test_pantallas_confirmadas_bash(decide, mundo, cmd, cwd):
     assert "trovefy landing capturar" in motivo or "producto.yaml" in motivo, (cmd, motivo)
 
 
+def test_pantallas_confirmadas_leer_pasa(decide, mundo):
+    assert decide("Bash", {"command": _fmt("cat {v}/config/pantallas-confirmadas.yaml", mundo)}) == ("allow", "")
+
+
+# --- F1-1 (segunda ronda): la confirmación vive en ~/.config/trovefy y la lanza solo el usuario -------------
+
+CONF_PANTALLAS = "{home}/.config/trovefy/pantallas-confirmadas.yaml"
+
+
+@pytest.mark.parametrize("tool,datos", [
+    ("Write", {"file_path": CONF_PANTALLAS, "content": "impultienda: {}\n"}),
+    ("Edit", {"file_path": CONF_PANTALLAS, "old_string": "no", "new_string": "sí"}),
+    ("MultiEdit", {"file_path": CONF_PANTALLAS, "edits": [{"old_string": "no", "new_string": "sí"}]}),
+    ("NotebookEdit", {"notebook_path": CONF_PANTALLAS, "new_source": "x"}),
+    ("Write", {"file_path": "{home}/.config/./trovefy/otra.yaml", "content": "x"}),
+])
+def test_config_de_trovefy_no_se_escribe_con_write_edit(decide, mundo, tool, datos):
+    datos = {k: (_fmt(x, mundo) if k in ("file_path", "notebook_path") else x) for k, x in datos.items()}
+    assert decide(tool, datos)[0] == "deny", datos
+
+
 @pytest.mark.parametrize("cmd", [
-    "cat {v}/config/pantallas-confirmadas.yaml",
+    "cp /tmp/p ~/.config/trovefy/pantallas-confirmadas.yaml",
+    "printf x >| ~/.config/trovefy/pantallas-confirmadas.yaml",
+    "echo x >|{home}/.config/trovefy/pantallas-confirmadas.yaml",
+    "cp -t ~/.config/trovefy /tmp/pantallas-confirmadas.yaml",
+    "curl -so ~/.config/trovefy/pantallas-confirmadas.yaml file:///tmp/p",
+    "cp /tmp/p ~/.config/{{trovefy,x}}/pantallas-confirmadas.yaml",
+    "trovefy ayuda > ~/.config/trovefy/pantallas-confirmadas.yaml",
+    "uv run trovefy x 2> {home}/.config/trovefy/pantallas-confirmadas.yaml",
+])
+def test_config_de_trovefy_no_se_escribe_por_bash(decide, mundo, cmd):
+    assert decide("Bash", {"command": _fmt(cmd, mundo)})[0] == "deny", cmd
+
+
+@pytest.mark.parametrize("cmd", [
     "trovefy landing capturar",
     "uv run trovefy landing capturar --url https://app.impultienda.ar/x",
+    "uv run trovefy landing capturar < /dev/tty",
+    "cd {v} && script -qc 'trovefy landing capturar' /dev/null",
+    "printf '\\nsí\\n' | script -qec 'uv run trovefy landing capturar' /dev/null",
+    "uv run python -m trovefy.landing_cli capturar",
+    "uv run python -c 'from trovefy.tienda.confirmacion import confirmar_pantalla as c; c()'",
+    "uv run python -c 'from trovefy.tienda import confirmacion'",
+    "uv run python -c 'import trovefy.landing.panel as p; p.capturar_pantalla(v)'",
+    "python3 -c \"import trovefy.tienda.confirmacion\"",
+    "uv run trovefy 'land''ing' capturar",
 ])
-def test_pantallas_confirmadas_leer_o_capturar_pasa(decide, mundo, cmd):
-    assert decide("Bash", {"command": _fmt(cmd, mundo)}) == ("allow", "")
+def test_capturar_y_confirmar_solo_los_lanza_el_usuario(decide, mundo, cmd):
+    decision, motivo = decide("Bash", {"command": _fmt(cmd, mundo)})
+    assert decision == "deny" and "terminal" in motivo, (cmd, motivo)
+
+
+@pytest.mark.parametrize("cmd", [
+    "TROVEFY_VAULT=/tmp/fake uv run trovefy landing sonda --producto p --pais BG --tienda https://x",
+    "TROVEFY_VAULT=/tmp/fake trovefy landing publicar --producto p --pais BG",
+    "env TROVEFY_VAULT=/tmp/fake trovefy landing sonda --producto p --pais BG --tienda https://x",
+    "export TROVEFY_VAULT=/tmp/fake; uv run trovefy landing publicar --producto p --pais BG",
+])
+def test_sonda_y_publicar_con_otro_vault_se_niegan(decide, cmd):
+    assert decide("Bash", {"command": cmd})[0] == "deny", cmd
+
+
+@pytest.mark.parametrize("cmd", [
+    "trovefy landing sonda --producto p --pais BG --tienda https://x",
+    "TROVEFY_VAULT=/tmp/x uv run pytest -q tests/unit/landing",
+    "uv run pytest -q tests/unit/tienda/test_confirmacion.py",
+    "rg -n confirmar_pantalla scripts tests",
+    "grep -rn capturar_pantalla scripts",
+    "git log --oneline -3",
+])
+def test_lo_legitimo_alrededor_de_la_confirmacion_pasa(decide, cmd):
+    assert decide("Bash", {"command": cmd}) == ("allow", ""), cmd
+
+
+def test_segundo_vault_no_trae_confirmacion(decide, mundo, tmp_path):
+    """Copiar el vault a otro sitio y escribir allí una confirmación no sirve: ni se escribe en la config ni
+    se lanza la sonda con ese vault."""
+    otro = tmp_path / "fake"
+    assert decide("Bash", {"command": f"cp -r {mundo['v']} {otro}"}) == ("allow", "")
+    assert decide("Bash", {"command": f"TROVEFY_VAULT={otro} trovefy landing sonda --producto p --pais BG "
+                                      "--tienda https://x"})[0] == "deny"
+    assert decide("Write", {"file_path": str(mundo["home"] / ".config/trovefy/pantallas-confirmadas.yaml"),
+                            "content": "x"})[0] == "deny"
+
+
+# --- F1-4: la evidencia de la sonda solo la escribe la sonda ---------------------------------------------
+
+EV_SONDA = "{v}/config/evidencia/p05-impultienda-2026-11-17.json"
+
+
+@pytest.mark.parametrize("tool,datos", [
+    ("Write", {"file_path": EV_SONDA, "content": "{}"}),
+    ("Edit", {"file_path": EV_SONDA, "old_string": "false", "new_string": "true"}),
+    ("Write", {"file_path": "{v}/config/evidencia/p05-impultienda-2099-01-01.json", "content": "{}"}),
+    ("Write", {"file_path": "{v}/config/evidencia/p05-diseno-contenido-2026-11-17.png", "content": "x"}),
+])
+def test_evidencia_de_la_sonda_no_se_escribe_con_write(decide, mundo, tool, datos):
+    datos = {k: (_fmt(x, mundo) if k == "file_path" else x) for k, x in datos.items()}
+    assert decide(tool, datos)[0] == "deny", datos
+
+
+@pytest.mark.parametrize("cmd,cwd", [
+    ("echo '{{}}' > " + EV_SONDA, None),
+    ("cp /tmp/e.json " + EV_SONDA, None),
+    ("cp /tmp/p05-impultienda-2026-11-17.json {v}/config/evidencia/", None),
+    ("cp /tmp/e.json p05-impultienda-2026-11-18.json", "{v}/config/evidencia"),
+    ("sed -i s/false/true/ " + EV_SONDA, None),
+    ("rm -rf {v}/config/evidencia", None),
+])
+def test_evidencia_de_la_sonda_no_se_escribe_por_bash(decide, mundo, cmd, cwd):
+    assert decide("Bash", {"command": _fmt(cmd, mundo)}, cwd and _fmt(cwd, mundo))[0] == "deny", cmd
+
+
+def test_evidencia_de_la_sonda_se_lee(decide, mundo):
+    assert decide("Bash", {"command": _fmt("cat {v}/config/evidencia/p05-impultienda-*.json", mundo)}) == \
+        ("allow", "")
+    assert decide("Read", {"file_path": _fmt(EV_SONDA, mundo)}) == ("allow", "")
+
+
+# --- F1-2: huecos del hook (también para config/producto.yaml) ------------------------------------------
+
+@pytest.mark.parametrize("cmd,cwd", [
+    ("printf x >| {v}/config/producto.yaml", None),
+    ("printf a >| config/producto.yaml", "{v}"),
+    ("cp -t {v}/config /tmp/producto.yaml", None),
+    ("cp -t config /tmp/producto.yaml", "{v}"),
+    ("mv -t {v}/config /tmp/producto.yaml", None),
+    ("install -t {v}/config /tmp/producto.yaml", None),
+    ("ln -s -t {v}/config /tmp/producto.yaml", None),
+    ("cp --target-directory={v}/config /tmp/producto.yaml", None),
+    ("curl -so {v}/config/producto.yaml file:///tmp/p", None),
+    ("curl --output {v}/config/producto.yaml file:///tmp/p", None),
+    ("curl -O file:///tmp/producto.yaml", "{v}/config"),
+    ("wget -qO {v}/config/producto.yaml http://x", None),
+    ("wget --output-document={v}/config/producto.yaml http://x", None),
+    ("wget http://x/producto.yaml", "{v}/config"),
+    ("awk 'BEGIN{{print 1 > \"{v}/config/producto.yaml\"}}'", None),
+    ("cd {v} && awk 'BEGIN{{print \"x\" > \"config/producto.yaml\"}}'", None),
+    ("cp /tmp/p {v}/config/producto.{{yaml,x}}", None),
+    ("cp /tmp/p {v}/{{config,x}}/producto.yaml", None),
+    ("cp /tmp/p {v}/config/pantallas-confirmadas.{{yaml,x}}", None),
+])
+def test_huecos_del_hook_cerrados(decide, mundo, cmd, cwd):
+    assert decide("Bash", {"command": _fmt(cmd, mundo)}, cwd and _fmt(cwd, mundo))[0] == "deny", cmd
+
+
+@pytest.mark.parametrize("cmd", [
+    "awk '{{print $1}}' {v}/config/producto.yaml",
+    "cp -t /tmp/salida {v}/config/producto.yaml",
+    "curl -so /tmp/x.json https://example.test/x",
+    "mkdir -p /tmp/{{a,b}}",
+    "echo x >| /tmp/nota.txt",
+])
+def test_lo_legitimo_cerca_de_los_huecos_pasa(decide, mundo, cmd):
+    assert decide("Bash", {"command": _fmt(cmd, mundo)}) == ("allow", ""), cmd
 
 
 def test_config_del_repo_se_puede_editar(decide):

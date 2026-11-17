@@ -4,15 +4,20 @@ Lo comparten la sonda (Tarea 8) y la publicación (Tarea 9). Todo clic y toda es
 `trovefy.tienda.conductor.Conductor` (`poner`/`pulsar`, resolución 21): este módulo solo lee, navega y
 encadena. Antes de tocar el campo se guarda lo que tenía en `landing/<PAIS>/respaldo/` del producto.
 
-La pantalla solo es escribible con su propio `capturado`: el del mapa del repo o el que el usuario confirma en
-su vault con `trovefy landing capturar` (`trovefy.tienda.confirmacion`). Sin él: «no medido: mapa sin
+La pantalla solo es escribible con su propio `capturado`: el del mapa del repo o el que el usuario confirma con
+`trovefy landing capturar` (`trovefy.tienda.confirmacion`, fuera del vault). Sin él: «no medido: mapa sin
 confirmar» y no se abre el navegador.
+
+Restaurar nunca pega a ciegas (F2-1): primero lee el campo y solo pega lo de antes si lo que hay es lo que se
+pegó (mismo SHA-256). Si es otra cosa (alguien lo cambió entretanto), guarda también eso en `respaldo/`, no pega
+nada y para con `CampoCambiado` nombrando los dos archivos.
 """
 
 from __future__ import annotations
 
 import contextlib
 import copy
+import hashlib
 import re
 import sys
 import time
@@ -27,11 +32,14 @@ from trovefy.mapa import cargar as cargar_mapa
 from trovefy.navegador import NavegadorError, sesion
 from trovefy.producto.medios import carpeta_segura, escribir_medio
 from trovefy.secretos import buscar_secreto
+from trovefy.tienda import confirmacion
 from trovefy.tienda.conductor import Conductor, FirmaNoCasa, MapaSinConfirmar
 from trovefy.tienda.confirmacion import (
+    SIN_TERMINAL,
     confirmada_en_vault,
     confirmar_pantalla,
     mapa_con_confirmaciones,
+    ruta_evidencia,
 )
 from trovefy.vault.escritura import ZONA_NEGOCIO, anadir_log
 
@@ -44,7 +52,7 @@ SIN_CONFIRMAR = (f"no medido: mapa sin confirmar ({PANTALLA}). Confírmala tú c
 
 
 def mapa_impultienda(vault: Path) -> dict:
-    """El mapa de Impultienda del repo con las pantallas que el usuario confirmó en su vault."""
+    """El mapa de Impultienda del repo con las pantallas que el usuario confirmó (`trovefy landing capturar`)."""
     return mapa_con_confirmaciones(vault, SERVICIO, cargar_mapa(MAPA_IMPULTIENDA))
 
 
@@ -62,7 +70,7 @@ def preparar_mapa(vault: Path, mapa: dict | None = None, url_pantalla: str | Non
     """El mapa con el que se trabaja: el inyectado o el del repo + confirmaciones; con `url_pantalla`, esa URL
     (del host del mapa) para `diseno_contenido`. `MapaSinConfirmar` si la pantalla no tiene `capturado`.
 
-    Si quien da el `capturado` es la confirmación del vault (no el mapa del repo), `url_pantalla` tiene que ser
+    Si quien da el `capturado` es la confirmación del usuario (no el mapa del repo), `url_pantalla` tiene que ser
     la URL confirmada (I-2): se confirmó esa pantalla, no otra."""
     if mapa is None:
         confirmada = confirmada_en_vault(vault, SERVICIO, cargar_mapa(MAPA_IMPULTIENDA), PANTALLA)
@@ -115,60 +123,92 @@ class Panel:
         return self.leer()
 
 
-def respaldar(vault: Path, p_id: str, pais: str, contenido: str, ahora: datetime) -> Path:
-    """Guarda `contenido` en `landing/<PAIS>/respaldo/impultienda-<fecha>[-N].html` (0640, nunca pisa uno
-    anterior). `ValueError` si parece llevar un secreto: entonces no se guarda ni se toca nada."""
+class CampoCambiado(NavegadorError):
+    """Al ir a restaurar, el campo no tenía lo que se pegó: no se pega nada (F2-1)."""
+
+
+def _sha(texto: str) -> str:
+    return hashlib.sha256(texto.encode("utf-8")).hexdigest()
+
+
+def _respaldar_en(vault: Path, carpeta: Path, contenido: str, ahora: datetime, que: str) -> Path:
     patron = buscar_secreto(contenido)
     if patron:
         raise ValueError(f"lo que tiene ahora el campo de Impultienda parece llevar un secreto ({patron}): no lo "
                          "guardo ni toco nada. Revísalo tú en la pantalla.")
-    vault = Path(vault)
-    carpeta = ruta_landing(vault, p_id, pais) / "respaldo"
     carpeta_segura(vault, carpeta, crear=True)
-    fecha = ahora.astimezone(ZONA_NEGOCIO).date().isoformat()
-    ruta, n = carpeta / f"impultienda-{fecha}.html", 2
+    marca = ahora.astimezone(ZONA_NEGOCIO).strftime("%Y-%m-%dT%H%M%S")
+    ruta, n = carpeta / f"impultienda-{marca}.html", 2
     while ruta.exists() or ruta.is_symlink():
-        ruta, n = carpeta / f"impultienda-{fecha}-{n}.html", n + 1
+        ruta, n = carpeta / f"impultienda-{marca}-{n}.html", n + 1
     escribir_medio(ruta, contenido.encode("utf-8"), base=vault)
-    rel = ruta.relative_to(vault).as_posix()
-    anadir_log(vault, "landing", f"{p_id} {pais}: respaldo del contenido de Impultienda", [rel], ahora=ahora)
+    anadir_log(vault, "landing", que, [ruta.relative_to(vault).as_posix()], ahora=ahora)
     return ruta
 
 
-_RESPALDO = re.compile(r"impultienda-([0-9]{4}-[0-9]{2}-[0-9]{2})(?:-([0-9]+))?\.html")
+def respaldar(vault: Path, p_id: str, pais: str, contenido: str, ahora: datetime) -> Path:
+    """Guarda `contenido` en `landing/<PAIS>/respaldo/impultienda-AAAA-MM-DDTHHMMSS[-N].html` (0640, nunca pisa
+    uno anterior). `ValueError` si parece llevar un secreto: entonces no se guarda ni se toca nada."""
+    vault = Path(vault)
+    return _respaldar_en(vault, ruta_landing(vault, p_id, pais) / "respaldo", contenido, ahora,
+                         f"{p_id} {pais}: respaldo del contenido de Impultienda")
 
 
-def ultimo_respaldo(vault: Path, p_id: str, pais: str) -> Path | None:
-    """El respaldo más reciente de `landing/<PAIS>/respaldo/` (por fecha y número, no por orden alfabético:
-    `-2` va después del de ese mismo día sin número); None si no hay."""
-    carpeta = ruta_landing(Path(vault), p_id, pais.upper()) / "respaldo"
-    if carpeta.is_symlink() or not carpeta.is_dir():
-        return None
-    candidatos = [((m.group(1), int(m.group(2) or 1)), p) for p in carpeta.iterdir()
-                  if (m := _RESPALDO.fullmatch(p.name)) and p.is_file() and not p.is_symlink()]
+# Nombres nuevos con hora (AAAA-MM-DDTHHMMSS) y los antiguos solo con fecha (cuentan como de las 00:00:00).
+_RESPALDO = re.compile(r"impultienda-([0-9]{4}-[0-9]{2}-[0-9]{2})(?:T([0-9]{6}))?(?:-([0-9]+))?\.html")
+
+
+def ultimo_respaldo(vault: Path, pais: str) -> Path | None:
+    """El respaldo más reciente de la tienda de `pais`, buscado en `productos/*/landing/<PAIS>/respaldo/` (la
+    tienda es una por país, la toque el producto que la toque; F2-3). Se ordena por fecha, hora y número, no
+    por orden alfabético; None si no hay."""
+    vault = Path(vault)
+    candidatos = []
+    for carpeta in (vault / "productos").glob(f"*/landing/{pais.upper()}/respaldo"):
+        if carpeta.is_symlink() or not carpeta.is_dir():
+            continue
+        for p in carpeta.iterdir():
+            m = _RESPALDO.fullmatch(p.name)
+            if m and p.is_file() and not p.is_symlink():
+                candidatos.append(((m.group(1), m.group(2) or "000000", int(m.group(3) or 1), str(p)), p))
     return max(candidatos)[1] if candidatos else None
 
 
-def restaurar_desde_respaldo(vault: Path, respaldo: Path, *, mapa: dict | None = None, abrir=None,
-                             visible: bool = True, dormir: Callable[[float], None] = time.sleep) -> None:
-    """Vuelve a pegar en el campo el contenido de `respaldo` (L-4: tras una QA publicada en rojo) y comprueba que
-    quedó igual; si no, `NavegadorError` con la ruta del respaldo."""
+def restaurar_desde_respaldo(vault: Path, respaldo: Path, *, esperado: str | tuple[str, ...],
+                             mapa: dict | None = None, abrir=None, visible: bool = True,
+                             dormir: Callable[[float], None] = time.sleep, ahora: datetime | None = None) -> None:
+    """Vuelve a pegar en el campo el contenido de `respaldo` (L-4: tras una QA publicada en rojo) si el campo
+    tiene `esperado` (lo que se pegó), y comprueba que quedó igual (ver `restaurar`)."""
     respaldo = Path(respaldo)
     if respaldo.is_symlink() or not respaldo.is_file():
         raise NavegadorError(f"no encuentro el respaldo {respaldo}: pega tú lo que tenías")
     original = respaldo.read_text(encoding="utf-8")
-    restaurar(abrir or sesion, preparar_mapa(vault, mapa), original, respaldo, visible=visible, dormir=dormir)
+    restaurar(abrir or sesion, preparar_mapa(vault, mapa), original, respaldo, esperado=esperado, vault=vault,
+              visible=visible, dormir=dormir, ahora=ahora)
 
 
-def restaurar(abrir, mapa: dict, original: str, ruta: Path, *, visible: bool,
-              dormir: Callable[[float], None]) -> None:
-    """Vuelve a pegar `original` y comprueba que quedó igual; si no, `NavegadorError` con la ruta del respaldo."""
+def restaurar(abrir, mapa: dict, original: str, ruta: Path, *, esperado: str | tuple[str, ...], vault: Path,
+              visible: bool, dormir: Callable[[float], None], ahora: datetime | None = None) -> None:
+    """Vuelve a pegar `original` (guardado en `ruta`) y comprueba que quedó igual.
+
+    Antes lee el campo: si ya tiene `original`, no hace nada; si tiene alguno de `esperado` (lo que se pegó,
+    comparado por SHA-256), pega `original`; si tiene otra cosa, la guarda junto a `ruta`, no pega nada y lanza
+    `CampoCambiado` con los dos archivos. Si no queda igual, `NavegadorError` con la ruta del respaldo."""
+    vault = Path(vault)
+    esperados = {_sha(e) for e in ((esperado,) if isinstance(esperado, str) else esperado) if isinstance(e, str)}
     motivo = f"no pude restaurar el contenido: pégalo tú desde {ruta}"
     try:
         with abrir(SERVICIO, visible=visible) as page:
             panel = Panel(page, mapa, dormir)
             panel.abrir()
+            actual = panel.leer()
+            if actual == original:
+                return
+            if _sha(actual) not in esperados:
+                _campo_cambiado(vault, ruta, actual, ahora)
             releido = panel.guardar(original)
+    except CampoCambiado:
+        raise
     except Exception as exc:
         raise NavegadorError(motivo) from exc
     except BaseException:  # Ctrl-C a media restauración (L-1): que se sepa de dónde pegarlo, y se sigue
@@ -178,22 +218,26 @@ def restaurar(abrir, mapa: dict, original: str, ruta: Path, *, visible: bool,
         raise NavegadorError(motivo)
 
 
-def hay_terminal() -> bool:
-    """¿Hay una persona delante? stdin y stdout son una terminal (no una tubería ni un agente)."""
+def _campo_cambiado(vault: Path, ruta: Path, actual: str, ahora: datetime | None) -> None:
+    """El campo no tiene lo que se pegó: se guarda lo que hay (junto al respaldo) y se para sin pegar nada."""
+    ahora = ahora or datetime.now(ZONA_NEGOCIO)
+    base = (f"el campo «HTML completo de la tienda» ya no tiene lo que pegué (alguien lo cambió entretanto): no he "
+            f"pegado nada. Lo que tenías antes está en {ruta}")
     try:
-        return sys.stdin.isatty() and sys.stdout.isatty()
-    except (AttributeError, ValueError):
-        return False
+        nuevo = _respaldar_en(vault, Path(ruta).parent, actual, ahora,
+                              "Impultienda: el campo cambió antes de restaurar; respaldo de lo que había")
+    except ValueError as e:
+        raise CampoCambiado(f"{base}; lo que hay ahora no lo guardo: {e}") from None
+    raise CampoCambiado(f"{base}; lo que hay ahora, en {nuevo}. Decide tú cuál dejar.")
 
 
-SIN_TERMINAL = ("`trovefy landing capturar` lo lanzas tú, en tu terminal y con la pantalla delante: sin terminal "
-                "(una tubería, `printf sí |`, o un agente) no se confirma nada")
+hay_terminal = confirmacion.hay_terminal
 
 
 def capturar_pantalla(vault: Path, url: str | None = None, *, mapa: dict | None = None, abrir=None,
                       esperar: Callable[[str], object] = input, preguntar: Callable[[str], str] = input,
                       visible: bool = True, dormir: Callable[[float], None] = time.sleep,
-                      ahora: datetime | None = None, terminal: Callable[[], bool] = hay_terminal) -> dict:
+                      ahora: datetime | None = None) -> dict:
     """Confirmación guiada de `diseno_contenido` (resolución 20) sin un solo clic.
 
     Solo con una persona en la terminal (I-1: stdin y stdout TTY; si no, `ValueError` sin abrir nada). Abre la
@@ -202,7 +246,7 @@ def capturar_pantalla(vault: Path, url: str | None = None, *, mapa: dict | None 
     botón «Guardar cambios» casan con un solo elemento; se guarda una captura con los campos tapados y se le
     pregunta. Solo un «sí» literal confirma (`trovefy.tienda.confirmacion.confirmar_pantalla`).
     """
-    if not terminal():
+    if not confirmacion.hay_terminal():
         raise ValueError(SIN_TERMINAL)
     vault = Path(vault)
     ahora = ahora or datetime.now(ZONA_NEGOCIO)
@@ -211,7 +255,7 @@ def capturar_pantalla(vault: Path, url: str | None = None, *, mapa: dict | None 
     _con_url(base, inicio)  # el inicio también tiene que ser del host del mapa
     abrir = abrir or sesion
     fecha = ahora.astimezone(ZONA_NEGOCIO).date().isoformat()
-    evidencia = f"config/evidencia/p05-diseno-contenido-{fecha}.png"
+    evidencia = ruta_evidencia(PANTALLA, fecha)
     with abrir(SERVICIO, visible=visible) as page:
         try:
             page.goto(inicio, wait_until="load", timeout=30_000)
@@ -230,4 +274,4 @@ def capturar_pantalla(vault: Path, url: str | None = None, *, mapa: dict | None 
         c.capturar(vault / evidencia)
     respuesta = preguntar(f"¿Es esta la pantalla «Diseño de tienda → Contenido» de tu tienda ({real})? "
                           "Escribe «sí» para confirmarla: ")
-    return confirmar_pantalla(vault, SERVICIO, base, PANTALLA, real, respuesta, ahora, evidencia=evidencia)
+    return confirmar_pantalla(vault, SERVICIO, base, PANTALLA, real, respuesta, ahora)

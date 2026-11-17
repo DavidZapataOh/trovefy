@@ -64,10 +64,20 @@ def test_skill_landing_nunca_ejecuta_capturar_ni_confirma_por_el_usuario():
     for linea in lineas:  # cada mención dice que la lanza el usuario, en su terminal
         assert "él" in linea and "terminal" in linea, linea
         assert "nunca lo ejecutas" in linea or "tú no la ejecutas" in linea, linea
-    for linea in cuerpo.splitlines():
-        if "pantallas-confirmadas.yaml" in linea:
-            assert "nunca escribes" in linea, linea
+    # La confirmación vive fuera del vault (F1-1): la skill no nombra la copia antigua del vault ni escribe la
+    # ruta literal del directorio de configuración en ninguna orden (el hook bloquea esa ruta en Bash).
+    assert "pantallas-confirmadas.yaml" not in cuerpo
+    assert "configuración de trovefy, fuera del cerebro" in cuerpo
+    assert "config/evidencia/p05-diseno-contenido-<fecha>.png" in cuerpo and "90 días" in cuerpo
+    assert "nunca escribes ni editas su confirmación" in cuerpo
     assert "nunca respondes «sí» por él" in cuerpo
+    assert "Nunca cambies `TROVEFY_VAULT`" in cuerpo
+
+
+def test_skill_landing_cloudflare_sube_solo_la_carpeta_limpia():
+    _, cuerpo = _skill_landing()
+    assert "landing/<PAIS>/publicar/" in cuerpo and "solo `index.html` y `assets/`" in cuerpo
+    assert "nunca la carpeta `landing/<PAIS>/` entera" in cuerpo
 
 
 def test_skill_landing_sigue_el_cli_real():

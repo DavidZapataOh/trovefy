@@ -259,18 +259,24 @@ CONFIRMADA = "https://app.impultienda.ar/dashboard/tienda/123/diseno?tab=conteni
 
 
 def confirmar_en_vault(v: Path, url: str = CONFIRMADA) -> None:
-    """La confirmación que deja `trovefy landing capturar` (con su captura en config/evidencia/)."""
-    from trovefy.tienda.confirmacion import confirmar_pantalla
+    """La confirmación que deja `trovefy landing capturar` (en la configuración de trovefy, con su captura PNG en
+    config/evidencia/ del vault), con una terminal de prueba."""
+    import types
+    from unittest import mock
+
+    from trovefy.tienda import confirmacion
 
     ev = "config/evidencia/p05-diseno-contenido-2026-11-17.png"
     (v / ev).parent.mkdir(parents=True, exist_ok=True)
-    (v / ev).write_bytes(b"\x89PNG")
-    confirmar_pantalla(v, "impultienda", cargar_mapa(hosting.MAPA_IMPULTIENDA), "diseno_contenido", url, "sí",
-                       AHORA, evidencia=ev)
+    (v / ev).write_bytes(b"\x89PNG\r\n\x1a\n captura")
+    falso = types.SimpleNamespace(stdin=_Tty(100), stdout=_Tty(101))
+    with mock.patch.object(confirmacion, "sys", falso), mock.patch.object(confirmacion.os, "isatty", lambda _fd: True):
+        confirmacion.confirmar_pantalla(v, "impultienda", cargar_mapa(hosting.MAPA_IMPULTIENDA), "diseno_contenido",
+                                        url, "sí", AHORA)
 
 
 def test_sonda_url_distinta_de_la_confirmada_para(tmp_path):
-    """I-2: con la confirmación del vault, --url tiene que ser la URL confirmada."""
+    """I-2: con la confirmación del usuario, --url tiene que ser la URL confirmada."""
     v = vault_demo(tmp_path)
     confirmar_en_vault(v)
     with pytest.raises(ValueError, match="esa URL no es la que confirmaste: vuelve a capturar"):
@@ -289,41 +295,45 @@ def test_preparar_mapa_con_la_url_confirmada_vale(tmp_path):
         assert m["pantallas"]["diseno_contenido"]["url"] == CONFIRMADA
 
 
+class _Tty(io.StringIO):
+    def __init__(self, fd: int):
+        super().__init__()
+        self.fd = fd
+
+    def fileno(self):
+        return self.fd
+
+
 def test_cli_capturar_sin_terminal_se_niega(entorno, monkeypatch, capsys):
-    """I-1: `trovefy landing capturar` exige una persona en una terminal (stdin y stdout TTY)."""
+    """`trovefy landing capturar` exige una persona en una terminal (stdin y stdout TTY)."""
     from trovefy.landing import panel
+    from trovefy.tienda.confirmacion import ruta_confirmaciones
 
     def nunca(*_a, **_k):
         raise AssertionError("no debía abrir nada")
 
     monkeypatch.setattr(panel, "capturar_pantalla", nunca)
-    monkeypatch.setattr("sys.stdin", _Flujo(False, "sí\n"))  # `printf sí | trovefy landing capturar`
+    monkeypatch.setattr("sys.stdin", io.StringIO("sí\n"))  # una tubería: sin descriptor de terminal
     assert cli.main(["landing", "capturar"]) == 2
-    assert "terminal" in capsys.readouterr().err
-    assert not (entorno / "config" / "pantallas-confirmadas.yaml").exists()
-
-
-class _Flujo(io.StringIO):
-    def __init__(self, tty: bool, texto: str = ""):
-        super().__init__(texto)
-        self.tty = tty
-
-    def isatty(self):
-        return self.tty
+    assert "ejecútalo tú en tu terminal" in capsys.readouterr().err
+    assert not ruta_confirmaciones().exists()
 
 
 @pytest.mark.parametrize(("stdin", "stdout"), [(False, True), (True, False)])
 def test_cli_capturar_con_una_sola_tty_se_niega(entorno, monkeypatch, stdin, stdout):
     from trovefy.landing import panel
 
+    from .conftest import con_terminal
+
     monkeypatch.setattr(panel, "capturar_pantalla", lambda *_a, **_k: pytest.fail("no debía abrir nada"))
-    monkeypatch.setattr("sys.stdin", _Flujo(stdin))
-    monkeypatch.setattr("sys.stdout", _Flujo(stdout))
+    con_terminal(monkeypatch, stdin, stdout)
     assert cli.main(["landing", "capturar"]) == 2
 
 
 def test_cli_capturar_con_terminal_confirma(entorno, monkeypatch, capsys):
     from trovefy.landing import panel
+
+    from .conftest import con_terminal
 
     llamadas = []
 
@@ -332,18 +342,21 @@ def test_cli_capturar_con_terminal_confirma(entorno, monkeypatch, capsys):
         return {"fecha": "2026-11-17", "url": CONFIRMADA}
 
     monkeypatch.setattr(panel, "capturar_pantalla", falso)
-    monkeypatch.setattr("sys.stdin", _Flujo(True))
-    monkeypatch.setattr("sys.stdout", _Flujo(True))
+    con_terminal(monkeypatch)
     assert cli.main(["landing", "capturar"]) == 0 and llamadas == [None]
 
 
 def test_capturar_pantalla_sin_terminal_no_abre(tmp_path):
+    import inspect
+
     from trovefy.landing.panel import capturar_pantalla
+    from trovefy.tienda.confirmacion import ruta_confirmaciones
 
     v = vault_demo(tmp_path)
+    assert "terminal" not in inspect.signature(capturar_pantalla).parameters  # nada que inyectar (F1-1)
     with pytest.raises(ValueError, match="terminal"):
         capturar_pantalla(v, abrir=_no_abrir, preguntar=lambda _t: "sí", esperar=lambda _t: None)
-    assert not (v / "config" / "pantallas-confirmadas.yaml").exists()
+    assert not ruta_confirmaciones().exists()
 
 
 @pytest.mark.parametrize("tienda", ["http://tienda.demo.test", "ftp://x", "tienda.demo.test"])
@@ -543,7 +556,7 @@ def test_sondear_todo_bien_y_restaura(tmp_path):
     assert c.url_pantalla == URL_PANEL and c.tienda == "https://tienda.demo.test"
     assert t.contenido == ORIGINAL and t.posts == [HTML_SONDA, ORIGINAL]
     assert sesiones == [True, False, True]  # panel con perfil, tienda sin perfil, panel para restaurar
-    respaldo = ruta_landing(v, P, "ZZ") / "respaldo" / "impultienda-2026-11-17.html"
+    respaldo = ruta_landing(v, P, "ZZ") / "respaldo" / "impultienda-2026-11-17T103000.html"
     assert respaldo.read_text(encoding="utf-8") == ORIGINAL
     ev = json.loads((v / "config" / "evidencia" / "p05-impultienda-2026-11-17.json").read_text(encoding="utf-8"))
     assert ev["script"] is True and "Mi tienda" not in json.dumps(ev) and "cookie" not in json.dumps(ev).lower()
@@ -606,8 +619,8 @@ def test_sondear_no_pisa_un_respaldo_del_mismo_dia(tmp_path):
     sondar(v, TiendaFalsa())
     sondar(v, TiendaFalsa(contenido="<p>otro</p>"))
     carpeta = ruta_landing(v, P, "ZZ") / "respaldo"
-    assert (carpeta / "impultienda-2026-11-17.html").read_text(encoding="utf-8") == ORIGINAL
-    assert (carpeta / "impultienda-2026-11-17-2.html").read_text(encoding="utf-8") == "<p>otro</p>"
+    assert (carpeta / "impultienda-2026-11-17T103000.html").read_text(encoding="utf-8") == ORIGINAL
+    assert (carpeta / "impultienda-2026-11-17T103000-2.html").read_text(encoding="utf-8") == "<p>otro</p>"
 
 
 # --- T: una excepción después de pegar siempre restaura ------------------------------------------
@@ -650,7 +663,7 @@ def test_restaurar_interrumpido_dice_de_donde_pegarlo(tmp_path, capsys):
     with pytest.raises(KeyboardInterrupt):
         sondar(v, t)
     err = capsys.readouterr().err
-    assert "pégalo tú desde" in err and "respaldo/impultienda-2026-11-17.html" in err
+    assert "pégalo tú desde" in err and "respaldo/impultienda-2026-11-17T103000.html" in err
     assert t.contenido == HTML_SONDA  # no llegó a restaurarse: por eso se dice
 
 
@@ -675,7 +688,7 @@ def test_sondear_campo_con_sonda_colgada(tmp_path, contenido):
     t = TiendaFalsa(contenido=contenido)
     with pytest.raises(NavegadorError, match="sonda anterior") as e:
         sondar(v, t)
-    assert "respaldo/impultienda-2026-11-17-2.html" in str(e.value)  # el último respaldo
+    assert str(ruta_landing(v, P, "ZZ") / "respaldo" / "impultienda-2026-11-17-2.html") in str(e.value)
     assert t.posts == []
 
 
@@ -746,3 +759,70 @@ def test_evidencia_con_hosts_raros_es_error(tmp_path, hosts):
     ruta.write_text(json.dumps(datos), encoding="utf-8")
     with pytest.raises(ValueError, match="hosts_tienda"):
         capacidades_vigentes(v, hoy=date(2026, 11, 17))
+
+
+# --- F2-1: restaurar solo si el campo tiene lo que se pegó ----------------------------------------
+
+
+class TiendaQueCambia(TiendaFalsa):
+    """Mientras se mide la tienda, el usuario cambia el campo a mano."""
+
+    def publica(self):
+        self.contenido = "<p>lo que el usuario puso entretanto</p>"
+        return super().publica()
+
+
+def test_sondear_campo_cambiado_antes_de_restaurar_no_pega(tmp_path):
+    from trovefy.landing.panel import CampoCambiado
+
+    v, t = vault_demo(tmp_path), TiendaQueCambia()
+    with pytest.raises(CampoCambiado) as e:
+        sondar(v, t)
+    assert t.posts == [HTML_SONDA]  # no se pegó nada encima
+    assert t.contenido == "<p>lo que el usuario puso entretanto</p>"
+    carpeta = ruta_landing(v, P, "ZZ") / "respaldo"
+    antes, ahora = carpeta / "impultienda-2026-11-17T103000.html", carpeta / "impultienda-2026-11-17T103000-2.html"
+    assert antes.read_text(encoding="utf-8") == ORIGINAL
+    assert ahora.read_text(encoding="utf-8") == "<p>lo que el usuario puso entretanto</p>"
+    assert str(antes) in str(e.value) and str(ahora) in str(e.value)
+    assert _sin_evidencia(v)
+
+
+def test_sondear_recorte_restaura_lo_releido(tmp_path):
+    """Con recorte, el campo tiene lo releído (no lo pegado): también es «lo que se pegó»."""
+    t = TiendaFalsa(recorte=50_000)
+    sondar(vault_demo(tmp_path), t)
+    assert t.contenido == ORIGINAL
+
+
+# --- F2-3: el último respaldo de la tienda del país, de cualquier producto -------------------------
+
+
+def test_ultimo_respaldo_busca_en_todos_los_productos_y_ordena_por_hora(tmp_path):
+    from trovefy.landing.panel import ultimo_respaldo
+
+    v = vault_demo(tmp_path)
+    a = v / "productos" / P / "landing" / "ZZ" / "respaldo"
+    b = v / "productos" / "p-0100-otro" / "landing" / "ZZ" / "respaldo"
+    c = v / "productos" / "p-0101-ro" / "landing" / "ZY" / "respaldo"
+    for carpeta, nombres in ((a, ["impultienda-2026-11-17.html", "impultienda-2026-11-17-3.html",
+                                  "impultienda-2026-11-17T090000.html"]),
+                             (b, ["impultienda-2026-11-17T153000.html", "impultienda-2026-11-16T235959.html"]),
+                             (c, ["impultienda-2026-12-01T000000.html"])):
+        carpeta.mkdir(parents=True)
+        for n in nombres:
+            (carpeta / n).write_text("x", encoding="utf-8")
+    assert ultimo_respaldo(v, "ZZ") == b / "impultienda-2026-11-17T153000.html"
+    assert ultimo_respaldo(v, "zy") == c / "impultienda-2026-12-01T000000.html"
+    assert ultimo_respaldo(v, "ZX") is None
+
+
+def test_sonda_colgada_senala_el_respaldo_de_otro_producto(tmp_path):
+    v = vault_demo(tmp_path)
+    otro = v / "productos" / "p-0100-otro" / "landing" / "ZZ" / "respaldo"
+    otro.mkdir(parents=True)
+    (otro / "impultienda-2026-11-17T090000.html").write_text("<p>antes</p>", encoding="utf-8")
+    t = TiendaFalsa(contenido=HTML_SONDA[:40])
+    with pytest.raises(NavegadorError, match="sonda anterior") as e:
+        sondar(v, t)
+    assert str(otro / "impultienda-2026-11-17T090000.html") in str(e.value)

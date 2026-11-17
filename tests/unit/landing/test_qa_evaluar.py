@@ -468,6 +468,49 @@ def test_clasificar_peticion(url, clase):
     assert qa.clasificar_peticion(url, ("ejemplo-demo.test",), HOSTS_META, propios) == clase
 
 
+class _Req:
+    def __init__(self, url, method, page):
+        self.url, self.method = url, method
+        self.frame = type("F", (), {"page": page})()
+
+
+class _Ruta:
+    def __init__(self, req):
+        self.request, self.hecho = req, None
+
+    def abort(self):
+        self.hecho = "abort"
+
+    def continue_(self):
+        self.hecho = "continue"
+
+
+class _Ctx:
+    def __init__(self):
+        self.rutas = []
+
+    def on(self, *_a):
+        pass
+
+    def route(self, _patron, f):
+        self.rutas.append(f)
+
+
+@pytest.mark.parametrize(("url", "metodo", "hecho"), [
+    (TIENDA_CDN, "GET", "continue"), (TIENDA_CDN, "POST", "abort"), ("https://demo.test/carrito", "PUT", "abort"),
+    ("https://ejemplo-demo.test/a.webp", "GET", "continue"), (TERCERO, "GET", "abort"),
+])
+def test_filtro_de_la_qa_publicada_solo_lee_de_la_tienda(url, metodo, hecho):
+    """F2-4: en la QA publicada en Impultienda, a los hosts de la tienda solo se les hace GET (como probar_clic)."""
+    page = type("P", (), {})()
+    page.context = _Ctx()
+    externas, propias = [], []
+    qa._filtro(page, ("ejemplo-demo.test",), HOSTS_META, externas, (".demo.test",), propias)
+    ruta = _Ruta(_Req(url, metodo, page))
+    page.context.rutas[0](ruta)
+    assert ruta.hecho == hecho
+
+
 def test_fila_de_peticiones_de_la_tienda_es_aviso():
     r = _ev([_med("movil", peticiones_propias=(TIENDA_CDN,)), _med("escritorio")])
     assert _fila(r, "Peticiones de la tienda (movil)")[1] == "AVISO"
