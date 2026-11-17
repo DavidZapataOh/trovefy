@@ -18,6 +18,7 @@ class Mercado:
     precio_referencia: str | None
     estado: str
     fuente_banda: str | None = None
+    tienda: str | None = None  # URL https de la tienda (resolución 24); null hasta la sonda
 
 
 def cargar(ruta: Path) -> dict[str, Mercado]:
@@ -47,5 +48,6 @@ def cargar(ruta: Path) -> dict[str, Mercado]:
             precio_referencia=e.get("precio_referencia"),
             estado=e["estado"],
             fuente_banda=e.get("fuente_banda"),
+            tienda=e.get("tienda") if isinstance(e.get("tienda"), str) and e.get("tienda") else None,
         )
     return mercados
