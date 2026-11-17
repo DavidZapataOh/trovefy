@@ -151,6 +151,20 @@ def leer_credenciales(ruta_env: Path = RUTA_CLAUDE_ENV) -> Credenciales:
     return Credenciales(base, clave)
 
 
+def credenciales_publicas(ruta_env: Path = RUTA_CLAUDE_ENV) -> Credenciales:
+    """Credenciales **sin clave** para lo público (el precio de ``--simular``; ruling de la revisión final).
+
+    La base sale de ``APIMART_BASE_URL`` si ``ruta_env`` se puede leer y es https; si no, la oficial. La
+    clave nunca se toma, aunque esté en el archivo.
+    """
+    try:
+        base = (leer_env(ruta_env).get("APIMART_BASE_URL") or BASE_POR_DEFECTO).rstrip("/")
+        validar_base(base)
+    except (OSError, UnicodeDecodeError, EnvNoSeguro, PermisosInseguros, BaseInvalida):
+        base = BASE_POR_DEFECTO
+    return Credenciales(base, "")
+
+
 def _limpio(texto: object, clave: str | None) -> str:
     """Texto del servidor apto para un mensaje: una línea, corto y sin la clave."""
     t = re.sub(r"\s+", " ", str(texto))[:200]

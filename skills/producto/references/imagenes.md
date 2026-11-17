@@ -1,13 +1,13 @@
 # Imágenes del entregable: `entregable/imagenes.yaml`
 
-Solo imágenes propias, hechas con APIMart dentro del tope de US$ 2 por producto (o que dé el usuario). Nunca imágenes de la referencia ni de internet. Cada imagen generada queda en `<pieza>/medios/` con su `sha256`, su `task_id` y su coste en `medios/medios.json`.
+Solo imágenes propias, hechas con APIMart dentro del tope de US$ 2 por producto (o que dé el usuario). Nunca imágenes de la referencia ni de internet. Cada imagen generada queda en `<pieza>/medios/<id>.png` (siempre PNG: si APIMart devuelve JPEG o WEBP, se convierte al descargar) con su `sha256` (el del PNG guardado; el del original va en `sha256_original`), su `task_id` y su coste en `medios/medios.json`.
 
 ## Formato
 
 Una lista; cada imagen con estos campos y ninguno más:
 
 ```yaml
-- id: portada            # portada, mockup, il-01 … il-10 (minúsculas, números y guiones)
+- id: portada            # portada, mockup, il-01 … il-10 (minúsculas, números y guiones); único dentro de su pieza
   pieza: principal       # principal, bono-N, bump, u1, u2, u3 o downsell
   prompt: >-
     Portada de un cuaderno de respiración para dormir mejor, ilustración plana en azul y arena,
@@ -19,7 +19,7 @@ Una lista; cada imagen con estos campos y ninguno más:
 
 ## Qué pedir
 
-- **portada** (`2:3`): la imagen de la portada del PDF. La maqueta la usa sola si existe `medios/portada.png`. Sin texto: el título lo pone la maqueta.
+- **portada** (`2:3`): la imagen de la portada del PDF. La maqueta la usa sola si existe `medios/portada.png`. Sin texto: el título lo pone la maqueta. Cada pieza puede tener la suya (`id: portada` con `pieza: principal`, otra con `pieza: bono-1`…).
 - **mockup** (`3:2` o `4:3`): el producto como objeto (cuaderno, tableta) para la landing. Sin texto.
 - **il-01 … il-10** (6 a 10): una por sección que lo necesite. Sencillas, del mismo estilo; usa `referencias: [portada]` para que no cambie el estilo.
 - Escribe el prompt en español o en inglés, nunca con la marca ni con el nombre del anunciante original. Pide siempre «sin texto».
@@ -27,6 +27,6 @@ Una lista; cada imagen con estos campos y ninguno más:
 
 ## Coste y orden
 
-1. `trovefy producto imagenes <p-id> --simular`: mide el precio de cada modelo de `config/producto.yaml`, elige el más barato (P-11) y anota lo que costaría sin enviar nada. Con unos US$ 0,0085 por imagen en 1k, 12 imágenes son unos US$ 0,10.
+1. `trovefy producto imagenes <p-id> --simular`: mide el precio de cada modelo de `config/producto.yaml` (el precio es público: no hace falta la clave), elige el más barato (P-11) y anota lo que costaría sin enviar nada. Con unos US$ 0,0085 por imagen en 1k, 12 imágenes son unos US$ 0,10.
 2. `trovefy producto imagenes <p-id>`: genera. Una imagen ya hecha con el mismo prompt, proporción y resolución no se paga dos veces. Si cambias el prompt de una imagen, se vuelve a generar y vuelve a costar.
 3. Si el tope para el lote, el usuario decide: o sube el tope con sus palabras, o se sigue con menos imágenes.

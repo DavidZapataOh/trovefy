@@ -211,7 +211,7 @@ def _json(valor: Any) -> Any:
 
 
 def registrar_medio(raiz: Path, id_: str, archivo: str, sha256: str, origen: Literal["apimart", "propio"],
-                    **datos: Any) -> None:
+                    *, base: Path | None = None, **datos: Any) -> None:
     """Añade o reemplaza la entrada ``id_`` del manifiesto de ``raiz``.
 
     ``archivo`` es un nombre suelto (png, jpg, jpeg, webp o pdf) dentro de ``<raíz>/medios/``: un
@@ -220,10 +220,15 @@ def registrar_medio(raiz: Path, id_: str, archivo: str, sha256: str, origen: Lit
     (Python lo impide: ``TypeError``); los ``Decimal`` se guardan como texto y los ``float`` se
     rechazan. ``ValueError`` si algo no cuadra, si hay un enlace en la raíz o en ``medios/`` o si el
     texto trae algo con forma de secreto; entonces no se escribe nada.
+
+    ``base`` (el vault, como en :func:`escribir_medio`) marca desde dónde se revisan las carpetas: ninguna
+    entre ``base`` y ``medios/`` puede ser un enlace. Sin ``base`` (compatibilidad) se revisa desde el
+    padre de ``raiz``.
     """
     raiz = Path(raiz)
+    base = raiz.parent if base is None else Path(base)
     _validar(id_, archivo, sha256, origen, datos)
-    if not carpeta_segura(raiz.parent, raiz / CARPETA, crear=False):
+    if not carpeta_segura(base, raiz / CARPETA, crear=False):
         raise ValueError(f"el medio {CARPETA}/{archivo} no existe")
     if _hash_medio(raiz, archivo) != sha256:
         raise ValueError(f"el sha256 de {CARPETA}/{archivo} no coincide con el archivo")
@@ -238,4 +243,4 @@ def registrar_medio(raiz: Path, id_: str, archivo: str, sha256: str, origen: Lit
     manifiesto = leer_manifiesto(raiz)
     manifiesto[id_] = entrada
     texto = json.dumps(manifiesto, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    _escribir(ruta_manifiesto(raiz), texto.encode("utf-8"), raiz.parent)
+    _escribir(ruta_manifiesto(raiz), texto.encode("utf-8"), base)

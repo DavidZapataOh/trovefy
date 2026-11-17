@@ -129,6 +129,27 @@ def test_cli_imagenes_simular_no_envia(vault, capsys, falso):
     assert "simulación" in out
 
 
+@pytest.mark.parametrize("env", ["no-existe", "sin-clave"])
+def test_cli_imagenes_simular_sin_clave(vault, capsys, falso, monkeypatch, tmp_path, env):
+    # Ruling de la revisión final: el precio es público; --simular no necesita claude.env.
+    _imagenes(vault)
+    ruta = tmp_path / "otro" / "claude.env"
+    if env == "sin-clave":
+        ruta.parent.mkdir()
+        ruta.write_text("OTRA=1\n", encoding="utf-8")
+        ruta.chmod(0o600)
+    monkeypatch.setattr(producto_cli, "RUTA_ENV", ruta)
+    codigo, out, err = correr(capsys, "imagenes", P, "--simular")
+    assert codigo == 0, out + err
+    assert "simulación" in out and "gpt-image-2" in out
+    assert {f.estado for f in leer_costes(vault, P)} == {"simulada"}
+    assert falso.rutas and all(r.startswith("GET /api/pricing") for r in falso.rutas)
+    assert all(a == "" for a in falso.autorizaciones)
+    # Sin --simular sigue haciendo falta la clave.
+    codigo, _, err = correr(capsys, "imagenes", P)
+    assert codigo == 2 and ("APIMART_API_KEY" in err or "no existe" in err)
+
+
 def test_cli_imagenes_stop(vault, capsys, falso):
     _imagenes(vault)
     (vault / ".trovefy" / "STOP").write_text("", encoding="utf-8")

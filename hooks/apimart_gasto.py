@@ -32,6 +32,8 @@ segmento que lo menciona debe empezar por ``trovefy producto`` o ser de solo lec
 (``uv run pytest``, ``ruff``, ``rg``, ``grep``, ``git log|diff|show|commit`` sin ``--pre``/``--output``…);
 eso se mira **antes** que la regla de ``claude.env`` (``git commit -m "…claude.env…"`` y
 ``rg claude.env`` pasan; ``cat`` sobre ``claude.env`` no, y la clave real ya la cubre la regla de ruta).
+El cuerpo del heredoc de ``trovefy producto anotar-qc … <<'FIN'`` (delimitador entrecomillado: bash no
+expande nada) es la respuesta del agente: se analiza solo la primera línea y lo que siga a la de cierre.
 
 WebFetch: deniega ``apimart.ai`` y sus subdominios salvo ``docs.apimart.ai`` (ruling R-D). Solo biblioteca
 estándar (PyYAML opcional); falla cerrado. Idea tomada del ``guard.mjs`` de LordVayron/video-factory
@@ -380,7 +382,33 @@ def _grep_conf(datos: dict, cwd: str | None) -> bool:
 
 # --- Bash -----------------------------------------------------------------------------------------------
 
+_ANOTAR_QC_HEREDOC = re.compile(
+    r"(?:^|&&|\|\||[;|(])\s*(?:uv\s+run\s+)?trovefy\s+producto\s+anotar-qc\s[^;&|<>\n]*<<(-?)\s*(['\"])(\w+)\2")
+
+
+def _sin_cuerpo_qc(comando: str) -> str:
+    """Quita el cuerpo del heredoc de ``trovefy producto anotar-qc … <<'FIN'`` (ruling de la revisión final).
+
+    Con el delimitador entrecomillado bash no expande nada en el cuerpo: es la respuesta del agente, datos.
+    Queda la primera línea entera y lo que siga a la línea de cierre. Solo si la primera línea tiene un
+    único ``<<``; con el delimitador sin comillas (o cualquier otra forma) el comando se analiza entero.
+    """
+    primera, salto, resto = comando.partition("\n")
+    if not salto or primera.count("<<") != 1:
+        return comando
+    m = _ANOTAR_QC_HEREDOC.search(primera)
+    if not m:
+        return comando
+    tabs, delim = m.group(1) == "-", m.group(3)
+    lineas = resto.split("\n")
+    for i, linea in enumerate(lineas):
+        if (linea.lstrip("\t") if tabs else linea) == delim:
+            return "\n".join([primera, *lineas[i + 1:]])
+    return primera  # sin línea de cierre, bash lee el cuerpo hasta el final
+
+
 def _bash(comando: str, cwd: str | None = None) -> tuple[str, str]:
+    comando = _sin_cuerpo_qc(comando)
     for variante in dict.fromkeys((comando, unquote(comando))):
         c = _normalizar(variante)
         segmentos = _segmentos(c)

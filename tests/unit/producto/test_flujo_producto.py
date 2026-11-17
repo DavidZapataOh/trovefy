@@ -145,3 +145,57 @@ def test_flujo_producto(vault, capsys, monkeypatch):
 
     texto, _ = paso("estado", P)
     assert texto.count(" apta") == len(PIEZAS)
+
+
+def _publico_en(formato: str):
+    """Descarga pública que devuelve la imagen en ``formato`` (APIMart puede no dar PNG)."""
+    from PIL import Image
+
+    def abrir(req, timeout=None):
+        assert "Authorization" not in req.headers
+        buf = io.BytesIO()
+        Image.new("RGB", (60, 90), (31, 78, 95)).save(buf, format=formato)
+        r = publico(req, timeout)
+        r._c = buf.getvalue()
+        return r
+
+    return abrir
+
+
+@pytest.mark.parametrize("formato", ["JPEG", "WEBP"])
+def test_portada_jpeg_o_webp_sale_en_el_pdf_como_png(vault, capsys, monkeypatch, formato):
+    """Revisión final: la portada se convierte a PNG al descargar y la maqueta la usa; cada pieza su portada."""
+    import hashlib
+
+    from trovefy.producto.medios import leer_manifiesto
+
+    v = vault
+    monkeypatch.setattr(producto_cli, "_abrir_publico", _publico_en(formato))
+    c, texto = _cli(capsys, monkeypatch, "ficha", P, "--pais", "ZZ", "--exigencia", "sanitario", "--tipo", "ebook")
+    assert c == 0, texto
+    piezas = ("principal", "bono-1")
+    for pid in piezas:
+        raiz = pieza(v, P, pid).raiz
+        raiz.mkdir(parents=True, exist_ok=True)
+        (raiz / "PLAN.md").write_text(PLAN, encoding="utf-8")
+        shutil.copytree(FUENTE, raiz / "fuente")
+        for paso in ("plan", "gates"):
+            c, texto = _cli(capsys, monkeypatch, paso, P, "--pieza", pid)
+            assert c == 0, texto
+    imagenes = [{"id": "portada", "pieza": pid, "prompt": f"portada de {pid}, sin texto", "proporcion": "2:3",
+                 "resolucion": "1k"} for pid in piezas]
+    (v / "productos" / P / "entregable" / "imagenes.yaml").write_text(
+        yaml.safe_dump(imagenes, allow_unicode=True), encoding="utf-8")
+    c, texto = _cli(capsys, monkeypatch, "imagenes", P)
+    assert c == 0 and "generadas: portada, portada" in texto, texto
+    for pid in piezas:
+        raiz = pieza(v, P, pid).raiz
+        man = leer_manifiesto(raiz, verificar=True)
+        archivo = raiz / "medios" / "portada.png"
+        assert man["portada"]["archivo"] == "portada.png"
+        assert man["portada"]["sha256"] == hashlib.sha256(archivo.read_bytes()).hexdigest()
+        assert archivo.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+        c, texto = _cli(capsys, monkeypatch, "maquetar", P, "--pieza", pid)
+        assert c == 0 and "Apto." in texto, texto
+        html = next((raiz / "fuente").glob("*-v1.html")).read_text(encoding="utf-8")
+        assert '<img src="medios/portada.png"' in html

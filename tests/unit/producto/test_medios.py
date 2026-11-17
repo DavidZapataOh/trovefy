@@ -260,3 +260,51 @@ def test_carpeta_segura_es_publica_con_alias_privado():
 
     assert medios._carpeta_segura is medios.carpeta_segura
     assert render.carpeta_segura is medios.carpeta_segura
+
+
+# --- base del manifiesto (revisión final del plan 17) -------------------------------------------------
+
+
+def _bono_con_bonos_enlazado(tmp_path):
+    """vault/productos/p/entregable/bonos → carpeta de fuera; la pieza bono-1 cuelga del enlace."""
+    vault = tmp_path / "vault"
+    entregable = vault / "productos" / "p-0042-respira" / "entregable"
+    entregable.mkdir(parents=True)
+    fuera = tmp_path / "fuera"
+    (fuera / "bono-1" / "medios").mkdir(parents=True)
+    (entregable / "bonos").symlink_to(fuera, target_is_directory=True)
+    raiz = entregable / "bonos" / "bono-1"
+    (fuera / "bono-1" / "medios" / "portada.png").write_bytes(DATOS)
+    os.chmod(fuera / "bono-1" / "medios" / "portada.png", 0o640)
+    return vault, raiz, fuera
+
+
+def test_manifiesto_con_base_vault_revisa_desde_el_vault(tmp_path):
+    vault, raiz, fuera = _bono_con_bonos_enlazado(tmp_path)
+    with pytest.raises(ValueError, match="enlace"):
+        registrar_medio(raiz, "portada", "portada.png", SHA, "propio", base=vault)
+    assert not (fuera / "bono-1" / "medios" / "medios.json").exists()
+
+
+def test_manifiesto_sin_base_compatible(tmp_path):
+    # Sin base (compatibilidad): se revisa desde el padre de la raíz, como antes.
+    _vault, raiz, fuera = _bono_con_bonos_enlazado(tmp_path)
+    registrar_medio(raiz, "portada", "portada.png", SHA, "propio")
+    assert json.loads((fuera / "bono-1" / "medios" / "medios.json").read_text())["portada"]["sha256"] == SHA
+
+
+def test_manifiesto_con_base_vault_normal(tmp_path):
+    vault = tmp_path / "vault"
+    raiz = vault / "productos" / "p-0042-respira" / "entregable"
+    vault.mkdir()
+    sha = escribir_medio(raiz / "medios" / "portada.png", DATOS, base=vault)
+    registrar_medio(raiz, "portada", "portada.png", sha, "apimart", base=vault, task_id="t-1")
+    assert leer_manifiesto(raiz)["portada"] == {"archivo": "portada.png", "sha256": SHA, "origen": "apimart",
+                                                "task_id": "t-1"}
+
+
+def test_manifiesto_base_fuera(tmp_path):
+    raiz = tmp_path / "entregable"
+    _medio(raiz)
+    with pytest.raises(ValueError, match="fuera"):
+        registrar_medio(raiz, "portada", "portada.png", SHA, "propio", base=tmp_path / "otro")

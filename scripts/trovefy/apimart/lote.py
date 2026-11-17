@@ -42,6 +42,7 @@ from trovefy.apimart.cliente import (
     EstadoTarea,
     PeticionImagen,
     PeticionInvalida,
+    a_png,
     cuerpo_envio,
     descargar,
     enviar,
@@ -98,7 +99,8 @@ class ResultadoLote:
 def leer_peticiones(vault: Path, p_id: str) -> list[PeticionImagen]:
     """Lee ``entregable/imagenes.yaml`` (lista de ``{id, pieza, prompt, proporcion, resolucion, referencias}``).
 
-    ``FileNotFoundError`` si falta; ``PeticionInvalida`` si la forma no cuadra o hay ids repetidos.
+    ``FileNotFoundError`` si falta; ``PeticionInvalida`` si la forma no cuadra o hay un id repetido en la
+    misma pieza (el id es único por ``(pieza, id)``: cada pieza puede tener su ``portada``).
     """
     ruta = rutas.entregable(vault, p_id) / PETICIONES
     if not ruta.is_file():
@@ -118,9 +120,9 @@ def leer_peticiones(vault: Path, p_id: str) -> list[PeticionImagen]:
         if not all(isinstance(x, str) for x in textos) or not isinstance(refs, list) \
                 or not all(isinstance(r, str) for r in refs):
             raise PeticionInvalida(f"{PETICIONES}, imagen {n}: los campos son textos y referencias una lista")
-        if d["id"] in vistos:
-            raise PeticionInvalida(f"{PETICIONES}: el id «{d['id']}» está repetido")
-        vistos.add(d["id"])
+        if (d["pieza"], d["id"]) in vistos:  # único por (pieza, id): cada pieza puede tener su portada
+            raise PeticionInvalida(f"{PETICIONES}: el id «{d['id']}» está repetido en la pieza {d['pieza']}")
+        vistos.add((d["pieza"], d["id"]))
         salida.append(PeticionImagen(d["id"], d["pieza"], d["prompt"], d["proporcion"], d["resolucion"],
                                      tuple(refs)))
     return salida
@@ -258,7 +260,9 @@ def _cerrar_tarea(vault: Path, p_id: str, base: FilaCoste, estado: EstadoTarea, 
         cuenta.pendientes.append(imagen)
         return
     try:
-        datos = descargar(estado.url, abrir_publico)
+        original = descargar(estado.url, abrir_publico)
+        formato_original = formato_imagen(original)
+        datos = a_png(original)  # siempre {imagen}.png (ruling de la revisión final; contrato 17:583)
     except ErrorApimart:
         # Completada en APIMart pero sin descargar: se reintenta con --reanudar (mismo task_id).
         anotar_coste(vault, p_id, replace(base, fecha=ahora(), estado="pendiente",
@@ -266,12 +270,13 @@ def _cerrar_tarea(vault: Path, p_id: str, base: FilaCoste, estado: EstadoTarea, 
         cuenta.pendientes.append(imagen)
         return
     raiz = rutas.pieza(vault, p_id, base.pieza).raiz
-    archivo = f"{imagen}.{formato_imagen(datos)}"
+    archivo = f"{imagen}.png"
     real = _real_positivo(estado.coste_real_usd)  # un coste real de 0 no se cree: cuenta el estimado
-    sha = escribir_medio(raiz / CARPETA / archivo, datos, base=Path(vault))
-    registrar_medio(raiz, imagen, archivo, sha, "apimart", task_id=estado.task_id, modelo=base.modelo,
-                    prompt_sha256=prompt_sha256, proporcion=base.proporcion, resolucion=base.resolucion,
-                    coste_usd=real if real is not None else base.coste_estimado_usd)
+    sha = escribir_medio(raiz / CARPETA / archivo, datos, base=Path(vault))  # sha de los bytes PNG escritos
+    registrar_medio(raiz, imagen, archivo, sha, "apimart", base=Path(vault), task_id=estado.task_id,
+                    modelo=base.modelo, prompt_sha256=prompt_sha256, proporcion=base.proporcion,
+                    resolucion=base.resolucion, coste_usd=real if real is not None else base.coste_estimado_usd,
+                    formato_original=formato_original, sha256_original=hashlib.sha256(original).hexdigest())
     rel = (raiz / CARPETA / archivo).relative_to(rutas.entregable(vault, p_id)).as_posix()
     anotar_coste(vault, p_id, replace(base, fecha=ahora(), estado="completada", coste_real_usd=real,
                                       sha256=sha, archivo=rel))
@@ -299,9 +304,9 @@ def generar_imagenes(vault: Path, p_id: str, peticiones: list[PeticionImagen], *
         return cuenta.resultado(MOTIVO_STOP)
     if precio is None:
         return cuenta.resultado(MOTIVO_SIN_PRECIO)
-    ids = [p.id for p in peticiones]
+    ids = [(p.pieza, p.id) for p in peticiones]
     if len(set(ids)) != len(ids):
-        raise PeticionInvalida("hay ids de imagen repetidos en el lote")
+        raise PeticionInvalida("hay ids de imagen repetidos en una misma pieza del lote")
     for p in peticiones:
         validar(p, leer_manifiesto(rutas.pieza(vault, p_id, p.pieza).raiz) if rutas.PIEZA.fullmatch(p.pieza) else {})
         if p.resolucion != precio.resolucion:

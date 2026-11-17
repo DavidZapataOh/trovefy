@@ -250,6 +250,35 @@ def formato_imagen(datos: bytes) -> str | None:
     return FORMATOS.get(formato or "")
 
 
+def a_png(datos: bytes) -> bytes:
+    """Los bytes de una imagen ya descargada, en PNG (ruling de la revisión final: ``{imagen}.png``).
+
+    Pasa otra vez por :func:`formato_imagen` (``verify`` y el límite de píxeles de Pillow, aquí con el aviso
+    de bomba de descompresión como error). Un PNG se devuelve tal cual; JPEG y WEBP se decodifican y se
+    guardan en PNG (RGB, o RGBA si traen transparencia). ``RespuestaInesperada`` si no se puede.
+    """
+    import warnings
+
+    from PIL import Image
+
+    formato = formato_imagen(datos)
+    if formato is None:
+        raise RespuestaInesperada("lo descargado no es una imagen PNG, JPEG ni WEBP")
+    if formato == "png":
+        return datos
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(datos)) as img:
+                img.load()
+                transparente = "A" in img.getbands() or "transparency" in img.info
+                salida = io.BytesIO()
+                img.convert("RGBA" if transparente else "RGB").save(salida, format="PNG")
+    except Exception:  # noqa: BLE001 - cualquier fallo de Pillow = no se guarda
+        raise RespuestaInesperada(f"la imagen {formato.upper()} no se pudo convertir a PNG") from None
+    return salida.getvalue()
+
+
 def descargar(url: str, abrir_publico=abrir_sin_redireccion, max_bytes: int = MAX_DESCARGA) -> bytes:
     """Descarga el resultado: solo https, sin redirecciones y **sin** ``Authorization``.
 

@@ -1,3 +1,4 @@
+import hashlib
 import io
 import itertools
 import json
@@ -584,3 +585,83 @@ def test_si_falla_la_fila_de_costes_no_queda_intento(vault, monkeypatch):
         lote(vault, [pet("portada")], abrir=falso)
     assert not (vault / "productos" / P / "entregable" / ".apimart-intentos.jsonl").exists()
     assert leer_costes(vault, P) == [] and falso.cuerpos == []
+
+
+# --- revisión final del plan 17: portada PNG, ids por pieza, base del manifiesto ---------------------
+
+
+def _imagen(formato: str) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (60, 90), (31, 78, 95)).save(buf, format=formato)
+    return buf.getvalue()
+
+
+@pytest.mark.parametrize(("formato", "ext"), [("JPEG", "jpg"), ("WEBP", "webp"), ("PNG", "png")])
+def test_descarga_se_guarda_siempre_como_png(vault, formato, ext):
+    original = _imagen(formato)
+    r = lote(vault, [pet("portada")], abrir_publico=lambda req, timeout=None: _Resp(original))
+    assert r.generadas == ("portada",)
+    medios = vault / "productos" / P / "entregable" / "medios"
+    assert sorted(p.name for p in medios.iterdir()) == ["medios.json", "portada.png"]
+    escrito = (medios / "portada.png").read_bytes()
+    with Image.open(io.BytesIO(escrito)) as img:
+        assert img.format == "PNG" and img.size == (60, 90)
+    assert stat.S_IMODE((medios / "portada.png").stat().st_mode) == 0o640
+    man = leer_manifiesto(vault / "productos" / P / "entregable", verificar=True)
+    sha = hashlib.sha256(escrito).hexdigest()
+    assert man["portada"]["archivo"] == "portada.png" and man["portada"]["sha256"] == sha
+    assert man["portada"]["sha256_original"] == hashlib.sha256(original).hexdigest()
+    assert man["portada"]["formato_original"] == ext
+    fila = leer_costes(vault, P)[-1]
+    assert fila.estado == "completada" and fila.sha256 == sha and fila.archivo == "medios/portada.png"
+
+
+def test_conversion_a_png_respeta_el_limite_de_pixeles(vault, monkeypatch):
+    # Una imagen que Pillow rechaza al decodificar (bomba de descompresión) no se guarda.
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 100)
+    original = _imagen("JPEG")
+    r = lote(vault, [pet("portada")], abrir_publico=lambda req, timeout=None: _Resp(original))
+    assert r.generadas == () and r.pendientes == ("portada",)
+    assert not (vault / "productos" / P / "entregable" / "medios" / "portada.png").exists()
+
+
+def test_ids_por_pieza(vault):
+    r = lote(vault, [pet("portada"), pet("portada", pieza="bono-1")])
+    assert r.generadas == ("portada", "portada")
+    principal = vault / "productos" / P / "entregable"
+    bono = principal / "bonos" / "bono-1"
+    assert leer_manifiesto(principal)["portada"]["archivo"] == "portada.png"
+    assert leer_manifiesto(bono)["portada"]["archivo"] == "portada.png"
+    assert [f.archivo for f in leer_costes(vault, P) if f.estado == "completada"] == [
+        "medios/portada.png", "bonos/bono-1/medios/portada.png"]
+    # Volver a lanzarlo omite las dos.
+    assert lote(vault, [pet("portada"), pet("portada", pieza="bono-1")]).omitidas == ("portada", "portada")
+
+
+def test_id_repetido_en_la_misma_pieza_sigue_fallando(vault):
+    with pytest.raises(PeticionInvalida):
+        lote(vault, [pet("portada"), pet("portada", prompt="otra")], abrir=explota)
+
+
+def test_leer_peticiones_ids_por_pieza(vault):
+    _yaml(vault, [{"id": "portada", "pieza": "principal", "prompt": "a", "proporcion": "2:3", "resolucion": "1k"},
+                  {"id": "portada", "pieza": "bono-1", "prompt": "b", "proporcion": "2:3", "resolucion": "1k"}])
+    assert [(p.pieza, p.id) for p in leer_peticiones(vault, P)] == [("principal", "portada"), ("bono-1", "portada")]
+    _yaml(vault, [{"id": "portada", "pieza": "bono-1", "prompt": "a", "proporcion": "2:3", "resolucion": "1k"}] * 2)
+    with pytest.raises(PeticionInvalida, match="repetido"):
+        leer_peticiones(vault, P)
+
+
+def test_registrar_medio_recibe_el_vault_como_base(vault, monkeypatch):
+    from trovefy.apimart import lote as modulo
+
+    llamadas = []
+    real = modulo.registrar_medio
+
+    def espia(*a, **k):
+        llamadas.append(k.get("base"))
+        return real(*a, **k)
+
+    monkeypatch.setattr(modulo, "registrar_medio", espia)
+    lote(vault, [pet("il-01", pieza="bono-1")])
+    assert llamadas == [vault]

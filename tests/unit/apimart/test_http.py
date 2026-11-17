@@ -18,6 +18,7 @@ from trovefy.apimart.http import (
     SinClave,
     SinRed,
     SinSaldo,
+    credenciales_publicas,
     leer_credenciales,
     pedir_json,
 )
@@ -204,3 +205,16 @@ def test_el_cliente_no_sigue_redirecciones():
         servidor.shutdown()
         servidor.server_close()
     assert [v[1] for v in _Redirige.visitas] == ["/v1/images/generations", "/v1/tasks/x"]
+
+
+@pytest.mark.parametrize(("texto", "base"), [
+    (None, BASE_POR_DEFECTO),
+    ("OTRA=1", BASE_POR_DEFECTO),
+    (f"APIMART_API_KEY={CLAVE}\nAPIMART_BASE_URL=https://espejo.example/", "https://espejo.example"),
+    ("APIMART_BASE_URL=http://malo.example", BASE_POR_DEFECTO),
+])
+def test_credenciales_publicas_sin_clave(tmp_path, texto, base):
+    ruta = tmp_path / "claude.env" if texto is None else escribir_env(tmp_path, texto)
+    cred = credenciales_publicas(ruta)
+    assert cred == Credenciales(base, "")
+    assert CLAVE not in repr(cred)

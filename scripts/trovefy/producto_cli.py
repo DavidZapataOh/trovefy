@@ -236,10 +236,17 @@ def _gasto_y_tope(vault: Path, p_id: str) -> str:
     return f"gastado {gastado} USD de un tope de {tope}"
 
 
-def _credenciales():
-    from trovefy.apimart.http import leer_credenciales
+def _credenciales(*, simular: bool = False):
+    """La clave de ``claude.env``. Con ``simular`` y sin clave, credenciales públicas (solo la base): el
+    precio es público y ``--simular`` no envía nada (ruling de la revisión final)."""
+    from trovefy.apimart.http import SinClave, credenciales_publicas, leer_credenciales
 
-    cred = leer_credenciales(RUTA_ENV)
+    try:
+        cred = leer_credenciales(RUTA_ENV)
+    except SinClave:
+        if not simular:
+            raise
+        return credenciales_publicas(RUTA_ENV)
     _SECRETOS.append(cred.clave)
     return cred
 
@@ -270,7 +277,7 @@ def _imagenes(args: argparse.Namespace, vault: Path) -> int:
         _decir(f"APIMart: {_gasto_y_tope(vault, p_id)}")
         return 0
     cfg = cargar_config(vault)
-    cred = _credenciales()
+    cred = _credenciales(simular=args.simular and not args.reanudar)
     if args.reanudar:
         r = lote.reanudar(vault, p_id, cred=cred, abrir=_abrir, abrir_publico=_abrir_publico, dormir=_dormir,
                           ahora=_ahora)
