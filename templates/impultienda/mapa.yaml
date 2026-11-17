@@ -1,4 +1,5 @@
-# Mapa de pantallas de Impultienda (paso 09). Solo lectura: Trovefy no hace clics aquí.
+# Mapa de pantallas de Impultienda (paso 09 y fase 2). Las pantallas sin «controles» son solo de lectura; las que
+# tienen controles solo las toca `trovefy.tienda.conductor.Conductor`, y solo con su «capturado» confirmado.
 # capturado: null = construido desde la página pública, NO confirmado con tu pantalla real.
 # Mientras sea null, el verificador del paso 09 devuelve «no medido» y guarda la captura como provisional.
 # Se confirma de dos maneras equivalentes: el usuario, con `trovefy arranque confirmar 09` sobre el texto provisional de
@@ -26,3 +27,14 @@ pantallas:
     firma: ["Pasarelas de pago"]
     campos:
       pasarelas: {patron: 'Pasarelas conectadas:\s*([^<\n]+)'}
+  # Plan 18 (/landing): «Diseño de tienda › Contenido», campo «HTML completo de la tienda» (captura del usuario,
+  # config/evidencia/09-captura-usuario-2026-11-12.png). La ruta es una suposición: la sonda del plan 18 guarda la
+  # URL real. capturado: null hasta confirmarla (`trovefy checkout capturar diseno_contenido`); mientras tanto el
+  # conductor lee pero no escribe. Resolución 20 del contrato de la fase 2.
+  diseno_contenido:
+    url: https://app.impultienda.ar/dashboard/diseno/contenido
+    firma: ["Diseño de tienda", "HTML completo de la tienda", "Guardar cambios"]
+    capturado: null
+    controles:
+      html: {css: "textarea", tipo: area}
+      guardar: {etiqueta: "Guardar cambios", rol: button, tipo: boton}

@@ -87,7 +87,13 @@ def verificar_impultienda(
     return ResultadoVerificacion(True, evidencia, r.motivo, [], r.datos, r.lineas)
 
 
-registrar_lector("09", lector_de_mapa(lambda: cargar(RUTA_MAPA)), huella=lambda: huella_mapa(cargar(RUTA_MAPA)))
+# El paso 09 solo lee sus tres pantallas: las de la fase 2 (diseno_contenido, checkout…) no cuentan para su confirmación.
+registrar_lector(
+    "09",
+    lector_de_mapa(lambda: cargar(RUTA_MAPA), tuple(PANTALLAS)),
+    huella=lambda: huella_mapa(cargar(RUTA_MAPA), tuple(PANTALLAS)),
+    pantallas=tuple(PANTALLAS),
+)
 
 
 @verificador("09")

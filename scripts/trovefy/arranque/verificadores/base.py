@@ -301,6 +301,7 @@ class Lector:
     requeridos: tuple[str, ...] | None  # None: todos los campos que devuelve `leer`
     aceptar: Callable[[dict[str, str | None]], str | None] | None = None  # motivo para no confirmar, o None
     huella: str | Callable[[], str] = ""  # sha256 de los patrones (código) o del mapa actuales
+    pantallas: tuple[str, ...] | None = None  # pantallas del mapa que lee el paso (None: todas)
 
     def huella_actual(self) -> str:
         return self.huella() if callable(self.huella) else self.huella
@@ -315,8 +316,9 @@ def registrar_lector(
     requeridos: tuple[str, ...] | None = None,
     aceptar: Callable[[dict[str, str | None]], str | None] | None = None,
     huella: str | Callable[[], str] = "",
+    pantallas: tuple[str, ...] | None = None,
 ) -> None:
-    LECTORES[id_] = Lector(leer, requeridos, aceptar, huella)
+    LECTORES[id_] = Lector(leer, requeridos, aceptar, huella, pantallas)
 
 
 def huella_de(*partes) -> str:
@@ -325,9 +327,20 @@ def huella_de(*partes) -> str:
     return hashlib.sha256(texto.encode("utf-8")).hexdigest()
 
 
-def huella_mapa(mapa: dict) -> str:
-    """sha256 de las pantallas de un mapa (URL, firma y patrones), sin `capturado` ni `fuente`."""
-    return hashlib.sha256(json.dumps(mapa["pantallas"], sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+def _solo(mapa: dict, pantallas: tuple[str, ...] | None) -> dict:
+    """Las pantallas del mapa que lee un paso (todas si `pantallas` es None)."""
+    if pantallas is None:
+        return mapa["pantallas"]
+    return {n: mapa["pantallas"][n] for n in pantallas}
+
+
+def huella_mapa(mapa: dict, pantallas: tuple[str, ...] | None = None) -> str:
+    """sha256 de las pantallas de un mapa (URL, firma y patrones), sin `capturado` ni `fuente`.
+
+    Con `pantallas`, solo las que lee el paso: añadir al mapa pantallas de otra fase no invalida su confirmación.
+    """
+    datos = json.dumps(_solo(mapa, pantallas), sort_keys=True, ensure_ascii=False)
+    return hashlib.sha256(datos.encode("utf-8")).hexdigest()
 
 
 def lector_para(paso: str, mapa: dict | None = None) -> Lector | None:
@@ -335,7 +348,10 @@ def lector_para(paso: str, mapa: dict | None = None) -> Lector | None:
     base = LECTORES.get(paso)
     if base is None or mapa is None:
         return base
-    return Lector(lector_de_mapa(lambda: mapa), base.requeridos, base.aceptar, huella_mapa(mapa))
+    return Lector(
+        lector_de_mapa(lambda: mapa, base.pantallas), base.requeridos, base.aceptar,
+        huella_mapa(mapa, base.pantallas), base.pantallas,
+    )
 
 
 def rechazo(lector: Lector, valores: dict[str, str | None]) -> str | None:
@@ -350,14 +366,16 @@ def rechazo(lector: Lector, valores: dict[str, str | None]) -> str | None:
     return lector.aceptar(valores) if lector.aceptar else None
 
 
-def lector_de_mapa(mapa: Callable[[], dict]) -> Callable[[dict[str, str], Path], dict]:
-    """Lector para un mapa.yaml: «<pantalla>.firma» y «<pantalla>.<campo>» de cada pantalla."""
+def lector_de_mapa(
+    mapa: Callable[[], dict], pantallas: tuple[str, ...] | None = None
+) -> Callable[[dict[str, str], Path], dict]:
+    """Lector para un mapa.yaml: «<pantalla>.firma» y «<pantalla>.<campo>» de cada pantalla (o de `pantallas`)."""
     from trovefy.mapa import FirmaAusente, leer_pantalla
 
     def leer(textos: dict[str, str], _vault: Path) -> dict[str, str | None]:
         m = mapa()
         salida: dict[str, str | None] = {}
-        for nombre, pantalla in m["pantallas"].items():
+        for nombre, pantalla in _solo(m, pantallas).items():
             texto = textos.get(nombre)
             try:
                 campos = leer_pantalla(pantalla, texto) if texto is not None else None
