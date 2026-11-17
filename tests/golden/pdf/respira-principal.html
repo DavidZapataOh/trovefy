@@ -15,6 +15,7 @@ body{margin:0}
 h1,h2,h3,h4{font-family:var(--fuente-titulos);color:var(--color-primario);line-height:1.2}
 .flujo{page:flujo}
 .page{width:210mm;height:296.8mm;display:flex;flex-direction:column;break-after:page;box-sizing:border-box;padding:20mm 18mm}
+.page>*{flex-shrink:0}
 .push{margin-top:auto}
 .seccion{break-before:page}
 .fuentes{break-before:page;font-size:9pt}

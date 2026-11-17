@@ -1,4 +1,5 @@
 import hashlib
+import os
 import re
 import shutil
 import stat
@@ -11,11 +12,21 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+import yaml
 from fixtures.pdf.fuente_latina import crear_fuente_latina
+from fixtures.pdf.herramientas import falta_weasyprint, faltan, requerir
+from trovefy.pdf import render
 from trovefy.pdf.render import (
+    MARGEN_INFERIOR_MM,
+    NO_PDFINFO,
+    ORDEN_PANGO,
+    Ancla,
+    PdfinfoNoMedido,
     PdfNoDisponible,
     desbordes,
+    escribir_exclusivo,
     fetcher_local,
+    fijas_esperadas,
     nombre_pdf,
     paginas_pdfinfo,
     producir_pdf,
@@ -39,18 +50,16 @@ CFG = ConfigProducto(
 )
 
 
-def _hay_weasyprint() -> str | None:
-    try:
-        import weasyprint  # noqa: F401
-    except (ImportError, OSError) as exc:
-        return f"WeasyPrint no disponible ({exc}): sudo apt install -y libpango-1.0-0 libpangoft2-1.0-0"
-    return None
+_SIN_WEASY = falta_weasyprint()
+_SIN_PDF = faltan("pdfinfo", "fc-match", weasyprint=True)
 
 
-_SIN_WEASY = _hay_weasyprint()
-necesita_pdf = pytest.mark.skipif(_SIN_WEASY is not None or shutil.which("pdfinfo") is None
-                                  or shutil.which("fc-match") is None,
-                                  reason=_SIN_WEASY or "falta pdfinfo o fc-match (poppler-utils, fontconfig)")
+@pytest.fixture
+def _herramientas_pdf():
+    requerir(_SIN_PDF)  # con CI definido, falla en vez de saltar (ruling L7)
+
+
+necesita_pdf = pytest.mark.usefixtures("_herramientas_pdf")
 
 
 def _png() -> bytes:
@@ -63,14 +72,15 @@ def _png() -> bytes:
     return buf.getvalue()
 
 
-def _vault(tmp_path: Path, p_id: str, pais: str, idioma: str, slug: str) -> Path:
+def _vault(tmp_path: Path, p_id: str, pais: str, idioma: str, slug: str,
+           titulo: str = "Respira y duerme") -> Path:
     v = tmp_path / "v"
     shutil.copytree(PRODUCTO, v / "productos" / p_id)
     p = pieza(v, p_id, "principal")
     shutil.copytree(RESPIRA / "fuente", p.raiz / "fuente")
     ficha = Ficha(p_id=p_id, pais=pais, idioma=idioma, slug=slug, unidad_venta="plan de 21 días",
                   promesa="Duerme mejor", avatar="Adulto que duerme mal", exigencia="sanitario", tipo="ebook",
-                  piezas=(PiezaFicha("principal", "Respira y duerme", "ebook", 4),))
+                  piezas=(PiezaFicha("principal", titulo, "ebook", 4),))
     meta = {"tipo_documento": "ficha", "fecha": "2026-11-16", **asdict(ficha)}
     meta["piezas"] = [asdict(x) for x in ficha.piezas]
     frontmatter.escribir(p.raiz / "FICHA.md", meta, "# Ficha\n")
@@ -137,10 +147,48 @@ def test_nombre_pdf():
         nombre_pdf(ficha, "principal", 0)
 
 
+def _a(pagina: int, y: float = 500.0, limite: float = 1046.0) -> Ancla:
+    return Ancla(pagina, y, limite)
+
+
 def test_desbordes():
-    anclas = {"ini-portada": 0, "fin-portada": 0, "ini-diario": 5, "fin-diario": 6, "ini-mapa": 7, "s-01": 2}
+    anclas = {"ini-portada": _a(0), "fin-portada": _a(0), "ini-diario": _a(5), "fin-diario": _a(6),
+              "ini-mapa": _a(7), "s-01": _a(2)}
     assert desbordes(anclas) == ("diario", "mapa")
-    assert desbordes({"ini-a": 1, "fin-a": 1}) == ()
+    assert desbordes({"ini-a": _a(1), "fin-a": _a(1)}) == ()
+
+
+def test_desbordes_fin_por_debajo_del_margen():
+    """El contenido que se sale por abajo de la página fija (recortado al pintar) deja ``fin-X`` fuera."""
+    assert desbordes({"ini-a": _a(0, 75), "fin-a": _a(0, 1046.4, 1046.0)}) == ()
+    assert desbordes({"ini-a": _a(0, 75), "fin-a": _a(0, 1097.7, 1046.0)}) == ("a",)
+
+
+def test_desbordes_falla_cerrado_si_faltan_anclas():
+    anclas = {"ini-portada": _a(0), "fin-portada": _a(0), "fin-diario": _a(3)}
+    assert desbordes(anclas, ("portada", "diario", "mapa")) == ("diario", "mapa")
+    assert desbordes({}, ("portada",)) == ("portada",)
+
+
+def test_fijas_esperadas():
+    html = ('<div class="page portada"><span id="ini-portada"></span><h1>T</h1></div>'
+            '<div class="page ficha"><span id="ini-diario"></span><span id="fin-diario"></span></div>'
+            '<div class="page ficha"><h2>Sin anclas</h2><span class="push" id="fin-mapa"></span></div>'
+            '<section id="s-01"><h2 id="x">a</h2></section>')
+    assert fijas_esperadas(html) == ("diario", "mapa", "portada")
+    assert fijas_esperadas("<p>nada</p>") == ("portada",)
+
+
+def test_margen_inferior_es_el_de_base_css():
+    from trovefy.pdf.maqueta import BASE_CSS
+
+    css = BASE_CSS.read_text(encoding="utf-8")
+    regla = re.search(r"\.page\{([^}]*)\}", css).group(1)
+    assert f"padding:{MARGEN_INFERIOR_MM}mm " in regla
+
+
+def test_orden_pango_lleva_harfbuzz_subset():
+    assert "libharfbuzz-subset0" in ORDEN_PANGO.split()
 
 
 def test_paginas_pdfinfo_lee_pages(tmp_path):
@@ -152,7 +200,23 @@ def test_paginas_pdfinfo_lee_pages(tmp_path):
 
 
 def test_paginas_pdfinfo_sin_programa(tmp_path):
-    assert paginas_pdfinfo(tmp_path / "a.pdf", correr=_sin("pdfinfo")) is None
+    with pytest.raises(PdfinfoNoMedido) as exc:
+        paginas_pdfinfo(tmp_path / "a.pdf", correr=_sin("pdfinfo"))
+    assert str(exc.value) == NO_PDFINFO
+
+
+@pytest.mark.parametrize(("codigo", "salida", "error", "detalle"), [
+    (1, "", "Syntax Warning: May not be a PDF file", "código 1: Syntax Warning: May not be a PDF file"),
+    (0, "Title: x\nEncrypted: no\n", "", "salida sin «Pages:»"),
+    (0, "Pages: muchas\n", "", "salida sin «Pages:»"),
+])
+def test_paginas_pdfinfo_falla(tmp_path, codigo, salida, error, detalle):
+    def correr(args, **kw):
+        return subprocess.CompletedProcess(args, codigo, stdout=salida, stderr=error)
+
+    with pytest.raises(PdfinfoNoMedido) as exc:
+        paginas_pdfinfo(tmp_path / "a.pdf", correr=correr)
+    assert str(exc.value) == f"no medido: pdfinfo falló ({detalle})"
 
 
 def test_recurso_remoto_no_se_carga(tmp_path, monkeypatch):
@@ -169,8 +233,7 @@ def test_recurso_remoto_no_se_carga(tmp_path, monkeypatch):
 
 
 def test_fetcher_sirve_archivos_de_la_pieza(tmp_path):
-    if _SIN_WEASY:
-        pytest.skip(_SIN_WEASY)
+    requerir(_SIN_WEASY)
     (tmp_path / "medios").mkdir()
     (tmp_path / "medios" / "a.png").write_bytes(b"png")
     r = fetcher_local(tmp_path)(f"file://{tmp_path}/medios/a.png")
@@ -191,7 +254,7 @@ def test_fetcher_no_sigue_enlaces_fuera(tmp_path):
 def test_sin_weasyprint_mensaje_guiado(monkeypatch, tmp_path):
     monkeypatch.setitem(sys.modules, "weasyprint", None)
     with pytest.raises(PdfNoDisponible) as exc:
-        renderizar("<p>x</p>", tmp_path, tmp_path / "x.pdf")
+        renderizar("<p>x</p>", tmp_path, tmp_path / "x.pdf", base=tmp_path)
     assert "libpango" in str(exc.value) and "paso 00" in str(exc.value)
     assert not (tmp_path / "x.pdf").exists()
 
@@ -248,6 +311,18 @@ def test_sin_pdfinfo_no_medido(vault_respira):
     assert "no medido: falta pdfinfo (sudo apt install -y poppler-utils)" in r.problemas
 
 
+@necesita_pdf
+def test_pdfinfo_que_falla_no_es_que_falte(vault_respira):
+    def correr(args, **kw):
+        if args[0] == "pdfinfo":
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr="I/O Error: Couldn't open file")
+        return subprocess.run(args, **kw)  # noqa: PLW1510 - check lo pasa el llamador
+
+    r = producir_pdf(vault_respira, "p-0042-respira", "principal", CFG, correr=correr, ahora=AHORA)
+    assert r.paginas_pdfinfo is None and not r.apto
+    assert r.problemas == ("no medido: pdfinfo falló (código 1: I/O Error: Couldn't open file)",)
+
+
 def test_bulgaro_sin_glifos_no_renderiza(vault_dishai, tmp_path):
     latina = crear_fuente_latina(tmp_path / "latin-only.ttf")
 
@@ -266,3 +341,206 @@ def test_bulgaro_sin_glifos_no_renderiza(vault_dishai, tmp_path):
 def test_pieza_que_no_esta_en_la_ficha(vault_respira):
     with pytest.raises(ValueError, match="bono-3"):
         producir_pdf(vault_respira, "p-0042-respira", "bono-3", CFG, ahora=AHORA)
+
+
+# --- revisión: desbordes dentro de un hijo flex (H1) ------------------------------------------------
+
+
+def _ficha_yaml(raiz: Path, spec: dict) -> None:
+    (raiz / "fuente" / "fichas" / "diario.yaml").write_text(yaml.safe_dump(spec, allow_unicode=True),
+                                                             encoding="utf-8")
+
+
+@necesita_pdf
+def test_instrucciones_largas_en_la_ficha_se_detectan(vault_respira):
+    raiz = pieza(vault_respira, "p-0042-respira", "principal").raiz
+    instrucciones = " ".join(["Anota cada mañana a qué hora te acostaste y cuánto tardaste."] * 150)
+    assert len(instrucciones.split()) >= 1500
+    _ficha_yaml(raiz, {"id": "diario", "titulo": "Diario de sueño", "instrucciones": instrucciones,
+                       "tipo": "lineas", "filas": 3})
+    r = producir_pdf(vault_respira, "p-0042-respira", "principal", CFG, ahora=AHORA)
+    assert r.pdf is not None and "diario" in r.desbordes and not r.apto
+
+
+@necesita_pdf
+def test_casillas_largas_en_bulgaro_se_detectan(vault_dishai):
+    raiz = pieza(vault_dishai, "p-0043-dishai", "principal").raiz
+    frase = "Отбележи всеки ден колко минути дишаш бавно преди сън"
+    etiquetas = [f"{i}. " + " ".join([frase] * 3) for i in range(1, 26)]
+    assert all(28 <= len(e.split()) <= 32 for e in etiquetas)
+    _ficha_yaml(raiz, {"id": "diario", "titulo": "Дневник", "instrucciones": "Отбележи всяка сутрин.",
+                       "tipo": "casillas", "filas": etiquetas})
+    r = producir_pdf(vault_dishai, "p-0043-dishai", "principal", CFG, ahora=AHORA)
+    assert r.pdf is not None and "diario" in r.desbordes and not r.apto
+
+
+@necesita_pdf
+def test_titulo_de_portada_largo_se_detecta(tmp_path):
+    titulo = " ".join(["Respira despacio y duerme mejor cada noche"] * 22)
+    v = _vault(tmp_path, "p-0042-respira", "ZZ", "es", "respira", titulo=titulo)
+    r = producir_pdf(v, "p-0042-respira", "principal", CFG, ahora=AHORA)
+    assert r.pdf is not None and "portada" in r.desbordes and not r.apto
+
+
+@necesita_pdf
+def test_ancla_que_falta_en_el_html_es_desborde(tmp_path):
+    html = ('<html><head><style>@page{size:A4;margin:0}div{break-after:page}</style></head><body>'
+            '<div class="page portada"><h1>Sin anclas</h1></div>'
+            '<div class="page ficha"><span id="ini-mapa"></span><p>a</p></div></body></html>')
+    anclas = renderizar(html, tmp_path, tmp_path / "x.pdf", base=tmp_path)
+    assert anclas["ini-mapa"].pagina == 1 and anclas["ini-mapa"].limite > anclas["ini-mapa"].y
+    assert desbordes(anclas, fijas_esperadas(html)) == ("mapa", "portada")
+
+
+# --- revisión: escrituras sin seguir enlaces (M3) ---------------------------------------------------
+
+
+def _archivos(carpeta: Path) -> dict[str, bytes]:
+    return {p.relative_to(carpeta).as_posix(): p.read_bytes() for p in sorted(carpeta.rglob("*")) if p.is_file()}
+
+
+def test_carpeta_de_bonos_enlazada_no_escribe_fuera(tmp_path):
+    v = _vault(tmp_path, "p-0042-respira", "ZZ", "es", "respira")
+    raiz = pieza(v, "p-0042-respira", "principal").raiz
+    fuera = tmp_path / "fuera"
+    shutil.copytree(RESPIRA / "fuente", fuera / "bono-1" / "fuente")
+    (raiz / "bonos").symlink_to(fuera, target_is_directory=True)
+    meta, cuerpo = frontmatter.leer(raiz / "FICHA.md")
+    meta["piezas"].append({"id": "bono-1", "titulo": "Bono", "tipo": "bono", "paginas_objetivo": 4})
+    frontmatter.escribir(raiz / "FICHA.md", meta, cuerpo)
+    antes = _archivos(fuera)
+    with pytest.raises(ValueError, match="enlace simbólico"):
+        producir_pdf(v, "p-0042-respira", "bono-1", CFG, ahora=AHORA)
+    assert _archivos(fuera) == antes
+
+
+def test_renderizar_no_escribe_por_un_enlace(tmp_path):
+    requerir(_SIN_WEASY)
+    fuera = tmp_path / "fuera"
+    fuera.mkdir()
+    (tmp_path / "v").mkdir()
+    (tmp_path / "v" / "entregable").symlink_to(fuera, target_is_directory=True)
+    with pytest.raises(ValueError, match="enlace simbólico"):
+        renderizar("<p>x</p>", tmp_path / "v" / "entregable", tmp_path / "v" / "entregable" / "x.pdf",
+                   base=tmp_path / "v")
+    assert list(fuera.iterdir()) == []
+
+
+def test_escribir_exclusivo(tmp_path):
+    destino = tmp_path / "a" / "b.html"
+    escribir_exclusivo(destino, b"uno", base=tmp_path)
+    assert destino.read_bytes() == b"uno" and stat.S_IMODE(destino.stat().st_mode) == 0o640
+    with pytest.raises(FileExistsError):
+        escribir_exclusivo(destino, b"dos", base=tmp_path)
+    assert destino.read_bytes() == b"uno"
+    assert sorted(p.name for p in destino.parent.iterdir()) == ["b.html"]  # sin temporales
+
+
+def test_escribir_exclusivo_no_sigue_un_enlace_final(tmp_path):
+    fuera = tmp_path / "fuera.html"
+    (tmp_path / "v").mkdir()
+    (tmp_path / "v" / "b.html").symlink_to(fuera)
+    with pytest.raises(FileExistsError):
+        escribir_exclusivo(tmp_path / "v" / "b.html", b"x", base=tmp_path / "v")
+    assert not fuera.exists()
+
+
+# --- revisión: versión reservada de forma atómica (M4) ----------------------------------------------
+
+
+@necesita_pdf
+def test_dos_ejecuciones_a_la_vez_dan_versiones_distintas(vault_respira, monkeypatch):
+    """Las dos eligen la versión a la vez (barrera tras ``siguiente_version``): la reserva con
+    ``O_EXCL`` hace que una se quede la v1 y la otra pase a la v2."""
+    import threading
+
+    barrera = threading.Barrier(2, timeout=30)
+    original = render.siguiente_version
+    primeras = threading.local()
+
+    def a_la_vez(*a, **k):
+        n = original(*a, **k)
+        if not getattr(primeras, "hecha", False):  # solo la primera elección de cada hilo espera a la otra
+            primeras.hecha = True
+            barrera.wait()
+        return n
+
+    monkeypatch.setattr(render, "siguiente_version", a_la_vez)
+    resultados, errores = [], []
+
+    def correr():
+        try:
+            resultados.append(producir_pdf(vault_respira, "p-0042-respira", "principal", CFG, ahora=AHORA))
+        except Exception as exc:  # noqa: BLE001 - se comprueba abajo
+            errores.append(exc)
+
+    hilos = [threading.Thread(target=correr) for _ in range(2)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join(120)
+    assert errores == []
+    assert sorted(r.version for r in resultados) == [1, 2]
+    assert sorted(r.pdf.name for r in resultados) == ["respira-es-v1.pdf", "respira-es-v2.pdf"]
+    assert all(r.apto for r in resultados)
+    for r in resultados:
+        assert r.html.name == r.pdf.name.replace(".pdf", ".html")
+
+
+# --- revisión: PdfNoDisponible deja rastro en el log (L4) -------------------------------------------
+
+
+def test_pdf_no_disponible_tras_el_html_queda_en_el_log(vault_respira, monkeypatch):
+    def sin_weasy():
+        raise PdfNoDisponible("WeasyPrint no carga")
+
+    monkeypatch.setattr(render, "_weasyprint", sin_weasy)
+    monkeypatch.setattr(render, "comprobar_fuentes", lambda *a, **k: [])
+    with pytest.raises(PdfNoDisponible):
+        producir_pdf(vault_respira, "p-0042-respira", "principal", CFG, ahora=AHORA)
+    raiz = pieza(vault_respira, "p-0042-respira", "principal").raiz
+    assert (raiz / "fuente" / "respira-es-v1.html").is_file()
+    log = (vault_respira / "log.md").read_text(encoding="utf-8")
+    assert "v1: sin PDF (WeasyPrint no disponible)" in log and "respira-es-v1.html" in log
+
+
+# --- revisión: el fetcher abre sin seguir enlaces (L5) ----------------------------------------------
+
+
+def test_fetcher_no_sigue_un_enlace_que_aparece_tras_comprobar(tmp_path, monkeypatch):
+    """Si el último componente pasa a ser un enlace entre ``realpath`` y la lectura, ``O_NOFOLLOW`` lo para."""
+    fuera = tmp_path / "fuera.png"
+    fuera.write_bytes(b"secreto")
+    raiz = tmp_path / "raiz"
+    (raiz / "medios").mkdir(parents=True)
+    (raiz / "medios" / "a.png").symlink_to(fuera)
+    f = fetcher_local(raiz)
+    monkeypatch.setattr(render.os.path, "realpath", lambda p: str(p))  # la comprobación ya «pasó»
+    with pytest.raises(ValueError, match="enlace|regular"):
+        f(f"file://{raiz}/medios/a.png")
+
+
+def test_fetcher_rechaza_lo_que_no_es_archivo_regular(tmp_path):
+    raiz = tmp_path / "raiz"
+    (raiz / "medios").mkdir(parents=True)
+    os.mkfifo(raiz / "medios" / "a.png")
+    with pytest.raises(ValueError):
+        fetcher_local(raiz)(f"file://{raiz}/medios/a.png")
+    with pytest.raises(ValueError):
+        fetcher_local(raiz)(f"file://{raiz}/medios")
+
+
+# --- revisión: fragmento con una etiqueta truncada al final (M1, de punta a punta) ------------------
+
+
+@pytest.mark.parametrize("cola", ["\n<style", '\n<link rel="stylesheet" href="medios/x.css" x="',
+                                  '\n<img src="medios/portada.png" alt="', '\n<script src="http://e/x'])
+def test_seccion_truncada_no_llega_al_pdf(vault_respira, cola):
+    from trovefy.pdf.maqueta import FragmentoInvalido
+
+    raiz = pieza(vault_respira, "p-0042-respira", "principal").raiz
+    s = raiz / "fuente" / "secciones" / "03-plan-21-dias.html"
+    s.write_text(s.read_text(encoding="utf-8").rstrip() + cola, encoding="utf-8")
+    with pytest.raises(FragmentoInvalido, match="03-plan-21-dias.html.*sin cerrar"):
+        producir_pdf(vault_respira, "p-0042-respira", "principal", CFG, ahora=AHORA)
+    assert list((raiz / "fuente").glob("*-v*.html")) == [] and list(raiz.glob("*.pdf")) == []

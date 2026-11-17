@@ -255,3 +255,60 @@ def test_css_colores_y_tipos_con_var():
         assert valor.strip().startswith("var(--")
     for valor in re.findall(r"(?<![-\w])color\s*:\s*([^;}]+)", css):
         assert valor.strip().startswith("var(--")
+
+
+def test_css_hijos_de_pagina_fija_no_se_encogen():
+    """Sin esto, un hijo de ``.page`` (flex) se encoge y su contenido se recorta sin mover ``fin-X``."""
+    css = BASE_CSS.read_text(encoding="utf-8")
+    assert ".page>*{flex-shrink:0}" in css
+
+
+# --- revisión: fragmentos truncados (M1) ------------------------------------------------------------
+
+
+@pytest.mark.parametrize("html", [
+    '<h2>x</h2><p>a</p><script src="http://e/x',
+    "<h2>x</h2><p>a</p><style",
+    "<h2>x</h2><p>a</p><link",
+    '<h2>x</h2><img src="medios/a.png" alt="',
+    '<h2>x</h2><p class="a>',
+    "<h2>x</h2><p>a</p><",
+])
+def test_fragmento_con_etiqueta_sin_cerrar_rechazado(html):
+    with pytest.raises(FragmentoInvalido):
+        sanear_fragmento(html)
+
+
+def test_fragmento_se_reconstruye_desde_los_tokens():
+    # el texto se escapa y las etiquetas salen de la lista blanca, nunca se copia la entrada
+    assert sanear_fragmento("<h2>a &lt;script&gt; b</h2>") == "<h2>a &lt;script&gt; b</h2>"
+    assert sanear_fragmento('<p>a & b</p><img src="medios/a&#46;png" alt=\'x"y\'/>') == (
+        '<p>a &amp; b</p><img src="medios/a.png" alt="x&quot;y">')
+    assert sanear_fragmento("<P CLASS=nota>Uno&nbsp;dos</P>") == '<p class="nota">Uno\xa0dos</p>'
+
+
+# --- revisión: familias de los tokens (M2) ----------------------------------------------------------
+
+
+@pytest.mark.parametrize("cambio", [
+    {"--fuente-titulos": "'Lora', serif"},
+    {"--fuente-texto": "Arial, 'DejaVu Sans', sans-serif"},
+    {"--fuente-mono": "'DejaVu Sans Mono', monospace"},
+])
+def test_ensamblado_fuente_del_token_distinta_de_tipografias(pieza_respira, cambio):
+    tokens = {**tokens_brandbook(BRANDBOOK.read_text(encoding="utf-8")), **cambio}
+    with pytest.raises(ValueError, match="--fuente-"):
+        _ensamblar(pieza_respira, tokens=tokens)
+
+
+def test_ensamblado_falta_token_de_fuente(pieza_respira):
+    tokens = tokens_brandbook(BRANDBOOK.read_text(encoding="utf-8"))
+    del tokens["--fuente-texto"]
+    with pytest.raises(ValueError, match="--fuente-texto"):
+        _ensamblar(pieza_respira, tokens=tokens)
+
+
+def test_ensamblado_fuente_del_token_ignora_mayusculas(pieza_respira):
+    tokens = {**tokens_brandbook(BRANDBOOK.read_text(encoding="utf-8")),
+              "--fuente-titulos": "'dejavu serif', serif", "--fuente-texto": "'DejaVu Sans'"}
+    assert "dejavu serif" in _ensamblar(pieza_respira, tokens=tokens)

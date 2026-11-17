@@ -60,10 +60,15 @@ class BrandbookSinTokens(ValueError):
 
 
 class _Saneador(HTMLParser):
+    """Recorre el fragmento y lo **reconstruye** desde los tokens: el texto se escapa y cada etiqueta y
+    atributo sale de la lista blanca. Lo que el parser no entiende (una etiqueta sin cerrar al final, un
+    ``<`` suelto) es rechazo: nunca se copia la entrada tal cual."""
+
     def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
+        super().__init__(convert_charrefs=False)  # las entidades llegan aparte: un «<» en el texto es basura
         self.ids: list[str] = []
         self.h2: str | None = None
+        self.salida: list[str] = []
         self._en_h2 = False
         self._texto_h2: list[str] = []
 
@@ -71,41 +76,66 @@ class _Saneador(HTMLParser):
         linea = self.getpos()[0]
         raise FragmentoInvalido(f"línea {linea}: {motivo}")
 
-    def handle_starttag(self, tag, attrs):
+    def _etiqueta(self, tag, attrs) -> str:
         if tag not in ETIQUETAS:
             self._mal(f"<{tag}> no está permitido (solo {', '.join(sorted(ETIQUETAS))})")
+        vistos: set[str] = set()
+        partes = [tag]
         for nombre, valor in attrs:
             valor = valor or ""
             if nombre.startswith("on"):
                 self._mal(f"atributo {nombre} prohibido en <{tag}>")
             if nombre not in ATRIBUTOS:
                 self._mal(f"atributo {nombre} no permitido en <{tag}> (solo {', '.join(sorted(ATRIBUTOS))})")
+            if nombre in vistos:
+                self._mal(f"atributo {nombre} repetido en <{tag}>")
+            vistos.add(nombre)
             if nombre == "id":
                 if not _ID.fullmatch(valor):
                     self._mal(f"id mal escrito: «{valor}»")
                 self.ids.append(valor)
-            elif nombre == "class" and not _CLASE.fullmatch(valor.strip()):
-                self._mal(f"class mal escrita: «{valor}»")
+            elif nombre == "class":
+                if not _CLASE.fullmatch(valor.strip()):
+                    self._mal(f"class mal escrita: «{valor}»")
+                valor = " ".join(valor.split())
             elif nombre == "href" and not _HREF.fullmatch(valor):
                 self._mal(f"href solo a un ancla del propio libro (#…): «{valor}»")
             elif nombre == "src" and (tag != "img" or not _SRC.fullmatch(valor) or ".." in valor):
                 self._mal(f"src solo en <img> y a {CARPETA}/<archivo>: «{valor}»")
+            partes.append(f'{nombre}="{_e(valor)}"')
         if tag == "h2" and self.h2 is None:
             self._en_h2 = True
+        return "<" + " ".join(partes) + ">"
+
+    def handle_starttag(self, tag, attrs):
+        self.salida.append(self._etiqueta(tag, attrs))
 
     def handle_startendtag(self, tag, attrs):
-        self.handle_starttag(tag, attrs)
+        self.salida.append(self._etiqueta(tag, attrs))
 
     def handle_endtag(self, tag):
         if tag not in ETIQUETAS:
             self._mal(f"</{tag}> no está permitido")
+        self.salida.append(f"</{tag}>")
         if tag == "h2" and self._en_h2:
             self._en_h2 = False
             self.h2 = " ".join("".join(self._texto_h2).split())
 
-    def handle_data(self, data):
+    def _texto(self, texto: str) -> None:
+        self.salida.append(html_mod.escape(texto, quote=False))
         if self._en_h2:
-            self._texto_h2.append(data)
+            self._texto_h2.append(texto)
+
+    def handle_data(self, data):
+        if "<" in data:
+            self._mal(f"etiqueta sin cerrar o «<» suelto: «{data.strip()[:40]}» (escribe &lt; si es texto)")
+        self._texto(data)
+
+    def handle_entityref(self, name):
+        self._texto(html_mod.unescape(f"&{name};"))
+
+    def handle_charref(self, name):
+        self._texto(html_mod.unescape(f"&#{name};"))
 
     def handle_comment(self, data):
         self._mal("comentarios HTML no permitidos")
@@ -125,13 +155,18 @@ def _sanear(html: str) -> tuple[str, _Saneador]:
         raise FragmentoInvalido("el fragmento no es texto")
     s = _Saneador()
     s.feed(html)
+    # Lo que el parser deja sin entender tras ``feed`` es una etiqueta truncada al final; ``close()``
+    # la tiraría en silencio (Python 3.12.13+) o la daría como texto.
+    if "<" in s.rawdata:
+        raise FragmentoInvalido(f"etiqueta sin cerrar al final: «{s.rawdata.strip()[:40]}»")
     s.close()
-    return html.strip(), s
+    return "".join(s.salida).strip(), s
 
 
 def sanear_fragmento(html: str) -> str:
-    """Devuelve el fragmento (sin espacios en los extremos) si cumple la lista blanca; si no,
-    ``FragmentoInvalido``. Nunca lo «arregla»: un fragmento malo lo rehace Claude."""
+    """Fragmento reconstruido desde sus tokens (texto escapado; etiquetas y atributos de la lista blanca,
+    sin espacios en los extremos) o ``FragmentoInvalido``. Nunca «arregla» nada: un fragmento malo, o
+    truncado, lo rehace Claude."""
     return _sanear(html)[0]
 
 
@@ -271,6 +306,32 @@ def _ficha_yaml(ruta: Path) -> str:
         raise ValueError(f"{Path(ruta).name}: {exc}") from None
 
 
+_USOS_FUENTE = ("titulos", "texto")  # orden de ``familias``
+
+
+def _primera_familia(valor: str) -> str:
+    return " ".join(valor.split(",")[0].strip().strip("'\"").lower().split())
+
+
+def _comprobar_fuentes_de_tokens(tokens: dict[str, str], familias: tuple[str, str]) -> None:
+    """Cada token ``--fuente-<uso>`` debe empezar por la familia de ``tipografias`` con ese ``uso``: es la
+    que comprueba ``comprobar_fuentes``; si no, WeasyPrint usaría otra sin revisar (ruling M2)."""
+    por_uso = dict(zip(_USOS_FUENTE, familias, strict=True))
+    for uso, familia in por_uso.items():
+        if f"--fuente-{uso}" not in tokens:
+            raise ValueError(f"tokens_css no trae --fuente-{uso} (debe empezar por «{familia}»): rehaz el brandbook")
+    for clave, valor in tokens.items():
+        if not clave.startswith("--fuente-"):
+            continue
+        uso = clave.removeprefix("--fuente-")
+        if uso not in por_uso:
+            raise ValueError(f"tokens_css.{clave}: no hay tipografía con uso: {uso} en BRANDBOOK.md "
+                             f"(solo {', '.join(_USOS_FUENTE)})")
+        if _primera_familia(valor) != " ".join(por_uso[uso].lower().split()):
+            raise ValueError(f"tokens_css.{clave} empieza por «{valor.split(',')[0].strip()}», pero tipografias "
+                             f"({uso}) dice «{por_uso[uso]}»: deben coincidir; rehaz el brandbook")
+
+
 def ensamblar(pieza: Pieza, ficha: Ficha, pieza_ficha: PiezaFicha, tokens: dict[str, str],
               familias: tuple[str, str], secciones: list[Path], fichas: list[Path], manifiesto: dict) -> str:
     """Documento A4 completo de una pieza, listo para los gates y WeasyPrint.
@@ -287,6 +348,7 @@ def ensamblar(pieza: Pieza, ficha: Ficha, pieza_ficha: PiezaFicha, tokens: dict[
     for familia in familias:
         if not isinstance(familia, str) or not _FAMILIA.fullmatch(familia):
             raise ValueError(f"familia de fuente mal escrita: «{familia}»")
+    _comprobar_fuentes_de_tokens(tokens, familias)
     fuente = Path(pieza.raiz) / "fuente"
     titulo = _e(pieza_ficha.titulo)
     ids = ["ini-portada", "fin-portada", "fuentes"]

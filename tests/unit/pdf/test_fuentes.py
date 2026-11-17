@@ -1,9 +1,9 @@
-import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
-from fixtures.pdf.fuente_latina import FAMILIA_LATINA
+from fixtures.pdf.fuente_latina import FAMILIA_LATINA, crear_coleccion
+from fixtures.pdf.herramientas import faltan, requerir
 from trovefy.pdf.fuentes import (
     comprobar_fuentes,
     glifos_faltantes,
@@ -36,7 +36,7 @@ def test_fc_match_usa_formato_familia_y_archivo(latin_only):
     correr = _fc({FAMILIA_LATINA: f"{FAMILIA_LATINA}\n{latin_only}"}, llamadas)
     assert ruta_fuente(FAMILIA_LATINA, correr=correr) == latin_only
     args, kw = llamadas[0]
-    assert args == ["fc-match", "-f", "%{family}\n%{file}", FAMILIA_LATINA]
+    assert args == ["fc-match", "-f", "%{family}\n%{file}\n%{index}", FAMILIA_LATINA]
     assert kw.get("capture_output") is True
 
 
@@ -63,11 +63,9 @@ def test_glifos_ignora_espacios_y_control(latin_only):
 
 
 def test_fuente_cirilica_completa():
-    if shutil.which("fc-match") is None:
-        pytest.skip("falta fc-match (fontconfig): CI lo instala en la Tarea 9")
+    requerir(faltan("fc-match"))
     ruta = ruta_fuente("DejaVu Sans")
-    if ruta is None:
-        pytest.skip("DejaVu Sans no está instalada (fonts-dejavu-core): CI la instala en la Tarea 9")
+    requerir(None if ruta else "DejaVu Sans no está instalada (sudo apt install -y fonts-dejavu-core)")
     assert glifos_faltantes("Дишай спокойно: щ, ж, ъ, ю, я — «Ъ»", ruta) == set()
 
 
@@ -121,3 +119,45 @@ def test_ruta_inexistente_es_none(tmp_path):
 def test_ruta_es_path(latin_only):
     correr = _fc({FAMILIA_LATINA: f"{FAMILIA_LATINA}\n{latin_only}"})
     assert isinstance(ruta_fuente(FAMILIA_LATINA, correr=correr), Path)
+
+
+# --- revisión: colecciones .ttc (L6) ----------------------------------------------------------------
+
+
+def test_glifos_de_la_fuente_del_indice(tmp_path):
+    ttc = crear_coleccion(tmp_path / "coleccion.ttc")
+    assert {"Д", "ш"} <= glifos_faltantes("Дишай", ttc, indice=0)
+    assert glifos_faltantes("Дишай", ttc, indice=1) == set()
+
+
+def test_comprobar_fuentes_usa_el_indice_de_fc_match(tmp_path):
+    ttc = crear_coleccion(tmp_path / "coleccion.ttc")
+    correr = _fc({"Coleccion Cirilica": f"Coleccion Cirilica\n{ttc}\n1",
+                  "Coleccion Latina": f"Coleccion Latina\n{ttc}\n0"})
+    assert comprobar_fuentes("<p>Дишай</p>", ("Coleccion Cirilica", "Coleccion Cirilica"), correr=correr) == []
+    problemas = comprobar_fuentes("<p>Дишай</p>", ("Coleccion Latina", "Coleccion Latina"), correr=correr)
+    assert len(problemas) == 1 and "«Coleccion Latina» no tiene" in problemas[0]
+
+
+def test_indice_ilegible_es_problema(tmp_path):
+    ttc = crear_coleccion(tmp_path / "coleccion.ttc")
+    correr = _fc({"Coleccion Latina": f"Coleccion Latina\n{ttc}\nx"})
+    problemas = comprobar_fuentes("<p>Hola</p>", ("Coleccion Latina", "Coleccion Latina"), correr=correr)
+    assert len(problemas) == 1 and "no medido" in problemas[0]
+
+
+def test_real_fc_match_da_indice():
+    requerir(faltan("fc-match"))
+    r = subprocess.run(["fc-match", "-f", "%{family}\n%{file}\n%{index}", "DejaVu Sans"], capture_output=True,
+                       text=True, check=True)
+    assert r.stdout.split("\n")[2] == "0"
+
+
+def test_requerir_en_ci_falla(monkeypatch):
+    monkeypatch.setenv("CI", "true")
+    with pytest.raises(pytest.fail.Exception, match="falta pdfinfo"):
+        requerir("falta pdfinfo")
+    requerir(None)
+    monkeypatch.delenv("CI")
+    with pytest.raises(pytest.skip.Exception):
+        requerir("falta pdfinfo")

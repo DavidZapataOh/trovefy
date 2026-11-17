@@ -2,19 +2,22 @@
 
 Una cuadrícula de 6 columnas con cada página a 40 ppp y su número debajo, para que Claude (y el
 usuario) vean de un vistazo el ritmo de la maqueta: páginas vacías, desbordes, portada. Se escribe en
-0640 (contrato 10) en ``qc/contactos-vN.png``; una relectura de solo las páginas tocadas va a
-``qc/contactos-vN-rK.png``. La vista previa para la landing es del plan 18 (resolución 16).
+0640 (contrato 10) en ``qc/contactos-vN.png``; una relectura de solo las páginas tocadas, o repetir la
+hoja completa de la misma versión, va a la siguiente ``qc/contactos-vN-rK.png`` libre: nunca se pisa
+una hoja (``render.escribir_exclusivo``, carpetas revisadas desde el vault). La vista previa para la
+landing es del plan 18 (resolución 16).
 """
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import tempfile
 from io import BytesIO
 from pathlib import Path
 
-from trovefy.producto.medios import escribir_medio
+from trovefy.pdf.render import escribir_exclusivo
 
 COLUMNAS = 6
 DPI_CONTACTOS = 40  # miniatura de una página A4 (≈ 331 × 468 px); fuente: plan 17, Tarea 10
@@ -29,15 +32,21 @@ class QcNoDisponible(RuntimeError):
     """Falta ``pdftoppm`` (poppler-utils)."""
 
 
+def _ocupada(ruta: Path) -> bool:
+    return os.path.lexists(ruta)  # un enlace colgante también ocupa el nombre
+
+
 def ruta_contactos(raiz: Path, version: int, relectura: bool = False) -> Path:
-    """``<raíz>/qc/contactos-vN.png``; con ``relectura``, el siguiente ``contactos-vN-rK.png`` libre."""
+    """``<raíz>/qc/contactos-vN.png`` si está libre y no es ``relectura``; si no, el siguiente
+    ``contactos-vN-rK.png`` libre (ruling L1: repetir la hoja completa nunca pisa la anterior)."""
     if isinstance(version, bool) or not isinstance(version, int) or version < 1:
         raise ValueError(f"versión mal escrita: «{version}»")
     carpeta = Path(raiz) / "qc"
-    if not relectura:
-        return carpeta / f"contactos-v{version}.png"
+    completa = carpeta / f"contactos-v{version}.png"
+    if not relectura and not _ocupada(completa):
+        return completa
     k = 1
-    while (carpeta / f"contactos-v{version}-r{k}.png").exists():
+    while _ocupada(carpeta / f"contactos-v{version}-r{k}.png"):
         k += 1
     return carpeta / f"contactos-v{version}-r{k}.png"
 
@@ -87,9 +96,11 @@ def _miniaturas(pdf: Path, paginas: list[int] | None, correr) -> list[tuple[int,
 
 
 def hoja_de_contactos(pdf: Path, destino: Path, paginas: list[int] | None = None,
-                      correr=subprocess.run) -> Path:
+                      correr=subprocess.run, *, base: Path) -> Path:
     """Cuadrícula de ``COLUMNAS`` miniaturas (todas las páginas, o solo ``paginas``) con su número debajo.
-    Escribe ``destino`` en 0640 y lo devuelve. ``QcNoDisponible`` si falta ``pdftoppm``."""
+    Crea ``destino`` en 0640 y lo devuelve. ``base`` es el vault: ninguna carpeta entre él y ``destino``
+    puede ser un enlace (``ValueError``). ``FileExistsError`` si ``destino`` ya existe (pide la ruta a
+    ``ruta_contactos``). ``QcNoDisponible`` si falta ``pdftoppm``."""
     paginas = _validar_paginas(paginas)
     from PIL import Image, ImageDraw, ImageFont
 
@@ -106,5 +117,5 @@ def hoja_de_contactos(pdf: Path, destino: Path, paginas: list[int] | None = None
         dibujo.text((x + ancho // 2, y + alto + BANDA // 2), str(numero), fill=_TINTA, font=letra, anchor="mm")
     buf = BytesIO()
     hoja.save(buf, format="PNG", optimize=True)
-    escribir_medio(Path(destino), buf.getvalue(), base=Path(destino).parent.parent)
+    escribir_exclusivo(Path(destino), buf.getvalue(), base=Path(base))
     return Path(destino)

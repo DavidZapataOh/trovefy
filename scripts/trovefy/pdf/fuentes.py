@@ -14,7 +14,7 @@ import unicodedata
 from html.parser import HTMLParser
 from pathlib import Path
 
-FORMATO_FC = "%{family}\n%{file}"
+FORMATO_FC = "%{family}\n%{file}\n%{index}"  # index: la fuente dentro de una colección .ttc/.otc
 # Paquete de Debian/Ubuntu por prefijo de familia (resolución 19). Sin coincidencia: fonts-noto-core.
 _PAQUETES = (
     ("dejavu", "fonts-dejavu-core"),
@@ -51,33 +51,42 @@ def _orden_apt(paquete: str) -> str:
     return f"en una terminal de Ubuntu (WSL) aparte: `sudo apt install -y {paquete}`"
 
 
-def _fc_match(familia: str, correr) -> tuple[str, Path | None]:
-    """(primera familia que da ``fc-match``, archivo). ``FileNotFoundError`` si falta ``fc-match``."""
+class _IndiceIlegible(ValueError):
+    """``fc-match`` dio un ``%{index}`` que no es un número."""
+
+
+def _fc_match(familia: str, correr) -> tuple[str, Path | None, int]:
+    """(primera familia que da ``fc-match``, archivo, índice en la colección). ``FileNotFoundError`` si falta
+    ``fc-match``; ``_IndiceIlegible`` si el índice no es un número (sin índice: 0)."""
     r = correr(["fc-match", "-f", FORMATO_FC, familia], capture_output=True, text=True, check=False)
     if r.returncode != 0:
-        return "", None
+        return "", None, 0
     lineas = (r.stdout or "").split("\n")
     dada = lineas[0].split(",")[0].strip()
     archivo = lineas[1].strip() if len(lineas) > 1 else ""
-    return dada, Path(archivo) if archivo else None
+    texto_indice = lineas[2].strip() if len(lineas) > 2 else ""
+    if texto_indice and not (texto_indice.isascii() and texto_indice.isdigit()):
+        raise _IndiceIlegible(f"fc-match dio un índice ilegible para «{familia}»: «{texto_indice[:20]}»")
+    return dada, Path(archivo) if archivo else None, int(texto_indice or 0)
 
 
 def ruta_fuente(familia: str, correr=subprocess.run) -> Path | None:
     """Archivo de ``familia`` según ``fc-match``; ``None`` si ``fc-match`` da otra familia (la sustituye
     en silencio) o el archivo no existe. ``FileNotFoundError`` si falta ``fc-match``."""
-    dada, ruta = _fc_match(familia, correr)
+    dada, ruta, _ = _fc_match(familia, correr)
     if _normalizar(dada) != _normalizar(familia) or ruta is None or not ruta.is_file():
         return None
     return ruta
 
 
-def glifos_faltantes(texto: str, ruta: Path) -> set[str]:
-    """Letras de ``texto`` que no están en el ``cmap`` de la fuente (sin espacios ni caracteres de control)."""
+def glifos_faltantes(texto: str, ruta: Path, indice: int = 0) -> set[str]:
+    """Letras de ``texto`` que no están en el ``cmap`` de la fuente (sin espacios ni caracteres de control).
+    En una colección ``.ttc``/``.otc`` se lee la fuente número ``indice`` (el ``%{index}`` de ``fc-match``)."""
     from fontTools.ttLib import TTFont
 
     ruta = Path(ruta)
     coleccion = ruta.suffix.lower() in (".ttc", ".otc")
-    with TTFont(str(ruta), lazy=True, fontNumber=0 if coleccion else -1) as fuente:
+    with TTFont(str(ruta), lazy=True, fontNumber=indice if coleccion else -1) as fuente:
         cmap = fuente.getBestCmap() or {}
     return {c for c in set(texto)
             if not c.isspace() and unicodedata.category(c) not in _IGNORADAS and ord(c) not in cmap}
@@ -116,15 +125,18 @@ def comprobar_fuentes(html: str, familias: tuple[str, str], correr=subprocess.ru
     problemas: list[str] = []
     for familia in dict.fromkeys(familias):
         try:
-            dada, ruta = _fc_match(familia, correr)
+            dada, ruta, indice = _fc_match(familia, correr)
         except FileNotFoundError:
             return [f"no medido: falta fc-match; {_orden_apt('fontconfig')}"]
+        except _IndiceIlegible as exc:
+            problemas.append(f"no medido: {exc}")
+            continue
         if _normalizar(dada) != _normalizar(familia) or ruta is None or not ruta.is_file():
             problemas.append(f"la fuente «{familia}» no está instalada (fc-match da «{dada or 'nada'}»); "
                              f"{_orden_apt(paquete_apt(familia))} o elige otra en BRANDBOOK.md")
             continue
         try:
-            faltan = sorted(glifos_faltantes(texto, ruta))
+            faltan = sorted(glifos_faltantes(texto, ruta, indice))
         except Exception as exc:  # noqa: BLE001 - un archivo de fuente roto es un problema que se informa
             problemas.append(f"no medido: no se puede leer la fuente «{familia}» ({ruta.name}: {exc})")
             continue
