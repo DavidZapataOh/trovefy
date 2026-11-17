@@ -1,0 +1,35 @@
+{
+  "fuente": "catálogo ficticio para los tests (nombres inventados)",
+  "fecha": "2026-11-17",
+  "servidor": "https://mcp.ejemplo.example/mcp",
+  "plan": "Max (prueba)",
+  "herramientas": [
+    {
+      "nombre": "ficticia_listar_cosas",
+      "descripcion": "SOLO LECTURA. Lista las cosas de una tienda.",
+      "esquema": {"type": "object", "properties": {"store_id": {"type": "string", "format": "uuid"}}, "required": ["store_id"]},
+      "clase": "lectura",
+      "motivo": "solo lee el catálogo"
+    },
+    {
+      "nombre": "ficticia_fijar_cosa",
+      "descripcion": "Cambia una cosa. Dos pasos: sin confirmar devuelve una vista previa y un token.",
+      "esquema": {"type": "object", "properties": {
+        "store_id": {"type": "string", "format": "uuid"},
+        "precio": {"type": "number"},
+        "confirmar": {"type": "boolean"},
+        "token": {"type": "string", "description": "Token de la vista previa", "pattern": "^[0-9a-f]{16}$"}
+      }, "required": ["store_id", "precio"]},
+      "clase": "escritura",
+      "motivo": "receta: precio; el token es el de la vista previa, no una credencial"
+    },
+    {
+      "nombre": "ficticia_conectar_pasarela",
+      "descripcion": "Conecta una pasarela de cobro.",
+      "esquema": {"type": "object", "properties": {"store_id": {"type": "string"}}},
+      "clase": "prohibida",
+      "motivo": "dinero: pasarelas"
+    }
+  ],
+  "faltan": ["precio propio del embudo: solo en el panel"]
+}
