@@ -56,6 +56,24 @@ def test_plantilla_solo_pageview_y_viewcontent():
     assert "Purchase" not in texto and "InitiateCheckout" not in texto
 
 
+def test_plantilla_sin_autoconfig_antes_de_init():
+    """I-3: sin autoConfig el píxel no manda eventos automáticos (clics, metadatos) además de los dos nuestros."""
+    texto = PIXEL_PLANTILLA.read_text(encoding="utf-8")
+    apagado = "fbq('set','autoConfig',false,'{{dataset_id}}');"
+    assert apagado in texto
+    assert texto.index(apagado) < texto.index("fbq('init'")
+    assert texto.count("fbq(") == 4  # set autoConfig, init, PageView, ViewContent
+
+
+@pytest.mark.parametrize("dataset_id", ["١٢٣٤٥٦٧", "１２３４５６７", "123456\n"])
+def test_dataset_solo_digitos_ascii(tmp_path, dataset_id):
+    """L-2: `[0-9]{6,20}`; `\\d` aceptaría dígitos de otros alfabetos."""
+    v = vault_demo(tmp_path)
+    tracking(v, dataset_id)
+    with pytest.raises(EntradaInvalida, match="dataset_id"):
+        pixel_js(v, cargar(v))
+
+
 def test_pixel_js_sin_tracking_es_none(tmp_path):
     v = vault_demo(tmp_path)
     assert pixel_js(v, cargar(v)) is None

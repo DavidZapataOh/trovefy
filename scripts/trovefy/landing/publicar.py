@@ -18,9 +18,11 @@ from __future__ import annotations
 
 import hashlib
 import re
+import ssl
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -41,9 +43,17 @@ from trovefy.landing.hosting import (
     capacidades_vigentes,
     elegir_hosting,
     empaquetar_en_linea,
+    parar_si_sonda_colgada,
 )
-from trovefy.landing.panel import SERVICIO, Panel, preparar_mapa, respaldar, restaurar
-from trovefy.landing.plantilla import leer_landing_yaml, pixel_js
+from trovefy.landing.panel import (
+    SERVICIO,
+    Panel,
+    preparar_mapa,
+    respaldar,
+    restaurar,
+    restaurar_desde_respaldo,
+)
+from trovefy.landing.plantilla import leer_landing_yaml, manifiesto_landing, pixel_js
 from trovefy.landing.qa import comprobar_url_publicada
 from trovefy.navegador import NavegadorError, sesion
 from trovefy.producto.medios import escribir_medio
@@ -105,10 +115,18 @@ def listo_para_publicar(vault: Path, datos: DatosLanding) -> list[str]:
         return [*motivos, f"la landing de {datos.pais} no está guardada: trovefy landing guardar"]
     raiz = ruta_landing(vault, datos.p_id, datos.pais)
     qa = _frontmatter(raiz / "QA.md")
+    try:
+        manifiesto = manifiesto_landing(raiz)
+    except (OSError, ValueError) as e:
+        manifiesto = None
+        motivos.append(f"landing/{datos.pais}: {e}")
     if qa is None or qa.get("tipo") != "qa_landing":
         motivos.append("falta la QA local: trovefy landing qa")
     elif qa.get("version") != version:
         motivos.append(f"la QA es de otra versión ({qa.get('version')}; la actual es {version}): trovefy landing qa")
+    elif manifiesto is not None and qa.get("manifiesto") != manifiesto:  # I-6: CSS, js, imágenes…
+        motivos.append("los archivos de la landing cambiaron después de la QA (estilo.css, utm.js, pixel.js o "
+                       "alguna imagen de assets/): vuelve a trovefy landing qa")
     elif qa.get("ok") is not True:
         motivos.append("la QA no está en verde: arregla lo que dice QA.md y vuelve a trovefy landing qa")
     nativo = veredicto_vigente(vault, datos.p_id, datos.pais)
@@ -156,6 +174,9 @@ def _sha(texto: str) -> str:
 
 def _motivo_distinto(pegado: str, releido: str) -> str:
     n, m = len(releido), len(pegado)
+    sin_scripts = re.sub(r"<script\b.*?</script>", "", pegado, flags=re.IGNORECASE | re.DOTALL)
+    if releido.strip() == sin_scripts.strip() != pegado.strip():  # va al final: quitarlo parece un recorte
+        return "Impultienda quitó el script (utm.js): la landing no reenviaría los UTM"
     if n < m and pegado.startswith(releido):
         return f"Impultienda recortó el HTML ({n} de {m} caracteres)"
     if re.search(r"<script\b", pegado, re.IGNORECASE) and not re.search(r"<script\b", releido, re.IGNORECASE):
@@ -163,14 +184,24 @@ def _motivo_distinto(pegado: str, releido: str) -> str:
     return f"Impultienda cambió el HTML al guardarlo ({n} de {m} caracteres, SHA-256 distinto)"
 
 
+@dataclass(frozen=True)
+class Pegada:
+    """Resultado de `publicar_impultienda`: la URL pública y el respaldo de lo que había (None si la misma
+    versión ya estaba en el campo y no se pegó nada). Con el respaldo, una QA publicada en rojo lo devuelve."""
+
+    url: str
+    respaldo: Path | None
+
+
 def publicar_impultienda(vault: Path, datos: DatosLanding, capacidades: Capacidades, *, mapa: dict | None = None,
                          abrir=None, visible: bool = True, dormir=time.sleep,
-                         ahora: datetime | None = None) -> str:
+                         ahora: datetime | None = None) -> Pegada:
     """Pega la landing en línea en «HTML completo de la tienda», guarda, relee y compara el SHA-256.
 
-    Antes de tocar nada: dominio (si `dominio_propio`), límite de caracteres medido y mapa confirmado. Si lo
-    releído no es lo pegado, restaura lo de antes y lanza `HtmlRecortado`. Devuelve la URL pública
-    (`https://<dominio propio>/`; la QA publicada confirma el host final)."""
+    Antes de tocar nada: dominio (si `dominio_propio`), límite de caracteres medido, mapa confirmado y que el
+    campo no tenga restos de una sonda (I-5). Si lo releído no es lo pegado, o algo falla tras pegar (una
+    parada, Ctrl-C), restaura lo de antes. Devuelve la URL pública (`https://<dominio propio>/`; la QA
+    publicada confirma el host final) y el respaldo."""
     vault = Path(vault)
     ahora = ahora or datetime.now(ZONA_NEGOCIO)
     if capacidades.dominio_propio:
@@ -196,7 +227,8 @@ def publicar_impultienda(vault: Path, datos: DatosLanding, capacidades: Capacida
             panel.abrir()
             original = panel.leer()
             if original == fragmento:
-                return url  # ya estaba publicada esta misma versión
+                return Pegada(url, None)  # ya estaba publicada esta misma versión: no se pega nada
+            parar_si_sonda_colgada(vault, datos.p_id, datos.pais, original)  # I-5: no se respalda una sonda
             respaldo = respaldar(vault, datos.p_id, datos.pais, original, ahora)
             pegado = True
             releido = panel.guardar(fragmento)
@@ -214,7 +246,7 @@ def publicar_impultienda(vault: Path, datos: DatosLanding, capacidades: Capacida
     rel = respaldo.relative_to(vault).as_posix()
     anadir_log(vault, "landing", f"{datos.p_id} {datos.pais}: pegada en Impultienda y releída igual", [rel],
                ahora=ahora)
-    return url
+    return Pegada(url, respaldo)
 
 
 # --- Cloudflare ----------------------------------------------------------------------------------
@@ -225,10 +257,13 @@ class _SinRedireccion(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def _abrir_seguro(url: str, timeout: float = _TIMEOUT_S):
+def _abrir_seguro(url: str, timeout: float = _TIMEOUT_S, *, contexto: ssl.SSLContext | None = None):
+    """GET https sin seguir redirecciones (un 3xx es `HTTPError`). `contexto`: el TLS (por defecto, el del
+    sistema; los tests de integración pasan uno con su certificado de 127.0.0.1)."""
     if urlparse(url).scheme != "https":
         raise ValueError("solo https")
-    return urllib.request.build_opener(_SinRedireccion).open(url, timeout=timeout)
+    https = urllib.request.HTTPSHandler(context=contexto or ssl.create_default_context())
+    return urllib.request.build_opener(_SinRedireccion, https).open(url, timeout=timeout)
 
 
 def verificar_cloudflare(url: str, dir_landing: Path, abrir=_abrir_seguro) -> bool:
@@ -257,11 +292,16 @@ def verificar_cloudflare(url: str, dir_landing: Path, abrir=_abrir_seguro) -> bo
 # --- registro ------------------------------------------------------------------------------------
 
 
-def _bloque_qa(vault: Path, datos: DatosLanding, version: str, fecha: str) -> dict:
-    """`landing.qa` (resolución 3) desde el frontmatter de `QA.md`; `utm_checkout` con `interceptado: true`
-    (resolución 22: el checkout aún no existe; el recorrido del 19 lo sobrescribe)."""
+def _bloque_qa(vault: Path, datos: DatosLanding, version: str, url: str, fecha: str) -> dict:
+    """`landing.qa` (resolución 3) desde el frontmatter del `QA.md` **publicado** de esta versión y esta URL (L-5;
+    si no lo es, `NoPublicable`); `utm_checkout` con `interceptado: true` (resolución 22: el checkout aún no
+    existe; el recorrido del 19 lo sobrescribe)."""
     rel = f"landing/{datos.pais}/QA.md"
     meta = _frontmatter(ruta_landing(vault, datos.p_id, datos.pais) / "QA.md") or {}
+    if meta.get("tipo") != "qa_landing" or meta.get("version") != version or meta.get("url") != url:
+        raise NoPublicable(f"{rel} no es la QA publicada de la versión {version} en {url} (es de "
+                           f"{meta.get('version') or '¿?'} en {meta.get('url') or 'local'}): vuelve a "
+                           "trovefy landing publicar")
     bloque: dict = {"archivo": rel, "fecha": str(meta.get("fecha") or fecha), "version": version}
     if isinstance(meta.get("movil_390"), dict):
         bloque["movil_390"] = meta["movil_390"]
@@ -297,13 +337,13 @@ def registrar_publicacion(vault: Path, datos: DatosLanding, url: str, hosting: H
         raise NoPublicable(f"la QA publicada no está en verde: mira landing/{datos.pais}/QA.md")
     fecha = ahora.astimezone(ZONA_NEGOCIO).date().isoformat()
     landing = {"url": url, "hosting": hosting.ruta, "version": version, "fecha": fecha,
-               "qa": _bloque_qa(vault, datos, version, fecha)}
+               "qa": _bloque_qa(vault, datos, version, url, fecha)}
     linea = f"- Landing {datos.pais} v{version}: {url} ({fecha}, {hosting.ruta})"
-    actualizar_producto(vault, datos.p_id, {"paises": {datos.pais: {"landing": landing}}}, [linea], "landing", ahora)
-    if estado == "producido":
+    if estado == "producido":  # L-5: primero el estado (avanzar_estado relee y para si cambió entretanto)
         avanzar_estado(vault, datos.p_id, datos.pais, "producido", "con_landing",
                        [f"landing/{datos.pais}/QA.md", url], "landing", ahora)
         estado = "con_landing"
+    actualizar_producto(vault, datos.p_id, {"paises": {datos.pais: {"landing": landing}}}, [linea], "landing", ahora)
     cambios = {"url": url, "publicada": fecha, "version": version, "hosting": hosting.ruta}
     if hosting.ruta == "cloudflare":  # ruling B: sin TRACKING.md, publicada sin píxel y pendiente de él
         cambios["pixel"] = "pendiente" if _sin_pixel(vault, datos) else "activo"
@@ -324,11 +364,29 @@ def _slug(p_id: str) -> str:
     return re.sub(r"^p-\d{4}-", "", p_id)
 
 
+def _qa_en_rojo(vault: Path, datos: DatosLanding, pegada: Pegada | None, restaurar_imp, ahora: datetime) -> str:
+    """Tras una QA publicada en rojo: en Impultienda, si se pegó algo, vuelve a dejar lo de antes desde el
+    respaldo (ruling L-4) y quita la URL de `landing.yaml`. Devuelve qué pasó, para el mensaje."""
+    if pegada is None:  # Cloudflare: lo sube y lo quita el usuario
+        return "la URL queda en landing.yaml sin dar por publicada"
+    if pegada.respaldo is None:
+        return "la misma versión ya estaba en Impultienda (no se pegó nada, no hay nada que devolver)"
+    rel = pegada.respaldo.relative_to(vault).as_posix()
+    try:
+        (restaurar_imp or restaurar_desde_respaldo)(vault, pegada.respaldo)
+    except NavegadorError as e:
+        return f"y NO he podido devolver lo de antes: {e}"
+    _escribir_landing_yaml(vault, datos, {"url": None, "publicada": None},
+                           f"QA publicada en rojo: restaurado lo de antes desde {rel}", ahora)
+    return f"He vuelto a dejar en Impultienda lo que había (desde {rel}); la landing no queda publicada"
+
+
 def publicar(vault: Path, datos: DatosLanding, url_cloudflare: str | None = None, *, qa=None, publicar_imp=None,
-             verificar=None, ahora: datetime | None = None) -> str:
+             verificar=None, restaurar_imp=None, ahora: datetime | None = None) -> str:
     """Publica (Impultienda) o verifica la subida (Cloudflare), pasa la QA publicada y, si está en verde, lo
-    registra. Devuelve la URL. `NoPublicable` con los motivos si algo lo impide; la URL ya publicada pero con la
-    QA en rojo queda en `landing.yaml` con `publicada: null` y `QA.md` dice por qué."""
+    registra. Devuelve la URL. `NoPublicable` con los motivos si algo lo impide. Con la QA en rojo: en
+    Impultienda se devuelve lo que había desde el respaldo (L-4) y se dice; en Cloudflare la URL queda en
+    `landing.yaml` con `publicada: null`. `QA.md` dice por qué."""
     vault = Path(vault)
     ahora = ahora or datetime.now(ZONA_NEGOCIO)
     motivos = listo_para_publicar(vault, datos)
@@ -345,10 +403,12 @@ def publicar(vault: Path, datos: DatosLanding, url_cloudflare: str | None = None
         raise NoPublicable(f"la landing se preparó para {landing.get('hosting')} y la sonda dice {h.ruta} ({h.motivo}): "
                            "trovefy landing preparar --rehacer, guardar, validar, nativo y qa")
     raiz = ruta_landing(vault, datos.p_id, datos.pais)
+    pegada = None
     if h.ruta == "impultienda":
         if url_cloudflare:
             raise NoPublicable("--url es solo para la ruta Cloudflare; la sonda dice Impultienda")
-        url = (publicar_imp or publicar_impultienda)(vault, datos, c, ahora=ahora)
+        pegada = (publicar_imp or publicar_impultienda)(vault, datos, c, ahora=ahora)
+        url = pegada.url
     else:
         if not datos.dominio:
             raise NoPublicable("no medido: falta el dominio propio (paso 07 de config/arranque.yaml)")
@@ -370,7 +430,7 @@ def publicar(vault: Path, datos: DatosLanding, url_cloudflare: str | None = None
                            ahora)
     r = (qa or _qa_publicada)(vault, datos, url)
     if not r.ok:
-        raise NoPublicable(f"la QA publicada no pasa: mira landing/{datos.pais}/QA.md (la URL queda en landing.yaml "
-                           "sin dar por publicada)")
+        que = _qa_en_rojo(vault, datos, pegada, restaurar_imp, ahora)
+        raise NoPublicable(f"la QA publicada no pasa: mira landing/{datos.pais}/QA.md. {que}.")
     registrar_publicacion(vault, datos, url, h, version, r, ahora)
     return url

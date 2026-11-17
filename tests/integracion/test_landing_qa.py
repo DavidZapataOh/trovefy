@@ -118,6 +118,27 @@ def test_medir_silencia_sin_anotar(tmp_path, servir, rapido):
     assert m.peticiones_externas == ()
 
 
+def test_medir_politica_por_ruta(tmp_path, servir, rapido):
+    """Ruling I-4 con Chromium real: lo de la tienda sigue y se anota aparte (AVISO), Meta se aborta sin anotar
+    y cualquier otro tercero se aborta y se anota (FALLA)."""
+    from urllib.parse import urlsplit
+
+    from trovefy.landing.constantes import HOSTS_META
+    from trovefy.landing.qa import medir
+
+    web = _web(tmp_path / "web")
+    url = servir(web)
+    tienda = f"http://localhost:{urlsplit(url).port}/assets/vista-p2-480.webp"  # «otro host» que es la tienda
+    extra = (f'<img src="{tienda}" alt=""><img src="https://externo.test/a.webp" alt="">'
+             '<img src="https://connect.facebook.net/en_US/fbevents.js" alt="">')
+    html = (web / "index.html").read_text(encoding="utf-8").replace("</main>", extra + "</main>")
+    (web / "index.html").write_text(html, encoding="utf-8")
+    m = medir(url, "movil", tmp_path / "m.png", ("127.0.0.1",), red_4g=False, silenciar=HOSTS_META,
+              propios=("localhost",))
+    assert m.peticiones_externas == ("https://externo.test/a.webp",)
+    assert m.peticiones_propias == (tienda,)
+
+
 def test_medir_desborde_con_selector(tmp_path, servir, rapido):
     from trovefy.landing.qa import medir
 

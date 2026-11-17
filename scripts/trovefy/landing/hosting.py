@@ -17,12 +17,13 @@ import json
 import re
 import time
 from dataclasses import asdict, dataclass, fields
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Literal
 
 from trovefy.config import mercados
 from trovefy.config.yaml_config import cargar_yaml
+from trovefy.landing.constantes import HOSTS_META, casa_host
 from trovefy.landing.panel import (
     MAPA_IMPULTIENDA,
     PANTALLA,
@@ -32,6 +33,7 @@ from trovefy.landing.panel import (
     preparar_mapa,
     respaldar,
     restaurar,
+    ultimo_respaldo,
 )
 from trovefy.landing.plantilla import UTM_JS, tienda_valida
 from trovefy.mapa import origen
@@ -60,6 +62,9 @@ class Capacidades:
     url_pantalla: str | None
     fecha: str
     fuente: str
+    # Hosts que cargó la tienda pública en la sonda (sin los de Meta): la QA publicada en Impultienda los da
+    # como AVISO, no como FALLA (ruling I-4). Una evidencia anterior sin el campo vale como «ninguno».
+    hosts_tienda: tuple[str, ...] = ()
 
 
 CAPACIDADES_FASE0 = Capacidades(
@@ -75,10 +80,33 @@ HTML_SONDA = (
     "<script>document.getElementById(\"tf-sonda\").dataset.ok=\"1\"</script>"
     "<!-- " + "relleno-tf-sonda " * 12_500 + "-->"
 )
+_PREFIJO_SONDA_MIN = 16  # «<style>#tf-sonda»: un prefijo más corto no lleva ninguna marca propia
 COLOR_SONDA = "rgb(1, 2, 3)"
+
+
+def es_sonda_colgada(contenido: str) -> bool:
+    """¿El campo tiene restos de una sonda que no se restauró? (I-5) Sus marcas o un recorte suyo."""
+    if not isinstance(contenido, str):
+        return False
+    if 'id="tf-sonda"' in contenido or "relleno-tf-sonda" in contenido:
+        return True
+    return len(contenido) >= _PREFIJO_SONDA_MIN and HTML_SONDA.startswith(contenido)
+
+
+def parar_si_sonda_colgada(vault: Path, p_id: str, pais: str, contenido: str) -> None:
+    """`NavegadorError` (sin tocar nada) si el campo tiene restos de una sonda: que el usuario pegue antes el
+    último respaldo."""
+    if not es_sonda_colgada(contenido):
+        return
+    ultimo = ultimo_respaldo(vault, p_id, pais)
+    donde = (f"pega tú el último respaldo ({Path(ultimo).relative_to(vault).as_posix()})" if ultimo else
+             f"no hay respaldos en landing/{pais}/respaldo/: pega tú lo que tenías")
+    raise NavegadorError(f"el campo «HTML completo de la tienda» tiene restos de una sonda anterior: {donde} en "
+                         "«Diseño de tienda → Contenido» y vuelve a lanzar. No he tocado nada.")
 FUERA_MAX = 40  # caracteres visibles fuera de #tf-sonda que aún no son «marco» (un aviso de cookies corto)
 
-_EVIDENCIA = re.compile(r"p05-impultienda-(\d{4}-\d{2}-\d{2})\.json")
+_EVIDENCIA = re.compile(r"p05-impultienda-([0-9]{4}-[0-9]{2}-[0-9]{2})\.json")
+_HOST = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?")
 _BOOLEANAS = ("html_propio", "script", "estilos", "titulo_propio", "sin_marco", "dominio_propio")
 _MOTIVOS_FALSE = {
     "html_propio": "Impultienda no sirve el HTML propio",
@@ -109,6 +137,12 @@ def _desde_json(datos: object, nombre: str) -> Capacidades:
     valores = {}
     for f in fields(Capacidades):
         v = datos.get(f.name)
+        if f.name == "hosts_tienda":
+            v = [] if v is None else v
+            if not isinstance(v, list) or not all(isinstance(h, str) and _HOST.fullmatch(h) for h in v):
+                raise ValueError(f"{nombre}: «hosts_tienda» tiene un valor que no entiendo ({v!r})")
+            valores[f.name] = tuple(v)
+            continue
         if f.name in _BOOLEANAS:
             ok = v is None or isinstance(v, bool)
         elif f.name == "limite_caracteres":
@@ -123,12 +157,14 @@ def _desde_json(datos: object, nombre: str) -> Capacidades:
     return Capacidades(**valores)
 
 
-def capacidades_vigentes(vault: Path) -> Capacidades:
-    """Las de la evidencia más reciente `config/evidencia/p05-impultienda-AAAA-MM-DD.json`; si no hay ninguna,
-    `CAPACIDADES_FASE0`. Una evidencia rota es `ValueError` (nunca se cae a una anterior en silencio)."""
+def capacidades_vigentes(vault: Path, *, hoy: date | None = None) -> Capacidades:
+    """Las de la evidencia más reciente `config/evidencia/p05-impultienda-AAAA-MM-DD.json` con fecha no posterior
+    a `hoy` (por defecto, hoy en la zona de negocio; una fechada en el futuro no se cree, L-3); si no hay
+    ninguna, `CAPACIDADES_FASE0`. Una evidencia rota es `ValueError` (nunca se cae a una anterior en silencio)."""
+    hoy_iso = (hoy or datetime.now(ZONA_NEGOCIO).date()).isoformat()
     carpeta = Path(vault) / "config" / "evidencia"
     candidatas = sorted((m.group(1), p) for p in carpeta.glob("p05-impultienda-*.json")
-                        if (m := _EVIDENCIA.fullmatch(p.name)) and not p.is_symlink())
+                        if (m := _EVIDENCIA.fullmatch(p.name)) and not p.is_symlink() and m.group(1) <= hoy_iso)
     if not candidatas:
         return CAPACIDADES_FASE0
     ruta = candidatas[-1][1]
@@ -267,7 +303,7 @@ def empaquetar_en_linea(dir_landing: Path) -> str:
     main = _SECCION.sub(seccion, mains[0])
     partes = [*([titulo.group(0)] if titulo else []), *metas, f"<style>\n{css.strip()}\n</style>", main,
               f"<script>\n{utm.strip()}\n</script>"]
-    salida = "\n".join(partes) + "\n"
+    salida = "\n".join(partes)  # sin salto final (L-6): el campo de Impultienda lo puede comer
     if "assets/" in salida:
         raise ValueError("quedan rutas assets/ en el fragmento: algún recurso no se ha podido meter en línea")
     return salida
@@ -373,10 +409,30 @@ _JS_MEDIR = """() => {
 }"""
 
 
+def _host_anotable(url: str) -> str | None:
+    """El host de una petición de la tienda que se anota (http/https, no de Meta), o None."""
+    from urllib.parse import urlsplit
+
+    partes = urlsplit(url)
+    host = (partes.hostname or "").lower().rstrip(".")
+    if partes.scheme not in ("http", "https") or not _HOST.fullmatch(host) or casa_host(host, HOSTS_META):
+        return None
+    return host
+
+
 def _medir_tienda(page, tienda: str, dormir) -> dict:
-    """Abre la tienda (sin perfil) y mide lo que hizo Impultienda con el fragmento de la sonda."""
+    """Abre la tienda (sin perfil) y mide lo que hizo Impultienda con el fragmento de la sonda; anota también los
+    hosts que carga la página (ruling I-4: la QA publicada los da como propios de la tienda)."""
     from urllib.parse import urlparse
 
+    hosts: set[str] = set()
+
+    def anotar(req) -> None:
+        if (h := _host_anotable(getattr(req, "url", ""))) is not None:
+            hosts.add(h)
+
+    if callable(getattr(page, "on", None)):
+        page.on("request", anotar)
     esperar_entre_navegaciones(urlparse(tienda).hostname or "", dormir=dormir)
     try:
         page.goto(tienda, wait_until="load", timeout=30_000)
@@ -384,6 +440,7 @@ def _medir_tienda(page, tienda: str, dormir) -> dict:
         raise NavegadorError(f"no se pudo abrir la tienda ({type(exc).__name__}); revisa la URL") from exc
     titulo = page.title() == "tf-sonda"
     principal = page.main_frame
+    medidas = dict.fromkeys(("html_propio", "script", "estilos", "titulo_propio", "sin_marco"), False)
     for frame in page.frames:
         try:
             r = frame.evaluate(_JS_MEDIR)
@@ -391,9 +448,11 @@ def _medir_tienda(page, tienda: str, dormir) -> dict:
             continue
         if r:
             en_principal = frame is principal
-            return {"html_propio": True, "script": bool(r.get("ok")), "estilos": r.get("color") == COLOR_SONDA,
-                    "titulo_propio": titulo, "sin_marco": en_principal and int(r.get("fuera") or 0) <= FUERA_MAX}
-    return dict.fromkeys(("html_propio", "script", "estilos", "titulo_propio", "sin_marco"), False)
+            medidas = {"html_propio": True, "script": bool(r.get("ok")), "estilos": r.get("color") == COLOR_SONDA,
+                       "titulo_propio": titulo,
+                       "sin_marco": en_principal and int(r.get("fuera") or 0) <= FUERA_MAX}
+            break
+    return {**medidas, "hosts_tienda": tuple(sorted(hosts))}
 
 
 def _escribir_evidencia(vault: Path, c: Capacidades, ahora: datetime) -> str:
@@ -439,9 +498,7 @@ def sondear(vault: Path, p_id: str, pais: str, tienda: str, dominio_propio: bool
             panel = Panel(page, m, dormir)
             panel.abrir()
             original = panel.leer()
-            if original == HTML_SONDA:
-                raise NavegadorError("el campo ya tiene la prueba de una sonda anterior: pega tú el último respaldo de "
-                                     f"landing/{pais.upper()}/respaldo/ y vuelve a lanzar")
+            parar_si_sonda_colgada(vault, p_id, pais.upper(), original)  # I-5: restos de una sonda a medias
             respaldo = respaldar(vault, p_id, pais.upper(), original, ahora)
             pegado = True  # desde aquí, pase lo que pase, se restaura
             releido = panel.guardar(HTML_SONDA)
@@ -450,7 +507,10 @@ def sondear(vault: Path, p_id: str, pais: str, tienda: str, dominio_propio: bool
     finally:
         if pegado:
             restaurar(abrir, m, original, respaldo, visible=visible, dormir=dormir)
-    limite = len(releido) if releido != HTML_SONDA and HTML_SONDA.startswith(releido) else None
+    if not releido:  # L-3: un campo vacío tras guardar no es un límite de 0 caracteres: no guarda HTML propio
+        limite, medidas = None, {**medidas, "html_propio": False}
+    else:
+        limite = len(releido) if releido != HTML_SONDA and HTML_SONDA.startswith(releido) else None
     fecha = ahora.astimezone(ZONA_NEGOCIO).date().isoformat()
     palabra = {True: "sí", False: "no", None: "no preguntado"}[dominio_propio]
     c = Capacidades(

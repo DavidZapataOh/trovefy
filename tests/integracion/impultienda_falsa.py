@@ -15,6 +15,7 @@ import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import parse_qs
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "landing" / "impultienda-contenido.html"
 FIRMA = ["Diseño de tienda", "HTML completo de la tienda", "Guardar cambios"]
@@ -27,7 +28,25 @@ class Estado:
     sin_script: bool = False
     marco: bool = False
     firma: bool = True
+    formulario: bool = False  # «Guardar cambios» envía un <form> (POST + 303 a /panel): el guardado navega
     posts: list[str] = field(default_factory=list)
+
+
+# El mismo panel con un formulario de verdad: guardar es una navegación (POST /guardar → 303 → GET /panel).
+_FORMULARIO = """<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Panel de prueba</title></head>
+<body>
+<h1>Diseño de tienda</h1>
+<h2>Contenido</h2>
+<form method="post" action="/guardar">
+<label for="html">{{etiqueta}}</label>
+<textarea id="html" name="html" rows="10" cols="80">{{contenido}}</textarea>
+<button type="submit" id="guardar">Guardar cambios</button>
+</form>
+</body>
+</html>
+"""
 
 
 def _manejador(estado: Estado):
@@ -48,7 +67,8 @@ def _manejador(estado: Estado):
             ruta = self.path.split("?", 1)[0]
             if ruta == "/panel":
                 etiqueta = "HTML completo de la tienda" if estado.firma else "Código de la portada"
-                pagina = FIXTURE.read_text(encoding="utf-8").replace("{{etiqueta}}", etiqueta)
+                plantilla = _FORMULARIO if estado.formulario else FIXTURE.read_text(encoding="utf-8")
+                pagina = plantilla.replace("{{etiqueta}}", etiqueta)
                 self._responder(200, pagina.replace("{{contenido}}", html.escape(estado.contenido, quote=False)))
             elif ruta in ("/tienda", "/tienda/"):
                 cuerpo = estado.contenido
@@ -65,12 +85,20 @@ def _manejador(estado: Estado):
                 return
             largo = int(self.headers.get("Content-Length") or 0)
             texto = self.rfile.read(largo).decode("utf-8")
+            if estado.formulario:  # application/x-www-form-urlencoded; el navegador manda los saltos como CRLF
+                texto = parse_qs(texto, keep_blank_values=True).get("html", [""])[0].replace("\r\n", "\n")
             estado.posts.append(texto)
             if estado.sin_script:
                 texto = re.sub(r"<script\b.*?</script>", "", texto, flags=re.DOTALL | re.IGNORECASE)
             if estado.recorte:
                 texto = texto[: estado.recorte]
             estado.contenido = texto
+            if estado.formulario:
+                self.send_response(303)
+                self.send_header("Location", "/panel")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             self._responder(204)
 
     return Manejador

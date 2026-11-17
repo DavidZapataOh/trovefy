@@ -12,6 +12,11 @@ ventana visible, Trovefy comprueba firma y controles sin pulsar nada, y él resp
 que se confirmó (`url`, `firma`, `controles`): si el mapa cambia, la confirmación deja de valer. Una URL fuera
 de los orígenes del mapa, de login o de cobros no se confirma ni se acepta al leer (aunque se edite a mano).
 El `capturado` del código, si lo hay, manda sobre esto.
+
+La confirmación exige una persona (ruling I-1): `trovefy landing capturar` solo corre con stdin y stdout en una
+terminal; al leer, solo cuenta con `respuesta` «sí», `evidencia` como archivo normal bajo `config/evidencia/`
+(sin enlaces), `fecha` no futura y la `huella` actual; y el hook `apimart_gasto` impide escribir este archivo
+desde Claude (Write/Edit/MultiEdit y Bash).
 """
 
 from __future__ import annotations
@@ -19,8 +24,9 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import stat
 from datetime import date, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from urllib.parse import urldefrag
 
 import yaml
@@ -31,6 +37,7 @@ from trovefy.vault.escritura import ZONA_NEGOCIO, anadir_log, escribir_atomico
 
 RUTA = "config/pantallas-confirmadas.yaml"
 _SI = frozenset({"si", "sí"})
+_EVIDENCIA = ("config", "evidencia")
 
 
 def huella_pantalla(pantalla: dict) -> str:
@@ -97,12 +104,55 @@ def confirmar_pantalla(vault: Path, servicio: str, mapa: dict, nombre: str, url:
     return entrada
 
 
-def mapa_con_confirmaciones(vault: Path, servicio: str, mapa: dict) -> dict:
+def _evidencia_valida(vault: Path, evidencia: object) -> bool:
+    """¿`evidencia` es un archivo normal que existe bajo `config/evidencia/` del vault, sin enlaces por medio?"""
+    if not isinstance(evidencia, str) or not evidencia or "\\" in evidencia:
+        return False
+    partes = PurePosixPath(evidencia).parts
+    if len(partes) < 3 or partes[:2] != _EVIDENCIA or any(p in ("..", ".", "") for p in partes):
+        return False
+    ruta = Path(vault)
+    for parte in partes:  # ningún componente (carpetas incluidas) puede ser un enlace
+        ruta = ruta / parte
+        if ruta.is_symlink():
+            return False
+    try:
+        st = ruta.lstat()
+    except OSError:
+        return False
+    return stat.S_ISREG(st.st_mode)
+
+
+def _vale(vault: Path, mapa: dict, nombre: str, entrada: object, hoy: date) -> str | None:
+    """La fecha (ISO) de una confirmación que se puede creer, o None (ruling I-1: «sí», evidencia y fecha)."""
+    if not isinstance(entrada, dict) or prohibida(mapa, nombre):
+        return None
+    respuesta = entrada.get("respuesta")
+    if not isinstance(respuesta, str) or respuesta.strip().casefold() not in _SI:
+        return None
+    if entrada.get("huella") != huella_pantalla(mapa["pantallas"][nombre]) or _motivo_url(mapa, entrada.get("url")):
+        return None
+    fecha = entrada.get("fecha")
+    fecha = fecha.isoformat() if isinstance(fecha, date) else fecha
+    try:
+        dia = date.fromisoformat(fecha) if isinstance(fecha, str) else None
+    except ValueError:
+        return None
+    if dia is None or dia > hoy:
+        return None
+    return fecha if _evidencia_valida(vault, entrada.get("evidencia")) else None
+
+
+def mapa_con_confirmaciones(vault: Path, servicio: str, mapa: dict, *, hoy: date | None = None) -> dict:
     """Copia de `mapa` con `capturado` y la `url` real de las pantallas que el usuario confirmó.
 
-    Solo cuentan las confirmaciones con la huella de la pantalla actual y una URL válida, y solo en pantallas
-    sin `capturado` propio en el mapa. Un archivo ilegible cuenta como «sin confirmar».
+    Solo cuentan (ruling I-1) las confirmaciones con respuesta «sí», la huella de la pantalla actual, una URL
+    válida, fecha no posterior a `hoy` (por defecto, hoy en la zona de negocio) y su captura como archivo normal
+    bajo `config/evidencia/` (sin enlaces); y solo en pantallas sin `capturado` propio en el mapa. Un archivo
+    ilegible cuenta como «sin confirmar». El archivo lo escribe solo `trovefy landing capturar` (con TTY); un
+    hook impide escribirlo desde Claude.
     """
+    hoy = hoy or datetime.now(ZONA_NEGOCIO).date()
     salida = copy.deepcopy(mapa)
     try:
         confirmadas = _leer(vault).get(servicio)
@@ -112,17 +162,20 @@ def mapa_con_confirmaciones(vault: Path, servicio: str, mapa: dict) -> dict:
         return salida
     for nombre, entrada in confirmadas.items():
         p = salida["pantallas"].get(nombre)
-        if p is None or not isinstance(entrada, dict) or capturado_de(mapa, nombre) is not None:
+        if p is None or capturado_de(mapa, nombre) is not None:
             continue
-        fecha = entrada.get("fecha")
-        fecha = fecha.isoformat() if isinstance(fecha, date) else fecha
-        if (entrada.get("huella") != huella_pantalla(mapa["pantallas"][nombre]) or not isinstance(fecha, str)
-                or _motivo_url(mapa, entrada.get("url")) or prohibida(mapa, nombre)):
-            continue
-        try:
-            date.fromisoformat(fecha)
-        except ValueError:
+        fecha = _vale(vault, mapa, nombre, entrada, hoy)
+        if fecha is None:
             continue
         p["capturado"] = fecha
         p["url"] = entrada["url"]
     return salida
+
+
+def confirmada_en_vault(vault: Path, servicio: str, mapa: dict, nombre: str) -> str | None:
+    """La URL confirmada en el vault si es esa confirmación (y no un `capturado` del mapa) la que hace
+    escribible la pantalla `nombre`; None si no."""
+    if capturado_de(mapa, nombre) is not None:
+        return None
+    c = mapa_con_confirmaciones(vault, servicio, mapa)
+    return c["pantallas"][nombre]["url"] if capturado_de(c, nombre) is not None else None

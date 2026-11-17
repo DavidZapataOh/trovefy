@@ -106,9 +106,30 @@ def test_capturar_pantalla_confirma_sin_clics(tmp_path):
     avisos = []
     with impultienda_falsa(estado) as base:
         mapa = mapa_local(base, capturado=None)
-        entrada = capturar_pantalla(v, mapa=mapa, esperar=avisos.append, preguntar=lambda _t: "sí",
+        entrada = capturar_pantalla(v, mapa=mapa, esperar=avisos.append, preguntar=lambda _t: "sí", terminal=lambda: True,
                                     visible=False, dormir=lambda _s: None, ahora=AHORA)
     assert estado.posts == []  # ni un guardado
     assert entrada["url"] == base + "/panel" and avisos
     assert (v / entrada["evidencia"]).stat().st_size > 0
     assert capturado_de(mapa_con_confirmaciones(v, "impultienda", mapa), "diseno_contenido") == "2026-11-17"
+
+
+def test_sonda_con_guardado_que_navega(tmp_path):
+    """T: «Guardar cambios» como formulario (POST + 303 a /panel): el guardado navega y todo sigue igual."""
+    from integracion.impultienda_falsa import Estado
+    from trovefy.landing.hosting import HTML_SONDA
+
+    estado = Estado(formulario=True)
+    original = estado.contenido
+    _, c = _sondar(tmp_path, estado)
+    assert (c.html_propio, c.script, c.estilos, c.titulo_propio, c.sin_marco) == (True,) * 5
+    assert c.limite_caracteres is None
+    assert estado.posts == [HTML_SONDA, original] and estado.contenido == original
+
+
+def test_sonda_anota_los_hosts_que_carga_la_tienda(tmp_path):
+    """I-4: la evidencia lleva los hosts que cargó la tienda pública (aquí, el de la propia tienda)."""
+    from integracion.impultienda_falsa import Estado
+
+    _, c = _sondar(tmp_path, Estado())
+    assert c.hosts_tienda == ("127.0.0.1",)

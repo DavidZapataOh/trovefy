@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from trovefy import cli, landing_cli
 from trovefy.landing import qa
+from trovefy.landing.constantes import HOSTS_META
 from trovefy.landing.entrada import ruta_landing
 from trovefy.landing.qa import (
     UTM_PRUEBA,
@@ -302,15 +303,19 @@ def test_utm_intactos():
 class Falso:
     """Sustituye a `medir` y `probar_clic`: anota las llamadas y escribe una captura de mentira."""
 
-    def __init__(self, lcp=(1000.0, 1100.0, 1050.0)):
+    def __init__(self, lcp=(1000.0, 1100.0, 1050.0), peticiones=()):
         self.lcp = list(lcp)
         self.llamadas: list[tuple] = []
+        self.peticiones = list(peticiones)  # lo que pediría la página, pasado por la política real de la QA
 
-    def medir(self, url, vista, captura, permitidos, red_4g, silenciar=()):
-        self.llamadas.append(("medir", url, vista, permitidos, red_4g, silenciar))
+    def medir(self, url, vista, captura, permitidos, red_4g, silenciar=(), propios=()):
+        self.llamadas.append(("medir", url, vista, permitidos, red_4g, silenciar, propios))
         captura.parent.mkdir(parents=True, exist_ok=True)
         captura.write_bytes(b"\x89PNG falso")
-        return _med(vista, lcp_ms=self.lcp, captura=captura, hitos=self.hitos, version_servida=self.version)
+        clases = {p: qa.clasificar_peticion(p, permitidos, silenciar, propios) for p in self.peticiones}
+        return _med(vista, lcp_ms=self.lcp, captura=captura, hitos=self.hitos, version_servida=self.version,
+                    peticiones_externas=tuple(p for p, c in clases.items() if c == "externa"),
+                    peticiones_propias=tuple(p for p, c in clases.items() if c == "propia"))
 
     def clic(self, url, checkout_url, interceptar=True, utm=UTM_PRUEBA):
         self.llamadas.append(("clic", url, checkout_url, interceptar, utm))
@@ -364,7 +369,7 @@ def test_ejecutar_qa_cloudflare_silencia_el_pixel(tmp_path, monkeypatch):
     monkeypatch.setattr(qa, "probar_clic", falso.clic)
     qa.ejecutar_qa(v, cargar(v))
     medidas = [x for x in falso.llamadas if x[0] == "medir"]
-    assert all(set(x[5]) == {"connect.facebook.net", "www.facebook.com"} for x in medidas)
+    assert all(set(x[5]) == set(HOSTS_META) and x[6] == () for x in medidas)
     assert next(x for x in falso.llamadas if x[0] == "clic")[2] == "https://tienda.demo.test/checkout"
 
 
@@ -442,3 +447,97 @@ def test_cli_qa(montada, capsys):
     assert "NO MEDIDO" in out and "QA.md" in out
     assert cli.main([*args, "--publicada"]) == 2  # sin url en landing.yaml
     assert "publicar" in capsys.readouterr().err
+
+
+# --- I-4: política de peticiones por ruta en la QA publicada -------------------------------------
+
+TERCERO = "https://tercero.test/rastreo.js"
+TIENDA_CDN = "https://cdn.demo.test/tema.css"  # mismo dominio registrable que la tienda (tienda.demo.test)
+META = "https://connect.facebook.net/en_US/fbevents.js"
+
+
+@pytest.mark.parametrize(("url", "clase"), [
+    ("https://ejemplo-demo.test/a.webp", "seguir"),
+    (META, "silenciar"), ("https://www.facebook.com/tr?id=1", "silenciar"), ("https://scontent.fbcdn.net/x", "silenciar"),
+    (TIENDA_CDN, "propia"), ("https://demo.test/x", "propia"), ("https://cdn.tiendas-cdn.test/app.js", "propia"),
+    (TERCERO, "externa"), ("https://otro.tiendas-cdn.test/app.js", "externa"), ("https://demo.test.evil.test/", "externa"),
+    ("https://facebook.com.evil.test/", "externa"),
+])
+def test_clasificar_peticion(url, clase):
+    propios = (".demo.test", "cdn.tiendas-cdn.test")
+    assert qa.clasificar_peticion(url, ("ejemplo-demo.test",), HOSTS_META, propios) == clase
+
+
+def test_fila_de_peticiones_de_la_tienda_es_aviso():
+    r = _ev([_med("movil", peticiones_propias=(TIENDA_CDN,)), _med("escritorio")])
+    assert _fila(r, "Peticiones de la tienda (movil)")[1] == "AVISO"
+    assert _fila(r, "Peticiones externas (movil)")[1] == "OK"
+    assert r.ok
+
+
+def _publicada(tmp_path, monkeypatch, hosting, peticiones, hosts_tienda=()):
+    import json
+    from dataclasses import asdict, replace
+
+    from trovefy.landing.hosting import CAPACIDADES_FASE0
+
+    v = montar(tmp_path, hosting=hosting)
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    c = replace(CAPACIDADES_FASE0, script=True, estilos=True, titulo_propio=True, sin_marco=True,
+                dominio_propio=True, tienda="https://tienda.demo.test", fecha="2026-11-17", fuente="prueba",
+                hosts_tienda=tuple(hosts_tienda))
+    ruta = v / "config" / "evidencia" / "p05-impultienda-2026-11-17.json"
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    ruta.write_text(json.dumps(asdict(c)), encoding="utf-8")
+    falso = Falso(peticiones=peticiones)
+    falso.hitos, falso.version = _hitos(), qa.version_guardada(v, cargar(v))
+    monkeypatch.setattr(qa, "medir", falso.medir)
+    monkeypatch.setattr(qa, "probar_clic", falso.clic)
+    url = "https://ejemplo-demo.test/" if hosting == "impultienda" else "https://zz.ejemplo-demo.test/"
+    return v, falso, qa.ejecutar_qa(v, cargar(v), url=url)
+
+
+def test_qa_publicada_impultienda_tienda_aviso_tercero_falla(tmp_path, monkeypatch):
+    """Ruling I-4: en Impultienda, lo de la tienda es AVISO, otro tercero es FALLA y Meta ni se cuenta."""
+    v, falso, r = _publicada(tmp_path, monkeypatch, "impultienda", [TIENDA_CDN, TERCERO, META])
+    for vista in ("movil", "escritorio"):
+        fila = _fila(r, f"Peticiones de la tienda ({vista})")
+        assert fila[1] == "AVISO" and "cdn.demo.test" in fila[2]
+        fila = _fila(r, f"Peticiones externas ({vista})")
+        assert fila[1] == "FALLA" and TERCERO in fila[2] and "facebook" not in fila[2] and "cdn.demo.test" not in fila[2]
+    assert not r.ok
+    medidas = [x for x in falso.llamadas if x[0] == "medir"]
+    assert all(set(x[5]) == set(HOSTS_META) and ".demo.test" in x[6] for x in medidas)
+    texto = (ruta_landing(v, P, "ZZ") / "QA.md").read_text(encoding="utf-8")
+    assert "| Peticiones de la tienda (movil) | AVISO |" in texto
+
+
+def test_qa_publicada_impultienda_solo_tienda_no_bloquea(tmp_path, monkeypatch):
+    _, _, r = _publicada(tmp_path, monkeypatch, "impultienda", [TIENDA_CDN, META, "https://cdn.otra-cdn.test/a.js"],
+                         hosts_tienda=["cdn.otra-cdn.test"])
+    assert _fila(r, "Peticiones de la tienda (movil)")[1] == "AVISO"
+    assert _fila(r, "Peticiones externas (movil)")[1] == "OK"
+
+
+def test_qa_publicada_cloudflare_la_tienda_es_un_tercero(tmp_path, monkeypatch):
+    _, falso, r = _publicada(tmp_path, monkeypatch, "cloudflare", [TIENDA_CDN, META])
+    assert _fila(r, "Peticiones externas (movil)")[1] == "FALLA"
+    assert not [f for f in r.filas if f[0].startswith("Peticiones de la tienda")]
+    assert all(x[6] == () for x in falso.llamadas if x[0] == "medir")
+
+
+def test_qa_local_impultienda_sin_propios(montada):
+    v, falso = montada
+    qa.ejecutar_qa(v, cargar(v))
+    assert all(x[6] == () and set(x[5]) == set(HOSTS_META) for x in falso.llamadas if x[0] == "medir")
+
+
+def test_qa_anota_el_manifiesto(montada):
+    """I-6: QA.md lleva el manifiesto de los archivos medidos (index.html y assets/)."""
+    from trovefy.landing.plantilla import manifiesto_landing
+
+    v, _ = montada
+    qa.ejecutar_qa(v, cargar(v))
+    raiz = ruta_landing(v, P, "ZZ")
+    assert frontmatter.leer(raiz / "QA.md")[0]["manifiesto"] == manifiesto_landing(raiz)

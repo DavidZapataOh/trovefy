@@ -47,7 +47,7 @@ UTM_JS = PLANTILLAS / "utm.js"
 PIXEL_PLANTILLA = PLANTILLAS / "pixel.js"  # R1 / resolución 23: solo en la ruta Cloudflare
 PIXEL_ETIQUETA = '<script src="assets/pixel.js" defer></script>'
 _UTM_ETIQUETA = '<script src="assets/utm.js" defer></script>'
-_DATASET = re.compile(r"\d{6,20}")
+_DATASET = re.compile(r"[0-9]{6,20}")
 HOSTINGS = ("impultienda", "cloudflare")
 TEXTO_PROPIO = "<!-- texto propio -->"
 _VERSION = re.compile(r'data-tf-version="[^"]*"')
@@ -88,6 +88,30 @@ def precio_texto(precio: Decimal, moneda: str, idioma: str | None = None) -> str
 def version_de(html: str) -> str:
     """SHA-256 (12 hex) del HTML con ``data-tf-version`` vaciado."""
     return hashlib.sha256(_VERSION.sub('data-tf-version=""', html).encode("utf-8")).hexdigest()[:12]
+
+
+def manifiesto_landing(raiz: Path) -> str:
+    """SHA-256 de todo lo que se publica (I-6): ``index.html`` y cada archivo de ``assets/`` (``estilo.css``,
+    ``utm.js``, ``pixel.js``, las imágenes, ``medios.json`` con sus hashes y ``vistas.json``), por nombre y
+    contenido. La QA lo anota en ``QA.md`` y ``publicar`` lo vuelve a calcular: un CSS cambiado tras la QA no
+    se publica. ``ValueError`` con un enlace simbólico o una subcarpeta en ``assets/``."""
+    raiz = Path(raiz)
+    h = hashlib.sha256()
+    archivos = [("index.html", raiz / "index.html")]
+    assets = raiz / "assets"
+    for ruta in (raiz, raiz / "index.html", assets):
+        if ruta.is_symlink():
+            raise ValueError(f"{ruta.name} es un enlace simbólico: no se publica")
+    if assets.is_dir():
+        for ruta in sorted(assets.iterdir(), key=lambda p: p.name):
+            if ruta.is_symlink():
+                raise ValueError(f"assets/{ruta.name} es un enlace simbólico: no se publica")
+            if not ruta.is_file():
+                raise ValueError(f"assets/{ruta.name} no es un archivo: assets/ no lleva carpetas")
+            archivos.append((f"assets/{ruta.name}", ruta))
+    for nombre, ruta in archivos:
+        h.update(f"{nombre}\0{hashlib.sha256(ruta.read_bytes()).hexdigest()}\n".encode())
+    return h.hexdigest()
 
 
 def ruta_tracking(vault: Path, p_id: str, pais: str) -> Path:

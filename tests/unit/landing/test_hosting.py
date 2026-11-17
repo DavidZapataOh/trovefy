@@ -2,13 +2,15 @@
 sonda comprueba antes de abrir el navegador (sin Chromium: lo que lo usa está en tests/integracion)."""
 
 import base64
+import io
 import json
 import re
 import shutil
 from contextlib import contextmanager
 from dataclasses import replace
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -168,6 +170,7 @@ def test_empaquetar_en_linea(tmp_path):
     datos = (raiz / "assets" / "vista-p1-480.webp").read_bytes()
     assert f"data:image/webp;base64,{base64.b64encode(datos).decode()}" in out
     assert "<link" not in out and "<!DOCTYPE" not in out.upper()
+    assert out.endswith("</script>")  # L-6: sin salto final (un textarea lo puede comer y cambiar el SHA-256)
 
 
 def test_empaquetar_hero_conserva_srcset(tmp_path):
@@ -250,6 +253,97 @@ def test_sonda_url_mismo_host_otro_origen_rechazada(tmp_path, url):
     with pytest.raises(ValueError):
         sondear(vault_demo(tmp_path), P, "ZZ", "https://tienda.demo.test", True, url_pantalla=url,
                 mapa=_mapa_confirmado(), abrir=_no_abrir)
+
+
+CONFIRMADA = "https://app.impultienda.ar/dashboard/tienda/123/diseno?tab=contenido"
+
+
+def confirmar_en_vault(v: Path, url: str = CONFIRMADA) -> None:
+    """La confirmación que deja `trovefy landing capturar` (con su captura en config/evidencia/)."""
+    from trovefy.tienda.confirmacion import confirmar_pantalla
+
+    ev = "config/evidencia/p05-diseno-contenido-2026-11-17.png"
+    (v / ev).parent.mkdir(parents=True, exist_ok=True)
+    (v / ev).write_bytes(b"\x89PNG")
+    confirmar_pantalla(v, "impultienda", cargar_mapa(hosting.MAPA_IMPULTIENDA), "diseno_contenido", url, "sí",
+                       AHORA, evidencia=ev)
+
+
+def test_sonda_url_distinta_de_la_confirmada_para(tmp_path):
+    """I-2: con la confirmación del vault, --url tiene que ser la URL confirmada."""
+    v = vault_demo(tmp_path)
+    confirmar_en_vault(v)
+    with pytest.raises(ValueError, match="esa URL no es la que confirmaste: vuelve a capturar"):
+        sondear(v, P, "ZZ", "https://tienda.demo.test", True,
+                url_pantalla="https://app.impultienda.ar/dashboard/tienda/999/diseno", abrir=_no_abrir)
+    assert not (ruta_landing(v, P, "ZZ") / "respaldo").exists()
+
+
+def test_preparar_mapa_con_la_url_confirmada_vale(tmp_path):
+    from trovefy.landing.panel import preparar_mapa
+
+    v = vault_demo(tmp_path)
+    confirmar_en_vault(v)
+    for url in (None, CONFIRMADA, CONFIRMADA + "#ancla"):
+        m = preparar_mapa(v, url_pantalla=url)
+        assert m["pantallas"]["diseno_contenido"]["url"] == CONFIRMADA
+
+
+def test_cli_capturar_sin_terminal_se_niega(entorno, monkeypatch, capsys):
+    """I-1: `trovefy landing capturar` exige una persona en una terminal (stdin y stdout TTY)."""
+    from trovefy.landing import panel
+
+    def nunca(*_a, **_k):
+        raise AssertionError("no debía abrir nada")
+
+    monkeypatch.setattr(panel, "capturar_pantalla", nunca)
+    monkeypatch.setattr("sys.stdin", _Flujo(False, "sí\n"))  # `printf sí | trovefy landing capturar`
+    assert cli.main(["landing", "capturar"]) == 2
+    assert "terminal" in capsys.readouterr().err
+    assert not (entorno / "config" / "pantallas-confirmadas.yaml").exists()
+
+
+class _Flujo(io.StringIO):
+    def __init__(self, tty: bool, texto: str = ""):
+        super().__init__(texto)
+        self.tty = tty
+
+    def isatty(self):
+        return self.tty
+
+
+@pytest.mark.parametrize(("stdin", "stdout"), [(False, True), (True, False)])
+def test_cli_capturar_con_una_sola_tty_se_niega(entorno, monkeypatch, stdin, stdout):
+    from trovefy.landing import panel
+
+    monkeypatch.setattr(panel, "capturar_pantalla", lambda *_a, **_k: pytest.fail("no debía abrir nada"))
+    monkeypatch.setattr("sys.stdin", _Flujo(stdin))
+    monkeypatch.setattr("sys.stdout", _Flujo(stdout))
+    assert cli.main(["landing", "capturar"]) == 2
+
+
+def test_cli_capturar_con_terminal_confirma(entorno, monkeypatch, capsys):
+    from trovefy.landing import panel
+
+    llamadas = []
+
+    def falso(vault, url=None, **_k):
+        llamadas.append(url)
+        return {"fecha": "2026-11-17", "url": CONFIRMADA}
+
+    monkeypatch.setattr(panel, "capturar_pantalla", falso)
+    monkeypatch.setattr("sys.stdin", _Flujo(True))
+    monkeypatch.setattr("sys.stdout", _Flujo(True))
+    assert cli.main(["landing", "capturar"]) == 0 and llamadas == [None]
+
+
+def test_capturar_pantalla_sin_terminal_no_abre(tmp_path):
+    from trovefy.landing.panel import capturar_pantalla
+
+    v = vault_demo(tmp_path)
+    with pytest.raises(ValueError, match="terminal"):
+        capturar_pantalla(v, abrir=_no_abrir, preguntar=lambda _t: "sí", esperar=lambda _t: None)
+    assert not (v / "config" / "pantallas-confirmadas.yaml").exists()
 
 
 @pytest.mark.parametrize("tienda", ["http://tienda.demo.test", "ftp://x", "tienda.demo.test"])
@@ -338,12 +432,20 @@ class TiendaFalsa:
     """El servidor de Impultienda: guarda lo que se pega (con sus manías) y lo sirve en la tienda."""
 
     def __init__(self, contenido=ORIGINAL, recorte=None, sin_script=False, marco=False, firma=True,
-                 restaura=True):
+                 restaura=True, tras_pegar=None, al_restaurar=None, fallo_tienda=None, vaciar=False,
+                 hosts=()):
         self.contenido, self.recorte, self.sin_script, self.marco = contenido, recorte, sin_script, marco
         self.firma, self.restaura = firma, restaura
+        self.tras_pegar = tras_pegar  # excepción tras guardar lo pegado (el clic ya se hizo)
+        self.al_restaurar = al_restaurar  # excepción en el guardado de la restauración (antes de guardar)
+        self.fallo_tienda = fallo_tienda  # excepción al abrir la tienda pública
+        self.vaciar = vaciar  # el primer guardado deja el campo vacío
+        self.hosts = tuple(hosts)  # hosts que carga la tienda pública
         self.posts: list[str] = []
 
     def guardar(self, html: str) -> None:
+        if self.al_restaurar is not None and self.posts:
+            raise self.al_restaurar
         self.posts.append(html)
         if not self.restaura and len(self.posts) > 1:
             return  # el segundo guardado no llega
@@ -351,7 +453,11 @@ class TiendaFalsa:
             html = re.sub(r"<script>.*?</script>", "", html, flags=re.DOTALL)
         if self.recorte:
             html = html[: self.recorte]
+        if self.vaciar and len(self.posts) == 1:
+            html = ""
         self.contenido = html
+        if self.tras_pegar is not None and len(self.posts) == 1:
+            raise self.tras_pegar
 
     def panel(self) -> PaginaFalsa:
         texto = "Diseño de tienda\nHTML completo de la tienda\nGuardar cambios" if self.firma else "Diseño de tienda"
@@ -379,13 +485,27 @@ class _Marco:
         return self.r
 
 
+class _Peticion:
+    def __init__(self, url):
+        self.url = url
+
+
 class PaginaTiendaFalsa:
     def __init__(self, t: TiendaFalsa):
         self.t = t
         self.visitas: list[str] = []
+        self.oyentes: dict[str, list] = {}
+
+    def on(self, evento, f):
+        self.oyentes.setdefault(evento, []).append(f)
 
     def goto(self, url, **_kw):
         self.visitas.append(url)
+        if self.t.fallo_tienda is not None:
+            raise self.t.fallo_tienda
+        for h in (urlsplit(url).hostname, *self.t.hosts):
+            for f in self.oyentes.get("request", []):
+                f(_Peticion(f"https://{h}/recurso.js"))
         c = self.t.contenido
         r = None if 'id="tf-sonda"' not in c else {
             "ok": "<script>" in c, "color": COLOR if "<style>" in c else "rgb(0, 0, 0)",
@@ -488,3 +608,141 @@ def test_sondear_no_pisa_un_respaldo_del_mismo_dia(tmp_path):
     carpeta = ruta_landing(v, P, "ZZ") / "respaldo"
     assert (carpeta / "impultienda-2026-11-17.html").read_text(encoding="utf-8") == ORIGINAL
     assert (carpeta / "impultienda-2026-11-17-2.html").read_text(encoding="utf-8") == "<p>otro</p>"
+
+
+# --- T: una excepción después de pegar siempre restaura ------------------------------------------
+
+
+def _sin_evidencia(v: Path) -> bool:
+    return not list((v / "config").glob("evidencia/p05-impultienda-*.json"))
+
+
+def test_sondear_parada_de_pulsar_tras_guardar_restaura(tmp_path):
+    from trovefy.tienda.conductor import Parada, VentanaNueva
+
+    v, t = vault_demo(tmp_path), TiendaFalsa(tras_pegar=VentanaNueva("diseno_contenido", "se abrió otra ventana"))
+    with pytest.raises(Parada, match="otra ventana"):
+        sondar(v, t)
+    assert t.contenido == ORIGINAL and t.posts == [HTML_SONDA, ORIGINAL]
+    assert _sin_evidencia(v)
+
+
+def test_sondear_fallo_al_medir_la_tienda_restaura(tmp_path):
+    v, t = vault_demo(tmp_path), TiendaFalsa(fallo_tienda=RuntimeError("red caída"))
+    with pytest.raises(NavegadorError, match="no se pudo abrir la tienda"):
+        sondar(v, t)
+    assert t.contenido == ORIGINAL and t.posts == [HTML_SONDA, ORIGINAL]
+    assert _sin_evidencia(v)
+
+
+@pytest.mark.parametrize("donde", ["tras_pegar", "fallo_tienda"])
+def test_sondear_ctrl_c_restaura(tmp_path, donde):
+    v, t = vault_demo(tmp_path), TiendaFalsa(**{donde: KeyboardInterrupt()})
+    with pytest.raises(KeyboardInterrupt):
+        sondar(v, t)
+    assert t.contenido == ORIGINAL and t.posts == [HTML_SONDA, ORIGINAL]
+    assert _sin_evidencia(v)
+
+
+def test_restaurar_interrumpido_dice_de_donde_pegarlo(tmp_path, capsys):
+    """L-1: un Ctrl-C a media restauración sigue su curso, pero antes dice de dónde pegar lo de antes."""
+    v, t = vault_demo(tmp_path), TiendaFalsa(fallo_tienda=RuntimeError("x"), al_restaurar=KeyboardInterrupt())
+    with pytest.raises(KeyboardInterrupt):
+        sondar(v, t)
+    err = capsys.readouterr().err
+    assert "pégalo tú desde" in err and "respaldo/impultienda-2026-11-17.html" in err
+    assert t.contenido == HTML_SONDA  # no llegó a restaurarse: por eso se dice
+
+
+# --- I-5: una sonda anterior a medias se reconoce por cualquiera de sus marcas -------------------
+
+
+def _respaldos(v: Path) -> Path:
+    carpeta = ruta_landing(v, P, "ZZ") / "respaldo"
+    carpeta.mkdir(parents=True)
+    for nombre in ("impultienda-2026-11-16.html", "impultienda-2026-11-17.html", "impultienda-2026-11-17-2.html",
+                   "impultienda-2026-11-15-9.html"):
+        (carpeta / nombre).write_text("<p>antes</p>", encoding="utf-8")
+    return carpeta
+
+
+@pytest.mark.parametrize("contenido", [HTML_SONDA, HTML_SONDA[:50_000], HTML_SONDA[:30],
+                                       '<h1>Mi tienda</h1><div id="tf-sonda">tf-sonda</div>',
+                                       "<p>hola</p><!-- relleno-tf-sonda relleno-tf-sonda"])
+def test_sondear_campo_con_sonda_colgada(tmp_path, contenido):
+    v = vault_demo(tmp_path)
+    _respaldos(v)
+    t = TiendaFalsa(contenido=contenido)
+    with pytest.raises(NavegadorError, match="sonda anterior") as e:
+        sondar(v, t)
+    assert "respaldo/impultienda-2026-11-17-2.html" in str(e.value)  # el último respaldo
+    assert t.posts == []
+
+
+def test_sondear_sonda_colgada_sin_respaldos(tmp_path):
+    t = TiendaFalsa(contenido=HTML_SONDA[:1000])
+    with pytest.raises(NavegadorError, match="sonda anterior") as e:
+        sondar(vault_demo(tmp_path), t)
+    assert "no hay respaldos" in str(e.value)
+
+
+def test_un_prefijo_corto_cualquiera_no_es_sonda():
+    from trovefy.landing.hosting import es_sonda_colgada
+
+    assert not es_sonda_colgada("") and not es_sonda_colgada("<") and not es_sonda_colgada("<style>")
+    assert not es_sonda_colgada(ORIGINAL)
+    assert es_sonda_colgada(HTML_SONDA[:16])
+
+
+# --- L-3 -----------------------------------------------------------------------------------------
+
+
+def test_sondear_relectura_vacia_no_es_un_limite(tmp_path):
+    t = TiendaFalsa(vaciar=True)
+    c = sondar(vault_demo(tmp_path), t)
+    assert c.limite_caracteres is None and c.html_propio is False
+    assert elegir_hosting(c).ruta == "cloudflare"
+    assert t.contenido == ORIGINAL
+
+
+def test_capacidades_ignora_evidencia_futura(tmp_path):
+    v = vault_demo(tmp_path)
+    _evidencia(v, "2026-11-17", script=True)
+    _evidencia(v, "2026-11-18", script=False)
+    assert capacidades_vigentes(v, hoy=date(2026, 11, 17)).fecha == "2026-11-17"
+    assert capacidades_vigentes(v, hoy=date(2026, 11, 18)).fecha == "2026-11-18"
+    _evidencia(v, "2999-01-01", script=False)
+    assert capacidades_vigentes(v).fecha != "2999-01-01"  # sin `hoy`, la fecha de negocio
+
+
+# --- I-4: la sonda anota qué hosts carga la tienda ---------------------------------------------
+
+
+def test_sondear_anota_los_hosts_de_la_tienda(tmp_path):
+    v = vault_demo(tmp_path)
+    t = TiendaFalsa(hosts=("cdn.tiendas.test", "connect.facebook.net", "tienda.demo.test"))
+    c = sondar(v, t)
+    assert c.hosts_tienda == ("cdn.tiendas.test", "tienda.demo.test")  # sin los de Meta, ordenados
+    ev = json.loads((v / "config" / "evidencia" / "p05-impultienda-2026-11-17.json").read_text(encoding="utf-8"))
+    assert ev["hosts_tienda"] == ["cdn.tiendas.test", "tienda.demo.test"]
+    assert capacidades_vigentes(v, hoy=date(2026, 11, 17)) == c
+
+
+def test_evidencia_vieja_sin_hosts_vale(tmp_path):
+    v = vault_demo(tmp_path)
+    ruta = _evidencia(v, "2026-11-17")
+    datos = json.loads(ruta.read_text(encoding="utf-8"))
+    datos.pop("hosts_tienda", None)
+    ruta.write_text(json.dumps(datos), encoding="utf-8")
+    assert capacidades_vigentes(v, hoy=date(2026, 11, 17)).hosts_tienda == ()
+
+
+@pytest.mark.parametrize("hosts", ["cdn.test", [1], ["con espacio"], ["https://x.test/"]])
+def test_evidencia_con_hosts_raros_es_error(tmp_path, hosts):
+    v = vault_demo(tmp_path)
+    ruta = _evidencia(v, "2026-11-17")
+    datos = json.loads(ruta.read_text(encoding="utf-8"))
+    datos["hosts_tienda"] = hosts
+    ruta.write_text(json.dumps(datos), encoding="utf-8")
+    with pytest.raises(ValueError, match="hosts_tienda"):
+        capacidades_vigentes(v, hoy=date(2026, 11, 17))

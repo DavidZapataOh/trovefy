@@ -198,6 +198,58 @@ def test_bash_config_producto_por_ruta(decide, mundo, cmd, cwd):
     assert decide("Bash", {"command": _fmt(cmd, mundo)}, cwd and _fmt(cwd, mundo))[0] == "deny", cmd
 
 
+# --- I-1 del plan 18: config/pantallas-confirmadas.yaml solo lo escribe `trovefy landing capturar` -------
+
+PANTALLAS = "{v}/config/pantallas-confirmadas.yaml"
+
+
+@pytest.mark.parametrize("tool,datos", [
+    ("Write", {"file_path": PANTALLAS, "content": "impultienda: {}\n"}),
+    ("Edit", {"file_path": PANTALLAS, "old_string": "no", "new_string": "sí"}),
+    ("MultiEdit", {"file_path": PANTALLAS, "edits": [{"old_string": "no", "new_string": "sí"}]}),
+    ("Write", {"file_path": "{v}/config/../config/pantallas-confirmadas.yaml", "content": "x"}),
+])
+def test_pantallas_confirmadas_write_edit(decide, mundo, tool, datos):
+    datos = {k: (_fmt(x, mundo) if k == "file_path" else x) for k, x in datos.items()}
+    decision, motivo = decide(tool, datos)
+    assert decision == "deny" and "trovefy landing capturar" in motivo
+
+
+def test_pantallas_confirmadas_write_relativo_desde_el_vault(decide, mundo):
+    decision, _ = decide("Write", {"file_path": "config/pantallas-confirmadas.yaml", "content": "x"}, mundo["v"])
+    assert decision == "deny"
+
+
+@pytest.mark.parametrize("cmd,cwd", [
+    ("echo 'impultienda: {{}}' > {v}/config/pantallas-confirmadas.yaml", None),
+    ("printf x >> {v}/config/pantallas-confirmadas.yaml", None),
+    ("cp /tmp/p.yaml {v}/config/pantallas-confirmadas.yaml", None),
+    ("cp /tmp/pantallas-confirmadas.yaml {v}/config/", None),
+    ("mv /tmp/p.yaml {v}/config/pantallas-confirmadas.yaml", None),
+    ("sed -i s/no/si/ {v}/config/pantallas-confirmadas.yaml", None),
+    ("echo x | tee {v}/config/pantallas-confirmadas.yaml", None),
+    ("cd {v}/config && echo x > pantallas-confirmadas.yaml", None),
+    ("sed -i s/no/si/ pantallas-confirmadas.yaml", "{v}/config"),
+    ("python3 -c 'print(1)' > {v}/config/pantallas-confirmadas.yaml", None),
+    ("python3 -c \"open('{v}/config/pantallas-confirmadas.yaml','w').write('x')\"", None),
+    ("echo x > {v}/config/pantallas-confirmad?s.yaml", None),
+    ("rm {v}/config/pantallas-confirmadas.yaml", None),
+])
+def test_pantallas_confirmadas_bash(decide, mundo, cmd, cwd):
+    decision, motivo = decide("Bash", {"command": _fmt(cmd, mundo)}, cwd and _fmt(cwd, mundo))
+    assert decision == "deny", cmd
+    assert "trovefy landing capturar" in motivo or "producto.yaml" in motivo, (cmd, motivo)
+
+
+@pytest.mark.parametrize("cmd", [
+    "cat {v}/config/pantallas-confirmadas.yaml",
+    "trovefy landing capturar",
+    "uv run trovefy landing capturar --url https://app.impultienda.ar/x",
+])
+def test_pantallas_confirmadas_leer_o_capturar_pasa(decide, mundo, cmd):
+    assert decide("Bash", {"command": _fmt(cmd, mundo)}) == ("allow", "")
+
+
 def test_config_del_repo_se_puede_editar(decide):
     cmd = "sed -i 's/2.00/2.50/' templates/cerebro/config/producto.yaml"
     assert decide("Bash", {"command": cmd}) == ("allow", "")

@@ -11,6 +11,9 @@ las grafías del vault y los globs, expandidos y como patrón), al modo de ``raw
   pasa. Bash: se deniega reescribirlo (``>``, ``cp``, ``mv``, ``tee``, intérpretes…), añadirle algo que
   mencione el tope y ``sed -i`` que mencione el tope, use escapes o no muestre ninguna clave.
 - ``config/producto.yaml``: no se escribe (lo decide el usuario).
+- ``config/pantallas-confirmadas.yaml`` (I-1 del plan 18): solo lo escribe ``trovefy landing capturar``, que
+  exige una terminal con la persona delante; ni Write/Edit/MultiEdit ni Bash (``>``, ``cp``, ``mv``, ``tee``,
+  ``sed -i``, intérpretes…), tampoco en bloque sobre ``config/``. Leerlo sí.
 - El libro de gasto: ``productos/*/entregable/costes.csv`` (también en subcarpetas),
   ``.apimart-intentos.jsonl`` y ``.apimart.lock``; sus carpetas (``entregable/``, el producto,
   ``productos/``, el vault) no se borran, mueven ni sobrescriben en bloque (``rm -r``, ``mv``, ``cp -r``,
@@ -76,6 +79,8 @@ MOTIVO_CLAVE = "claude.env guarda la clave de APIMart: solo la lee `trovefy prod
 MOTIVO_CONF = "~/.config/trovefy guarda las claves: solo lo lee `trovefy …`; ni Read, ni Grep, ni cat"
 MOTIVO_TOPE = "el tope de APIMart solo lo sube `trovefy producto` con la cita literal del usuario"
 MOTIVO_CONFIG = "config/producto.yaml no se edita desde Claude: sus valores los decide el usuario"
+MOTIVO_PANTALLAS = ("config/pantallas-confirmadas.yaml solo lo escribe `trovefy landing capturar`, lanzado por el "
+                    "usuario en su terminal con la pantalla delante: no se crea, edita, mueve ni borra a mano")
 MOTIVO_GASTO = ("costes.csv, .apimart-intentos.jsonl y .apimart.lock (y su carpeta entregable/) son el registro del "
                 "gasto: solo los escribe `trovefy producto`; no se editan, mueven ni borran (si algo falla, pide ayuda)")
 MOTIVO_STOP = ".trovefy/STOP lo quita el usuario: Claude no lo borra ni lo mueve"
@@ -108,6 +113,7 @@ _LIBRO = (("productos", "*", "entregable", "costes.csv"),
           ("productos", "*", "entregable", "**", "costes.csv"))
 _DECISION = (("productos", "*", "decisiones", "*-tope-apimart.md"),)
 _CONFIG = (("config", "producto.yaml"),)
+_PANTALLAS = (("config", "pantallas-confirmadas.yaml"),)  # I-1 del plan 18: la confirmación exige un humano
 _STOP = ((".trovefy", "STOP"),)
 _PRODUCTO = (("productos", "*", "PRODUCTO.md"),)
 # M3 (Tareas 11–12): el registro de QC y los PDF que el cierre da por buenos. Solo `trovefy producto`.
@@ -303,6 +309,8 @@ def _bash_rutas(original: str, c: str, cwd: str | None) -> str | None:
                 return MOTIVO_TOPE
             if _toca(partes, _CONFIG, en_bloque):
                 return MOTIVO_CONFIG
+            if _toca(partes, _PANTALLAS, en_bloque):
+                return MOTIVO_PANTALLAS
             if _toca(partes, _QC, False) or (en_bloque and _contiene_qc(ruta, partes)):
                 return MOTIVO_QC
             if clase in _QUITA and _toca(partes, _STOP, True):
@@ -608,6 +616,8 @@ def _escritura(nombre: str, datos: dict, cwd: str | None) -> tuple[str, str]:
         return "allow", ""
     if partes == ("config", "producto.yaml"):
         return "deny", MOTIVO_CONFIG
+    if any(coincide_patron(partes, p) for p in _PANTALLAS):
+        return "deny", MOTIVO_PANTALLAS
     if len(partes) < 3 or partes[0] != "productos":
         return "allow", ""
     if partes[2] == "entregable" and (partes[-1] == "costes.csv" or partes[-1] in _ARCHIVOS_GASTO):

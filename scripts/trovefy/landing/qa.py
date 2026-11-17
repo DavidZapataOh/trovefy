@@ -6,9 +6,11 @@ Tres capas:
   (sin perfil: la QA no necesita sesión; sin service workers; el móvil con ``is_mobile`` y DPR 2). Solo lee y
   navega; ningún clic salvo el del botón de compra de la propia landing, cuyo destino se intercepta con un
   204 (no se abre el checkout). La intercepción va en el **contexto**: una ventana nueva (``target``,
-  ``window.open``) se cierra y su navegación se aborta, y los WebSocket no conectan. Toda petición a un host
-  fuera de `permitidos` se aborta y se anota; las de `silenciar` (el píxel de Meta en la ruta Cloudflare,
-  resolución 23) se abortan sin anotar: una QA nunca manda eventos a Meta. La QA publicada no lleva
+  ``window.open``) se cierra y su navegación se aborta, y los WebSocket no conectan. Política por ruta
+  (ruling I-4, :func:`clasificar_peticion`): los hosts de Meta se abortan sin anotar en las dos rutas (una QA
+  nunca manda eventos a Meta); en la QA publicada en Impultienda, los de la propia tienda (su dominio
+  registrable y los que anotó la sonda) siguen y son AVISO; cualquier otro host fuera de `permitidos` se aborta
+  y es FALLA. La QA publicada no lleva
   ``fbclid`` (ruling M6) y solo mide https del dominio propio o de la tienda (:func:`comprobar_url_publicada`).
 - **Evaluar** (`evaluar`): pura. Cada comprobación da una fila ``(comprobación, OK|FALLA|AVISO|NO MEDIDO,
   detalle)``; un dato ausente es «NO MEDIDO» con su motivo y bloquea igual que un fallo (contrato 9).
@@ -34,12 +36,14 @@ from trovefy.landing.constantes import (
     BAJADA_BPS,
     CPU_X,
     DPR_MOVIL,
+    HOSTS_META,
     LATENCIA_MS,
     LCP_MAX_MS,
     RONDAS_LCP,
     SUBIDA_BPS,
     TOLERANCIA_HITO,
     VIEWPORTS,
+    casa_host,
 )
 from trovefy.landing.entrada import (
     DatosLanding,
@@ -47,7 +51,7 @@ from trovefy.landing.entrada import (
     ruta_landing,
     wireframe,
 )
-from trovefy.landing.validar import HOSTS_PIXEL, Resultado, validar
+from trovefy.landing.validar import Resultado, validar
 
 UTM_PUBLICADA = "?utm_source=fb&utm_medium=paid&utm_campaign=QA%7C0&utm_term=QA%7C0&utm_content=QA%7C0"
 UTM_PRUEBA = UTM_PUBLICADA + "&fbclid=QA"  # la local (interceptada) lleva fbclid (resolución 22)
@@ -74,6 +78,7 @@ class Medicion:
     motivo: str | None
     http: int | None = None  # estado HTTP del documento (gate «200 en móvil», resolución 3)
     version_servida: str | None = None  # data-tf-version de la página servida
+    peticiones_propias: tuple[str, ...] = ()  # de la tienda en la QA publicada en Impultienda: AVISO (I-4)
 
 
 @dataclass(frozen=True)
@@ -289,17 +294,43 @@ def _blindar(page) -> None:
         ctx.route_web_socket("**/*", lambda ws: ws.close())
 
 
-def _filtro(page, permitidos: tuple[str, ...], silenciar: tuple[str, ...], externas: list[str]) -> None:
+def clasificar_peticion(url: str, permitidos, silenciar, propios) -> str:
+    """Política de red de la QA por ruta (ruling I-4), para una petición de la página medida:
+
+    - ``seguir``: un host de ``permitidos`` (el de la landing);
+    - ``silenciar``: casa con ``silenciar`` (los hosts de Meta en las dos rutas): se aborta sin contarla;
+    - ``propia``: casa con ``propios`` (en la QA publicada en Impultienda, el dominio registrable de la tienda
+      y los hosts que anotó la sonda): sigue y es AVISO;
+    - ``externa``: cualquier otro tercero: se aborta y es FALLA.
+
+    Reglas de :func:`trovefy.landing.constantes.casa_host` (``.x.test`` = el dominio y sus subdominios)."""
+    host = (urlsplit(url).hostname or "").lower().rstrip(".")
+    if host in permitidos:
+        return "seguir"
+    if casa_host(host, silenciar):
+        return "silenciar"
+    if casa_host(host, propios):
+        return "propia"
+    return "externa"
+
+
+def _filtro(page, permitidos: tuple[str, ...], silenciar: tuple[str, ...], externas: list[str],
+            propios: tuple[str, ...] = (), propias: list[str] | None = None) -> None:
     def ruta(route):
         req = route.request
         url = req.url
-        host = (urlsplit(url).hostname or "").lower()
-        if host in permitidos and not _de_otra_pagina(req, page):
-            route.continue_()
+        clase = clasificar_peticion(url, permitidos, silenciar, propios)
+        if clase == "silenciar":
+            route.abort()
             return
-        if host not in silenciar and url not in externas:
-            externas.append(url)
-        route.abort()
+        if _de_otra_pagina(req, page) or clase == "externa":
+            if url not in externas:
+                externas.append(url)
+            route.abort()
+            return
+        if clase == "propia" and propias is not None and url not in propias:
+            propias.append(url)
+        route.continue_()
 
     _blindar(page)
     page.context.route("**/*", ruta)
@@ -342,7 +373,7 @@ def _escribir_captura(captura: Path, png: bytes) -> Path:
 
 
 def medir(url: str, vista: str, captura: Path, permitidos: tuple[str, ...], red_4g: bool,
-          silenciar: tuple[str, ...] = ()) -> Medicion:
+          silenciar: tuple[str, ...] = (), propios: tuple[str, ...] = ()) -> Medicion:
     """Mide ``url`` en la vista (``VIEWPORTS``): ``RONDAS_LCP`` cargas con caché vacía (LCP tras ``load`` +
     3 s; con ``red_4g``, Slow 4G y CPU ×4 por CDP); de la primera, peso, estado HTTP, versión, hitos, ancho de
     scroll con el selector culpable y la captura de página completa (0640). Un fallo de carga devuelve una
@@ -353,13 +384,15 @@ def medir(url: str, vista: str, captura: Path, permitidos: tuple[str, ...], red_
 
     permitidos = tuple(h.lower() for h in permitidos)
     silenciar = tuple(h.lower() for h in silenciar)
+    propios = tuple(h.lower() for h in propios)
+    propias: list[str] = []
     externas: list[str] = []
     vacia = {"vista": vista, "lcp_ms": None, "peso_bytes": None, "ancho_scroll": 0, "desborde_selector": None,
              "hitos": None, "captura": None}
     try:
         with _pagina(vista) as page:
             page.set_default_timeout(TIEMPO_CARGA_MS)
-            _filtro(page, permitidos, silenciar, externas)
+            _filtro(page, permitidos, silenciar, externas, propios, propias)
             _sin_cache(page)
             if red_4g:
                 _red_4g(page)
@@ -389,13 +422,13 @@ def medir(url: str, vista: str, captura: Path, permitidos: tuple[str, ...], red_
                         "peso": _peso(peticiones),
                     }
     except (PlaywrightError, NavegadorError) as exc:
-        return Medicion(**vacia, peticiones_externas=tuple(externas),
+        return Medicion(**vacia, peticiones_externas=tuple(externas), peticiones_propias=tuple(propias),
                         motivo=f"no se pudo cargar la página ({type(exc).__name__})")
     captura = _escribir_captura(captura, datos["png"])
     valido = all(isinstance(x, (int, float)) and x > 0 for x in lcp)
     return Medicion(
         vista=vista, lcp_ms=[float(x) for x in lcp] if valido else None, peso_bytes=datos["peso"],
-        peticiones_externas=tuple(externas), ancho_scroll=datos["ancho"],
+        peticiones_externas=tuple(externas), peticiones_propias=tuple(propias), ancho_scroll=datos["ancho"],
         desborde_selector=datos["selector"],
         hitos=datos["hitos"], captura=captura,
         motivo=None if valido else "el navegador no dio LCP en alguna ronda",
@@ -534,6 +567,10 @@ def _filas_medicion(m: Medicion, wf: list[dict], version: str, publicada: bool) 
         filas.append((f"Peticiones externas ({m.vista})", FALLA, ", ".join(m.peticiones_externas)))
     else:
         filas.append((f"Peticiones externas ({m.vista})", OK, "ninguna"))
+    if m.peticiones_propias:  # I-4: de la tienda (Impultienda publicada): se avisa, no bloquea
+        hosts = sorted({(urlsplit(u).hostname or u) for u in m.peticiones_propias})
+        filas.append((f"Peticiones de la tienda ({m.vista})", AVISO,
+                      f"{len(m.peticiones_propias)} de la propia tienda: {', '.join(hosts)}"))
     filas.append(_filas_hitos(m, wf))
     return filas
 
@@ -602,7 +639,8 @@ def _captura_rel(m: Medicion, raiz_producto: Path | None) -> str | None:
 
 
 def render_qa(datos: DatosLanding, r: ResultadoQA, mediciones: list[Medicion], ahora: datetime, url: str | None,
-              *, clic: Clic | None = None, version: str | None = None, raiz_producto: Path | None = None) -> str:
+              *, clic: Clic | None = None, version: str | None = None, raiz_producto: Path | None = None,
+              manifiesto: str | None = None) -> str:
     """``QA.md``: frontmatter ``{tipo: qa_landing, pais, version, ok, fecha, url, movil_390, utm_checkout}``
     (las dos últimas, con la forma de ``landing.qa`` de la resolución 3), tabla de filas y medidas."""
     from trovefy.vault.frontmatter import renderizar
@@ -618,7 +656,10 @@ def render_qa(datos: DatosLanding, r: ResultadoQA, mediciones: list[Medicion], a
                          "destino": clic.url_pedida if clic else None, "captura": None, "interceptado": True,
                          "fuente": f"landing/{datos.pais}/QA.md"},
     }
-    donde = f"publicada en {url}" if url else "local (127.0.0.1)"
+    if manifiesto is not None:  # I-6: los archivos medidos (index.html y assets/), para publicar solo eso
+        meta = {"tipo": meta.pop("tipo"), "pais": meta.pop("pais"), "version": meta.pop("version"),
+                "manifiesto": manifiesto, **meta}
+    donde =f"publicada en {url}" if url else "local (127.0.0.1)"
     lineas = [f"# QA de la landing · {datos.p_id} · {datos.pais}", "",
               f"Versión `{version}` · {donde} · {'apta' if r.ok else 'no apta'}.", "",
               perfil_red() + ".", "",
@@ -705,11 +746,31 @@ def _nativo(vault: Path, datos: DatosLanding) -> tuple[str, str] | None:
     return veredicto_vigente(vault, datos.p_id, datos.pais)
 
 
+def hosts_propios(vault: Path, datos: DatosLanding) -> tuple[str, ...]:
+    """Reglas de los hosts propios de la tienda en la QA publicada en Impultienda (ruling I-4): su dominio
+    registrable (``.impultienda.ar`` para ``mitienda.impultienda.ar``) y los hosts exactos que cargó la tienda en
+    la sonda (``config/evidencia/p05-impultienda-*.json``). Sin tienda ni sonda, ninguno."""
+    from trovefy.landing.hosting import capacidades_vigentes
+    from trovefy.landing.plantilla import host_tienda
+    from trovefy.navegador import dominio_registrable
+
+    reglas: list[str] = []
+    try:
+        c = capacidades_vigentes(vault)
+    except ValueError:
+        c = None
+    for tienda in dict.fromkeys((datos.tienda, c.tienda if c else None)):
+        if (host := host_tienda(tienda)) is not None:
+            reglas.append("." + dominio_registrable(host))
+    reglas += list(c.hosts_tienda) if c else []
+    return tuple(dict.fromkeys(r for r in reglas if not casa_host(r.lstrip("."), HOSTS_META)))
+
+
 def ejecutar_qa(vault: Path, datos: DatosLanding, url: str | None = None, *,
                 ahora: datetime | None = None) -> ResultadoQA:
     """Mide la landing (local en ``127.0.0.1`` sin ``url``; la publicada con ``url``), la evalúa y escribe
     ``landing/<PAIS>/QA.md`` con las capturas ``qa/<vista>-<version>.png`` y su línea de log."""
-    from trovefy.landing.plantilla import leer_landing_yaml
+    from trovefy.landing.plantilla import leer_landing_yaml, manifiesto_landing
     from trovefy.producto.medios import carpeta_segura
     from trovefy.secretos import buscar_secreto
     from trovefy.vault.escritura import ZONA_NEGOCIO, anadir_log, escribir_atomico
@@ -728,14 +789,19 @@ def ejecutar_qa(vault: Path, datos: DatosLanding, url: str | None = None, *,
         carpeta_segura(vault, raiz / "qa", crear=True)
     except ValueError as exc:
         raise EntradaInvalida(str(exc)) from None
-    silenciar = tuple(sorted(HOSTS_PIXEL)) if landing.get("hosting") == "cloudflare" else ()
+    try:  # I-6: lo que se mide, archivo a archivo; publicar lo vuelve a calcular
+        manifiesto = manifiesto_landing(raiz)
+    except (OSError, ValueError) as exc:
+        raise EntradaInvalida(f"landing/{datos.pais}: {exc}") from None
+    silenciar = HOSTS_META  # ruling I-4: Meta se aborta sin contar, en las dos rutas
+    propios = hosts_propios(vault, datos) if url is not None and landing.get("hosting") == "impultienda" else ()
     validacion = validar(vault, datos)
     wf = leer_hitos_esperados(vault, datos)
 
     def _medir_todo(pagina: str) -> tuple[list[Medicion], Clic]:
         permitidos = ((urlsplit(pagina).hostname or "").lower(),)
         meds = [medir(pagina, vista, raiz / "qa" / f"{vista}-{version}.png", permitidos,
-                      red_4g=(vista == "movil"), silenciar=silenciar) for vista in VIEWPORTS]
+                      red_4g=(vista == "movil"), silenciar=silenciar, propios=propios) for vista in VIEWPORTS]
         return meds, probar_clic(pagina, checkout, utm=UTM_PRUEBA if url is None else UTM_PUBLICADA)
 
     if url is None:
@@ -746,7 +812,7 @@ def ejecutar_qa(vault: Path, datos: DatosLanding, url: str | None = None, *,
     r = evaluar(validacion, mediciones, clic, wf, _nativo(vault, datos), version, publicada=url is not None)
     ahora = ahora or datetime.now(ZONA_NEGOCIO)
     texto = render_qa(datos, r, mediciones, ahora, url, clic=clic, version=version,
-                      raiz_producto=ruta_producto(vault, datos.p_id).parent)
+                      raiz_producto=ruta_producto(vault, datos.p_id).parent, manifiesto=manifiesto)
     patron = buscar_secreto(texto)
     if patron:
         raise EntradaInvalida(f"QA.md: aparece algo con forma de secreto ({patron}); no se guarda")

@@ -17,3 +17,16 @@ TOLERANCIA_HITO = 0.10  # fracción del alto de página (plan 18, Tarea 6)
 ANCHOS_IMAGEN = (480, 960)  # srcset: móvil 390 px a 1x–2x y escritorio a ~1x (plan 18)
 TIMEOUT_ORDEN_S = 120  # tope por orden externa (pdfinfo, pdftoppm, ffmpeg)
 ESTADOS_LANDING = ("producido", "con_landing", "con_checkout", "listo")  # contrato 3: desde producido
+# Hosts de Meta (ruling I-4): la QA los aborta sin contarlos en las dos rutas (una QA nunca manda eventos a Meta)
+# y la sonda no los anota como hosts de la tienda. Un «.» delante = ese dominio y todos sus subdominios.
+HOSTS_META = (".facebook.com", ".facebook.net", ".fbcdn.net", ".fbsbx.com", ".instagram.com")
+
+
+def casa_host(host: str, reglas) -> bool:
+    """¿`host` casa con alguna regla? `".x.test"` = `x.test` y sus subdominios; si no, el host exacto."""
+    h = (host or "").strip().lower().rstrip(".")
+    for r in reglas:
+        r = r.strip().lower().rstrip(".")
+        if (r.startswith(".") and (h == r[1:] or h.endswith(r))) or h == r:
+            return True
+    return False

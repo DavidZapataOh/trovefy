@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import re
+import sys
 import time
 from collections.abc import Callable
 from datetime import datetime
@@ -26,7 +28,11 @@ from trovefy.navegador import NavegadorError, sesion
 from trovefy.producto.medios import carpeta_segura, escribir_medio
 from trovefy.secretos import buscar_secreto
 from trovefy.tienda.conductor import Conductor, FirmaNoCasa, MapaSinConfirmar
-from trovefy.tienda.confirmacion import confirmar_pantalla, mapa_con_confirmaciones
+from trovefy.tienda.confirmacion import (
+    confirmada_en_vault,
+    confirmar_pantalla,
+    mapa_con_confirmaciones,
+)
 from trovefy.vault.escritura import ZONA_NEGOCIO, anadir_log
 
 SERVICIO = "impultienda"
@@ -54,10 +60,19 @@ def _con_url(mapa: dict, url: str) -> dict:
 
 def preparar_mapa(vault: Path, mapa: dict | None = None, url_pantalla: str | None = None) -> dict:
     """El mapa con el que se trabaja: el inyectado o el del repo + confirmaciones; con `url_pantalla`, esa URL
-    (del host del mapa) para `diseno_contenido`. `MapaSinConfirmar` si la pantalla no tiene `capturado`."""
+    (del host del mapa) para `diseno_contenido`. `MapaSinConfirmar` si la pantalla no tiene `capturado`.
+
+    Si quien da el `capturado` es la confirmación del vault (no el mapa del repo), `url_pantalla` tiene que ser
+    la URL confirmada (I-2): se confirmó esa pantalla, no otra."""
+    if mapa is None:
+        confirmada = confirmada_en_vault(vault, SERVICIO, cargar_mapa(MAPA_IMPULTIENDA), PANTALLA)
+        if (url_pantalla is not None and confirmada is not None
+                and (not isinstance(url_pantalla, str) or urldefrag(url_pantalla.strip()).url != confirmada)):
+            raise ValueError(f"esa URL no es la que confirmaste: vuelve a capturar (`trovefy landing capturar "
+                             f"--url {url_pantalla}`) o lanza sin --url (la confirmada es {confirmada})")
     m = copy.deepcopy(mapa) if mapa is not None else mapa_impultienda(vault)
     if url_pantalla is not None:
-        m = _con_url(m, url_pantalla)
+        m = _con_url(m, url_pantalla.strip() if isinstance(url_pantalla, str) else url_pantalla)
     if capturado_de(m, PANTALLA) is None:
         raise MapaSinConfirmar(PANTALLA, SIN_CONFIRMAR)
     return m
@@ -120,6 +135,31 @@ def respaldar(vault: Path, p_id: str, pais: str, contenido: str, ahora: datetime
     return ruta
 
 
+_RESPALDO = re.compile(r"impultienda-([0-9]{4}-[0-9]{2}-[0-9]{2})(?:-([0-9]+))?\.html")
+
+
+def ultimo_respaldo(vault: Path, p_id: str, pais: str) -> Path | None:
+    """El respaldo más reciente de `landing/<PAIS>/respaldo/` (por fecha y número, no por orden alfabético:
+    `-2` va después del de ese mismo día sin número); None si no hay."""
+    carpeta = ruta_landing(Path(vault), p_id, pais.upper()) / "respaldo"
+    if carpeta.is_symlink() or not carpeta.is_dir():
+        return None
+    candidatos = [((m.group(1), int(m.group(2) or 1)), p) for p in carpeta.iterdir()
+                  if (m := _RESPALDO.fullmatch(p.name)) and p.is_file() and not p.is_symlink()]
+    return max(candidatos)[1] if candidatos else None
+
+
+def restaurar_desde_respaldo(vault: Path, respaldo: Path, *, mapa: dict | None = None, abrir=None,
+                             visible: bool = True, dormir: Callable[[float], None] = time.sleep) -> None:
+    """Vuelve a pegar en el campo el contenido de `respaldo` (L-4: tras una QA publicada en rojo) y comprueba que
+    quedó igual; si no, `NavegadorError` con la ruta del respaldo."""
+    respaldo = Path(respaldo)
+    if respaldo.is_symlink() or not respaldo.is_file():
+        raise NavegadorError(f"no encuentro el respaldo {respaldo}: pega tú lo que tenías")
+    original = respaldo.read_text(encoding="utf-8")
+    restaurar(abrir or sesion, preparar_mapa(vault, mapa), original, respaldo, visible=visible, dormir=dormir)
+
+
 def restaurar(abrir, mapa: dict, original: str, ruta: Path, *, visible: bool,
               dormir: Callable[[float], None]) -> None:
     """Vuelve a pegar `original` y comprueba que quedó igual; si no, `NavegadorError` con la ruta del respaldo."""
@@ -131,21 +171,39 @@ def restaurar(abrir, mapa: dict, original: str, ruta: Path, *, visible: bool,
             releido = panel.guardar(original)
     except Exception as exc:
         raise NavegadorError(motivo) from exc
+    except BaseException:  # Ctrl-C a media restauración (L-1): que se sepa de dónde pegarlo, y se sigue
+        print(f"INTERRUMPIDA la restauración: {motivo}", file=sys.stderr)
+        raise
     if releido != original:
         raise NavegadorError(motivo)
+
+
+def hay_terminal() -> bool:
+    """¿Hay una persona delante? stdin y stdout son una terminal (no una tubería ni un agente)."""
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+SIN_TERMINAL = ("`trovefy landing capturar` lo lanzas tú, en tu terminal y con la pantalla delante: sin terminal "
+                "(una tubería, `printf sí |`, o un agente) no se confirma nada")
 
 
 def capturar_pantalla(vault: Path, url: str | None = None, *, mapa: dict | None = None, abrir=None,
                       esperar: Callable[[str], object] = input, preguntar: Callable[[str], str] = input,
                       visible: bool = True, dormir: Callable[[float], None] = time.sleep,
-                      ahora: datetime | None = None) -> dict:
+                      ahora: datetime | None = None, terminal: Callable[[], bool] = hay_terminal) -> dict:
     """Confirmación guiada de `diseno_contenido` (resolución 20) sin un solo clic.
 
-    Abre la ventana visible con el perfil `impultienda` (en `url` o en la del mapa); el usuario navega a
+    Solo con una persona en la terminal (I-1: stdin y stdout TTY; si no, `ValueError` sin abrir nada). Abre la
+    ventana visible con el perfil `impultienda` (en `url` o en la del mapa); el usuario navega a
     «Diseño de tienda → Contenido» y pulsa Intro. Se comprueban sesión, origen, firma y que el campo HTML y el
     botón «Guardar cambios» casan con un solo elemento; se guarda una captura con los campos tapados y se le
     pregunta. Solo un «sí» literal confirma (`trovefy.tienda.confirmacion.confirmar_pantalla`).
     """
+    if not terminal():
+        raise ValueError(SIN_TERMINAL)
     vault = Path(vault)
     ahora = ahora or datetime.now(ZONA_NEGOCIO)
     base = copy.deepcopy(mapa) if mapa is not None else cargar_mapa(MAPA_IMPULTIENDA)

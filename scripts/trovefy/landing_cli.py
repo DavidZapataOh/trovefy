@@ -151,9 +151,11 @@ def _sonda(args: argparse.Namespace, vault: Path) -> int:
 
 @_con_paradas
 def _capturar(args: argparse.Namespace, vault: Path) -> int:
-    from trovefy.landing.panel import capturar_pantalla
+    from trovefy.landing import panel
 
-    entrada = capturar_pantalla(vault, args.url)
+    if not panel.hay_terminal():  # I-1: una persona delante, no una tubería ni un agente
+        return _error(panel.SIN_TERMINAL)
+    entrada = panel.capturar_pantalla(vault, args.url)
     print(f"Pantalla «Diseño de tienda → Contenido» confirmada ({entrada['fecha']}): {entrada['url']}")
     return 0
 

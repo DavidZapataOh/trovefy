@@ -13,10 +13,11 @@ from trovefy import cli
 from trovefy.landing.entrada import EstadoNoPermite, ruta_landing
 from trovefy.landing.hosting import CAPACIDADES_FASE0, Hosting, empaquetar_en_linea
 from trovefy.landing.nativo import registrar_veredicto
-from trovefy.landing.plantilla import leer_landing_yaml
+from trovefy.landing.plantilla import leer_landing_yaml, manifiesto_landing
 from trovefy.landing.publicar import (
     HtmlRecortado,
     NoPublicable,
+    Pegada,
     listo_para_publicar,
     publicar,
     publicar_impultienda,
@@ -46,10 +47,13 @@ def version(v: Path) -> str:
 
 
 def escribir_qa(v: Path, ok: bool = True, ver: str | None = None, url: str | None = None) -> Path:
+    """`QA.md` como lo deja `ejecutar_qa`: con la versión y el manifiesto de los archivos medidos (I-6)."""
     ver = ver or version(v)
-    ruta = ruta_landing(v, P, "ZZ") / "QA.md"
+    raiz = ruta_landing(v, P, "ZZ")
+    ruta = raiz / "QA.md"
     frontmatter.escribir(ruta, {
-        "tipo": "qa_landing", "pais": "ZZ", "version": ver, "ok": ok, "fecha": AHORA.isoformat(), "url": url,
+        "tipo": "qa_landing", "pais": "ZZ", "version": ver, "manifiesto": manifiesto_landing(raiz), "ok": ok,
+        "fecha": AHORA.isoformat(), "url": url,
         "movil_390": {"http": 200, "captura": f"landing/ZZ/qa/movil-{ver}.png"},
         "utm_checkout": {"ok": True, "destino": "https://x.test/checkout?utm_source=fb", "captura": None,
                          "interceptado": True},
@@ -214,6 +218,7 @@ def test_publicar_cloudflare_solo_dominio_o_subdominio_del_pais(tmp_path):
 def test_registrar_avanza_producido_a_con_landing(tmp_path):
     v = lista(tmp_path)
     ver = version(v)
+    escribir_qa(v, url=URL)  # la QA publicada de esta versión y esta URL (L-5)
     meta0, cuerpo0 = producto(v)
     estado = registrar_publicacion(v, cargar(v), URL, Hosting("impultienda", "x"), ver, VERDE, AHORA)
     assert estado == "con_landing"
@@ -238,6 +243,7 @@ def test_registrar_avanza_producido_a_con_landing(tmp_path):
 def test_registrar_no_toca_estado_avanzado(tmp_path):
     v = lista(tmp_path)
     d = cargar(v)
+    escribir_qa(v, url=URL)
     editar_md(v, "PRODUCTO", lambda m: m["paises"]["ZZ"].update(
         estado="con_checkout", landing={"url": "https://vieja.test/", "qa": "landing/ZZ/QA.md"}))
     estado = registrar_publicacion(v, d, URL, Hosting("impultienda", "x"), version(v), VERDE, AHORA)
@@ -329,7 +335,7 @@ def _publicar_imp(v, t, c=TODO_SI):
 def test_publicar_impultienda_relee_igual(tmp_path):
     v, t = lista(tmp_path), TiendaFalsa()
     original = t.contenido
-    assert _publicar_imp(v, t) == URL
+    assert _publicar_imp(v, t).url == URL
     assert t.contenido == empaquetar_en_linea(ruta_landing(v, P, "ZZ"))
     respaldo = ruta_landing(v, P, "ZZ") / "respaldo" / "impultienda-2026-11-17.html"
     assert respaldo.read_text(encoding="utf-8") == original
@@ -389,7 +395,7 @@ def test_publicar_impultienda_completo(tmp_path):
 
     def imp(vault, d, c, **_kw):
         llamadas.append(c)
-        return URL
+        return Pegada(URL, None)
 
     assert publicar(v, cargar(v), qa=qa, publicar_imp=imp, ahora=AHORA) == URL
     assert qa.urls == [URL] and llamadas == [TODO_SI]
@@ -400,7 +406,7 @@ def test_qa_publicada_falla_no_registra(tmp_path):
     v = lista(tmp_path)
     antes = (v / "productos" / P / "PRODUCTO.md").read_bytes()
     with pytest.raises(NoPublicable, match="QA.md"):
-        publicar(v, cargar(v), qa=QAFalsa(LCP_ALTO), publicar_imp=lambda *a, **k: URL, ahora=AHORA)
+        publicar(v, cargar(v), qa=QAFalsa(LCP_ALTO), publicar_imp=lambda *a, **k: Pegada(URL, None), ahora=AHORA)
     assert (v / "productos" / P / "PRODUCTO.md").read_bytes() == antes
     ly = leer_landing_yaml(v, P, "ZZ")
     assert ly["url"] == URL and ly["publicada"] is None
@@ -423,14 +429,14 @@ def test_publicar_sonda_no_medida(tmp_path):
     for f in (v / "config" / "evidencia").glob("p05-*.json"):
         f.unlink()
     with pytest.raises(NoPublicable, match="no medido"):
-        publicar(v, cargar(v), qa=QAFalsa(), publicar_imp=lambda *a, **k: URL, ahora=AHORA)
+        publicar(v, cargar(v), qa=QAFalsa(), publicar_imp=lambda *a, **k: Pegada(URL, None), ahora=AHORA)
 
 
 def test_publicar_hosting_distinto_de_la_sonda(tmp_path):
     v = lista(tmp_path)
     evidencia(v, replace(TODO_SI, script=False))
     with pytest.raises(NoPublicable, match="--rehacer"):
-        publicar(v, cargar(v), qa=QAFalsa(), publicar_imp=lambda *a, **k: URL, ahora=AHORA)
+        publicar(v, cargar(v), qa=QAFalsa(), publicar_imp=lambda *a, **k: Pegada(URL, None), ahora=AHORA)
 
 
 def _cloudflare_lista(tmp_path) -> Path:
@@ -487,8 +493,217 @@ def test_cli_publicar_bien(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("TROVEFY_VAULT", str(v))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setattr(landing_cli, "_ejecutar_orden", Ejecutar())
-    monkeypatch.setattr(mod, "publicar_impultienda", lambda *a, **k: URL)
+    monkeypatch.setattr(mod, "publicar_impultienda", lambda *a, **k: Pegada(URL, None))
     monkeypatch.setattr(mod, "_qa_publicada", QAFalsa())
     assert cli.main(["landing", "publicar", "--producto", P, "--pais", "ZZ"]) == 0
     assert f"ZZ → con_landing: {URL}" in capsys.readouterr().out
     assert yaml.safe_load((ruta_landing(v, P, "ZZ") / "landing.yaml").read_text(encoding="utf-8"))["publicada"]
+
+
+# --- T: una excepción después de pegar siempre restaura ------------------------------------------
+
+
+def test_publicar_impultienda_parada_de_pulsar_tras_guardar_restaura(tmp_path):
+    from trovefy.tienda.conductor import Parada, VentanaNueva
+
+    v, t = lista(tmp_path), TiendaFalsa(tras_pegar=VentanaNueva("diseno_contenido", "se abrió otra ventana"))
+    original = t.contenido
+    with pytest.raises(Parada):
+        _publicar_imp(v, t)
+    assert t.contenido == original and len(t.posts) == 2 and t.posts[1] == original
+
+
+def test_publicar_impultienda_ctrl_c_restaura(tmp_path):
+    v, t = lista(tmp_path), TiendaFalsa(tras_pegar=KeyboardInterrupt())
+    original = t.contenido
+    with pytest.raises(KeyboardInterrupt):
+        _publicar_imp(v, t)
+    assert t.contenido == original and t.posts[-1] == original
+
+
+# --- I-5: una sonda colgada en el campo para la publicación -----------------------------------
+
+
+@pytest.mark.parametrize("trozo", [10_000, 40])
+def test_publicar_impultienda_con_sonda_colgada_para(tmp_path, trozo):
+    from trovefy.landing.hosting import HTML_SONDA
+    from trovefy.navegador import NavegadorError
+
+    v = lista(tmp_path)
+    carpeta = ruta_landing(v, P, "ZZ") / "respaldo"
+    carpeta.mkdir(parents=True)
+    (carpeta / "impultienda-2026-11-16.html").write_text("<p>antes</p>", encoding="utf-8")
+    t = TiendaFalsa(contenido=HTML_SONDA[:trozo])
+    with pytest.raises(NavegadorError, match="sonda anterior") as e:
+        _publicar_imp(v, t)
+    assert "respaldo/impultienda-2026-11-16.html" in str(e.value)
+    assert t.posts == []
+
+
+# --- L-6 ----------------------------------------------------------------------------------------
+
+
+def test_publicar_impultienda_pega_sin_salto_final(tmp_path):
+    v, t = lista(tmp_path), TiendaFalsa()
+    _publicar_imp(v, t)
+    assert not t.posts[0].endswith("\n")
+
+
+# --- L-4: QA publicada en rojo en Impultienda → se restaura lo de antes ------------------------
+
+
+class Restaurador:
+    def __init__(self, falla: Exception | None = None):
+        self.llamadas: list[Path] = []
+        self.falla = falla
+
+    def __call__(self, vault, respaldo, **_kw):
+        self.llamadas.append(respaldo)
+        if self.falla is not None:
+            raise self.falla
+
+
+def test_qa_publicada_en_rojo_restaura_lo_de_antes(tmp_path):
+    from trovefy.landing.publicar import Pegada
+
+    v = lista(tmp_path)
+    respaldo = ruta_landing(v, P, "ZZ") / "respaldo" / "impultienda-2026-11-17.html"
+    restaurar = Restaurador()
+    antes = (v / "productos" / P / "PRODUCTO.md").read_bytes()
+    with pytest.raises(NoPublicable, match="He vuelto a dejar en Impultienda lo que había") as e:
+        publicar(v, cargar(v), qa=QAFalsa(LCP_ALTO), publicar_imp=lambda *a, **k: Pegada(URL, respaldo),
+                 restaurar_imp=restaurar, ahora=AHORA)
+    assert restaurar.llamadas == [respaldo]
+    assert "impultienda-2026-11-17.html" in str(e.value)
+    assert (v / "productos" / P / "PRODUCTO.md").read_bytes() == antes
+    ly = leer_landing_yaml(v, P, "ZZ")
+    assert ly.get("url") is None and ly.get("publicada") is None
+
+
+def test_qa_publicada_en_rojo_y_restaurar_falla_lo_dice(tmp_path):
+    from trovefy.landing.publicar import Pegada
+    from trovefy.navegador import NavegadorError
+
+    v = lista(tmp_path)
+    respaldo = ruta_landing(v, P, "ZZ") / "respaldo" / "impultienda-2026-11-17.html"
+    restaurar = Restaurador(NavegadorError(f"no pude restaurar el contenido: pégalo tú desde {respaldo}"))
+    with pytest.raises(NoPublicable, match="pégalo tú desde"):
+        publicar(v, cargar(v), qa=QAFalsa(LCP_ALTO), publicar_imp=lambda *a, **k: Pegada(URL, respaldo),
+                 restaurar_imp=restaurar, ahora=AHORA)
+
+
+def test_qa_publicada_en_rojo_sin_pegar_nada_no_restaura(tmp_path):
+    """La misma versión ya estaba en el campo (no se pegó nada): no hay un «antes» que devolver."""
+    from trovefy.landing.publicar import Pegada
+
+    v = lista(tmp_path)
+    restaurar = Restaurador()
+    with pytest.raises(NoPublicable, match="QA.md"):
+        publicar(v, cargar(v), qa=QAFalsa(LCP_ALTO), publicar_imp=lambda *a, **k: Pegada(URL, None),
+                 restaurar_imp=restaurar, ahora=AHORA)
+    assert restaurar.llamadas == []
+
+
+def test_qa_publicada_en_rojo_en_cloudflare_no_restaura(tmp_path):
+    v = _cloudflare_lista(tmp_path)
+    restaurar = Restaurador()
+    with pytest.raises(NoPublicable, match="QA.md"):
+        publicar(v, cargar(v), f"https://zz.{DOMINIO}/", qa=QAFalsa(LCP_ALTO), verificar=lambda *_a: True,
+                 restaurar_imp=restaurar, ahora=AHORA)
+    assert restaurar.llamadas == []
+
+
+def test_restaurar_desde_respaldo_pega_el_archivo(tmp_path):
+    from trovefy.landing.panel import restaurar_desde_respaldo
+
+    v, t = lista(tmp_path), TiendaFalsa(contenido="<p>la landing</p>")
+    respaldo = ruta_landing(v, P, "ZZ") / "respaldo" / "impultienda-2026-11-17.html"
+    respaldo.parent.mkdir(parents=True)
+    respaldo.write_text("<h1>lo de antes</h1>", encoding="utf-8")
+    restaurar_desde_respaldo(v, respaldo, mapa=_mapa_confirmado(), abrir=abridor(t, []), dormir=lambda _s: None)
+    assert t.contenido == "<h1>lo de antes</h1>"
+
+
+# --- L-5 ----------------------------------------------------------------------------------------
+
+
+def test_registrar_avanza_antes_de_escribir_la_landing(tmp_path, monkeypatch):
+    """Si el estado cambió entre la lectura y la escritura, `avanzar_estado` para y no queda nada a medias."""
+    from trovefy.landing import publicar as mod
+    from trovefy.vault.producto import EstadoInesperado
+
+    v = lista(tmp_path)
+    escribir_qa(v, url=URL)
+    d, ver = cargar(v), version(v)
+    editar_md(v, "PRODUCTO", lambda m: m["paises"]["ZZ"].update(estado="modelado"))
+    monkeypatch.setattr(mod, "estado_pais", lambda *_a: "producido")  # lo leyó antes del cambio
+    antes = (v / "productos" / P / "PRODUCTO.md").read_bytes()
+    with pytest.raises(EstadoInesperado):
+        registrar_publicacion(v, d, URL, Hosting("impultienda", "x"), ver, VERDE, AHORA)
+    assert (v / "productos" / P / "PRODUCTO.md").read_bytes() == antes
+
+
+@pytest.mark.parametrize(("ver", "url"), [(None, None), (None, "https://otra.test/"), ("000000000000", URL)])
+def test_registrar_qa_de_otra_publicacion_no_vale(tmp_path, ver, url):
+    """`landing.qa` solo sale del QA.md publicado de esta versión y esta URL."""
+    v = lista(tmp_path)
+    escribir_qa(v, ver=ver, url=url)
+    antes = (v / "productos" / P / "PRODUCTO.md").read_bytes()
+    with pytest.raises(NoPublicable, match="QA.md"):
+        registrar_publicacion(v, cargar(v), URL, Hosting("impultienda", "x"), version(v), VERDE, AHORA)
+    assert (v / "productos" / P / "PRODUCTO.md").read_bytes() == antes
+
+
+# --- I-6: la versión publicada cubre todos los archivos, no solo index.html -----------------------
+
+
+@pytest.mark.parametrize("archivo", ["assets/estilo.css", "assets/utm.js", "assets/medios.json",
+                                     "assets/vista-p1-480.webp"])
+def test_cambio_tras_la_qa_bloquea_publicar(tmp_path, archivo):
+    v = lista(tmp_path)
+    ruta = ruta_landing(v, P, "ZZ") / archivo
+    ruta.write_bytes(ruta.read_bytes() + b"\n/* cambio */\n")
+    motivos = listo_para_publicar(v, cargar(v))
+    assert any("cambiaron después de la QA" in m for m in motivos), motivos
+
+
+def test_css_cambiado_tras_la_qa_no_publica(tmp_path):
+    v = lista(tmp_path)
+    css = ruta_landing(v, P, "ZZ") / "assets" / "estilo.css"
+    css.write_text(css.read_text(encoding="utf-8") + "\nbody{color:red}\n", encoding="utf-8")
+
+    def nunca(*_a, **_k):
+        raise AssertionError("no debía publicar")
+
+    with pytest.raises(NoPublicable, match="cambiaron después de la QA"):
+        publicar(v, cargar(v), qa=nunca, publicar_imp=nunca, ahora=AHORA)
+
+
+def test_qa_sin_manifiesto_no_vale(tmp_path):
+    v = lista(tmp_path)
+    ruta = ruta_landing(v, P, "ZZ") / "QA.md"
+    meta, cuerpo = frontmatter.leer(ruta)
+    meta.pop("manifiesto")
+    frontmatter.escribir(ruta, meta, cuerpo)
+    assert any("cambiaron después de la QA" in m for m in listo_para_publicar(v, cargar(v)))
+
+
+def test_manifiesto_ve_un_archivo_nuevo_en_assets(tmp_path):
+    from trovefy.landing.plantilla import manifiesto_landing
+
+    v = lista(tmp_path)
+    raiz = ruta_landing(v, P, "ZZ")
+    antes = manifiesto_landing(raiz)
+    (raiz / "assets" / "extra.webp").write_bytes(b"RIFF")
+    assert manifiesto_landing(raiz) != antes
+
+
+def test_manifiesto_con_enlace_es_error(tmp_path):
+    from trovefy.landing.plantilla import manifiesto_landing
+
+    v = lista(tmp_path)
+    raiz = ruta_landing(v, P, "ZZ")
+    (raiz / "assets" / "enlace.webp").symlink_to(raiz / "assets" / "estilo.css")
+    with pytest.raises(ValueError, match="enlace"):
+        manifiesto_landing(raiz)
+    assert any("enlace" in m for m in listo_para_publicar(v, cargar(v)))
