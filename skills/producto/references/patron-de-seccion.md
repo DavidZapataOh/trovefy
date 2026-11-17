@@ -43,10 +43,16 @@ imagen: f-01         # opcional: id de una ilustración de medios/medios.json de
 tipo: tabla          # tabla | lineas | casillas
 columnas: [Día, Hora, Minutos]
 filas: 7             # en casillas, también la lista de textos de cada casilla
+notas: Notas         # opcional: etiqueta del área de notas, en el idioma del producto
 ```
 
 - `imagen` (opcional) ilustra la ficha: va entre las instrucciones y la tabla, las líneas o las casillas, como `<figure class="ficha-img">` con el título de la ficha de `alt`. Es el id de una imagen ya generada para **esa misma pieza** (`f-01`, `f-02`… en `entregable/imagenes.yaml`, ver `imagenes.md`). Si el id no está en `medios/medios.json` de la pieza, el ensamblado falla y lo nombra: genérala primero o quita la línea.
-- La imagen se acota a unos 70 mm de alto, centrada y sin deformar. Aun así, imagen y tabla comparten una página fija: con muchas filas, la maqueta lo marca como desborde; entonces quita filas o parte la ficha en dos.
+- La imagen se acota a unos 115 mm de alto, centrada y sin deformar: cabe con 5 casillas. Aun así, imagen y tabla comparten una página fija: con muchas filas, la maqueta lo marca como desborde; entonces quita filas o parte la ficha en dos.
+- `notas` (opcional) añade, debajo de la tabla, las líneas o las casillas, un área de notas con líneas para escribir que llena el resto de la página hasta el pie. El valor es su etiqueta y va **en el idioma del producto** (`Notas`, `Notes`, `Бележки`…). Sin `notas` no hay área de notas. Úsala sobre todo en las fichas de `casillas`, que si no dejan media página en blanco.
+- Una `tabla` sin `imagen` y con pocas filas (hasta 8, o hasta 12) lleva filas más altas para llenar la página; no hace falta inflar `filas`.
+- Cada ficha lleva su número de página al pie, como las páginas de texto.
+
+Las secciones van seguidas, sin salto de página entre una y otra (un `h2` nunca se queda solo al pie, y `div.ejercicio`, `div.recordar`, `div.lograr` y `div.plantilla` no se parten). El índice, con el título de la pieza y el número de página de cada apartado, y el aviso de salud comparten página con el principio del primer apartado. Solo la portada, cada ficha y las fuentes empiezan página.
 
 ## Tono
 

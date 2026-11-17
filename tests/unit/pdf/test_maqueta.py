@@ -253,8 +253,85 @@ def test_css_imagen_de_ficha_acotada():
     css = BASE_CSS.read_text(encoding="utf-8")
     regla = re.search(r"\.ficha-img img\{([^}]*)\}", css)
     assert regla, "falta la regla .ficha-img img"
-    for decl in ("max-height:70mm", "width:auto", "object-fit:contain", "margin:0 auto"):
+    for decl in ("max-height:115mm", "width:auto", "object-fit:contain", "margin:0 auto"):
         assert decl in regla.group(1)
+
+
+# --- revisión del primer producto: índice, flujo y fichas que llenan la página ---------------------
+
+
+def _regla(selector: str) -> str:
+    css = BASE_CSS.read_text(encoding="utf-8")
+    m = re.search(rf"(?:^|\}}|\n){re.escape(selector)}\{{([^}}]*)\}}", css)
+    assert m, f"falta la regla {selector}"
+    return m.group(1)
+
+
+def test_css_enlaces_con_color_de_marca_sin_subrayar():
+    regla = _regla("a")
+    assert "color:var(--color-primario)" in regla and "text-decoration:none" in regla
+
+
+def test_css_indice_con_titulo_y_puntos_guia():
+    assert "list-style:none" in _regla(".indice ol")
+    assert "margin" in _regla(".indice li")
+    despues = _regla(".indice a::after")
+    assert "leader(" in despues and "target-counter(attr(href url),page)" in despues
+    assert "font-size" in _regla(".indice h2")
+
+
+def test_css_secciones_en_flujo():
+    css = BASE_CSS.read_text(encoding="utf-8")
+    assert not re.search(r"\.seccion\{[^}]*break-before", css), "las secciones no fuerzan página"
+    assert "break-after:avoid" in _regla("h2,h3,h4")
+    assert "break-inside:avoid" in _regla("figure,.plantilla,.ejercicio,.recordar,.lograr")
+    assert "break-before:page" in _regla(".fuentes")
+
+
+def test_css_fichas_con_numero_de_pagina():
+    css = BASE_CSS.read_text(encoding="utf-8")
+    m = re.search(r"@page ficha\{size:A4;margin:0 0 (\d+)mm;@bottom-center\{([^}]*)\}\}", css)
+    assert m and "counter(page)" in m.group(2)
+    # la página de la ficha + el margen del pie = la página A4: el límite de desborde no cambia
+    ficha = _regla(".ficha")
+    assert "page:ficha" in ficha and f"height:{296.8 - int(m.group(1)):.1f}mm" in ficha
+    assert "padding-bottom:0" in ficha
+
+
+def test_css_casillas_holgadas_y_notas_que_llenan():
+    assert "min-height:12mm" in _regla(".ficha .casillas li")
+    assert "flex-grow:1" in _regla(".ficha .notas")
+    assert "repeating-linear-gradient" in _regla(".ficha .notas-lineas")
+
+
+def test_ensamblado_indice_con_titulo(pieza_respira):
+    html = _ensamblar(pieza_respira)
+    nav = html[html.index('<nav class="indice flujo">'):html.index("</nav>")]
+    assert '<h2 class="indice-titulo">Respira y duerme</h2>' in nav
+
+
+def test_ficha_con_notas():
+    html = generar_ficha_imprimible({**DIARIO, "tipo": "casillas", "filas": ["Agua"], "notas": "Notas <mías>"})
+    assert ('<div class="notas"><p class="notas-titulo">Notas &lt;mías&gt;</p>'
+            '<div class="notas-lineas"></div></div>') in html
+    assert html.index("</ul>") < html.index('class="notas"') < html.index('id="fin-diario"')
+    assert "notas" not in generar_ficha_imprimible({**DIARIO, "tipo": "casillas", "filas": ["Agua"]})
+
+
+@pytest.mark.parametrize("notas", ["", "  ", 3, None, ["a"]])
+def test_ficha_con_notas_mal_escritas(notas):
+    with pytest.raises(ValueError, match="notas"):
+        generar_ficha_imprimible({**DIARIO, "notas": notas})
+
+
+@pytest.mark.parametrize(("filas", "imagen", "clase"), [
+    (3, False, "filas-pocas"), (8, False, "filas-pocas"), (9, False, "filas-medias"), (12, False, "filas-medias"),
+    (13, False, None), (17, False, None), (7, True, None),
+])
+def test_tabla_con_pocas_filas_las_hace_mas_altas(filas, imagen, clase):
+    spec = {**DIARIO, "filas": filas, **({"imagen": "f-01"} if imagen else {})}
+    html = generar_ficha_imprimible(spec, MANIFIESTO_F01)
+    assert (f'<table class="{clase}">' if clase else "<table>") in html
 
 
 # --- ensamblado -------------------------------------------------------------------------------------

@@ -9,34 +9,54 @@
    se detecta por sus anclas ini-/fin- en el PDF, no se recorta. */
 @page{size:A4;margin:0}
 @page flujo{size:A4;margin:20mm 18mm 22mm;@bottom-center{content:counter(page);font-family:var(--fuente-texto);font-size:9pt;color:var(--color-primario)}}
+/* Fichas: el pie con el número ocupa los 20 mm de abajo (el padding inferior de .page), así que el
+   contenido acaba donde siempre y el límite de desborde de render.py no cambia. */
+@page ficha{size:A4;margin:0 0 20mm;@bottom-center{content:counter(page);font-family:var(--fuente-texto);font-size:9pt;color:var(--color-primario)}}
 *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
 html{font-family:var(--fuente-texto);font-size:11pt;line-height:1.5;color:var(--color-texto, var(--color-primario))}
 body{margin:0}
 h1,h2,h3,h4{font-family:var(--fuente-titulos);color:var(--color-primario);line-height:1.2}
+h2,h3,h4{break-after:avoid}
+a{color:var(--color-primario);text-decoration:none}
 .flujo{page:flujo}
 .page{width:210mm;height:296.8mm;display:flex;flex-direction:column;break-after:page;box-sizing:border-box;padding:20mm 18mm}
 .page>*{flex-shrink:0}
 .push{margin-top:auto}
-.seccion{break-before:page}
+/* Las secciones fluyen una tras otra, sin salto forzado: solo portada, fichas y fuentes empiezan página. */
+.seccion{margin-top:12mm}
+.seccion>h2:first-child{margin-top:0;padding-top:5mm;border-top:0.75pt solid var(--color-primario)}
 .fuentes{break-before:page;font-size:9pt}
-figure,.plantilla,.ejercicio{break-inside:avoid}
+figure,.plantilla,.ejercicio,.recordar,.lograr{break-inside:avoid}
 figure img{max-width:100%}
 .portada{justify-content:center;text-align:center;background:var(--color-fondo)}
 .portada h1{font-size:30pt}
 .portada img{max-width:100%;max-height:150mm;margin:10mm auto 0}
-.indice ol{padding-left:6mm}
-.aviso-salud{font-size:9pt;border-top:0.5pt solid var(--color-primario);margin-top:8mm}
+.indice h2{font-size:20pt;margin:0 0 8mm}
+.indice ol{list-style:none;padding:0;margin:0 0 10mm}
+.indice li{margin:0 0 3mm}
+.indice a{display:block;color:var(--color-texto, var(--color-primario))}
+.indice a::after{content:leader('.') target-counter(attr(href url),page);color:var(--color-primario)}
+.aviso-salud{font-size:9pt;border-top:0.5pt solid var(--color-primario);margin-top:8mm;padding-top:2mm}
+.aviso-salud .aviso-salud{border-top:0;margin-top:0;padding-top:0}
 .lograr,.recordar,.ejercicio,.plantilla{border-left:3pt solid var(--color-acento, var(--color-primario));padding:2mm 4mm;margin:4mm 0}
 .instrucciones{margin:0 0 5mm}
-/* Ilustración de una ficha: acotada para que quepa con su tabla en la página fija; sin recortar nada. */
+.ficha{page:ficha;height:276.8mm;padding-bottom:0}
+/* Ilustración de una ficha: acotada para que quepa con 5 casillas en la página fija; sin recortar nada. */
 .ficha-img{margin:0 0 5mm;text-align:center}
-.ficha-img img{display:block;max-height:70mm;max-width:100%;width:auto;height:auto;margin:0 auto;object-fit:contain}
+.ficha-img img{display:block;max-height:115mm;max-width:100%;width:auto;height:auto;margin:0 auto;object-fit:contain}
 .ficha table{width:100%;border-collapse:collapse}
 .ficha th,.ficha td{border:0.5pt solid var(--color-primario);padding:1.5mm 2mm;height:7mm;text-align:left}
+/* Tablas sin ilustración y con pocas filas: filas más altas para llenar la página (clase de la maqueta). */
+.ficha table.filas-pocas td{height:17mm}
+.ficha table.filas-medias td{height:11mm}
 .ficha .linea{border-bottom:0.5pt solid var(--color-primario);height:9mm}
 .ficha .casillas{list-style:none;padding:0;margin:0}
-.ficha .casillas li{min-height:9mm}
+.ficha .casillas li{min-height:12mm;padding:1mm 0}
 .casilla{display:inline-block;width:4mm;height:4mm;border:0.5pt solid var(--color-primario);margin-right:3mm}
+/* Notas (campo «notas» de la ficha): llena el hueco que queda hasta el pie con líneas para escribir. */
+.ficha .notas{flex-grow:1;display:flex;flex-direction:column;margin-top:5mm;min-height:15mm}
+.ficha .notas-titulo{margin:0 0 1mm;font-family:var(--fuente-titulos);color:var(--color-primario)}
+.ficha .notas-lineas{flex-grow:1;background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 8.5mm,var(--color-primario) 8.5mm,var(--color-primario) 9mm)}
 :root{--color-primario:#1F4E5F;--color-acento:#F2C14E;--color-fondo:#FAF7F2;--fuente-titulos:'DejaVu Serif', serif;--fuente-texto:'DejaVu Sans', sans-serif}
 </style>
 </head>
@@ -48,6 +68,7 @@ figure img{max-width:100%}
 <span class="push" id="fin-portada"></span>
 </div>
 <nav class="indice flujo">
+<h2 class="indice-titulo">Respira y duerme</h2>
 <ol>
 <li><a href="#s-01">Por qué te cuesta dormir</a></li>
 <li><a href="#s-02">La respiración lenta</a></li>
@@ -98,7 +119,7 @@ figure img{max-width:100%}
 <span id="ini-diario"></span>
 <h2>Diario de sueño</h2>
 <p class="instrucciones">Cada mañana, anota a qué hora te acostaste y cuántos minutos tardaste en dormirte.</p>
-<table>
+<table class="filas-pocas">
 <thead><tr><th>Día</th><th>Hora</th><th>Minutos</th></tr></thead>
 <tbody>
 <tr><td></td><td></td><td></td></tr>

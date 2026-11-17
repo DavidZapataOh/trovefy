@@ -34,27 +34,27 @@ entregable:
     principal:
       version: 1
       pdf: entregable/respira-lento-es-v1.pdf
-      paginas: 7
+      paginas: 6
       fecha: '2026-11-16'
     bono-1:
       version: 1
       pdf: entregable/bonos/bono-1/respira-lento-bono-1-es-v1.pdf
-      paginas: 7
+      paginas: 6
       fecha: '2026-11-16'
     bono-2:
       version: 1
       pdf: entregable/bonos/bono-2/respira-lento-bono-2-es-v1.pdf
-      paginas: 7
+      paginas: 6
       fecha: '2026-11-16'
     bump:
       version: 1
       pdf: entregable/bump/respira-lento-bump-es-v1.pdf
-      paginas: 7
+      paginas: 6
       fecha: '2026-11-16'
     u1:
       version: 1
       pdf: entregable/upsells/u1/respira-lento-u1-es-v1.pdf
-      paginas: 7
+      paginas: 6
       fecha: '2026-11-16'
 ---
 # Producto p-0042-respira
@@ -62,8 +62,8 @@ entregable:
 Producto ficticio de los tests del plan 17.
 
 ## Versiones del entregable
-- 2026-11-16 · principal v1 · entregable/respira-lento-es-v1.pdf · 7 págs · gates 100 · revisor ok · nativo ok
-- 2026-11-16 · bono-1 v1 · entregable/bonos/bono-1/respira-lento-bono-1-es-v1.pdf · 7 págs · gates 100 · revisor ok · nativo ok
-- 2026-11-16 · bono-2 v1 · entregable/bonos/bono-2/respira-lento-bono-2-es-v1.pdf · 7 págs · gates 100 · revisor ok · nativo ok
-- 2026-11-16 · bump v1 · entregable/bump/respira-lento-bump-es-v1.pdf · 7 págs · gates 100 · revisor ok · nativo ok
-- 2026-11-16 · u1 v1 · entregable/upsells/u1/respira-lento-u1-es-v1.pdf · 7 págs · gates 100 · revisor ok · nativo ok
+- 2026-11-16 · principal v1 · entregable/respira-lento-es-v1.pdf · 6 págs · gates 100 · revisor ok · nativo ok
+- 2026-11-16 · bono-1 v1 · entregable/bonos/bono-1/respira-lento-bono-1-es-v1.pdf · 6 págs · gates 100 · revisor ok · nativo ok
+- 2026-11-16 · bono-2 v1 · entregable/bonos/bono-2/respira-lento-bono-2-es-v1.pdf · 6 págs · gates 100 · revisor ok · nativo ok
+- 2026-11-16 · bump v1 · entregable/bump/respira-lento-bump-es-v1.pdf · 6 págs · gates 100 · revisor ok · nativo ok
+- 2026-11-16 · u1 v1 · entregable/upsells/u1/respira-lento-u1-es-v1.pdf · 6 págs · gates 100 · revisor ok · nativo ok

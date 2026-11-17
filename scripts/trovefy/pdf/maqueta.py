@@ -34,6 +34,9 @@ ETIQUETAS = frozenset([
 ATRIBUTOS = frozenset(("class", "id", "href", "src", "alt"))
 TIPOS_FICHA = ("tabla", "lineas", "casillas")
 FILAS_MAX = 500  # una ficha de más de una página se detecta por anclas; esto solo corta lo absurdo
+# Tablas de ficha sin ilustración: hasta tantas filas, filas más altas (clase de templates/pdf/base.css)
+# para que la tabla llene la página. Con ilustración, la altura normal: comparten la página fija.
+FILAS_POCAS, FILAS_MEDIAS = 8, 12
 PORTADA = "portada.png"
 
 _ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
@@ -254,10 +257,12 @@ def _figura_ficha(ident: str, titulo: str, imagen: object, manifiesto: dict | No
 
 def generar_ficha_imprimible(spec: dict, manifiesto: dict | None = None) -> str:
     """``div.page.ficha`` con anclas ``ini-<id>``/``fin-<id>`` desde un ``fuente/fichas/*.yaml``:
-    ``{id, titulo, instrucciones, imagen?, tipo: tabla|lineas|casillas, columnas?, filas}``. ``filas`` es un
-    entero (filas vacías); en ``casillas`` también puede ser la lista de textos de cada casilla. ``imagen``
-    es el id de una ilustración del ``manifiesto`` de la pieza (``medios.json``): va entre las
-    instrucciones y la tabla, las líneas o las casillas; si no está en el manifiesto, ``ValueError``."""
+    ``{id, titulo, instrucciones, imagen?, tipo: tabla|lineas|casillas, columnas?, filas, notas?}``. ``filas``
+    es un entero (filas vacías); en ``casillas`` también puede ser la lista de textos de cada casilla.
+    ``imagen`` es el id de una ilustración del ``manifiesto`` de la pieza (``medios.json``): va entre las
+    instrucciones y la tabla, las líneas o las casillas; si no está en el manifiesto, ``ValueError``.
+    ``notas`` es la etiqueta, en el idioma del producto, de un área de notas con líneas que llena lo que
+    queda de página (``div.notas``); sin ella no hay área de notas."""
     if not isinstance(spec, dict):
         raise ValueError("ficha: el yaml no es un mapa")  # noqa: TRY004 - error de datos
     ident = spec.get("id")
@@ -277,6 +282,13 @@ def generar_ficha_imprimible(spec: dict, manifiesto: dict | None = None) -> str:
     if isinstance(filas, bool) or not isinstance(filas, int) or not 1 <= filas <= FILAS_MAX:
         raise ValueError(f"ficha {ident}: filas debe ser un entero entre 1 y {FILAS_MAX}")
 
+    notas = None
+    if "notas" in spec:
+        notas = spec["notas"]
+        if not isinstance(notas, str) or not notas.strip():
+            raise ValueError(f"ficha {ident}: notas debe ser un texto (la etiqueta del área de notas)")
+        notas = notas.strip()
+
     lineas = ['<div class="page ficha">', f'<span id="ini-{ident}"></span>', f"<h2>{_e(titulo)}</h2>",
               f'<p class="instrucciones">{_e(instrucciones)}</p>']
     if "imagen" in spec:
@@ -287,7 +299,13 @@ def generar_ficha_imprimible(spec: dict, manifiesto: dict | None = None) -> str:
             raise ValueError(f"ficha {ident}: una tabla necesita columnas (lista de textos)")
         cabecera = "".join(f"<th>{_e(c)}</th>" for c in columnas)
         vacia = "<tr>" + "<td></td>" * len(columnas) + "</tr>"
-        lineas += ["<table>", f"<thead><tr>{cabecera}</tr></thead>", "<tbody>", *[vacia] * filas,
+        clase = ""
+        if "imagen" not in spec:
+            if filas <= FILAS_POCAS:
+                clase = ' class="filas-pocas"'
+            elif filas <= FILAS_MEDIAS:
+                clase = ' class="filas-medias"'
+        lineas += [f"<table{clase}>", f"<thead><tr>{cabecera}</tr></thead>", "<tbody>", *[vacia] * filas,
                    "</tbody>", "</table>"]
     elif tipo == "lineas":
         lineas += ['<div class="lineas">', *['<div class="linea"></div>'] * filas, "</div>"]
@@ -295,6 +313,8 @@ def generar_ficha_imprimible(spec: dict, manifiesto: dict | None = None) -> str:
         textos = etiquetas or [""] * filas
         lineas += ['<ul class="casillas">', *[f'<li><span class="casilla"></span>{_e(t)}</li>' for t in textos],
                    "</ul>"]
+    if notas:
+        lineas.append(f'<div class="notas"><p class="notas-titulo">{_e(notas)}</p><div class="notas-lineas"></div></div>')
     lineas += [f'<span class="push" id="fin-{ident}"></span>', "</div>"]
     return "\n".join(lineas)
 
@@ -354,7 +374,7 @@ def ensamblar(pieza: Pieza, ficha: Ficha, pieza_ficha: PiezaFicha, tokens: dict[
     """Documento A4 completo de una pieza, listo para los gates y WeasyPrint.
 
     Orden: portada (``div.page.portada``, con ``medios/portada.png`` si está en el manifiesto) →
-    ``nav.indice`` → ``aside.aviso-salud`` (si existe ``fuente/aviso-salud.html``) → una
+    ``nav.indice`` (con el título de la pieza y número de página de cada apartado) → ``aside.aviso-salud`` (si existe ``fuente/aviso-salud.html``) → una
     ``section.seccion.flujo#s-NN`` por fragmento, en el orden dado → fichas → ``section.fuentes#fuentes``
     (si existe ``fuente/fuentes.html``). ``FragmentoInvalido`` si un fragmento se sale de la lista blanca,
     no trae su ``h2`` o repite un id.
@@ -416,7 +436,7 @@ def ensamblar(pieza: Pieza, ficha: Ficha, pieza_ficha: PiezaFicha, tokens: dict[
     partes = [
         "<!DOCTYPE html>", f'<html lang="{_e(ficha.idioma)}">', "<head>", '<meta charset="utf-8">',
         f"<title>{titulo}</title>", "<style>", css, f":root{{{root}}}", "</style>", "</head>", "<body>",
-        *portada, '<nav class="indice flujo">', "<ol>", *indice, "</ol>", "</nav>",
+        *portada, '<nav class="indice flujo">', f'<h2 class="indice-titulo">{titulo}</h2>', "<ol>", *indice, "</ol>", "</nav>",
     ]
     if aviso:
         partes.append(aviso)

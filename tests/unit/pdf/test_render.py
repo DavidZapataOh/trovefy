@@ -409,7 +409,7 @@ def _png_grande(ancho: int = 1024, alto: int = 1536) -> bytes:
 @pytest.mark.parametrize("tamano", [(1024, 1536), (1536, 1024), (60, 90)])
 def test_ficha_ilustrada_es_apta(vault_respira, tamano):
     """Una ilustración de 1k (más alta que la página a 96 ppp) cabe en la ficha con su tabla: la CSS la
-    acota a ~70 mm sin recortar nada, y las anclas siguen detectando desbordes."""
+    acota a ~115 mm sin recortar nada, y las anclas siguen detectando desbordes."""
     raiz = pieza(vault_respira, "p-0042-respira", "principal").raiz
     sha = escribir_medio(raiz / "medios" / "f-01.png", _png_grande(*tamano))
     registrar_medio(raiz, "f-01", "f-01.png", sha, "apimart", task_id="t-0002")
@@ -585,3 +585,142 @@ def test_seccion_truncada_no_llega_al_pdf(vault_respira, cola):
     with pytest.raises(FragmentoInvalido, match="03-plan-21-dias.html.*sin cerrar"):
         producir_pdf(vault_respira, "p-0042-respira", "principal", CFG, ahora=AHORA)
     assert list((raiz / "fuente").glob("*-v*.html")) == [] and list(raiz.glob("*.pdf")) == []
+
+
+# --- revisión del primer producto: secciones en flujo, fichas que llenan la página y su número -----
+
+_MM = 96 / 25.4
+
+
+def _documento(html: str, raiz: Path):
+    import weasyprint
+
+    return weasyprint.HTML(string=html, base_url=str(raiz) + os.sep, url_fetcher=fetcher_local(raiz)).render()
+
+
+def _cajas(caja):
+    yield caja
+    for hija in getattr(caja, "children", None) or []:
+        yield from _cajas(hija)
+
+
+def _caja_de_clase(pagina, clase: str):
+    """Primera caja (no anónima) de la página con ``clase``."""
+    for caja in _cajas(pagina._page_box):
+        elemento = getattr(caja, "element", None)
+        if (elemento is not None and not caja.element_tag.startswith("::")
+                and clase in (elemento.get("class") or "").split()):
+            return caja
+    return None
+
+
+def _texto_caja(caja) -> str:
+    return "".join(c.text for c in _cajas(caja) if hasattr(c, "text"))
+
+
+_VERBOS = ("respira", "cuenta", "suelta", "nota", "afloja", "escucha", "apoya", "baja", "estira", "repite",
+           "mira", "piensa", "deja", "lleva", "vuelve", "toca", "siente")
+_COSAS = ("la nariz", "los hombros", "la tripa", "las manos", "la espalda", "los pies", "la mandíbula",
+          "el cuello", "la frente", "los brazos", "las piernas", "el pecho", "la lengua", "los ojos",
+          "las rodillas", "la cadera", "la nuca")
+
+
+def _parrafos(n: int, palabra: str) -> str:
+    """``n`` párrafos distintos (sin repetir ninguno) de ~60 palabras."""
+    salida = []
+    for k in range(n):
+        v, c = _VERBOS[k % len(_VERBOS)], _COSAS[(k * 5) % len(_COSAS)]
+        salida.append(f"<p>{palabra}, paso {k + 1}: {v} despacio pensando en {c} y cuenta {k + 4} tiempos "
+                      f"antes de seguir. Durante la noche {k + 2} conviene que {c} quede suelta mientras "
+                      f"{v} sin prisa, con la luz baja y el teléfono lejos de la cama. Si aparece una idea, "
+                      f"apúntala en el papel número {k + 7} y vuelve a {c}; así el cuerpo aprende el ritmo "
+                      f"de la semana {k % 3 + 1} sin esfuerzo.</p>")
+    return "\n".join(salida)
+
+
+def _secciones_largas(raiz: Path) -> None:
+    """Tres secciones de ~1,2 páginas, cada una con su ejercicio y su recordatorio al final."""
+    carpeta = raiz / "fuente" / "secciones"
+    for f in carpeta.glob("*.html"):
+        f.unlink()
+    for i, nombre in enumerate(("uno", "dos", "tres"), 1):
+        bloques = [_parrafos(2, f"{nombre.capitalize()} {j}") for j in range(3)]
+        (carpeta / f"0{i}-{nombre}.html").write_text(
+            f"<h2>Apartado {nombre}</h2>\n"
+            f'<div class="lograr"><p>Al terminar el apartado {nombre} sabrás respirar más lento.</p></div>\n'
+            + "".join(f"<h3>Parte {j + 1} de {nombre}</h3>\n{b}\n" for j, b in enumerate(bloques))
+            + f'<div class="ejercicio"><p>Ejercicio {nombre}: tres minutos de respiración lenta.</p></div>\n'
+            f'<div class="recordar" id="r-0{i}"><p>Recuerda {nombre}: la salida más larga.</p></div>\n',
+            encoding="utf-8")
+
+
+@necesita_pdf
+def test_secciones_fluyen_sin_paginas_casi_vacias(vault_respira, tmp_path):
+    raiz = pieza(vault_respira, "p-0042-respira", "principal").raiz
+    _secciones_largas(raiz)
+    r = producir_pdf(vault_respira, "p-0042-respira", "principal", CFG, ahora=AHORA)
+    assert r.apto
+    paginas = _documento(r.html.read_text(encoding="utf-8"), raiz).pages
+    anclas: dict[str, int] = {}
+    for i, p in enumerate(paginas):
+        for n in p.anchors:
+            anclas.setdefault(n, i)
+    # Cada sección ocupa ~1,2 páginas: la siguiente empieza en la página donde acaban sus cajas, nunca
+    # en una nueva (con un salto forzado, la página de las cajas quedaba casi vacía).
+    for anterior, siguiente in (("r-01", "s-02"), ("r-02", "s-03")):
+        assert anclas[siguiente] == anclas[anterior], (anterior, siguiente, sorted(anclas.items(), key=lambda x: x[1]), len(paginas))
+    # el índice y el aviso no se quedan solos: el primer apartado empieza en su misma página
+    assert anclas["s-01"] == 1
+    # portada + 3 secciones de ~1,2 páginas en flujo (≤ 5 págs. de texto) + ficha + fuentes
+    assert r.paginas <= 1 + 5 + 1 + 1, r.paginas
+
+
+@necesita_pdf
+def test_ficha_ilustrada_de_casillas_con_notas_llena_la_pagina(vault_respira):
+    raiz = pieza(vault_respira, "p-0042-respira", "principal").raiz
+    sha = escribir_medio(raiz / "medios" / "f-01.png", _png_grande(1024, 1536))
+    registrar_medio(raiz, "f-01", "f-01.png", sha, "apimart", task_id="t-0002")
+    _ficha_yaml(raiz, {"id": "diario", "titulo": "Dishai 4-6", "imagen": "f-01", "tipo": "casillas",
+                       "instrucciones": "Marca cada paso mientras lo haces. Te llevará unos cinco minutos.",
+                       "filas": [f"Paso {i}: siéntate cómodo y respira despacio por la nariz." for i in range(5)],
+                       "notas": "Mis notas"})
+    r = producir_pdf(vault_respira, "p-0042-respira", "principal", CFG, ahora=AHORA)
+    assert r.apto and r.desbordes == ()
+    html = r.html.read_text(encoding="utf-8")
+    assert '<p class="notas-titulo">Mis notas</p>' in html
+    pagina = next(p for p in _documento(html, raiz).pages if "ini-diario" in p.anchors)
+    img = next(c for c in _cajas(pagina._page_box) if getattr(c, "element_tag", "") == "img")
+    assert img.height >= 100 * _MM  # la ilustración ya no es un sello de 70 mm
+    notas = _caja_de_clase(pagina, "notas")
+    assert notas is not None and "Mis notas" in _texto_caja(notas)
+    abajo = notas.position_y + notas.margin_height()
+    assert abajo >= pagina.anchors["fin-diario"][1] - 1  # llega hasta el pie de la ficha
+    assert notas.margin_height() >= 15 * _MM
+
+
+@necesita_pdf
+@pytest.mark.parametrize(("filas", "alto_min_mm"), [(7, 150), (11, 150), (17, 150)])
+def test_tablas_de_ficha_llenan_y_caben(vault_respira, filas, alto_min_mm):
+    raiz = pieza(vault_respira, "p-0042-respira", "principal").raiz
+    diario = raiz / "fuente" / "fichas" / "diario.yaml"
+    diario.write_text(diario.read_text(encoding="utf-8").replace("filas: 7", f"filas: {filas}"), encoding="utf-8")
+    r = producir_pdf(vault_respira, "p-0042-respira", "principal", CFG, ahora=AHORA)
+    assert r.apto and r.desbordes == ()
+    pagina = next(p for p in _documento(r.html.read_text(encoding="utf-8"), raiz).pages
+                  if "ini-diario" in p.anchors)
+    tabla = next(c for c in _cajas(pagina._page_box) if getattr(c, "element_tag", "") == "table")
+    assert tabla.margin_height() >= alto_min_mm * _MM, tabla.margin_height() / _MM
+
+
+@necesita_pdf
+def test_fichas_llevan_numero_de_pagina(vault_respira):
+    raiz = pieza(vault_respira, "p-0042-respira", "principal").raiz
+    r = producir_pdf(vault_respira, "p-0042-respira", "principal", CFG, ahora=AHORA)
+    assert r.apto
+    paginas = _documento(r.html.read_text(encoding="utf-8"), raiz).pages
+    i = next(i for i, p in enumerate(paginas) if "ini-diario" in p.anchors)
+    pies = [c for c in _cajas(paginas[i]._page_box) if getattr(c, "at_keyword", None) == "@bottom-center"]
+    assert [_texto_caja(c).strip() for c in pies] == [str(i + 1)]
+    # y la página de texto anterior lleva el suyo con el mismo estilo
+    pies_texto = [c for c in _cajas(paginas[i - 1]._page_box) if getattr(c, "at_keyword", None) == "@bottom-center"]
+    assert [_texto_caja(c).strip() for c in pies_texto] == [str(i)]
