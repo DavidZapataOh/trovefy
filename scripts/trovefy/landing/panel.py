@@ -149,13 +149,23 @@ def sha_texto(texto: str) -> str:
     return hashlib.sha256(texto.encode("utf-8")).hexdigest()
 
 
+_DATOS_BASE64 = re.compile(r"(data:[a-z]+/[a-z0-9.+-]+;base64,)[A-Za-z0-9+/=\s]+", re.IGNORECASE)
+
+
+def sin_datos_base64(texto: str) -> str:
+    """El texto con la carga de cada `data:<mime>;base64,…` sustituida por `…`. Esos bytes son imágenes en
+    línea: un trozo de base64 puede tener forma de token (p. ej. `EAA…`) sin serlo. Los secretos se buscan en
+    lo demás, que sigue revisado entero."""
+    return _DATOS_BASE64.sub(r"\1…", texto)
+
+
 def nombre_respaldo(ahora: datetime, sufijo: str = "") -> str:
     """`impultienda-AAAA-MM-DDTHHMMSS<sufijo>.html` (la hora, en la zona de negocio)."""
     return f"impultienda-{ahora.astimezone(ZONA_NEGOCIO):%Y-%m-%dT%H%M%S}{sufijo}.html"
 
 
 def _respaldar_en(vault: Path, carpeta: Path, contenido: str, ahora: datetime, que: str, sufijo: str = "") -> Path:
-    patron = buscar_secreto(contenido)
+    patron = buscar_secreto(sin_datos_base64(contenido))
     if patron:
         raise ValueError(f"lo que tiene ahora el campo de Impultienda parece llevar un secreto ({patron}): no lo "
                          "guardo ni toco nada. Revísalo tú en la pantalla.")

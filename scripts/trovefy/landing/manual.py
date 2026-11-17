@@ -28,7 +28,12 @@ from urllib.parse import urlsplit
 
 from trovefy.landing.entrada import DatosLanding, EntradaInvalida, ruta_landing
 from trovefy.landing.hosting import Hosting, empaquetar_en_linea, guardar_tienda
-from trovefy.landing.panel import _respaldar_en, nombre_respaldo, ultimo_respaldo
+from trovefy.landing.panel import (
+    _respaldar_en,
+    nombre_respaldo,
+    sin_datos_base64,
+    ultimo_respaldo,
+)
 from trovefy.landing.plantilla import leer_landing_yaml
 from trovefy.landing.publicar import (
     CARPETA_SUBIDA,
@@ -78,7 +83,7 @@ def preparar_pegado(vault: Path, datos: DatosLanding) -> Path:
     _puertas(vault, datos)
     raiz = ruta_landing(vault, datos.p_id, datos.pais)
     fragmento = empaquetar_en_linea(raiz)
-    patron = buscar_secreto(fragmento)
+    patron = buscar_secreto(sin_datos_base64(fragmento))
     if patron:
         raise NoPublicable(f"la landing en línea lleva algo con forma de secreto ({patron}): no la escribo")
     carpeta = raiz / CARPETA_SUBIDA

@@ -96,6 +96,29 @@ def test_pegado_con_algo_con_forma_de_secreto_no_se_escribe(tmp_path, monkeypatc
     assert not (ruta_landing(v, P, "ZZ") / "publicar" / "impultienda.html").exists()
 
 
+IMAGEN_CON_EAA = '<img src="data:image/webp;base64,UklGRk' + "EAAB" + "x7Kq2" * 8 + 'AAA=" alt="">'
+
+
+def test_pegado_no_confunde_los_datos_de_una_imagen_con_un_secreto(tmp_path, monkeypatch):
+    v = lista_sin_sonda(tmp_path)
+    monkeypatch.setattr(manual, "empaquetar_en_linea", lambda _r: f"<main>{IMAGEN_CON_EAA}</main>")
+    ruta = manual.preparar_pegado(v, cargar(v))
+    assert IMAGEN_CON_EAA in ruta.read_text(encoding="utf-8")
+
+
+def test_pegado_con_secreto_fuera_de_las_imagenes_sigue_parando(tmp_path, monkeypatch):
+    v = lista_sin_sonda(tmp_path)
+    monkeypatch.setattr(manual, "empaquetar_en_linea", lambda _r: f"<main>{IMAGEN_CON_EAA}{SECRETO}</main>")
+    with pytest.raises(NoPublicable, match="secreto"):
+        manual.preparar_pegado(v, cargar(v))
+
+
+def test_respaldo_manual_guarda_imagenes_en_linea(tmp_path):
+    v = lista_sin_sonda(tmp_path)
+    a = manual.guardar_respaldo(v, P, "ZZ", f"<p>lo de antes</p>{IMAGEN_CON_EAA}", AHORA)
+    assert IMAGEN_CON_EAA in a.read_text(encoding="utf-8")
+
+
 def test_instrucciones_dicen_archivo_tamano_y_pasos(tmp_path):
     v = lista_sin_sonda(tmp_path)
     d = cargar(v)
