@@ -1,3 +1,4 @@
+import unicodedata
 from decimal import Decimal
 
 import pytest
@@ -92,3 +93,40 @@ def test_contar_palabras_sin_indice_fuentes_ni_pies():
 def test_contar_palabras_no_pega_bloques():
     assert contar_palabras("<p>uno</p><p>dos</p>") == 2
     assert contar_palabras("<p>pa<strong>la</strong>bra</p>") == 1
+
+
+# --- ronda de revisión de las tareas 6–7 ------------------------------------------------------------
+
+
+def test_m5_plan_sin_fila_separadora_falla():
+    texto = "| Sección | Palabras | Fichas |\n| Uno | 6999 | 0 |\n| Dos | 10 | 0 |\n"
+    with pytest.raises(ValueError, match="separa"):
+        comprobar_plan(texto, 20, CFG)
+
+
+@pytest.mark.parametrize("total", ["Total", "TOTAL", "**Total**", "Totál", " total general "])
+def test_m5_fila_total_no_suma(total):
+    texto = _plan([("01", 3500, 1), (total, 3500, 1)])
+    cuenta = comprobar_plan(texto, 20, CFG)
+    assert (cuenta.palabras, cuenta.fichas) == (3500, 1)
+
+
+def test_bajo_mensaje_solo_si_faltan_paginas():
+    cuenta = comprobar_plan(_plan([("01", 6999, 0)]), 20, CFG)
+    assert cuenta.paginas_estimadas == 20
+    assert cuenta.faltan_palabras == 0
+    assert "faltan" not in cuenta.mensaje
+
+
+def test_bajo_mensaje_en_singular():
+    cuenta = comprobar_plan(_plan([("01", 6649, 0)]), 20, CFG)
+    assert cuenta.paginas_estimadas == 19
+    assert cuenta.mensaje.startswith("faltan ≈ 351 palabras (1 página):")
+    cuenta = comprobar_plan(_plan([("01", 6300, 0)]), 19, CFG)
+    assert cuenta.mensaje.startswith("faltan ≈ 350 palabras (1 página):")
+
+
+def test_bajo_contar_palabras_normaliza():
+    assert contar_palabras("<p>" + unicodedata.normalize("NFD", "canción respiración") + "</p>") == 2
+    assert contar_palabras("<p>respi&shy;ración y res\u200bpirar</p>") == 3
+    assert contar_palabras("<p>" + unicodedata.normalize("NFD", "дай ѝ книгата") + "</p>") == 3

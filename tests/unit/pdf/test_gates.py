@@ -1,4 +1,5 @@
 import json
+import unicodedata
 from decimal import Decimal
 from pathlib import Path
 
@@ -399,3 +400,363 @@ def test_valores_no_admitidos(raiz):
         _evaluar(_html("bueno.html"), raiz, exigencia="alta")
     with pytest.raises(ValueError):
         evaluar("", raiz=raiz, idioma="es", exigencia="normal", tipo_pieza="folleto", paginas_objetivo=1, cfg=CFG)
+
+
+# --- ronda de revisión de las tareas 6–7 ------------------------------------------------------------
+
+ANCLA = '<div class="ejercicio"><p>Esta noche'
+AVISO = ("<p>Este libro es una guía de hábitos. No es un tratamiento: si duermes mal desde hace semanas, "
+         "habla con tu médico.</p>")
+
+
+def _con(trozo: str, ancla: str = ANCLA) -> str:
+    html = _html("bueno.html")
+    assert ancla in html
+    return html.replace(ancla, trozo + ancla, 1)
+
+
+# H1: el aviso de salud no esconde promesas.
+
+
+def test_h1_promesa_dentro_del_aviso_falla(raiz):
+    html = _html("bueno.html").replace(
+        "habla con tu médico.</p>", "habla con tu médico.</p><p>Este método cura la ansiedad.</p>")
+    informe = _evaluar(html, raiz)
+    assert _gates(informe) == {"QG-11"}
+    assert informe.pasa is False
+
+
+def test_h1_ingresos_dentro_del_aviso_falla(raiz):
+    html = _html("bueno.html").replace("habla con tu médico.</p>",
+                                       "habla con tu médico.</p><p>Y vas a ganar 500 euros.</p>")
+    assert _gates(_evaluar(html, raiz)) == {"QG-10"}
+
+
+@pytest.mark.parametrize("descargo", [
+    "Esta guía no sustituye al médico.",
+    "Esta guía no sustituye a tu médico ni a tu tratamiento.",
+    "Antes de dejar la medicación, habla con tu médico.",
+])
+def test_h1_descargos_del_aviso_no_son_promesa(raiz, descargo):
+    html = _html("bueno.html").replace("habla con tu médico.</p>", f"habla con tu médico.</p><p>{descargo}</p>")
+    assert _evaluar(html, raiz).pasa is True
+
+
+def test_h1_negacion_lejana_o_tras_puntuacion_no_neutraliza():
+    assert [h.gate for h in promesas("No lo dudes: esto cura la ansiedad.", "es", "normal")] == ["QG-11"]
+    assert [h.gate for h in promesas("No es magia, pero cura el insomnio.", "es", "normal")] == ["QG-11"]
+
+
+def test_h1_negacion_en_bg_y_en():
+    assert promesas("Тази книга не лекува безсънието.", "bg", "normal") == []
+    assert promesas("This book does not cure insomnia.", "en", "normal") == []
+    assert promesas("This book doesn't replace your doctor.", "en", "normal") == []
+
+
+# H2: normalización del texto.
+
+
+@pytest.mark.parametrize(("trozo", "gate"), [
+    ("<p>Tendrás ingresos\npasivos y libertad\nfinanciera.</p>", "QG-10"),
+    ("<p>Tendrás ingresos&nbsp;pasivos.</p>", "QG-10"),
+    ("<p>Tendrás ingresos\u00a0\u00a0pasivos.</p>", "QG-10"),
+    ("<p>Tendrás ingresos<br>pasivos.</p>", "QG-10"),
+    ("<p>Vas a cu&shy;rar tu insomnio.</p>", "QG-11"),
+    ("<p>Vas a cu\u200brar tu insomnio.</p>", "QG-11"),
+    ("<p>Vas a cu\u2060rar tu insomnio.</p>", "QG-11"),
+    ("<p>Vas a \ufeffcurar tu insomnio.</p>", "QG-11"),
+    ("<p>" + unicodedata.normalize("NFD", "Esto sanará tu trauma.") + "</p>", "QG-11"),
+])
+def test_h2_promesa_partida_se_detecta(raiz, trozo, gate):
+    informe = _evaluar(_con(trozo), raiz)
+    assert gate in _gates(informe)
+    assert informe.pasa is False
+
+
+def test_h2_promesas_normaliza_el_texto_suelto():
+    assert [h.gate for h in promesas("ingresos\n\t pasivos", "es", "normal")] == ["QG-10"]
+    assert [h.gate for h in promesas(unicodedata.normalize("NFD", "sanará"), "es", "normal")] == ["QG-11"]
+
+
+def test_h2_cifra_partida_por_salto_de_linea(raiz):
+    assert "QG-09" in _gates(_evaluar(_con("<p>Casi 1 de\ncada 3 adultos.</p>"), raiz))
+    assert "QG-09" in _gates(_evaluar(_con("<p>El 40&nbsp;% de la gente.</p>"), raiz))
+
+
+# H3: QG-03 caza cualquier recurso remoto.
+
+
+@pytest.mark.parametrize("cambio", [
+    ("ancla", '<p style="background:url(https://x.test/a.png)">texto</p>'),
+    ("ancla", "<p style=\"background:url('//x.test/a.png')\">texto</p>"),
+    ("img", '<img src="medios/portada.png" srcset="medios/portada.png 1x, https://x.test/b.png 2x"'),
+    ("head", '<base href="https://x.test/">'),
+    ("head", '<base href="medios/">'),
+    ("ancla", '<svg><image href="https://x.test/a.png"/></svg>'),
+    ("ancla", '<svg><image xlink:href="//x.test/a.png"/></svg>'),
+    ("ancla", '<object data="https://x.test/a.pdf"></object>'),
+    ("ancla", '<video poster="https://x.test/p.png"></video>'),
+    ("ancla", '<iframe src="about:blank" data-x="1"></iframe><embed src="https://x.test/e.swf">'),
+    ("head", '<link rel="stylesheet" href="extra.css">'),
+    ("head", "<style>.x{background:image-set('https://x.test/a.png' 1x)}</style>"),
+])
+def test_h3_qg03_todo_recurso_remoto(raiz, cambio):
+    donde, trozo = cambio
+    html = _html("bueno.html")
+    if donde == "ancla":
+        html = _con(trozo)
+    elif donde == "img":
+        html = html.replace('<img src="medios/portada.png"', trozo)
+    else:
+        html = html.replace("</head>", f"{trozo}\n</head>")
+    informe = _evaluar(html, raiz)
+    assert "QG-03" in _gates(informe)
+    assert informe.pasa is False
+
+
+def test_h3_enlace_a_fuente_y_xmlns_no_son_recursos(raiz):
+    html = _html("bueno.html").replace(
+        "(dato de prueba).</li>", '(dato de prueba). <a href="https://datos.example.test/encuesta">enlace</a></li>')
+    html = html.replace(ANCLA, '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>' + ANCLA, 1)
+    assert _evaluar(html, raiz).hallazgos == ()
+
+
+# H4: QG-14 caza cualquier recorte.
+
+
+@pytest.mark.parametrize(("viejo", "nuevo"), [
+    (".push{", ".ficha{overflow:hidden}\n.push{"),
+    ("break-after:page}", "break-after:page;overflow:hidden !important}"),
+    ("break-after:page}", "break-after:page;overflow:hidden auto}"),
+    ("break-after:page}", "break-after:page;overflow: visible clip}"),
+    ("break-after:page}", "break-after:page;OVERFLOW-Y:Clip}"),
+    ("break-after:page}", "break-after:page;contain:paint}"),
+    ("break-after:page}", "break-after:page;contain: content}"),
+    ("break-after:page}", "break-after:page;contain:strict}"),
+    (".push{", "@media print{.seccion p{overflow:hidden}}\n.push{"),
+    ('<div class="lograr"><p>Al terminar este capítulo sabrás qué',
+     '<div class="lograr" style="overflow-x: hidden"><p>Al terminar este capítulo sabrás qué'),
+])
+def test_h4_qg14_cualquier_recorte(raiz, viejo, nuevo):
+    html = _html("bueno.html")
+    assert viejo in html
+    informe = _evaluar(html.replace(viejo, nuevo, 1), raiz)
+    assert _gates(informe) == {"QG-14"}
+
+
+@pytest.mark.parametrize(("viejo", "nuevo"), [
+    ("@page{size:A4;margin:0}", "@page{size:A4 portrait;margin:0}"),
+    ("@page{size:A4;margin:0}", "@page{size:a4;margin:0 0 0 0}"),
+    ("@page{size:A4;margin:0}", "@page{size:A4;margin:0mm 0}"),
+    ("height:296.8mm;", "height:296.8mm !important;"),
+    ("break-after:page}", "break-after:page;overflow:visible;contain:layout}"),
+])
+def test_h4_qg14_sin_falsos_positivos(raiz, viejo, nuevo):
+    html = _html("bueno.html")
+    assert viejo in html
+    assert _evaluar(html.replace(viejo, nuevo, 1), raiz).hallazgos == ()
+
+
+def test_h4_qg14_a4_apaisado_no_vale(raiz):
+    html = _html("bueno.html").replace("@page{size:A4;margin:0}", "@page{size:A4 landscape;margin:0}")
+    assert _gates(_evaluar(html, raiz)) == {"QG-14"}
+
+
+# M1: una página de imagen solo cuenta si tiene imagen; una .page vacía es un hallazgo.
+
+
+def test_m1_paginas_vacias_no_rellenan(raiz):
+    html = _html("bueno.html").replace('<section class="fuentes"',
+                                       '<div class="page"></div>' * 6 + '<section class="fuentes"')
+    informe = _evaluar(html, raiz, objetivo=10)
+    assert informe.paginas_estimadas == OBJETIVO
+    assert {"QG-05", "QG-12"} <= _gates(informe)
+    assert informe.pasa is False
+
+
+def test_m1_pagina_vacia_es_hallazgo(raiz):
+    html = _html("bueno.html").replace('<section class="fuentes"', '<div class="page"> </div><section class="fuentes"')
+    informe = _evaluar(html, raiz)
+    assert _gates(informe) == {"QG-12"}
+    [h] = informe.hallazgos
+    assert h.severidad == "alta" and "vacía" in h.texto
+
+
+def test_m1_pagina_sin_imagen_no_es_de_imagen(raiz):
+    # La portada sin <img> (con su título) ya no cuenta como página de imagen.
+    html = _html("bueno.html").replace('<img src="medios/portada.png" alt="Portada de Respira Lento">', "")
+    informe = _evaluar(html, raiz)
+    assert informe.paginas_estimadas == OBJETIVO - 1
+    assert _gates(informe) == {"QG-05"}
+
+
+# M2: fuentes e índice no esconden texto.
+
+
+def test_m2_texto_en_fuentes_fuera_de_las_citas_se_revisa(raiz):
+    html = _html("bueno.html").replace('<li id="fuente-1">', '<li>Este método cura tu ansiedad.</li><li id="fuente-1">')
+    assert "QG-11" in _gates(_evaluar(html, raiz))
+    html = _html("bueno.html").replace(
+        '<section class="seccion flujo" id="s-03">',
+        '<section class="fuentes"><p>Este método cura la ansiedad.</p></section><section class="seccion flujo" id="s-03">')
+    assert "QG-11" in _gates(_evaluar(html, raiz))
+
+
+def test_m2_cita_de_fuente_no_se_revisa(raiz):
+    html = _html("bueno.html").replace(
+        "Encuesta ficticia de hábitos de sueño, 2025 (dato de prueba).",
+        "Estudio ficticio: la respiración lenta cura el insomnio leve en el 40 % de los casos, 2025.")
+    assert _evaluar(html, raiz).hallazgos == ()
+
+
+def test_m2_indice_se_revisa(raiz):
+    html = _html("bueno.html").replace('<a href="#s-03">Tu plan de 21 días</a>',
+                                       '<a href="#s-03">Tu plan para ganar 500 euros</a>')
+    assert "QG-10" in _gates(_evaluar(html, raiz))
+
+
+def test_m2_cifra_en_fuentes_fuera_de_las_citas(raiz):
+    html = _html("bueno.html").replace("<h2>Fuentes</h2>", "<h2>Fuentes</h2><p>El 40 % no duerme.</p>")
+    assert "QG-09" in _gates(_evaluar(html, raiz))
+
+
+# M3: falsos positivos.
+
+
+@pytest.mark.parametrize("texto", [
+    "Консултирайте се с лекуващия си лекар, преди да започнете.",
+    "Лекуващият лекар знае най-добре.",
+    "Лекуващите лекари са съгласни.",
+])
+def test_m3_lekuvasht_no_es_promesa(texto):
+    assert promesas(texto, "bg", "sanitario") == []
+
+
+def test_m3_negacion_en_espanol_no_es_promesa():
+    assert promesas("Esta guía no sustituye al médico.", "es", "sanitario") == []
+    assert promesas("Nunca dejes tu medicación por tu cuenta.", "es", "sanitario") == []
+
+
+@pytest.mark.parametrize("texto", ["TODO EMPIEZA AQUÍ", "Lo TODO en mayúsculas", "Todo cambia"])
+def test_m3_todo_en_espanol_no_es_marcador(raiz, texto):
+    html = _html("bueno.html").replace("<h2>Tu plan de 21 días</h2>", f"<h2>{texto}</h2>")
+    assert "QG-01" not in _gates(_evaluar(html, raiz))
+
+
+@pytest.mark.parametrize("marcador", ["TODO: revisar", "TODO : revisar", "[ TODO ]", "[TODO revisar]",
+                                      "<!-- TODO revisar -->"])
+def test_m3_todo_como_marcador(raiz, marcador):
+    html = _html("bueno.html").replace("Recuerda: poco cada día", f"Recuerda: {marcador} poco cada día")
+    assert "QG-01" in _gates(_evaluar(html, raiz))
+
+
+def test_m3_bueno_bg_pasa(raiz):
+    informe = _evaluar(_html("bueno-bg.html"), raiz, idioma="bg")
+    assert informe.hallazgos == ()
+    assert informe.pasa is True
+    assert informe.paginas_estimadas == OBJETIVO
+
+
+# M4: QG-04 revisa toda referencia local a imagen.
+
+
+@pytest.mark.parametrize(("donde", "trozo"), [
+    ("css", ".portada{background:url(medios/ajena.png)}"),
+    ("css", ".portada{background:url('medios/ajena.png')}"),
+    ("ancla", '<p style="background:url(medios/ajena.png)">texto</p>'),
+    ("img", '<img src="medios/portada.png" srcset="medios/portada.png 1x, medios/ajena.png 2x"'),
+    ("ancla", '<svg><image href="medios/ajena.png"/></svg>'),
+    ("ancla", '<svg><image xlink:href="otra/ajena.png"/></svg>'),
+    ("ancla", '<video poster="medios/ajena.png"></video>'),
+    ("ancla", '<p><img src="data:image/png;base64,iVBORw0KGgo=" alt="x"></p>'),
+])
+def test_m4_qg04_toda_referencia_local(raiz, donde, trozo):
+    html = _html("bueno.html")
+    if donde == "css":
+        html = html.replace(".push{", trozo + "\n.push{")
+    elif donde == "img":
+        html = html.replace('<img src="medios/portada.png"', trozo)
+    else:
+        html = _con(trozo)
+    informe = _evaluar(html, raiz)
+    assert _gates(informe) == {"QG-04"}
+    assert informe.pasa is False
+
+
+def test_m4_referencias_propias_pasan(raiz):
+    html = _html("bueno.html").replace(".push{", ".portada{background:url(medios/portada.png)}\n.push{")
+    html = html.replace('<img src="medios/portada.png"',
+                        '<img src="medios/portada.png" srcset="medios/portada.png 1x, medios/portada.png 2x"')
+    html = html.replace(ANCLA, '<svg><defs><linearGradient id="g"/></defs><use href="#g"/></svg>'
+                        '<p style="fill:url(#g)">x</p>' + ANCLA, 1)
+    assert _evaluar(html, raiz).hallazgos == ()
+
+
+def test_m4_fuentes_de_font_face_no_son_imagenes(raiz):
+    html = _html("bueno.html").replace(
+        ".push{", "@font-face{font-family:'X';src:url(fuentes/x.ttf) format('truetype')}\n.push{")
+    assert _evaluar(html, raiz).hallazgos == ()
+
+
+# Bajos.
+
+
+@pytest.mark.parametrize("frase", ["El 40 por ciento de la gente", "70 процента от хората", "40 percent of people",
+                                   "40 per cent of people"])
+def test_bajo_qg09_porcentaje_en_palabras(raiz, frase):
+    assert "QG-09" in _gates(_evaluar(_con(f"<p>{frase}.</p>"), raiz))
+
+
+@pytest.mark.parametrize("trozo", ["<ul><li>El 40% de la gente<ul><li>sub</li></ul></li></ul>",
+                                   "<table><tr><td>El 40% de la gente</td></tr></table>",
+                                   "<h3>El 40% de la gente</h3>"])
+def test_bajo_qg09_cifra_en_otros_bloques(raiz, trozo):
+    assert "QG-09" in _gates(_evaluar(_con(trozo), raiz))
+
+
+@pytest.mark.parametrize("aviso", ["", "<p>Ojo.</p>", "<p>Consulta a tu médico.</p>"])
+def test_bajo_aviso_de_salud_vacio_o_corto(raiz, aviso):
+    html = _html("bueno.html").replace(AVISO, aviso)
+    informe = _evaluar(html, raiz)
+    assert _gates(informe) == {"QG-11"}
+    assert informe.pasa is False
+    assert _evaluar(html, raiz, exigencia="normal").pasa is True
+
+
+@pytest.mark.parametrize(("texto", "idioma", "gate"), [
+    ("Este método va a sanarte por dentro.", "es", "QG-11"),
+    ("Con esto te curarás para siempre.", "es", "QG-11"),
+    ("Te sanarás en una semana.", "es", "QG-11"),
+    ("Спечелете свободата си още днес.", "bg", "QG-10"),
+    ("Ще печелиш 500 лева.", "bg", "QG-10"),
+    ("Ще спечелите 2000 евро.", "bg", "QG-10"),
+])
+def test_bajo_formas_nuevas_del_lexico(texto, idioma, gate):
+    assert [h.gate for h in promesas(texto, idioma, "normal")] == [gate]
+
+
+@pytest.mark.parametrize(("texto", "idioma"), [
+    ("Una comida sana ayuda a dormir.", "es"),
+    ("Procura dormir a la misma hora.", "es"),
+    ("Кой печели от лошия сън?", "bg"),
+])
+def test_bajo_palabras_corrientes_no_son_promesa(texto, idioma):
+    assert promesas(texto, idioma, "normal") == []
+
+
+@pytest.mark.parametrize("texto", ["¿No quieres ganar 500 euros al mes?", "No dudes que esto cura la ansiedad.",
+                                   "Not only does this cure insomnia.", "Не чакай: това лекува безсънието."])
+def test_h1_negacion_que_no_niega_la_promesa(texto):
+    idioma = "bg" if "това" in texto else "en" if texto.startswith("Not") else "es"
+    assert promesas(texto, idioma, "normal") != []
+
+
+@pytest.mark.parametrize("texto", ["Esta guía no te curará.", "Esto no va a curar el insomnio.",
+                                   "This book will not cure insomnia.", "Тази книга не ще те излекува."])
+def test_h1_negacion_con_auxiliares_neutraliza(texto):
+    idioma = "bg" if "книга" in texto else "en" if texto.startswith("This") else "es"
+    assert promesas(texto, idioma, "normal") == []
+
+
+def test_m2_cita_fuera_de_fuentes_se_revisa(raiz):
+    assert "QG-11" in _gates(_evaluar(_con('<ul><li id="fuente-9">Este método cura la ansiedad.</li></ul>'), raiz))

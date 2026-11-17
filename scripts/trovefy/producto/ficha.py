@@ -1,9 +1,11 @@
 """Paso 1 de ``/producto``: precondiciones (estado y tres señales) y ``entregable/FICHA.md``.
 
-Precondiciones (contrato 3 y resolución 8): ``paises.<PAIS>.estado`` es ``modelado`` o posterior;
+Precondiciones (contrato 3, resoluciones 8 y 9, Ruling M6): ``paises.<PAIS>.estado`` es ``modelado`` o
+posterior; ``OFERTA.md`` está aprobada (``trovefy.modelar.aprobacion.oferta_aprobada``) y es de ese país;
 ``AUDITORIA.md`` trae ``ya_se_vende`` y ``hueco_por_pais`` en ``true``; y la tercera señal está en
 ``PRODUCTO.md`` → ``senales.se_puede_mejorar: true`` o hay una excepción de R16 vigente
 (``trovefy.modelar.aprobacion.excepcion_vigente``). ``decisiones/*-excepcion-senales.md`` ya no vale.
+``crear_ficha`` las comprueba siempre antes de escribir nada.
 
 Piezas (resolución 13 y Ruling R1): ``principal``, un ``bono-N`` por cada ``core.bonos`` de ``OFERTA.md``
 (sin id: su id es su posición desde 1), el ``bump`` siempre y ``u1|u2|u3|downsell`` solo con
@@ -20,7 +22,7 @@ from pathlib import Path
 from typing import Literal, get_args
 
 from trovefy.config import mercados as mercados_cfg
-from trovefy.modelar.aprobacion import excepcion_vigente
+from trovefy.modelar.aprobacion import excepcion_vigente, oferta_aprobada
 from trovefy.modelar.salida import cargar_brandbook, cargar_escalera, cargar_oferta
 from trovefy.producto.config import cargar_config
 from trovefy.producto.rutas import UPSELLS, entregable
@@ -61,6 +63,10 @@ def _pais(pais: str) -> str:
 
 class SinTresSenales(Exception):
     """Falta alguna de las tres señales de §4.1 (o la excepción de R16 vigente)."""
+
+
+class OfertaNoAprobada(Exception):
+    """``OFERTA.md`` no está aprobada (``oferta_aprobada``) o es de otro país (Ruling M6)."""
 
 
 class EstadoNoValido(EstadoInesperado):
@@ -104,6 +110,14 @@ def comprobar_precondiciones(vault: Path, p_id: str, pais: str, *, ahora: dateti
     estado = bloque.get("estado") if isinstance(bloque, dict) else None
     if estado not in ESTADOS_PRODUCIBLES:
         raise EstadoNoValido(f"{pais} está en «{estado or 'sin estado'}»: primero /modelar")
+
+    aprobada, motivo = oferta_aprobada(vault, p_id)
+    if not aprobada:
+        raise OfertaNoAprobada(f"{motivo}; sin oferta aprobada no se produce")
+    pais_oferta = cargar_oferta(vault, p_id).get("pais")
+    if pais_oferta != pais:
+        raise OfertaNoAprobada(f"OFERTA.md es de {pais_oferta or 'ningún país'}, no de {pais}: "
+                               f"modela la oferta de {pais} en /modelar")
 
     auditoria = ruta.parent / "AUDITORIA.md"
     if not auditoria.is_file():
@@ -195,6 +209,7 @@ def crear_ficha(vault: Path, p_id: str, pais: str, exigencia: str, tipo: str, ah
         raise ValueError(f"exigencia «{exigencia}» no admitida: {', '.join(EXIGENCIAS)}")
     if tipo not in TIPOS:
         raise ValueError(f"tipo «{tipo}» no admitido: {', '.join(TIPOS)}")
+    comprobar_precondiciones(vault, p_id, pais, ahora=ahora)
     cfg = cargar_config(vault)
     oferta = cargar_oferta(vault, p_id)
     escalera = cargar_escalera(vault, p_id).get(pais)

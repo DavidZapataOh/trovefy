@@ -8,6 +8,7 @@ from trovefy.producto.config import iniciar_config
 from trovefy.producto.ficha import (
     EstadoNoValido,
     Ficha,
+    OfertaNoAprobada,
     PiezaFicha,
     SinTresSenales,
     comprobar_precondiciones,
@@ -132,6 +133,42 @@ def test_tercera_en_auditoria_no_basta(tmp_path):
     _editar(v, "AUDITORIA", lambda m: m["senales"].update(se_puede_mejorar=True))
     with pytest.raises(SinTresSenales):
         comprobar_precondiciones(v, P, "ZZ", ahora=AHORA)
+
+
+# M6: la oferta aprobada y del mismo país.
+
+
+@pytest.mark.parametrize("aprobacion", ["rechazada", "pendiente"])
+def test_m6_oferta_no_aprobada_no_produce(tmp_path, aprobacion):
+    v = _vault(tmp_path)
+    _editar(v, "OFERTA", lambda m: m.update(aprobacion=aprobacion))
+    with pytest.raises(OfertaNoAprobada):
+        comprobar_precondiciones(v, P, "ZZ", ahora=AHORA)
+
+
+def test_m6_oferta_rechazada_no_crea_ficha(tmp_path):
+    v = _vault(tmp_path)
+    _editar(v, "OFERTA", lambda m: m.update(aprobacion="rechazada"))
+    with pytest.raises(OfertaNoAprobada, match="rechazada"):
+        crear_ficha(v, P, "ZZ", "sanitario", "ebook", AHORA)
+    assert not (v / "productos" / P / "entregable" / "FICHA.md").exists()
+
+
+def test_m6_oferta_de_otro_pais_no_produce(tmp_path):
+    v = _vault(tmp_path)
+    _editar(v, "PRODUCTO", lambda m: m["paises"].update(ZY={"estado": "modelado"}))
+    with pytest.raises(OfertaNoAprobada, match="ZZ"):
+        comprobar_precondiciones(v, P, "ZY", ahora=AHORA)
+    with pytest.raises(OfertaNoAprobada):
+        crear_ficha(v, P, "ZY", "sanitario", "ebook", AHORA)
+    assert not (v / "productos" / P / "entregable" / "FICHA.md").exists()
+
+
+def test_m6_crear_ficha_comprueba_precondiciones(tmp_path):
+    v = _vault(tmp_path)
+    _estado(v, "aprobado")
+    with pytest.raises(EstadoNoValido):
+        crear_ficha(v, P, "ZZ", "sanitario", "ebook", AHORA)
 
 
 # --- ficha ------------------------------------------------------------------------------------------

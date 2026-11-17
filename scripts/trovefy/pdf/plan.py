@@ -1,12 +1,14 @@
 """Paso 2 de ``/producto``: el plan del libro y el contador de 350 palabras por página (§4.7).
 
 Claude escribe ``PLAN.md`` con una tabla ``| sección | palabras | fichas |`` (y, si quiere, una columna
-``imágenes`` con las páginas de imagen a toda página). Aquí solo se cuenta: si el plan no llega al
+``imágenes`` con las páginas de imagen a toda página), la fila separadora ``|---|`` bajo la cabecera y, si
+quiere, una fila «Total» que no se suma. Aquí solo se cuenta: si el plan no llega al
 objetivo de páginas de la ficha, se dice cuántas palabras faltan y que se enriquezca, nunca que se rellene.
 
 ``contar_palabras`` es el mismo contador que usan los gates (QG-05, QG-06): texto visible, sin el índice
 (``nav.indice``), sin las fuentes (``section.fuentes``) y sin los pies de figura; palabras = ``\\w+``
-Unicode, así que cuenta igual en latino y en cirílico.
+Unicode sobre el texto normalizado (``normalizar``), así que cuenta igual en latino y en cirílico, en NFC o
+NFD y con guiones blandos.
 """
 
 from __future__ import annotations
@@ -30,6 +32,18 @@ _NO_VISIBLES = frozenset({"head", "title", "style", "script", "template", "noscr
 _ENRIQUECER = "enriquece con ejemplos, ejercicios o plantillas; nunca rellenes"
 _ENTERO = re.compile(r"\d{1,3}(?:[.  ]\d{3})+|\d+")
 _VACIO = frozenset({"", "-", "—", "–"})
+_ESPACIOS = re.compile(r"\s+")
+_SEPARADOR = re.compile(r"\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)*\|?")
+
+
+def normalizar(texto: str) -> str:
+    """Texto listo para contar y buscar: NFC, sin caracteres de formato (Cf: guion blando, espacios de
+    anchura cero, unión de palabras, BOM), el espacio duro como espacio y cada racha de blancos en uno solo.
+    Así una promesa partida por un salto de línea, un ``&nbsp;``, un ``<br>`` o un ``&shy;`` sigue casando,
+    y una palabra en NFD cuenta como una."""
+    texto = unicodedata.normalize("NFC", texto)
+    texto = "".join(c for c in texto if unicodedata.category(c) != "Cf")
+    return _ESPACIOS.sub(" ", texto.replace("\u00a0", " "))
 
 
 def clases(attrs: dict[str, str | None] | list[tuple[str, str | None]]) -> set[str]:
@@ -79,7 +93,7 @@ def contar_palabras(html: str) -> int:
     lector = _Contador()
     lector.feed(html)
     lector.close()
-    return len(PALABRA.findall("".join(lector.trozos)))
+    return len(PALABRA.findall(normalizar("".join(lector.trozos))))
 
 
 def paginas_estimadas(palabras: int, fichas: int, paginas_imagen: int, palabras_por_pagina: int) -> int:
@@ -101,16 +115,18 @@ class Cuenta:
 
     @property
     def mensaje(self) -> str:
-        if self.faltan_palabras > 0:
+        if self.paginas_estimadas < self.objetivo:
             paginas = self.objetivo - self.paginas_estimadas
-            return (f"faltan ≈ {_miles(self.faltan_palabras)} palabras ({paginas} "
+            return (f"faltan ≈ {_miles(self.faltan_palabras)} "
+                    f"{'palabra' if self.faltan_palabras == 1 else 'palabras'} ({paginas} "
                     f"{'página' if paginas == 1 else 'páginas'}): {_ENRIQUECER}")
         return f"el plan llega: {self.paginas_estimadas} páginas estimadas para un objetivo de {self.objetivo}"
 
 
 def cuenta(palabras: int, fichas: int, paginas_imagen: int, objetivo: int, palabras_por_pagina: int) -> Cuenta:
     estimadas = paginas_estimadas(palabras, fichas, paginas_imagen, palabras_por_pagina)
-    faltan = max(0, (objetivo - fichas - paginas_imagen) * palabras_por_pagina - palabras)
+    # Si las páginas estimadas llegan (el redondeo hacia arriba ya cuenta la última página a medias), no falta nada.
+    faltan = 0 if estimadas >= objetivo else (objetivo - fichas - paginas_imagen) * palabras_por_pagina - palabras
     return Cuenta(palabras, fichas, paginas_imagen, estimadas, objetivo, faltan)
 
 
@@ -134,6 +150,11 @@ def _entero(celda: str, columna: str, obligatoria: bool) -> int:
     return int(re.sub(r"\D", "", celda))
 
 
+def _es_total(celda: str) -> bool:
+    nombre = _normal(celda.replace("*", "").replace("_", " "))
+    return nombre == "total" or nombre.startswith("total ")
+
+
 def comprobar_plan(texto_plan: str, objetivo: int, cfg: ConfigProducto) -> Cuenta:
     """Suma la tabla ``| sección | palabras | fichas |`` de ``PLAN.md`` y la compara con el objetivo."""
     lineas = texto_plan.splitlines()
@@ -146,6 +167,9 @@ def comprobar_plan(texto_plan: str, objetivo: int, cfg: ConfigProducto) -> Cuent
             continue
         col = {n: j for j, n in enumerate(nombres)}
         col_img = next((j for j, n in enumerate(nombres) if n.startswith("imagen")), None)
+        if i + 1 >= len(lineas) or not _SEPARADOR.fullmatch(lineas[i + 1].strip()):
+            raise ValueError("PLAN.md: falta la fila que separa la cabecera de la tabla (| --- | --- | --- |) "
+                             "justo debajo de | sección | palabras | fichas |")
         palabras = fichas = imagenes = 0
         for fila in lineas[i + 2:]:
             datos = _celdas(fila)
@@ -153,6 +177,8 @@ def comprobar_plan(texto_plan: str, objetivo: int, cfg: ConfigProducto) -> Cuent
                 break
             if len(datos) < len(nombres):
                 raise ValueError(f"PLAN.md: a la fila «{fila.strip()}» le faltan columnas")
+            if _es_total(datos[col["seccion"]]):
+                continue  # la fila de totales no es una sección: sumarla contaría dos veces
             palabras += _entero(datos[col["palabras"]], "palabras", True)
             fichas += _entero(datos[col["fichas"]], "fichas", False)
             if col_img is not None:
