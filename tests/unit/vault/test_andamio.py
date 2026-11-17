@@ -12,7 +12,7 @@ def test_init_crea_el_andamio(tmp_path):
     crear_vault(v)
     for c in CARPETAS:
         assert (v / c).is_dir(), c
-    for f in ["CLAUDE.md", "index.md", "log.md", "config/umbrales.yaml", "config/mercados.yaml",
+    for f in ["CLAUDE.md", "index.md", "log.md", "config/umbrales.yaml", "config/mercados.yaml", "config/producto.yaml",
               "wiki/caza/exclusiones.md", "wiki/entidades.md"]:
         assert (v / f).is_file(), f
     assert "<!-- REGLAS:INICIO -->" in (v / "CLAUDE.md").read_text()

@@ -1,0 +1,18 @@
+# Producto (/producto): tope de APIMart, modelos de imagen, contador del plan y umbral de los gates.
+# Cada hoja lleva {valor, fuente, fecha}, como config/economia.yaml. El tope de un producto concreto
+# puede subirse en su PRODUCTO.md (apimart_tope_usd), siempre con la cita literal del usuario.
+apimart:
+  tope_producto_usd: {valor: "2.00", fuente: "§4.7: portada, mockup y 6–10 ilustraciones; suma principal, bonos y upsells (contrato 7)", fecha: "2026-11-16"}
+  modelos_imagen: {valor: [gpt-image-2], fuente: "P-11: se usa el más barato con precio medido de esta lista", fecha: "2026-11-16"}
+  resolucion: {valor: 1k, fuente: "§4.7 «proporción + resolution»; 4k solo en 6 proporciones", fecha: "2026-11-16"}
+plan:
+  palabras_por_pagina: {valor: 350, fuente: "§4.7 paso 2 (dp-createur dp-playbook-create:237-262)", fecha: "2026-11-16"}
+  paginas_min:
+    ebook: {valor: 20, fuente: "diseñador (plan 17), a recalibrar con el primer producto; gana sobre dp-createur (60+): el método valora la unidad de venta", fecha: "2026-11-16"}
+    kit: {valor: 10, fuente: "diseñador (plan 17), a recalibrar con el primer producto", fecha: "2026-11-16"}
+    bono: {valor: 4, fuente: "diseñador (plan 17), a recalibrar con el primer producto", fecha: "2026-11-16"}
+    bump: {valor: 4, fuente: "diseñador (plan 17, resolución 13): pieza pequeña como un bono, a recalibrar con el primer producto", fecha: "2026-11-16"}
+    upsell: {valor: 8, fuente: "diseñador (plan 17), a recalibrar con el primer producto; vale para u1, u2, u3 y downsell", fecha: "2026-11-16"}
+  seccion_palabras_min: {valor: 300, fuente: "diseñador (plan 17)", fecha: "2026-11-16"}
+gates:
+  puntuacion_min: {valor: 85, fuente: "dp-createur references/scoring-system.md, adaptado", fecha: "2026-11-16"}
