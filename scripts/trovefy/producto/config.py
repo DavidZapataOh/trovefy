@@ -1,0 +1,231 @@
+"""Carga y validación de ``config/producto.yaml``. Cada hoja es ``{valor, fuente, fecha}``.
+
+Mismo formato que ``config/economia.yaml`` (contrato, resolución 12): la validación de las hojas es la
+de :mod:`trovefy.economia.config`. Los importes salen en ``Decimal`` (``Decimal(str(v))``), con dos
+decimales como mucho y mayores que 0; nunca ``float``.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
+from pathlib import Path
+from types import MappingProxyType
+from typing import Any
+
+import yaml
+
+from trovefy.config.yaml_config import cargar_yaml
+from trovefy.economia.config import EconomiaInvalida, es_hoja, revisar_hojas
+from trovefy.producto.rutas import validar_p_id
+from trovefy.vault import frontmatter
+from trovefy.vault.escritura import escribir_atomico
+
+PLANTILLA = Path(__file__).resolve().parents[3] / "templates" / "cerebro" / "config" / "producto.yaml"
+RELATIVA = Path("config") / "producto.yaml"
+RESOLUCIONES = ("1k", "2k", "4k")
+# Claves de plan.paginas_min: tipo de la pieza principal (ebook|kit) y tipo de las demás piezas.
+TIPOS_PAGINAS = ("ebook", "kit", "bono", "bump", "upsell")
+MODELO = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,63}", re.ASCII)
+
+
+class ConfigInvalida(ValueError):
+    """``config/producto.yaml`` (o ``apimart_tope_usd`` de ``PRODUCTO.md``) no cumple el formato."""
+
+
+@dataclass(frozen=True)
+class ConfigProducto:
+    tope_usd: Decimal
+    modelos_imagen: tuple[str, ...]
+    resolucion: str
+    palabras_por_pagina: int
+    paginas_min: Mapping[str, int]  # MappingProxyType: de solo lectura
+    seccion_palabras_min: int
+    puntuacion_min: int
+
+
+def importe_usd(v: Any, clave: str) -> Decimal:
+    """Importe en USD: número o texto, > 0 y con dos decimales como mucho. ``ConfigInvalida`` si no."""
+    if isinstance(v, bool) or not isinstance(v, (int, float, str)):
+        raise ConfigInvalida(f"{clave}: importe ilegible ({v!r})")
+    try:
+        d = Decimal(str(v).strip())
+    except InvalidOperation:
+        raise ConfigInvalida(f"{clave}: importe ilegible ({v!r})") from None
+    if not d.is_finite() or d <= 0:
+        raise ConfigInvalida(f"{clave}: debe ser un importe mayor que 0 ({v!r})")
+    if d.as_tuple().exponent < -2:
+        raise ConfigInvalida(f"{clave}: como mucho dos decimales ({v!r})")
+    return d
+
+
+def _valor(datos: dict, clave: str) -> Any:
+    actual: Any = datos
+    for parte in clave.split("."):
+        if not isinstance(actual, dict) or es_hoja(actual) or parte not in actual:
+            raise ConfigInvalida(f"falta {clave} en config/producto.yaml")
+        actual = actual[parte]
+    if not es_hoja(actual):
+        raise ConfigInvalida(f"{clave}: no es una hoja {{valor, fuente, fecha}}")
+    if actual["valor"] is None:
+        raise ConfigInvalida(f"no medido: falta {clave} en config/producto.yaml")
+    return actual["valor"]
+
+
+def _entero(datos: dict, clave: str, maximo: int | None = None) -> int:
+    v = _valor(datos, clave)
+    if isinstance(v, bool) or not isinstance(v, int) or v <= 0 or (maximo is not None and v > maximo):
+        rango = f"entre 1 y {maximo}" if maximo is not None else "mayor que 0"
+        raise ConfigInvalida(f"{clave}: debe ser un entero {rango} ({v!r})")
+    return v
+
+
+def _construir(datos: Any) -> ConfigProducto:
+    if not isinstance(datos, dict):
+        raise ConfigInvalida("config/producto.yaml no es un mapa")
+    try:
+        revisar_hojas(datos, "")
+    except EconomiaInvalida as exc:
+        raise ConfigInvalida(f"config/producto.yaml: {exc}") from None
+
+    modelos = _valor(datos, "apimart.modelos_imagen")
+    if not isinstance(modelos, list) or not modelos or not all(isinstance(m, str) and m.strip() for m in modelos):
+        raise ConfigInvalida("apimart.modelos_imagen: debe ser una lista de modelos no vacía")
+    malos = [m for m in modelos if not MODELO.fullmatch(m.strip())]
+    if malos:
+        raise ConfigInvalida(f"apimart.modelos_imagen: nombre de modelo mal escrito ({malos[0]!r}); "
+                             "letras, cifras y . _ / - (hasta 64)")
+    resolucion = _valor(datos, "apimart.resolucion")
+    if resolucion not in RESOLUCIONES:
+        raise ConfigInvalida(f"apimart.resolucion: {resolucion!r} no es {', '.join(RESOLUCIONES)}")
+    paginas = MappingProxyType({t: _entero(datos, f"plan.paginas_min.{t}") for t in TIPOS_PAGINAS})
+
+    return ConfigProducto(
+        tope_usd=importe_usd(_valor(datos, "apimart.tope_producto_usd"), "apimart.tope_producto_usd"),
+        modelos_imagen=tuple(m.strip() for m in modelos),
+        resolucion=resolucion,
+        palabras_por_pagina=_entero(datos, "plan.palabras_por_pagina"),
+        paginas_min=paginas,
+        seccion_palabras_min=_entero(datos, "plan.seccion_palabras_min"),
+        puntuacion_min=_entero(datos, "gates.puntuacion_min", maximo=100),
+    )
+
+
+def cargar_config(vault: Path) -> ConfigProducto:
+    ruta = Path(vault) / RELATIVA
+    if not ruta.is_file():
+        raise FileNotFoundError("falta config/producto.yaml: ejecuta `trovefy producto iniciar`")
+    try:
+        datos = cargar_yaml(ruta.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        raise ConfigInvalida(f"config/producto.yaml no se puede leer: {exc}") from None
+    return _construir(datos)
+
+
+def iniciar_config(vault: Path) -> Path:
+    """Copia la plantilla a ``config/producto.yaml``; nunca sobrescribe."""
+    ruta = Path(vault) / RELATIVA
+    if ruta.exists():
+        raise FileExistsError(f"ya existe {RELATIVA}: no se sobrescribe")
+    escribir_atomico(ruta, PLANTILLA.read_text(encoding="utf-8"))
+    return ruta
+
+
+_NOMBRE_DECISION = re.compile(r"(\d{4}-\d{2}-\d{2}-\d{6})-tope-apimart\.md")
+
+
+def _registrada(meta: dict, nombre: str, ahora: datetime) -> datetime | None:
+    """Instante de ``registrada`` (con zona) si cuadra con el nombre del archivo y no es futuro; si no, None.
+
+    El nombre lleva la hora local de ``registrada`` en su propia zona (así lo escribe ``subir_tope``); el
+    orden se hace con el instante, de modo que no depende de la zona del proceso ni de la de cada decisión.
+    """
+    m = _NOMBRE_DECISION.fullmatch(nombre)
+    valor = meta.get("registrada")
+    if m is None or isinstance(valor, bool):
+        return None
+    if isinstance(valor, str):
+        try:
+            valor = datetime.fromisoformat(valor)
+        except ValueError:
+            return None
+    if not isinstance(valor, datetime) or valor.tzinfo is None or valor.utcoffset() is None:
+        return None
+    if valor.strftime("%Y-%m-%d-%H%M%S") != m.group(1) or valor > ahora:
+        return None
+    return valor
+
+
+def ultima_decision(dir_producto: Path, p_id: str, ahora: datetime | None = None) -> tuple[Decimal, Path] | None:
+    """``(tope_nuevo_usd, ruta)`` de la última ``decisiones/*-tope-apimart.md`` del producto con ``cita`` no vacía.
+
+    «Última» es la de ``registrada`` más reciente (instante con zona), no la que ordena última por nombre.
+    Se descartan las decisiones sin ``registrada`` legible con zona, las fechadas en el futuro y aquellas
+    cuyo nombre no cuadra con ``registrada``. Si dos válidas empatan en el instante con importes distintos,
+    o la última tiene un importe ilegible, no hay decisión clara: ``None`` (falla cerrado).
+    """
+    carpeta = dir_producto / "decisiones"
+    if not carpeta.is_dir():
+        return None
+    ahora = ahora or datetime.now(UTC)
+    validas: list[tuple[datetime, Path, dict]] = []
+    for ruta in carpeta.glob("*-tope-apimart.md"):
+        if ruta.is_symlink() or not ruta.is_file():
+            continue
+        try:
+            meta, _ = frontmatter.leer(ruta)
+        except (OSError, ValueError, yaml.YAMLError):
+            continue
+        meta = meta if isinstance(meta, dict) else {}
+        cita = meta.get("cita")
+        if meta.get("producto") != p_id or not isinstance(cita, str) or not cita.strip():
+            continue
+        cuando = _registrada(meta, ruta.name, ahora)
+        if cuando is not None:
+            validas.append((cuando, ruta, meta))
+    if not validas:
+        return None
+    ultima = max(c for c, _, _ in validas)
+    elegidas: dict[Decimal, Path] = {}
+    for cuando, ruta, meta in sorted(validas, key=lambda v: v[1].name):
+        if cuando != ultima:
+            continue
+        try:
+            elegidas[importe_usd(meta.get("tope_nuevo_usd"), f"decisiones/{ruta.name}: tope_nuevo_usd")] = ruta
+        except ConfigInvalida:
+            return None
+    return next(iter(elegidas.items())) if len(elegidas) == 1 else None
+
+
+def _tope_decidido(dir_producto: Path, p_id: str, ahora: datetime | None = None) -> Decimal | None:
+    """Importe de :func:`ultima_decision` (``None`` si no hay ninguna válida)."""
+    decision = ultima_decision(dir_producto, p_id, ahora)
+    return None if decision is None else decision[0]
+
+
+def tope_de(vault: Path, p_id: str, cfg: ConfigProducto) -> Decimal:
+    """Tope de APIMart del producto: ``PRODUCTO.md`` → ``apimart_tope_usd`` si está; si no, ``cfg.tope_usd``.
+
+    ``apimart_tope_usd`` solo vale si coincide con ``tope_nuevo_usd`` de la última
+    ``decisiones/*-tope-apimart.md`` del producto con ``cita`` no vacía (la escribe ``subir_tope`` con las
+    palabras del usuario). Si no coincide, ``ConfigInvalida``: falla cerrado y no se genera nada.
+    """
+    ruta = Path(vault) / "productos" / validar_p_id(p_id) / "PRODUCTO.md"
+    if not ruta.is_file():
+        return cfg.tope_usd
+    meta, _ = frontmatter.leer(ruta)
+    valor = (meta or {}).get("apimart_tope_usd")
+    if valor is None:
+        return cfg.tope_usd
+    tope = importe_usd(valor, f"productos/{p_id}/PRODUCTO.md: apimart_tope_usd")
+    if _tope_decidido(ruta.parent, p_id) != tope:
+        raise ConfigInvalida(
+            f"productos/{p_id}/PRODUCTO.md: apimart_tope_usd ({tope} USD) no coincide con la última decisión "
+            "con la cita del usuario (decisiones/*-tope-apimart.md); no se genera nada. El tope solo se sube "
+            "con la cita literal del usuario. Si una subida del tope se cortó a medias (la decisión está escrita "
+            "y PRODUCTO.md no), repite la subida con el mismo importe y la cita del usuario: termina de escribir "
+            "PRODUCTO.md sin otra decisión. Si no, pide ayuda: no sabes de dónde sale ese valor")
+    return tope

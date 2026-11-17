@@ -7,7 +7,7 @@ RAIZ = pathlib.Path(__file__).resolve().parents[2]
 def test_hooks_json_registra_los_hooks():
     reg = json.loads((RAIZ / "hooks/hooks.json").read_text())
     comandos = json.dumps(reg)
-    for h in ["meta_guard.py", "secretos.py", "raw_inmutable.py", "stop.py", "buzon_guard.py"]:
+    for h in ["meta_guard.py", "secretos.py", "raw_inmutable.py", "stop.py", "buzon_guard.py", "apimart_gasto.py"]:
         assert h in comandos
         assert (RAIZ / "hooks" / h).exists()
     assert "${CLAUDE_PLUGIN_ROOT}" in comandos
@@ -21,6 +21,7 @@ def test_matchers_exactos():
         "raw_inmutable.py": "Write|Edit|MultiEdit|Bash",
         "stop.py": "Write|Edit|MultiEdit|Bash",
         "buzon_guard.py": "Write|Edit|MultiEdit|NotebookEdit|Bash",
+        "apimart_gasto.py": "Bash|WebFetch|Write|Edit|MultiEdit|NotebookEdit|Read|Grep",
     }
     obtenido = {}
     for grupo in reg["hooks"]["PreToolUse"]:

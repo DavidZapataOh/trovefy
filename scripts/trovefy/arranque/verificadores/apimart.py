@@ -12,60 +12,38 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
 
+from trovefy.apimart.http import (
+    BASE_POR_DEFECTO,
+    LOOPBACK,
+    BaseInvalida,
+    ClaveRara,
+    ClaveRechazada,
+    RespuestaInesperada,
+    SinClave,
+    SinRed,
+    SinRedireccion,
+    abrir_sin_redireccion,
+    leer_credenciales,
+    validar_base,
+)
 from trovefy.arranque.estado import ResultadoVerificacion
 from trovefy.arranque.verificadores import verificador
 from trovefy.arranque.verificadores.base import guardar_evidencia
-from trovefy.secretos import RUTA_CLAUDE_ENV, EnvNoSeguro, PermisosInseguros, leer_env
+from trovefy.secretos import RUTA_CLAUDE_ENV
 from trovefy.vault.escritura import ZONA_NEGOCIO
 
-BASE_POR_DEFECTO = "https://api.apimart.ai"
+__all__ = ["BASE_POR_DEFECTO", "LOOPBACK", "BaseInvalida", "ClaveRara", "ClaveRechazada", "RespuestaInesperada",
+           "SinRed", "consultar_saldo", "verificar_apimart"]
+
 # La documentación no nombra la moneda; USD se infiere de que 10,5 de saldo = 105 créditos (1 crédito ≈ 0,1 USD).
 MONEDA = "USD (inferida)"
-LOOPBACK = ("127.0.0.1", "localhost", "::1")
 TIMEOUT = 15
 
-
-class ClaveRechazada(Exception):
-    pass
-
-
-class SinRed(Exception):
-    pass
-
-
-class RespuestaInesperada(Exception):
-    pass
-
-
-class BaseInvalida(Exception):
-    pass
-
-
-class ClaveRara(Exception):
-    pass
-
-
-class _SinRedireccion(urllib.request.HTTPRedirectHandler):
-    """No sigue redirecciones: urllib copiaría Authorization al destino."""
-
-    def redirect_request(self, *args, **kwargs):
-        return None
-
-
-def _abrir_sin_redireccion(req, timeout=None):
-    return urllib.request.build_opener(_SinRedireccion).open(req, timeout=timeout)
-
-
-def _validar_base(base: str) -> None:
-    try:
-        u = urlparse(base)
-        host = u.hostname
-    except ValueError:
-        raise BaseInvalida from None
-    if not host or not (u.scheme == "https" or (u.scheme == "http" and host in LOOPBACK)):
-        raise BaseInvalida
+# Nombres privados de antes del plan 17: ahora viven en trovefy.apimart.http.
+_SinRedireccion = SinRedireccion
+_abrir_sin_redireccion = abrir_sin_redireccion
+_validar_base = validar_base
 
 
 def _num(v):
@@ -111,22 +89,10 @@ def _no(motivo: str, arreglos: list[str]) -> ResultadoVerificacion:
 @verificador("16")
 def verificar_apimart(vault: Path, ruta_env: Path = RUTA_CLAUDE_ENV, abrir=None) -> ResultadoVerificacion:
     try:
-        env = leer_env(ruta_env)
-    except FileNotFoundError:
-        return _no(f"no existe {ruta_env}", [
-            "en una terminal de Ubuntu (WSL) aparte: `mkdir -p ~/.config/trovefy && touch ~/.config/trovefy/claude.env && chmod 600 ~/.config/trovefy/claude.env`",
-            "en esa terminal, abre ~/.config/trovefy/claude.env con un editor (por ejemplo `nano ~/.config/trovefy/claude.env`) y pega tu clave como APIMART_API_KEY=... (Claude no la ve)",
-        ])
-    except EnvNoSeguro as exc:
-        return _no(f"{ruta_env} no es seguro: {exc}", ["usa un archivo regular tuyo, sin enlaces simbólicos, con permisos 600"])
-    except (OSError, UnicodeDecodeError):  # PermissionError, IsADirectoryError, etc.; sin contenido ni clave
-        return _no(f"no se pudo leer {ruta_env}", ["comprueba que es un archivo de texto UTF-8 legible por ti"])
-    except PermisosInseguros as exc:
-        return _no(f"{ruta_env} tiene permisos {exc.modo:o}; deben ser 600", [f"en una terminal de Ubuntu (WSL) aparte: `chmod 600 {ruta_env}`"])
-    clave = env.get("APIMART_API_KEY", "")
-    if not clave:
-        return _no("falta APIMART_API_KEY en claude.env", ["en una terminal de Ubuntu (WSL) aparte, abre ~/.config/trovefy/claude.env con tu editor y añade APIMART_API_KEY=... (Claude no la ve)"])
-    base = env.get("APIMART_BASE_URL") or BASE_POR_DEFECTO
+        cred = leer_credenciales(ruta_env)
+    except SinClave as exc:
+        return _no(exc.motivo, exc.arreglos)
+    base, clave = cred.base, cred.clave
     try:
         saldo = consultar_saldo(base, clave, abrir)
     except BaseInvalida:

@@ -92,13 +92,14 @@ class ConfigEconomia:
 # --- validación de hojas -------------------------------------------------------------------------
 
 
-def _es_hoja(nodo: Any) -> bool:
+def es_hoja(nodo: Any) -> bool:
+    """¿Es ``nodo`` una hoja ``{valor, fuente, fecha}`` (trae alguno de los tres campos)?"""
     return isinstance(nodo, dict) and any(c in nodo for c in CAMPOS_HOJA)
 
 
-def _revisar_hojas(nodo: Any, clave: str) -> None:
+def revisar_hojas(nodo: Any, clave: str) -> None:
     """Toda hoja del árbol trae exactamente ``valor``, ``fuente`` (texto) y ``fecha`` (AAAA-MM-DD)."""
-    if _es_hoja(nodo):
+    if es_hoja(nodo):
         faltan = [c for c in CAMPOS_HOJA if c not in nodo]
         if faltan:
             raise EconomiaInvalida(f"{clave}: a la hoja le falta {', '.join(faltan)}")
@@ -117,7 +118,12 @@ def _revisar_hojas(nodo: Any, clave: str) -> None:
     if not isinstance(nodo, dict):
         raise EconomiaInvalida(f"{clave}: no es una hoja {{valor, fuente, fecha}}")
     for k, v in nodo.items():
-        _revisar_hojas(v, f"{clave}.{k}" if clave else str(k))
+        revisar_hojas(v, f"{clave}.{k}" if clave else str(k))
+
+
+# Nombres antiguos: se conservan para quien ya los usaba.
+_es_hoja = es_hoja
+_revisar_hojas = revisar_hojas
 
 
 def _nodo(datos: dict, clave: str) -> Any:
@@ -131,7 +137,7 @@ def _nodo(datos: dict, clave: str) -> Any:
 
 def _valor(datos: dict, clave: str) -> Any:
     hoja = _nodo(datos, clave)
-    if not _es_hoja(hoja):
+    if not es_hoja(hoja):
         raise EconomiaInvalida(f"{clave}: no es una hoja {{valor, fuente, fecha}}")
     return hoja["valor"]
 
@@ -181,7 +187,7 @@ def _par(v: Any, clave: str, conv) -> tuple:
 
 def _mapa(datos: dict, clave: str) -> dict:
     nodo = _nodo(datos, clave)
-    if not isinstance(nodo, dict) or _es_hoja(nodo):
+    if not isinstance(nodo, dict) or es_hoja(nodo):
         raise EconomiaInvalida(f"{clave}: debe ser un mapa de hojas")
     return nodo
 
@@ -192,12 +198,12 @@ def _mapa(datos: dict, clave: str) -> dict:
 def _construir(datos: Any) -> ConfigEconomia:
     if not isinstance(datos, dict):
         raise EconomiaInvalida("config/economia.yaml no es un mapa")
-    _revisar_hojas(datos, "")
+    revisar_hojas(datos, "")
 
     plataformas: dict[str, PlataformaCostes] = {}
     for nombre, nodo in _mapa(datos, "plataformas").items():
         base = f"plataformas.{nombre}"
-        if not isinstance(nodo, dict) or _es_hoja(nodo):
+        if not isinstance(nodo, dict) or es_hoja(nodo):
             raise EconomiaInvalida(f"{base}: debe ser un mapa de hojas")
         pcts = {c: _dec(_valor(datos, f"{base}.{c}"), f"{base}.{c}", pct=c.endswith("_pct"), nulo=True)
                 for c in _CAMPOS_COSTE}
@@ -312,10 +318,10 @@ def fijar(vault: Path, clave: str, valor: str | None, fuente: str, hoy: date) ->
     padre: Any = None
     actual: Any = datos
     for parte in clave.split("."):
-        if not isinstance(actual, dict) or _es_hoja(actual) or parte not in actual:
+        if not isinstance(actual, dict) or es_hoja(actual) or parte not in actual:
             raise KeyError(f"{clave} no existe en config/economia.yaml")
         padre, actual = actual, actual[parte]
-    if not _es_hoja(actual):
+    if not es_hoja(actual):
         raise KeyError(f"{clave} no es una hoja {{valor, fuente, fecha}} de config/economia.yaml")
     if not isinstance(fuente, str) or not fuente.strip():
         raise EconomiaInvalida(f"{clave}: la fuente está vacía")

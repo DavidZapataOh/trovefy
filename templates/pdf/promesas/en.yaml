@@ -1,0 +1,15 @@
+# Seed lexicon of forbidden promises in English (QG-10 income, QG-11 health). Own list, plan 17.
+# Python regular expressions, compiled with IGNORECASE and UNICODE. Additions go to the vault
+# (config/promesas/en.yaml, same keys) and are added to these; never changed in code.
+# A refund guarantee («30-day money-back guarantee») is not a promise.
+ingresos:
+  - '\bearn \$?\d+'
+  - '\b(passive|guaranteed) income'
+  - '\bfinancial freedom'
+salud:
+  - '\bheals?\b'
+  - '\bcures?\b'
+  - '\beliminates? (your )?(anxiety|pain|trauma|depression)'
+  - '\breplaces? (your )?(doctor|therapist|treatment)'
+  - '\bstop taking (your )?medication'
+  - '\bguaranteed results'

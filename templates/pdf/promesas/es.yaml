@@ -1,0 +1,18 @@
+# Léxico semilla de promesas prohibidas en español (QG-10 ingresos, QG-11 salud). Propio del plan 17.
+# Expresiones regulares de Python; se compilan con IGNORECASE y UNICODE. Las ampliaciones van al vault
+# (config/promesas/es.yaml, mismas claves) y se suman a estas; nunca se cambian en el código.
+# Una garantía de reembolso («garantía de 30 días») no es una promesa. Una coincidencia negada en su frase
+# («no sustituye al médico») o tras «antes de» es un descargo y no cuenta (gates._descargo).
+ingresos:
+  - '\bganar \d+'
+  - '\bingresos (garantizados|pasivos)'
+  - '\blibertad financiera'
+salud:
+  # Raíces con sus formas de futuro, condicional y enclíticos («sanarte», «curarás»); «sana» (adjetivo) y
+  # «procura» quedan fuera.
+  - '\bsanar(á|ás|án|é|emos|ía|ías|te|se|lo|la|nos|os)?\b'
+  - '\bcura(r|rá|rás|rán|ré|remos|ría|rías|rte|rse|rlo|rla|nos)?\b'
+  - '\belimina(rá)? (la|el|tu) (ansiedad|dolor|trauma|depresión)'
+  - '\bsustituye (al|a tu) (médico|terapeuta|tratamiento)'
+  - '\bdeja(r)? (la|tu) medicación'
+  - '\bresultados garantizados'
