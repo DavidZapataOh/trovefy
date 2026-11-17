@@ -17,3 +17,17 @@ def test_cada_skill_tiene_frontmatter_valido():
         assert meta["name"] == skill.parent.name
         assert meta["description"].strip()
         assert "allowed-tools" in meta
+
+def test_cada_agente_tiene_frontmatter_valido():
+    agentes = sorted((RAIZ / "agents").glob("*.md"))
+    assert {a.stem for a in agentes} >= {"revisor", "nativo"}
+    for agente in agentes:
+        texto = agente.read_text()
+        _, cabecera, cuerpo = texto.split("---", 2)
+        meta = yaml.safe_load(cabecera)
+        assert meta["name"] == agente.stem
+        assert meta["description"].strip()
+        herramientas = {t.strip() for t in meta["tools"].split(",")}
+        assert herramientas <= {"Read", "Glob", "Grep"}
+        assert "VEREDICTO: ok" in cuerpo
+        assert "VEREDICTO: corregir" in cuerpo
