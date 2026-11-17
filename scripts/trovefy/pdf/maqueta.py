@@ -325,7 +325,9 @@ def ensamblar(pieza: Pieza, ficha: Ficha, pieza_ficha: PiezaFicha, tokens: dict[
         vistos.add(i)
 
     root = ";".join(f"{k}:{v}" for k, v in tokens.items())
-    caras = [f'@font-face{{font-family:"{f}";src:local("{f}")}}' for f in dict.fromkeys(familias)]
+    # Sin @font-face{src:local()}: WeasyPrint lo resuelve a un file:// de /usr/share/fonts, que el
+    # url_fetcher de la pieza bloquea. Las familias se resuelven por nombre con fontconfig, lo mismo
+    # que comprueba fuentes.comprobar_fuentes con fc-match.
     css = BASE_CSS.read_text(encoding="utf-8").rstrip("\n")
     portada = ['<div class="page portada">', '<span id="ini-portada"></span>', f"<h1>{titulo}</h1>"]
     if any(isinstance(e, dict) and e.get("archivo") == PORTADA for e in (manifiesto or {}).values()):
@@ -334,7 +336,7 @@ def ensamblar(pieza: Pieza, ficha: Ficha, pieza_ficha: PiezaFicha, tokens: dict[
 
     partes = [
         "<!DOCTYPE html>", f'<html lang="{_e(ficha.idioma)}">', "<head>", '<meta charset="utf-8">',
-        f"<title>{titulo}</title>", "<style>", css, f":root{{{root}}}", *caras, "</style>", "</head>", "<body>",
+        f"<title>{titulo}</title>", "<style>", css, f":root{{{root}}}", "</style>", "</head>", "<body>",
         *portada, '<nav class="indice flujo">', "<ol>", *indice, "</ol>", "</nav>",
     ]
     if aviso:

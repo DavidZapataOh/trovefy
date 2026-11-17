@@ -21,6 +21,11 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Librerías del sistema para el PDF (Pango, poppler y fuentes con cirílico)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 poppler-utils fonts-dejavu-core fonts-noto-core
+
       - name: Instalar Python 3.12 y dependencias
         run: uv sync --locked
 
