@@ -28,7 +28,7 @@ from trovefy.modelar.esquema import TIPOS_SECCION
 from trovefy.modelar.salida import cargar_brandbook, cargar_escalera, cargar_oferta
 from trovefy.pdf.maqueta import tokens_brandbook
 from trovefy.pdf.render import PdfinfoNoMedido, paginas_pdfinfo
-from trovefy.producto.medios import leer_manifiesto
+from trovefy.producto.medios import carpeta_segura, leer_manifiesto
 from trovefy.vault import frontmatter
 from trovefy.vault import producto as vproducto
 
@@ -76,7 +76,7 @@ class DatosLanding:
     marca: str
     dominio: str | None
     tienda: str | None
-    resenas: int = 0  # reseñas reales completas en landing/<PAIS>/resenas.yaml (decide la sustitución)
+    resenas: int = 0  # reseñas reales completas del país en landing/<PAIS>/resenas.yaml (decide la sustitución)
 
 
 def ruta_landing(vault: Path, p_id: str, pais: str) -> Path:
@@ -173,7 +173,8 @@ def _precio(bloque: object, pais: str) -> tuple[Decimal, str]:
     return precio, moneda
 
 
-def _pdf(vault: Path, p_id: str, idioma: str) -> Path:
+def _pdf(vault: Path, p_id: str, idioma: str) -> tuple[Path, int]:
+    """(PDF vigente, sus páginas según PRODUCTO.md). Ningún componente de la ruta puede ser un enlace."""
     raiz = vproducto.ruta_producto(vault, p_id).parent
     meta, _ = frontmatter.leer(raiz / "PRODUCTO.md")
     entregable = meta.get("entregable") if isinstance(meta, dict) else None
@@ -188,9 +189,19 @@ def _pdf(vault: Path, p_id: str, idioma: str) -> Path:
             or not rel.endswith(".pdf")):
         raise EntradaInvalida(f"PRODUCTO.md: el PDF vigente «{rel}» no está dentro de entregable/")
     ruta = raiz.joinpath(*partes)
-    if ruta.is_symlink() or not ruta.is_file():
+    try:
+        existe = carpeta_segura(vault, ruta.parent, crear=False)
+    except ValueError as exc:
+        raise EntradaInvalida(f"el PDF vigente {rel}: {exc}") from None
+    if ruta.is_symlink():
+        raise EntradaInvalida(f"el PDF vigente {rel} es un enlace simbólico: vuelve a /producto")
+    if not existe or not ruta.is_file():
         raise EntradaInvalida(f"el PDF vigente {rel} no existe: vuelve a /producto")
-    return ruta
+    paginas = principal.get("paginas")
+    if isinstance(paginas, bool) or not isinstance(paginas, int) or paginas < 1:
+        raise EntradaInvalida(f"PRODUCTO.md no trae entregable.{idioma}.principal.paginas: cierra el entregable "
+                              "con /producto")
+    return ruta, paginas
 
 
 def _imagenes(vault: Path, p_id: str) -> tuple[Path, ...]:
@@ -229,7 +240,7 @@ def _tokens_css(vault: Path, p_id: str) -> str:
 
 
 def cargar_datos(vault: Path, p_id: str, pais: str, exigir_estado: tuple[str, ...] = ESTADOS_LANDING,
-                 *, correr=subprocess.run) -> DatosLanding:
+                 *, correr=None) -> DatosLanding:
     """Lo que necesita la landing de ``pais``; ``EntradaInvalida`` (o ``EstadoNoPermite``) con un mensaje claro."""
     vault = Path(vault)
     pais = _pais(pais)
@@ -271,12 +282,15 @@ def cargar_datos(vault: Path, p_id: str, pais: str, exigir_estado: tuple[str, ..
     if not isinstance(marca, str) or not marca.strip():
         raise EntradaInvalida("BRANDBOOK.md no trae nombre_local: /modelar")
 
-    pdf = _pdf(vault, p_id, mercado.idioma)
+    pdf, paginas_producto = _pdf(vault, p_id, mercado.idioma)
     try:
-        paginas = paginas_pdfinfo(pdf, correr=correr)
+        paginas = paginas_pdfinfo(pdf, correr=correr or subprocess.run)
     except PdfinfoNoMedido as exc:
         raise EntradaInvalida(f"páginas del PDF: {exc}") from None
-    resenas = sum(1 for r in leer_resenas(vault, p_id, pais) if resena_completa(r))
+    if paginas != paginas_producto:  # R4: el PDF cambió después de cerrar el entregable
+        raise EntradaInvalida(f"{pdf.name} tiene {paginas} páginas y PRODUCTO.md dice {paginas_producto}: el PDF "
+                              "cambió después de cerrarlo; rehaz /producto")
+    resenas = sum(1 for r in leer_resenas(vault, p_id, pais) if resena_completa(r) and r["pais"] == pais)
     return DatosLanding(
         p_id=p_id, pais=pais, idioma=mercado.idioma, moneda=moneda, estado=estado, secciones=secciones,
         promesa_h1=_texto(core, "promesa_h1", "OFERTA.md core"), angulo=_texto(core, "angulo", "OFERTA.md core"),

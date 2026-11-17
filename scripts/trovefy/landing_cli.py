@@ -16,7 +16,12 @@ from pathlib import Path
 
 from trovefy.cli import registrar
 
-_ejecutar_orden = subprocess.run  # punto de inyección de los tests (pdftoppm, ffmpeg, pdfinfo)
+_ejecutar_orden = None  # punto de inyección de los tests (pdftoppm, ffmpeg, pdfinfo); None → subprocess.run
+
+
+def _orden():
+    """La función que corre las órdenes externas, resuelta en cada llamada."""
+    return _ejecutar_orden or subprocess.run
 
 
 def _cache() -> Path:
@@ -62,9 +67,8 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
 
 
 def _faltan(vault: Path, p_id: str, pais: str) -> list[str]:
-    import yaml
-
     from trovefy.landing.entrada import ruta_landing
+    from trovefy.landing.plantilla import leer_landing_yaml
 
     raiz = ruta_landing(vault, p_id, pais)
     faltan = []
@@ -78,11 +82,7 @@ def _faltan(vault: Path, p_id: str, pais: str) -> list[str]:
         faltan.append("QA")
     if not (raiz / "nativo.md").is_file():
         faltan.append("veredicto del nativo")
-    url = None
-    if (raiz / "landing.yaml").is_file():
-        datos = yaml.safe_load((raiz / "landing.yaml").read_text(encoding="utf-8")) or {}
-        url = datos.get("url") if isinstance(datos, dict) else None
-    if not url:
+    if not leer_landing_yaml(vault, p_id, pais).get("url"):  # roto o enlazado → EntradaInvalida (sale 2)
         faltan.append("publicar")
     return faltan
 
@@ -91,7 +91,7 @@ def _estado(args: argparse.Namespace, vault: Path) -> int:
     from trovefy.landing.entrada import EstadoNoPermite, cargar_datos
 
     try:
-        d = cargar_datos(vault, args.producto, args.pais)
+        d = cargar_datos(vault, args.producto, args.pais, correr=_orden())
     except EstadoNoPermite as e:
         print(f"{args.pais.upper()}: no puede tener landing aún")
         print(str(e))
@@ -119,8 +119,8 @@ def _medios(args: argparse.Namespace, vault: Path) -> int:
     from trovefy.landing.entrada import cargar_datos
     from trovefy.landing.medios import preparar_medios
 
-    d = cargar_datos(vault, args.producto, args.pais, correr=_ejecutar_orden)
-    assets = preparar_medios(vault, d, _paginas(args.paginas), ejecutar=_ejecutar_orden)
+    d = cargar_datos(vault, args.producto, args.pais, correr=_orden())
+    assets = preparar_medios(vault, d, _paginas(args.paginas), ejecutar=_orden())
     print(f"Medios listos en {assets.relative_to(vault).as_posix()} (vistas de {d.pdf.name})")
     return 0
 
@@ -143,16 +143,16 @@ def _preparar(args: argparse.Namespace, vault: Path) -> int:
     from trovefy.landing.entrada import cargar_datos
     from trovefy.landing.plantilla import preparar
 
-    d = cargar_datos(vault, args.producto, args.pais, correr=_ejecutar_orden)
+    d = cargar_datos(vault, args.producto, args.pais, correr=_orden())
     hosting, aviso = (args.hosting, None) if args.hosting else _hosting_por_defecto()
     if aviso:
         print(f"Aviso: {aviso}")
     destino = _borrador(d.p_id, d.pais)
-    ya = (destino / "index.html").exists() and not args.rehacer
+    ya = [] if args.rehacer else [r for r in ("index.html", "assets/estilo.css") if (destino / r).exists()]
     ruta = preparar(vault, d, hosting, destino, rehacer=args.rehacer)
     print(f"Borrador ({hosting}): {ruta}")
-    if ya:
-        print("El index.html del borrador ya existía y no se ha tocado (usa --rehacer para empezar de cero).")
+    for rel in ya:
+        print(f"El {rel} del borrador ya existía y no se ha tocado (usa --rehacer para empezar de cero).")
     return 0
 
 
@@ -160,7 +160,7 @@ def _guardar(args: argparse.Namespace, vault: Path) -> int:
     from trovefy.landing.entrada import cargar_datos
     from trovefy.landing.plantilla import guardar
 
-    d = cargar_datos(vault, args.producto, args.pais, correr=_ejecutar_orden)
+    d = cargar_datos(vault, args.producto, args.pais, correr=_orden())
     version = guardar(vault, d, _borrador(d.p_id, d.pais))
     print(f"Landing guardada en el vault: versión {version}")
     return 0
@@ -170,7 +170,7 @@ def _validar(args: argparse.Namespace, vault: Path) -> int:
     from trovefy.landing.entrada import cargar_datos
     from trovefy.landing.validar import validar
 
-    d = cargar_datos(vault, args.producto, args.pais, correr=_ejecutar_orden)
+    d = cargar_datos(vault, args.producto, args.pais, correr=_orden())
     r = validar(vault, d)
     if r.fallos:
         print(f"{len(r.fallos)} fallo(s):")

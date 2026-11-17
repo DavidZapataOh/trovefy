@@ -9,11 +9,11 @@
   document.querySelectorAll("a[data-tf-checkout]").forEach(function (a) {
     var original = a.getAttribute("href") || "";
     var url = new URL(original, window.location.href);
-    var cambia = false;
-    pares.forEach(function (par) {
-      if (!url.searchParams.has(par[0])) { url.searchParams.append(par[0], par[1]); cambia = true; }
+    var extra = pares.filter(function (par) { return !url.searchParams.has(par[0]); }).map(function (par) {
+      return encodeURIComponent(par[0]) + "=" + encodeURIComponent(par[1]);
     });
-    if (!cambia) return;
+    if (!extra.length) return;
+    url.search = (url.search ? url.search + "&" : "?") + extra.join("&"); // lo que ya traía, tal cual
     var relativa = original.charAt(0) === "/" && original.charAt(1) !== "/";
     a.setAttribute("href", relativa ? url.pathname + url.search + url.hash : url.href);
   });

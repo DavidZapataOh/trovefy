@@ -2,35 +2,14 @@
 
 import json
 import stat
-import subprocess
-from pathlib import Path
 
 import pytest
 from trovefy import cli, landing_cli
 from trovefy.landing import medios as lm
-from trovefy.landing.entrada import cargar_datos, ruta_landing
+from trovefy.landing.entrada import ruta_landing
+from trovefy.producto.medios import escribir_medio, registrar_medio
 
-from .conftest import P, vault_demo
-
-
-class Ejecutar:
-    """`subprocess.run` falso: registra cada orden y crea el archivo de salida que pediría."""
-
-    def __init__(self):
-        self.ordenes: list[list[str]] = []
-        self.kwargs: list[dict] = []
-
-    def __call__(self, orden, **kw):
-        assert isinstance(orden, list)
-        self.ordenes.append(orden)
-        self.kwargs.append(kw)
-        if orden[0] == "pdfinfo":
-            return subprocess.CompletedProcess(orden, 0, "Pages:          3\n", "")
-        if orden[0] == "pdftoppm":
-            Path(orden[-1] + ".png").write_bytes(b"\x89PNG falso " + " ".join(orden).encode())
-        elif orden[0] == "ffmpeg":
-            Path(orden[-1]).write_bytes(b"RIFF webp falso " + " ".join(orden).encode())
-        return subprocess.CompletedProcess(orden, 0, "", "")
+from .conftest import Ejecutar, P, cargar, vault_demo
 
 
 @pytest.fixture
@@ -81,16 +60,45 @@ def test_imagen_fuera_del_entregable_rechazada(tmp_path, ej):
 
 def test_imagenes_propias(tmp_path, ej):
     v = vault_demo(tmp_path)
-    d = cargar_datos(v, P, "ZZ")
+    d = cargar(v)
     out = lm.imagenes_propias(d.imagenes, tmp_path / "dest", ejecutar=ej)
     assert sorted(m.archivo for m in out) == ["portada-480.webp", "portada-960.webp"]
     assert {m.origen for m in out} == {"entregable"}
     assert {m.fuente for m in out} == {"entregable/medios/portada.png"}
 
 
+def test_paginas_repetidas_rechazadas_antes_de_convertir(tmp_path, ej):
+    """M8: dos salidas con el mismo nombre se detectan antes de llamar a nada."""
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF")
+    with pytest.raises(ValueError, match="repetid"):
+        lm.vistas_previas(pdf, (1, 2, 1), tmp_path / "dest", ejecutar=ej, total=3)
+    assert ej.ordenes == []
+
+
+def _otra_imagen(v, nombre):
+    ent = v / "productos" / P / "entregable"
+    from .conftest import _png
+
+    sha = escribir_medio(ent / "medios" / nombre, _png(), base=v)
+    registrar_medio(ent, "otra-1", nombre, sha, "propio", base=v)
+
+
+@pytest.mark.parametrize("nombre", ["portada.jpg", "vista-p1.png"])
+def test_nombres_de_salida_repetidos_rechazados_antes_de_convertir(tmp_path, ej, nombre):
+    """M8: «portada.png» y «portada.jpg» darían el mismo webp; «vista-p1.png» pisaría una vista previa."""
+    v = vault_demo(tmp_path)
+    _otra_imagen(v, nombre)
+    d = cargar(v)
+    with pytest.raises(ValueError, match="repetid"):
+        lm.preparar_medios(v, d, ejecutar=ej)
+    assert [o for o in ej.ordenes if o[0] != "pdfinfo"] == []
+    assert not (ruta_landing(v, P, "ZZ") / "assets").exists()
+
+
 def _preparar(tmp_path, ej, **kw):
     v = vault_demo(tmp_path)
-    d = cargar_datos(v, P, "ZZ")
+    d = cargar(v)
     return v, d, lm.preparar_medios(v, d, ejecutar=ej, **kw)
 
 

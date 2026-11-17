@@ -53,10 +53,31 @@ def _medio(ruta: Path, origen: Origen, fuente: str, ancho: int) -> Medio:
     return Medio(ruta.name, origen, fuente, ancho, hashlib.sha256(ruta.read_bytes()).hexdigest())
 
 
+def _nombre_vista(n: int, ancho: int) -> str:
+    return f"vista-p{n}-{ancho}.webp"
+
+
+def _nombre_propia(ruta: Path, ancho: int) -> str:
+    return f"{ruta.stem}-{ancho}.webp"
+
+
+def _sin_repetidos(nombres: list[str]) -> None:
+    """``ValueError`` si dos salidas se llamarían igual (una pisaría a la otra); se mira antes de convertir."""
+    vistos, repetidos = set(), []
+    for n in nombres:
+        if n in vistos or n in FIJOS:
+            repetidos.append(n)
+        vistos.add(n)
+    if repetidos:
+        raise ValueError(f"nombre de medio repetido: {', '.join(dict.fromkeys(repetidos))} (dos imágenes o páginas "
+                         "darían el mismo archivo; renombra una en el entregable o no repitas páginas)")
+
+
 def vistas_previas(pdf: Path, paginas: tuple[int, ...], destino: Path, ejecutar=subprocess.run, *,
                    total: int | None = None) -> list[Medio]:
-    """``vista-p<N>-<W>.webp`` por página y ancho; ``ValueError`` si una página no existe en el PDF."""
+    """``vista-p<N>-<W>.webp`` por página y ancho; ``ValueError`` si una página no existe en el PDF o se repite."""
     pdf, destino = Path(pdf), Path(destino)
+    _sin_repetidos([_nombre_vista(n, w) for n in paginas for w in ANCHOS_IMAGEN])
     if total is None:
         try:
             total = paginas_pdfinfo(pdf, correr=ejecutar)
@@ -75,7 +96,7 @@ def vistas_previas(pdf: Path, paginas: tuple[int, ...], destino: Path, ejecutar=
             _correr(ejecutar, ["pdftoppm", "-f", str(n), "-l", str(n), "-scale-to-x", str(max(ANCHOS_IMAGEN)),
                                "-scale-to-y", "-1", "-png", "-singlefile", str(pdf), str(prefijo)])
             for ancho in ANCHOS_IMAGEN:
-                ruta = destino / f"vista-p{n}-{ancho}.webp"
+                ruta = destino / _nombre_vista(n, ancho)
                 _a_webp(ejecutar, prefijo.with_suffix(".png"), ruta, ancho)
                 salida.append(_medio(ruta, "vista_pdf", f"{pdf.name}#p{n}", ancho))
     return salida
@@ -95,12 +116,13 @@ def _del_entregable(ruta: Path) -> str:
 def imagenes_propias(imagenes: tuple[Path, ...], destino: Path, ejecutar=subprocess.run) -> list[Medio]:
     """Cada imagen del entregable a ``<nombre>-<W>.webp`` por ancho; otra ruta → ``ValueError``."""
     fuentes = [(Path(p), _del_entregable(Path(p))) for p in imagenes]  # se comprueban todas antes de nada
+    _sin_repetidos([_nombre_propia(r, w) for r, _ in fuentes for w in ANCHOS_IMAGEN])
     destino = Path(destino)
     destino.mkdir(parents=True, exist_ok=True)
     salida = []
     for ruta, rel in fuentes:
         for ancho in ANCHOS_IMAGEN:
-            dest = destino / f"{ruta.stem}-{ancho}.webp"
+            dest = destino / _nombre_propia(ruta, ancho)
             _a_webp(ejecutar, ruta, dest, ancho)
             salida.append(_medio(dest, "entregable", rel, ancho))
     return salida
@@ -125,6 +147,8 @@ def preparar_medios(vault: Path, datos: DatosLanding, paginas: tuple[int, ...] =
     """Vistas previas e imágenes propias en ``landing/<PAIS>/assets/`` con sus manifiestos; devuelve la carpeta."""
     vault = Path(vault)
     assets = ruta_landing(vault, datos.p_id, datos.pais) / "assets"
+    _sin_repetidos([_nombre_vista(n, w) for n in paginas for w in ANCHOS_IMAGEN]
+                   + [_nombre_propia(Path(r), w) for r in datos.imagenes for w in ANCHOS_IMAGEN])
     previos = _previos(assets) if assets.is_dir() else set()
     with tempfile.TemporaryDirectory(prefix="trovefy-medios-") as tmp:
         tmp = Path(tmp)

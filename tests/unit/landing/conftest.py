@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import io
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
+from trovefy.landing import entrada
 from trovefy.producto.medios import escribir_medio, registrar_medio
 from trovefy.vault import frontmatter
 
@@ -38,6 +40,47 @@ MERCADOS = f"""\
 ZZ: {{idioma: bg, moneda: EUR, zona: Europe/Sofia, banda_eur: [9, 19], estado: activo, tienda: "{TIENDA}"}}
 ZY: {{idioma: ro, moneda: EUR, zona: Europe/Bucharest, banda_eur: [9, 19], estado: activo, tienda: null}}
 """
+
+
+class Ejecutar:
+    """`subprocess.run` falso: registra cada orden y crea el archivo de salida que pediría. ``pdfinfo``
+    contesta ``paginas`` (3, las del PDF fijo y de PRODUCTO.md)."""
+
+    def __init__(self, paginas: int = 3):
+        self.paginas = paginas
+        self.ordenes: list[list[str]] = []
+        self.kwargs: list[dict] = []
+
+    def __call__(self, orden, **kw):
+        assert isinstance(orden, list)
+        self.ordenes.append(orden)
+        self.kwargs.append(kw)
+        if orden[0] == "pdfinfo":
+            return subprocess.CompletedProcess(orden, 0, f"Pages:          {self.paginas}\n", "")
+        if orden[0] == "pdftoppm":
+            Path(orden[-1] + ".png").write_bytes(b"\x89PNG falso " + " ".join(orden).encode())
+        elif orden[0] == "ffmpeg":
+            Path(orden[-1]).write_bytes(b"RIFF webp falso " + " ".join(orden).encode())
+        return subprocess.CompletedProcess(orden, 0, "", "")
+
+
+def cargar(v: Path, pais: str = "ZZ", **kw):
+    """``cargar_datos`` con ``pdfinfo`` falso (los unitarios nunca llaman al binario real)."""
+    kw.setdefault("correr", Ejecutar())
+    return entrada.cargar_datos(v, P, pais, **kw)
+
+
+@pytest.fixture(autouse=True)
+def _sin_binarios_reales(monkeypatch):
+    """Un unitario que llegue a ``pdfinfo``/``pdftoppm``/``ffmpeg`` reales falla: hay que inyectarlos."""
+    real = subprocess.run
+
+    def guardia(orden, *a, **kw):
+        if isinstance(orden, (list, tuple)) and orden and orden[0] in ("pdfinfo", "pdftoppm", "ffmpeg"):
+            raise AssertionError(f"unitario con {orden[0]} real: inyecta correr/ejecutar")
+        return real(orden, *a, **kw)
+
+    monkeypatch.setattr(subprocess, "run", guardia)
 
 
 def _png() -> bytes:
@@ -110,8 +153,11 @@ def vault_demo(tmp_path: Path, estado: str = "producido", secciones: int = 15) -
 
 @pytest.fixture
 def entorno(tmp_path, monkeypatch):
-    """Vault demo con TROVEFY_VAULT y HOME en tmp_path (para la CLI)."""
+    """Vault demo con TROVEFY_VAULT y HOME en tmp_path (para la CLI), con órdenes externas falsas."""
+    from trovefy import landing_cli
+
     v = vault_demo(tmp_path)
+    monkeypatch.setattr(landing_cli, "_ejecutar_orden", Ejecutar())
     monkeypatch.setenv("TROVEFY_VAULT", str(v))
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     return v

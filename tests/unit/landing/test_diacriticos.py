@@ -85,6 +85,38 @@ def test_texto_corto_no_decide_idioma():
     assert "idioma_distinto" not in _reglas(revisar_texto("Купи", "bg"))
 
 
+def test_bg_homoglifo_griego_falla():
+    """M3: una palabra que mezcla cirílico con cualquier otra escritura (aquí una alfa griega)."""
+    h = [x for x in revisar_texto("Денят свършвα, но тялото не го знае", "bg") if x.regla == "homoglifo"]
+    assert len(h) == 1 and "свършвα" in h[0].detalle and h[0].bloquea
+
+
+def test_bg_email_y_url_no_cuentan_en_la_escritura():
+    """M4: un email o una URL no bajan la cuota de cirílico."""
+    for texto in ("Пишете ни на support@ejemplo-demo.test и ще ви отговорим до 24 часа.",
+                  "Условията са на https://ejemplo-demo.test/usloviya и на www.ejemplo-demo.test.",
+                  "Сайтът е ejemplo-demo.test, а магазинът е tienda.demo.test."):
+        assert [x for x in revisar_texto(texto, "bg") if x.bloquea] == [], texto
+
+
+# Frases normales de una landing búlgara (sonda de la revisión): ninguna bloquea con las palabras permitidas.
+TEXTOS_BG = [
+    "Somatix · Спокойно тяло за 14 дни", "Спокойно тяло за 14 дни",
+    "Кратки вечерни упражнения за отпускане на раменете и врата.", "Искам наръчника сега", "Купувам наръчника",
+    "Наръчник в PDF за четене на телефона",
+    "Плащане с Visa, Mastercard или Impul Pay. Получавате файла по имейл веднага.",
+    "Какво ще получите в наръчника", "Често задавани въпроси", "Защо се получава така",
+    "Гаранция за връщане на парите", "Пишете ни на support@ejemplo-demo.test и ще ви отговорим до 24 часа.",
+    "Това е ѝ книга", "Десет минути вечер вместо хапчета",
+]
+
+
+def test_bg_frases_normales_no_bloquean():
+    permitidas = frozenset({"Somatix", "PDF", "A4", "Visa", "Mastercard", "Impul", "Pay"})
+    for texto in TEXTOS_BG:
+        assert [x for x in revisar_texto(texto, "bg", permitidas) if x.bloquea] == [], texto
+
+
 def test_idioma_sin_reglas_no_medido():
     h = revisar_texto("Te ćwiczenia pomagają ciału się rozluźnić wieczorem przed snem i dają spokój.", "pl")
     assert h == [Hallazgo("sin_reglas", "no medido: sin reglas de diacríticos para pl", bloquea=False)]

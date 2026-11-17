@@ -4,7 +4,8 @@ Reglas (todas bloquean salvo ``sin_reglas``):
 
 - ``bg``: ≥ 95 % de letras cirílicas (sin las palabras ``permitidas``: marca, «PDF», «A4») → si no,
   ``escritura``; ``ы э ё`` → ``letra_rusa``; letras de otros alfabetos cirílicos (``і ї є ґ ў ј љ њ ћ ђ џ``)
-  → ``letra_ajena``; una palabra con cirílico y latín a la vez → ``homoglifo``.
+  → ``letra_ajena``; una palabra con cirílico y cualquier otra escritura (latín, griego…) → ``homoglifo``.
+  Los emails y las URLs (o dominios sueltos) se quitan antes de medir.
 - ``ro``: ``ş ţ`` con cedilla → ``cedilla`` (deben ser ``ș ț`` con coma); ≥ 50 palabras sin ninguna de
   ``ă â î ș ț`` → ``sin_diacriticos``.
 - Cualquier idioma: ``trovefy.idioma.detectar`` entre el idioma y sus vecinos; otro idioma →
@@ -38,12 +39,23 @@ class Hallazgo:
 
 
 def _alfabeto(c: str) -> str:
+    """``cirilico``, ``latino`` o la escritura del nombre Unicode en minúsculas (``greek``, ``armenian``…)."""
     nombre = unicodedata.name(c, "")
     if nombre.startswith("CYRILLIC"):
         return "cirilico"
     if nombre.startswith("LATIN"):
         return "latino"
-    return "otro"
+    return nombre.split(" ", 1)[0].lower() or "desconocido"
+
+
+# Emails y URLs (con o sin esquema, y dominios sueltos como «ejemplo-demo.test»): no son texto en el idioma,
+# así que no cuentan para la cuota de escritura ni para la detección de idioma.
+_EMAIL_URL = re.compile(
+    r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+"
+    r"|(?:https?://|www\.)\S+"
+    r"|\b[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.[a-z]{2,}\b(?:/\S*)?",
+    re.IGNORECASE | re.ASCII,
+)
 
 
 def _lista(palabras: list[str]) -> str:
@@ -69,9 +81,11 @@ def _bg(palabras: list[str], permitidas: frozenset[str]) -> list[Hallazgo]:
         hallazgos.append(Hallazgo("letra_ajena", f"letras de otro alfabeto cirílico: {_lista(ajenas)}", True))
     for p in dict.fromkeys(palabras):
         alfabetos = {_alfabeto(c) for c in p if c.isalpha()}
-        if {"cirilico", "latino"} <= alfabetos:
-            latinas = "".join(c for c in p if _alfabeto(c) == "latino")
-            hallazgos.append(Hallazgo("homoglifo", f"«{p}» mezcla cirílico con letras latinas ({latinas})", True))
+        if "cirilico" in alfabetos and len(alfabetos) > 1:
+            ajenas = "".join(c for c in p if c.isalpha() and _alfabeto(c) != "cirilico")
+            otras = ", ".join(sorted(alfabetos - {"cirilico"}))
+            hallazgos.append(Hallazgo("homoglifo", f"«{p}» mezcla cirílico con letras de otra escritura "
+                                      f"({ajenas}: {otras})", True))
     return hallazgos
 
 
@@ -89,7 +103,7 @@ def _ro(texto: str, palabras: list[str]) -> list[Hallazgo]:
 
 def revisar_texto(texto: str, idioma: str, permitidas: frozenset[str] = frozenset()) -> list[Hallazgo]:
     """Hallazgos de escritura del texto en ``idioma``; ``[]`` si está limpio."""
-    texto = unicodedata.normalize("NFC", texto or "")
+    texto = _EMAIL_URL.sub(" ", unicodedata.normalize("NFC", texto or ""))
     palabras = re.findall(r"\w+", texto)
     permitidas = frozenset(p.casefold() for p in permitidas)
     if idioma == "bg":
