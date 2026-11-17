@@ -1,4 +1,5 @@
 import hashlib
+import itertools
 import os
 import re
 import shutil
@@ -699,7 +700,7 @@ def test_ficha_ilustrada_de_casillas_con_notas_llena_la_pagina(vault_respira):
 
 
 @necesita_pdf
-@pytest.mark.parametrize(("filas", "alto_min_mm"), [(7, 150), (11, 150), (17, 150)])
+@pytest.mark.parametrize(("filas", "alto_min_mm"), [(3, 200), (7, 205), (11, 190), (12, 190), (17, 150)])
 def test_tablas_de_ficha_llenan_y_caben(vault_respira, filas, alto_min_mm):
     raiz = pieza(vault_respira, "p-0042-respira", "principal").raiz
     diario = raiz / "fuente" / "fichas" / "diario.yaml"
@@ -710,6 +711,24 @@ def test_tablas_de_ficha_llenan_y_caben(vault_respira, filas, alto_min_mm):
                   if "ini-diario" in p.anchors)
     tabla = next(c for c in _cajas(pagina._page_box) if getattr(c, "element_tag", "") == "table")
     assert tabla.margin_height() >= alto_min_mm * _MM, tabla.margin_height() / _MM
+
+
+@necesita_pdf
+@pytest.mark.parametrize("filas", [1, 7, 12])
+def test_tabla_que_llena_cabe_con_instrucciones_y_cabecera_largas(vault_respira, filas):
+    raiz = pieza(vault_respira, "p-0042-respira", "principal").raiz
+    _ficha_yaml(raiz, {"id": "diario", "titulo": "Semana 2 del diario de respiración", "tipo": "tabla",
+                       "instrucciones": "Sigue como en la primera semana. " * 7,  # tres líneas
+                       "columnas": ["Día", "Estado por la mañana", "Ejercicio", "Estado después",
+                                    "Una frase sobre el día"],  # cabecera de dos líneas
+                       "filas": filas})
+    r = producir_pdf(vault_respira, "p-0042-respira", "principal", CFG, ahora=AHORA)
+    assert r.apto and r.desbordes == ()
+    pagina = next(p for p in _documento(r.html.read_text(encoding="utf-8"), raiz).pages if "ini-diario" in p.anchors)
+    instrucciones = _caja_de_clase(pagina, "instrucciones")
+    thead = next(c for c in _cajas(pagina._page_box) if getattr(c, "element_tag", "") == "thead")
+    assert instrucciones.margin_height() >= 3 * 5.5 * _MM + 5 * _MM  # de verdad tres líneas
+    assert thead.margin_height() >= 11 * _MM  # y una cabecera de dos
 
 
 @necesita_pdf
@@ -724,3 +743,108 @@ def test_fichas_llevan_numero_de_pagina(vault_respira):
     # y la página de texto anterior lleva el suyo con el mismo estilo
     pies_texto = [c for c in _cajas(paginas[i - 1]._page_box) if getattr(c, "at_keyword", None) == "@bottom-center"]
     assert [_texto_caja(c).strip() for c in pies_texto] == [str(i)]
+
+
+# --- segunda revisión del primer producto: notas continuas, tablas cortas y recuadros unidos ---------
+
+
+def _filas_oscuras(pdf: Path, pagina: int, x_px: int, y0_px: int, y1_px: int, dpi: int) -> list[int]:
+    """Filas (agrupadas: la primera de cada trazo) con tinta en la columna ``x_px`` de la página rasterizada
+    a ``dpi`` con ``pdftoppm``, entre ``y0_px`` e ``y1_px`` (px de esa resolución)."""
+    from PIL import Image
+
+    carpeta = pdf.parent / "raster"
+    carpeta.mkdir(exist_ok=True)
+    subprocess.run(["pdftoppm", "-r", str(dpi), "-f", str(pagina + 1), "-l", str(pagina + 1), "-png", str(pdf),
+                    str(carpeta / "p")], check=True)
+    imagen = Image.open(next(carpeta.glob("p*.png"))).convert("L")
+    tinta = [y for y in range(max(y0_px, 0), min(y1_px, imagen.height)) if imagen.getpixel((x_px, y)) < 230]
+    return [y for i, y in enumerate(tinta) if i == 0 or y - tinta[i - 1] > 1]
+
+
+@necesita_pdf
+@pytest.mark.skipif(shutil.which("pdftoppm") is None, reason="falta pdftoppm (poppler-utils)")
+@pytest.mark.parametrize("casillas", [2, 3, 5])
+def test_notas_son_un_solo_bloque_rayado_hasta_el_pie(vault_respira, casillas):
+    """En la hoja de contactos (la resolución con la que el revisor mira el PDF) las líneas de notas son
+    un único bloque: todas a la misma distancia, sin huecos, desde el título de las notas hasta el pie."""
+    from trovefy.pdf.qc import DPI_CONTACTOS
+
+    raiz = pieza(vault_respira, "p-0042-respira", "principal").raiz
+    _ficha_yaml(raiz, {"id": "diario", "titulo": "Tres minutos", "tipo": "casillas", "notas": "Notas",
+                       "instrucciones": "Marca cada paso mientras lo haces.",
+                       "filas": [f"Minuto {i}: respira despacio." for i in range(casillas)]})
+    r = producir_pdf(vault_respira, "p-0042-respira", "principal", CFG, ahora=AHORA)
+    assert r.apto and r.desbordes == () and r.pdf is not None
+    paginas = _documento(r.html.read_text(encoding="utf-8"), raiz).pages
+    i = next(i for i, p in enumerate(paginas) if "ini-diario" in p.anchors)
+    lineas = _caja_de_clase(paginas[i], "notas-lineas")
+    escala = DPI_CONTACTOS / 96
+    arriba, abajo = lineas.position_y, lineas.position_y + lineas.margin_height()
+    assert abajo >= paginas[i].anchors["fin-diario"][1] - 1  # el área llega hasta el pie de la ficha
+    x = round((lineas.position_x + lineas.margin_width() / 2) * escala)
+    filas = _filas_oscuras(r.pdf, i, x, round(arriba * escala), round(abajo * escala) + 1, DPI_CONTACTOS)
+    paso = 9 * _MM * escala
+    esperadas = int((abajo - arriba) / (9 * _MM))
+    assert len(filas) >= esperadas, (filas, esperadas)
+    huecos = [b - a for a, b in itertools.pairwise(filas)]
+    assert all(h <= paso * 1.3 for h in huecos), huecos  # ningún hueco: una sola tanda de líneas
+    assert filas[0] - arriba * escala <= paso * 1.3
+    assert abajo * escala - filas[-1] <= paso * 1.3  # y la última, junto al pie
+
+
+def _secciones_con_recuadro(raiz: Path, rellenos: list[int]) -> None:
+    """Una sección por relleno: ``n`` párrafos y, tras el último (``p#antes-K``), un ``ejercicio`` y un
+    ``recordar``. Con rellenos distintos, algún recuadro cae justo en el corte de página."""
+    carpeta = raiz / "fuente" / "secciones"
+    for f in carpeta.glob("*.html"):
+        f.unlink()
+    for k, n in enumerate(rellenos, 1):
+        parrafos = _parrafos(2, f"Bloque {k}").split("\n") + [
+            f"<p>Bloque {k}, nota {j + 1}: {_VERBOS[j % len(_VERBOS)]} despacio pensando en "
+            f"{_COSAS[(j * 3 + k) % len(_COSAS)]}.</p>" for j in range(n)]
+        parrafos[-1] = parrafos[-1].replace("<p>", f'<p id="antes-{k}">', 1)
+        (carpeta / f"{k:02d}-bloque.html").write_text(
+            f"<h2>Bloque {k}</h2>\n"
+            f'<div class="lograr"><p>Al terminar el bloque {k} sabrás respirar más lento.</p></div>\n'
+            f"<h3>Parte 1 del bloque {k}</h3>\n{parrafos[0]}\n<h3>Parte 2 del bloque {k}</h3>\n{parrafos[1]}\n"
+            f"<h3>Parte 3 del bloque {k}</h3>\n" + "\n".join(parrafos[2:]) + "\n"
+            f'<div class="ejercicio" id="e-{k}"><p>Ejercicio {k}: tres minutos de respiración lenta con la '
+            f"mano en la tripa, contando cuatro al entrar y seis al salir.</p></div>\n"
+            f'<div class="recordar" id="r-{k}"><p>Recuerda {k}: la salida más larga que la entrada.</p></div>\n',
+            encoding="utf-8")
+
+
+def _ids_por_pagina(paginas) -> list[set[str]]:
+    salida = []
+    for p in paginas:
+        ids = set()
+        for caja in _cajas(p._page_box):
+            elemento = getattr(caja, "element", None)
+            if elemento is not None and elemento.get("id"):
+                ids.add(elemento.get("id"))
+        salida.append(ids)
+    return salida
+
+
+@necesita_pdf
+def test_recuadros_no_se_separan_de_su_texto(vault_respira):
+    raiz = pieza(vault_respira, "p-0042-respira", "principal").raiz
+    rellenos = list(range(4, 20))
+    _secciones_con_recuadro(raiz, rellenos)
+    r = producir_pdf(vault_respira, "p-0042-respira", "principal", CFG, ahora=AHORA)
+    assert r.apto, r.informe.hallazgos
+    paginas = _documento(r.html.read_text(encoding="utf-8"), raiz).pages
+    ids = _ids_por_pagina(paginas)
+    for k in range(1, len(rellenos) + 1):
+        for recuadro in (f"e-{k}", f"r-{k}"):
+            pagina = next(i for i, s in enumerate(ids) if recuadro in s)
+            # el final del párrafo anterior está en la misma página que el recuadro
+            assert f"antes-{k}" in ids[pagina], (recuadro, pagina)
+    # y sin huecos grandes: ninguna página de texto (salvo la última antes de las fichas) por debajo de
+    # media página
+    primera_ficha = next(i for i, p in enumerate(paginas) if "ini-diario" in p.anchors)
+    for i in range(2, primera_ficha - 1):
+        cajas = [c for c in _cajas(paginas[i]._page_box) if getattr(c, "element_tag", "") == "p"]
+        fondo = max(c.position_y + c.margin_height() for c in cajas)
+        assert fondo >= paginas[i].height * 0.6, (i, fondo / _MM)

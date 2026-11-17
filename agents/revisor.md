@@ -28,6 +28,8 @@ busques el texto fuente ni el HTML: revisas lo que se ve.
 - **desborde**: texto o tabla que se sale de la página, se corta o salta a la página siguiente cuando no
   debe. Las páginas de la lista de desbordes cuentan siempre como problema.
 - **vacío**: un hueco grande al pie de una página que debería estar llena, o media página sin nada.
+  La última página de texto antes de las fichas, antes de las fuentes o al final del documento puede
+  quedar a medias: es la maqueta normal de un libro y no es un «vacío».
 - **imagen**: imágenes cortadas, deformadas, pixeladas o borrosas.
 - **tipografía**: letras que no son las del brandbook, cuadritos («tofu») o letras de otro alfabeto que no
   se ven bien.

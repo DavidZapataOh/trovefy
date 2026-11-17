@@ -325,13 +325,21 @@ def test_ficha_con_notas_mal_escritas(notas):
 
 
 @pytest.mark.parametrize(("filas", "imagen", "clase"), [
-    (3, False, "filas-pocas"), (8, False, "filas-pocas"), (9, False, "filas-medias"), (12, False, "filas-medias"),
-    (13, False, None), (17, False, None), (7, True, None),
+    (1, False, "filas-1"), (3, False, "filas-3"), (7, False, "filas-7"), (8, False, "filas-8"),
+    (12, False, "filas-12"), (13, False, None), (17, False, None), (7, True, None),
 ])
 def test_tabla_con_pocas_filas_las_hace_mas_altas(filas, imagen, clase):
     spec = {**DIARIO, "filas": filas, **({"imagen": "f-01"} if imagen else {})}
     html = generar_ficha_imprimible(spec, MANIFIESTO_F01)
     assert (f'<table class="{clase}">' if clase else "<table>") in html
+
+
+def test_css_una_clase_filas_n_por_cada_tabla_que_llena():
+    from trovefy.pdf.maqueta import FILAS_LLENAS
+
+    for n in range(1, FILAS_LLENAS + 1):
+        assert _regla(f".ficha table.filas-{n} td") == f"height:calc(200mm / {n} - 3.2mm)"
+    assert f".ficha table.filas-{FILAS_LLENAS + 1} " not in BASE_CSS.read_text(encoding="utf-8")
 
 
 # --- ensamblado -------------------------------------------------------------------------------------
