@@ -14,6 +14,7 @@ from trovefy.producto.ficha import (
     comprobar_precondiciones,
     crear_ficha,
     leer_ficha,
+    sin_traducir,
     slug_de,
 )
 from trovefy.vault import frontmatter
@@ -289,3 +290,70 @@ def test_leer_ficha_sin_archivo(tmp_path):
     v = _vault(tmp_path)
     with pytest.raises(FileNotFoundError, match="FICHA.md"):
         leer_ficha(v, P)
+
+
+# --- títulos locales (17b) --------------------------------------------------------------------------
+
+
+def _bulgaro(v):
+    (v / "config" / "mercados.yaml").write_text(MERCADOS.replace("ZZ: {idioma: es", "ZZ: {idioma: bg"),
+                                                encoding="utf-8")
+
+
+def test_titulo_local_de_un_bono(tmp_path):
+    v = _vault(tmp_path)
+    crear_ficha(v, P, "ZZ", "normal", "ebook", AHORA, titulos={"bono-1": "Спешна помощ за 3 минути"})
+    piezas = {p.id: p for p in leer_ficha(v, P).piezas}
+    assert piezas["bono-1"].titulo == "Спешна помощ за 3 минути"
+    assert piezas["bono-2"].titulo != "Спешна помощ за 3 минути"
+    assert leer_ficha(v, P).titulos_locales == ("bono-1",)
+
+
+def test_titulo_local_se_conserva_al_reescribir(tmp_path):
+    v = _vault(tmp_path)
+    crear_ficha(v, P, "ZZ", "normal", "ebook", AHORA, titulos={"bono-1": "Спешна помощ за 3 минути"})
+    crear_ficha(v, P, "ZZ", "sanitario", "ebook", AHORA)
+    ficha = leer_ficha(v, P)
+    assert {p.id: p.titulo for p in ficha.piezas}["bono-1"] == "Спешна помощ за 3 минути"
+    assert ficha.titulos_locales == ("bono-1",)
+    crear_ficha(v, P, "ZZ", "sanitario", "ebook", AHORA, titulos={"bono-1": "Бърза помощ"})
+    assert {p.id: p.titulo for p in leer_ficha(v, P).piezas}["bono-1"] == "Бърза помощ"
+
+
+@pytest.mark.parametrize(("titulos", "motivo"), [
+    ({"bono-9": "Нещо"}, "bono-9"),
+    ({"u2": "Нещо"}, "u2"),
+    ({"bono-1": "   "}, "vacío"),
+    ({"bono-1": "una\nlínea"}, "una línea"),
+    ({"bono-1": "x" * 121}, "120"),
+    ({"bono-1": "clave sk-ant-api03-" + "A" * 90}, "secreto"),
+])
+def test_titulo_local_rechaza_entrada_mala(tmp_path, titulos, motivo):
+    v = _vault(tmp_path)
+    with pytest.raises(ValueError, match=motivo):
+        crear_ficha(v, P, "ZZ", "normal", "ebook", AHORA, titulos=titulos)
+    assert not (v / "productos" / P / "entregable" / "FICHA.md").exists()
+
+
+def test_bonos_sin_traducir(tmp_path):
+    v = _vault(tmp_path)
+    crear_ficha(v, P, "ZZ", "normal", "ebook", AHORA)
+    assert sin_traducir(leer_ficha(v, P)) == ()  # español: el título de OFERTA ya es local
+    _bulgaro(v)
+    crear_ficha(v, P, "ZZ", "normal", "ebook", AHORA, titulos={"bono-2": "Дишай в офиса"})
+    assert sin_traducir(leer_ficha(v, P)) == ("bono-1",)
+
+
+def test_portada_lleva_el_titulo_local(tmp_path):
+    from trovefy.pdf.render import ensamblar_pieza
+    from trovefy.producto.rutas import pieza
+
+    v = _vault(tmp_path)
+    _bulgaro(v)
+    crear_ficha(v, P, "ZZ", "normal", "ebook", AHORA, titulos={"bono-1": "Спешна помощ <за> 3 минути"})
+    fuente = Path(__file__).resolve().parents[2] / "fixtures" / "pdf" / "respira" / "fuente"
+    shutil.copytree(fuente, pieza(v, P, "bono-1").raiz / "fuente")
+    html = ensamblar_pieza(v, P, "bono-1").html
+    assert "<h1>Спешна помощ &lt;за&gt; 3 минути</h1>" in html
+    assert "<title>Спешна помощ &lt;за&gt; 3 минути</title>" in html
+    assert "Audioguía" not in html

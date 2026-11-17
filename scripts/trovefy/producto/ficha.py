@@ -10,13 +10,20 @@ posterior; ``OFERTA.md`` está aprobada (``trovefy.modelar.aprobacion.oferta_apr
 Piezas (resolución 13 y Ruling R1): ``principal``, un ``bono-N`` por cada ``core.bonos`` de ``OFERTA.md``
 (sin id: su id es su posición desde 1), el ``bump`` siempre y ``u1|u2|u3|downsell`` solo con
 ``activo: true`` en ``ESCALERA.md`` → ``paises.<PAIS>.pasos``.
+
+Títulos locales (17b): el principal, el bump y los upsells traen su título en el idioma del país desde
+``ESCALERA.md``; los bonos solo tienen ``core.bonos[i].nombre`` de ``OFERTA.md``, en español (el idioma de
+trabajo). ``crear_ficha(..., titulos={"bono-1": "…"})`` (``--titulo bono-1=…``) fija el título local de una
+pieza; los ids quedan en ``titulos_locales`` de ``FICHA.md`` y se conservan al reescribir la ficha sin
+``--titulo``, como el avatar. ``sin_traducir`` da los bonos que siguen con el nombre de la oferta en un
+país que no habla español.
 """
 
 from __future__ import annotations
 
 import re
 import unicodedata
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, get_args
@@ -26,6 +33,7 @@ from trovefy.modelar.aprobacion import excepcion_vigente, oferta_aprobada
 from trovefy.modelar.salida import cargar_brandbook, cargar_escalera, cargar_oferta
 from trovefy.producto.config import cargar_config
 from trovefy.producto.rutas import UPSELLS, entregable
+from trovefy.secretos import buscar_secreto
 from trovefy.vault import frontmatter
 from trovefy.vault.escritura import anadir_log, escribir_atomico
 from trovefy.vault.producto import (
@@ -53,6 +61,8 @@ _BG = {
 }
 _NO_SLUG = re.compile(r"[^a-z0-9]+")
 _PAIS = re.compile(r"[A-Z]{2}")
+IDIOMA_DE_TRABAJO = "es"
+TITULO_MAX = 120  # cabe en la portada A4 en dos o tres líneas; más largo es un subtítulo, no un título
 
 
 def _pais(pais: str) -> str:
@@ -93,6 +103,7 @@ class Ficha:
     exigencia: Exigencia
     tipo: TipoProducto
     piezas: tuple[PiezaFicha, ...]
+    titulos_locales: tuple[str, ...] = ()  # ids de las piezas con título fijado por --titulo
 
 
 # --- precondiciones ---------------------------------------------------------------------------------
@@ -199,11 +210,55 @@ def _piezas(oferta: dict, pasos: dict, tipo: str, minimos: dict[str, int]) -> tu
     return tuple(piezas)
 
 
+def _titulo_local(pieza: object, texto: object) -> str:
+    if not isinstance(texto, str) or not texto.strip():
+        raise ValueError(f"--titulo {pieza}: el título está vacío")
+    texto = texto.strip()
+    if any(unicodedata.category(c) in ("Cc", "Zl", "Zp") for c in texto):
+        raise ValueError(f"--titulo {pieza}: el título debe ir en una línea, sin saltos ni controles")
+    if len(texto) > TITULO_MAX:
+        raise ValueError(f"--titulo {pieza}: el título pasa de {TITULO_MAX} caracteres ({len(texto)})")
+    if buscar_secreto(texto):
+        raise ValueError(f"--titulo {pieza}: aparece algo con forma de secreto; no se escribe nada")
+    return texto
+
+
+def _aplicar_titulos(piezas: tuple[PiezaFicha, ...], previa: dict, titulos: dict[str, str]
+                     ) -> tuple[tuple[PiezaFicha, ...], tuple[str, ...]]:
+    """Piezas con su título local: el de ``titulos`` (``--titulo``) o, si no, el que ya estaba fijado en la
+    ``FICHA.md`` anterior. Un ``--titulo`` de una pieza que no está en la ficha es un error."""
+    ids = [p.id for p in piezas]
+    for pieza in titulos:
+        if pieza not in ids:
+            raise ValueError(f"--titulo {pieza}: esa pieza no está en la ficha ({', '.join(ids)})")
+    nuevos = {pieza: _titulo_local(pieza, texto) for pieza, texto in titulos.items()}
+    fijados = previa.get("titulos_locales") if isinstance(previa.get("titulos_locales"), list) else []
+    anteriores = previa.get("piezas") if isinstance(previa.get("piezas"), list) else []
+    for p in anteriores:
+        if isinstance(p, dict) and p.get("id") in fijados and p.get("id") in ids and p["id"] not in nuevos:
+            try:
+                nuevos[p["id"]] = _titulo_local(p["id"], p.get("titulo"))
+            except ValueError:
+                continue  # un título roto a mano no se conserva: vuelve el de OFERTA/ESCALERA
+    salida = tuple(replace(p, titulo=nuevos[p.id]) if p.id in nuevos else p for p in piezas)
+    return salida, tuple(i for i in ids if i in nuevos)
+
+
+def sin_traducir(ficha: Ficha) -> tuple[str, ...]:
+    """Bonos sin título local en un país que no habla el idioma de trabajo (siguen con el nombre de
+    ``core.bonos`` de ``OFERTA.md``, en español)."""
+    if ficha.idioma == IDIOMA_DE_TRABAJO:
+        return ()
+    return tuple(p.id for p in ficha.piezas if p.tipo == "bono" and p.id not in ficha.titulos_locales)
+
+
 def _ruta_ficha(vault: Path, p_id: str) -> Path:
     return entregable(vault, p_id) / "FICHA.md"
 
 
-def crear_ficha(vault: Path, p_id: str, pais: str, exigencia: str, tipo: str, ahora: datetime) -> Path:
+def crear_ficha(vault: Path, p_id: str, pais: str, exigencia: str, tipo: str, ahora: datetime,
+                titulos: dict[str, str] | None = None) -> Path:
+    """Escribe ``entregable/FICHA.md``. ``titulos`` (``--titulo``): pieza → título local."""
     vault, pais = Path(vault), _pais(pais)
     if exigencia not in EXIGENCIAS:
         raise ValueError(f"exigencia «{exigencia}» no admitida: {', '.join(EXIGENCIAS)}")
@@ -221,11 +276,14 @@ def crear_ficha(vault: Path, p_id: str, pais: str, exigencia: str, tipo: str, ah
 
     ruta = _ruta_ficha(vault, p_id)
     avatar = _texto(core.get("avatar"), "core.avatar")
+    previa: dict = {}
     if ruta.is_file():
-        previa, _ = frontmatter.leer(ruta)
-        anterior = previa.get("avatar") if isinstance(previa, dict) else None
+        leida, _ = frontmatter.leer(ruta)
+        previa = leida if isinstance(leida, dict) else {}
+        anterior = previa.get("avatar")
         if isinstance(anterior, str) and anterior.strip():
             avatar = anterior.strip()
+    piezas, locales = _aplicar_titulos(_piezas(oferta, pasos, tipo, cfg.paginas_min), previa, titulos or {})
 
     ficha = Ficha(
         p_id=p_id, pais=pais, idioma=_idioma(vault, pais),
@@ -233,13 +291,15 @@ def crear_ficha(vault: Path, p_id: str, pais: str, exigencia: str, tipo: str, ah
         unidad_venta=_texto(core.get("unidad_venta"), "core.unidad_venta"),
         promesa=_texto(core.get("promesa_h1"), "core.promesa_h1"),
         avatar=avatar, exigencia=exigencia, tipo=tipo,
-        piezas=_piezas(oferta, pasos, tipo, cfg.paginas_min),
+        piezas=piezas, titulos_locales=locales,
     )
     meta = asdict(ficha)
     meta["piezas"] = [asdict(p) for p in ficha.piezas]
+    meta["titulos_locales"] = list(locales)
     meta = {"tipo_documento": "ficha", "fecha": ahora.date().isoformat(), **meta}
     lineas = [f"# Ficha · {p_id} · {pais}", "",
-              "Paso 1 de /producto. Claude puede afinar el avatar; el resto sale de OFERTA, ESCALERA y BRANDBOOK.",
+              ("Paso 1 de /producto. Claude puede afinar el avatar; los títulos locales van con --titulo; "
+               "el resto sale de OFERTA, ESCALERA y BRANDBOOK."),
               "", "| Pieza | Título | Tipo | Páginas objetivo |", "|---|---|---|---|"]
     lineas += [f"| {p.id} | {p.titulo} | {p.tipo} | {p.paginas_objetivo} |" for p in ficha.piezas]
     texto = frontmatter.renderizar(meta, "\n".join(lineas) + "\n")
@@ -261,9 +321,13 @@ def leer_ficha(vault: Path, p_id: str) -> Ficha:
     try:
         piezas = tuple(PiezaFicha(id=p["id"], titulo=p["titulo"], tipo=p["tipo"],
                                   paginas_objetivo=int(p["paginas_objetivo"])) for p in meta["piezas"])
+        locales = meta.get("titulos_locales") or []
+        if not isinstance(locales, list) or not all(isinstance(i, str) for i in locales):
+            raise TypeError("titulos_locales no es una lista de ids")
         ficha = Ficha(p_id=meta["p_id"], pais=meta["pais"], idioma=meta["idioma"], slug=meta["slug"],
                       unidad_venta=meta["unidad_venta"], promesa=meta["promesa"], avatar=meta["avatar"],
-                      exigencia=meta["exigencia"], tipo=meta["tipo"], piezas=piezas)
+                      exigencia=meta["exigencia"], tipo=meta["tipo"], piezas=piezas,
+                      titulos_locales=tuple(locales))
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"FICHA.md está incompleta o rota ({exc}): rehaz el paso 1") from None
     if ficha.exigencia not in EXIGENCIAS or ficha.tipo not in TIPOS or ficha.p_id != p_id:

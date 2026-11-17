@@ -99,6 +99,43 @@ def test_cli_ficha_crea_y_anota(vault, capsys):
     assert "ficha del entregable" in _log(vault)
 
 
+def test_cli_ficha_titulo_local(vault, capsys):
+    codigo, out, _ = correr(capsys, "ficha", P, "--pais", "ZZ", "--exigencia", "sanitario", "--tipo", "ebook",
+                            "--titulo", "bono-1=Спешна помощ за 3 минути", "--titulo", "bono-2=Дишай в офиса")
+    assert codigo == 0
+    assert "«Спешна помощ за 3 минути»" in out and "«Дишай в офиса»" in out
+    meta, _ = frontmatter.leer(vault / "productos" / P / "entregable" / "FICHA.md")
+    assert meta["titulos_locales"] == ["bono-1", "bono-2"]
+
+
+@pytest.mark.parametrize("valor", ["bono-1", "=Нещо", "bono-9=Нещо"])
+def test_cli_ficha_titulo_mal_escrito(vault, capsys, valor):
+    codigo, _out, err = correr(capsys, "ficha", P, "--pais", "ZZ", "--exigencia", "sanitario", "--tipo", "ebook",
+                               "--titulo", valor)
+    assert codigo == 2 and "Error:" in err
+    assert not (vault / "productos" / P / "entregable" / "FICHA.md").exists()
+
+
+def test_cli_ficha_titulo_repetido(vault, capsys):
+    codigo, _out, err = correr(capsys, "ficha", P, "--pais", "ZZ", "--exigencia", "sanitario", "--tipo", "ebook",
+                               "--titulo", "bono-1=Едно", "--titulo", "bono-1=Друго")
+    assert codigo == 2 and "bono-1" in err
+
+
+def test_cli_ficha_avisa_bono_sin_traducir(vault, capsys):
+    (vault / "config" / "mercados.yaml").write_text(MERCADOS.replace("idioma: es", "idioma: bg"), encoding="utf-8")
+    codigo, out, _ = correr(capsys, "ficha", P, "--pais", "ZZ", "--exigencia", "sanitario", "--tipo", "ebook",
+                            "--titulo", "bono-2=Дишай в офиса")
+    assert codigo == 0
+    assert "bono-1: título sin traducir (usa --titulo bono-1=…)" in out
+    assert "bono-2: título sin traducir" not in out
+
+
+def test_cli_ficha_en_espanol_no_avisa(vault, capsys):
+    codigo, out, _ = correr(capsys, "ficha", P, "--pais", "ZZ", "--exigencia", "sanitario", "--tipo", "ebook")
+    assert codigo == 0 and "sin traducir" not in out
+
+
 def test_cli_imagenes_sin_precio(vault, capsys, monkeypatch):
     _imagenes(vault)
     monkeypatch.setattr(producto_cli, "_abrir", APIMartFalso(precio=False))

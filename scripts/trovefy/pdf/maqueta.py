@@ -239,10 +239,25 @@ def _texto(spec: dict, clave: str) -> str:
     return valor.strip()
 
 
-def generar_ficha_imprimible(spec: dict) -> str:
+def _figura_ficha(ident: str, titulo: str, imagen: object, manifiesto: dict | None) -> str:
+    """``figure.ficha-img`` de la ilustración ``imagen`` (id del ``medios.json`` de la pieza)."""
+    if not isinstance(imagen, str) or not _ID_FICHA.fullmatch(imagen):
+        raise ValueError(f"ficha {ident}: imagen mal escrita «{imagen}» (el id de medios/medios.json, p. ej. f-01)")
+    entrada = (manifiesto or {}).get(imagen)
+    archivo = entrada.get("archivo") if isinstance(entrada, dict) else None
+    src = f"{CARPETA}/{archivo}" if isinstance(archivo, str) else ""
+    if not _SRC.fullmatch(src) or ".." in src:
+        raise ValueError(f"ficha {ident}: la imagen «{imagen}» no está en {CARPETA}/medios.json de esta pieza "
+                         "(genérala con trovefy producto imagenes)")
+    return f'<figure class="ficha-img"><img src="{_e(src)}" alt="{_e(titulo)}"></figure>'
+
+
+def generar_ficha_imprimible(spec: dict, manifiesto: dict | None = None) -> str:
     """``div.page.ficha`` con anclas ``ini-<id>``/``fin-<id>`` desde un ``fuente/fichas/*.yaml``:
-    ``{id, titulo, instrucciones, tipo: tabla|lineas|casillas, columnas?, filas}``. ``filas`` es un entero
-    (filas vacías); en ``casillas`` también puede ser la lista de textos de cada casilla."""
+    ``{id, titulo, instrucciones, imagen?, tipo: tabla|lineas|casillas, columnas?, filas}``. ``filas`` es un
+    entero (filas vacías); en ``casillas`` también puede ser la lista de textos de cada casilla. ``imagen``
+    es el id de una ilustración del ``manifiesto`` de la pieza (``medios.json``): va entre las
+    instrucciones y la tabla, las líneas o las casillas; si no está en el manifiesto, ``ValueError``."""
     if not isinstance(spec, dict):
         raise ValueError("ficha: el yaml no es un mapa")  # noqa: TRY004 - error de datos
     ident = spec.get("id")
@@ -264,6 +279,8 @@ def generar_ficha_imprimible(spec: dict) -> str:
 
     lineas = ['<div class="page ficha">', f'<span id="ini-{ident}"></span>', f"<h2>{_e(titulo)}</h2>",
               f'<p class="instrucciones">{_e(instrucciones)}</p>']
+    if "imagen" in spec:
+        lineas.append(_figura_ficha(ident, titulo, spec["imagen"], manifiesto))
     if tipo == "tabla":
         columnas = spec.get("columnas")
         if not isinstance(columnas, list) or not columnas or not all(isinstance(c, str) for c in columnas):
@@ -295,13 +312,13 @@ def _leer_fragmento(ruta: Path, *, con_h2: bool) -> tuple[str, _Saneador]:
     return texto, s
 
 
-def _ficha_yaml(ruta: Path) -> str:
+def _ficha_yaml(ruta: Path, manifiesto: dict) -> str:
     try:
         spec = cargar_yaml(Path(ruta).read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
         raise ValueError(f"{Path(ruta).name}: yaml ilegible ({exc})") from None
     try:
-        return generar_ficha_imprimible(spec)
+        return generar_ficha_imprimible(spec, manifiesto)
     except ValueError as exc:
         raise ValueError(f"{Path(ruta).name}: {exc}") from None
 
@@ -363,7 +380,7 @@ def ensamblar(pieza: Pieza, ficha: Ficha, pieza_ficha: PiezaFicha, tokens: dict[
 
     bloques_fichas = []
     for ruta in fichas:
-        html_ficha = _ficha_yaml(ruta)
+        html_ficha = _ficha_yaml(ruta, manifiesto or {})
         ids += _sanear(html_ficha)[1].ids
         bloques_fichas.append(html_ficha)
 

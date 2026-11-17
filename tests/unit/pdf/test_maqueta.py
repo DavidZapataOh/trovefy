@@ -190,6 +190,73 @@ def test_ficha_invalida(cambio):
         generar_ficha_imprimible({**DIARIO, **cambio})
 
 
+MANIFIESTO_F01 = {"f-01": {"archivo": "f-01.png", "sha256": "0" * 64, "origen": "apimart"}}
+
+
+def test_ficha_con_imagen_entre_instrucciones_y_tabla():
+    html = generar_ficha_imprimible({**DIARIO, "imagen": "f-01"}, MANIFIESTO_F01)
+    figura = '<figure class="ficha-img"><img src="medios/f-01.png" alt="Diario de sueño"></figure>'
+    assert figura in html
+    assert html.index('class="instrucciones"') < html.index(figura) < html.index("<table>")
+    lineas = generar_ficha_imprimible({**DIARIO, "tipo": "lineas", "imagen": "f-01"}, MANIFIESTO_F01)
+    assert lineas.index(figura) < lineas.index('<div class="lineas">')
+    casillas = generar_ficha_imprimible({**DIARIO, "tipo": "casillas", "imagen": "f-01"}, MANIFIESTO_F01)
+    assert casillas.index(figura) < casillas.index('<ul class="casillas">')
+
+
+def test_ficha_con_imagen_escapa_el_alt():
+    html = generar_ficha_imprimible({**DIARIO, "titulo": 'Diario "<b>"', "imagen": "f-01"}, MANIFIESTO_F01)
+    assert 'alt="Diario &quot;&lt;b&gt;&quot;"' in html
+
+
+@pytest.mark.parametrize("manifiesto", [None, {}, MANIFIESTO_F01])
+def test_ficha_con_imagen_desconocida_falla(manifiesto):
+    with pytest.raises(ValueError, match=r"ficha diario: .*f-02"):
+        generar_ficha_imprimible({**DIARIO, "imagen": "f-02"}, manifiesto)
+
+
+@pytest.mark.parametrize("imagen", ["", 3, "../f-01", None])
+def test_ficha_con_imagen_mal_escrita_falla(imagen):
+    with pytest.raises(ValueError, match="ficha diario"):
+        generar_ficha_imprimible({**DIARIO, "imagen": imagen}, MANIFIESTO_F01)
+
+
+def test_ensamblado_ficha_con_imagen_pasa_gates(pieza_respira):
+    sha = escribir_medio(pieza_respira.raiz / "medios" / "f-01.png", PNG)
+    registrar_medio(pieza_respira.raiz, "f-01", "f-01.png", sha, "apimart", task_id="t-0002")
+    diario = pieza_respira.raiz / "fuente" / "fichas" / "diario.yaml"
+    diario.write_text(diario.read_text(encoding="utf-8") + "imagen: f-01\n", encoding="utf-8")
+    html = _ensamblar(pieza_respira)
+    assert '<figure class="ficha-img"><img src="medios/f-01.png" alt="Diario de sueño"></figure>' in html
+    informe = evaluar(html, raiz=pieza_respira.raiz, idioma="es", exigencia="sanitario", tipo_pieza="principal",
+                      paginas_objetivo=4, cfg=CFG)
+    assert informe.hallazgos == () and informe.pasa
+
+
+def test_ensamblado_ficha_con_imagen_fuera_del_manifiesto(pieza_respira):
+    diario = pieza_respira.raiz / "fuente" / "fichas" / "diario.yaml"
+    diario.write_text(diario.read_text(encoding="utf-8") + "imagen: f-07\n", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"diario.yaml: ficha diario: .*f-07"):
+        _ensamblar(pieza_respira)
+
+
+def test_qg04_ve_la_imagen_de_una_ficha_sin_registrar(pieza_respira):
+    html = _ensamblar(pieza_respira).replace(
+        '<span class="push" id="fin-diario">',
+        '<figure class="ficha-img"><img src="medios/f-09.png" alt="x"></figure><span class="push" id="fin-diario">')
+    informe = evaluar(html, raiz=pieza_respira.raiz, idioma="es", exigencia="sanitario", tipo_pieza="principal",
+                      paginas_objetivo=4, cfg=CFG)
+    assert any(h.gate == "QG-04" and "f-09.png" in h.texto for h in informe.hallazgos)
+
+
+def test_css_imagen_de_ficha_acotada():
+    css = BASE_CSS.read_text(encoding="utf-8")
+    regla = re.search(r"\.ficha-img img\{([^}]*)\}", css)
+    assert regla, "falta la regla .ficha-img img"
+    for decl in ("max-height:70mm", "width:auto", "object-fit:contain", "margin:0 auto"):
+        assert decl in regla.group(1)
+
+
 # --- ensamblado -------------------------------------------------------------------------------------
 
 
