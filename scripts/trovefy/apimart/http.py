@@ -10,6 +10,7 @@ ningún mensaje de error lleva cabeceras ni la clave; no se siguen redirecciones
 
 from __future__ import annotations
 
+import http.client
 import json
 import re
 import urllib.error
@@ -217,7 +218,8 @@ def pedir(cred: Credenciales | None, metodo: Literal["GET", "POST"], ruta: str, 
             cuerpo = b""
         _lanzar(exc.code, _leer_json(cuerpo), clave)
         raise  # inalcanzable: _lanzar siempre lanza
-    except (urllib.error.URLError, TimeoutError, OSError):
+    except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException):
+        # HTTPException (BadStatusLine, IncompleteRead…) puede llevar bytes de la conexión: mensaje fijo.
         raise SinRed("sin red: APIMart no responde") from None
     if len(cuerpo) > MAX_RESPUESTA:
         raise RespuestaInesperada("respuesta de APIMart de más de 1 MB")

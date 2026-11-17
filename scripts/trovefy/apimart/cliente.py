@@ -11,7 +11,9 @@ Una tarea enviada puede estar cobrada: si el sondeo no termina queda ``pendiente
 
 from __future__ import annotations
 
+import http.client
 import io
+import ipaddress
 import re
 import time
 import urllib.error
@@ -54,6 +56,9 @@ FORMATOS = {"PNG": "png", "JPEG": "jpg", "WEBP": "webp"}
 _ID = re.compile(r"[a-z0-9-]{1,40}", re.ASCII)
 _TASK_ID = re.compile(r"[A-Za-z0-9_-]{1,128}", re.ASCII)
 _ESTADOS_FIN_MAL = ("failed", "cancelled", "canceled")
+_ETIQUETA = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", re.ASCII)
+_TLD = re.compile(r"[a-z]{2,63}|xn--[a-z0-9-]{1,59}", re.ASCII)
+_SUFIJOS_PRIVADOS = (".localhost", ".local", ".localdomain", ".internal", ".lan", ".home.arpa", ".intranet")
 
 
 class PeticionInvalida(ValueError):
@@ -136,12 +141,41 @@ def _coste(d: dict) -> Decimal | None:
     return None if creditos is None else creditos * CREDITO_USD
 
 
+def host_publico(host: str | None) -> bool:
+    """¿``host`` es un nombre DNS público? No vale una IP (en ninguna grafía), ``localhost``, un nombre de
+    una sola etiqueta ni los sufijos de red local. La documentación sirve los resultados desde
+    ``upload.apimart.ai``, pero su CDN puede cambiar: se rechaza lo que nunca es público en vez de fijar
+    una lista de hosts que, si cambiara, dejaría sin descargar imágenes ya pagadas."""
+    if not isinstance(host, str) or not host:
+        return False
+    h = host.lower().rstrip(".")
+    try:
+        ipaddress.ip_address(h)
+        return False
+    except ValueError:
+        pass
+    if h == "localhost" or h.endswith(_SUFIJOS_PRIVADOS):
+        return False
+    etiquetas = h.split(".")
+    return (len(etiquetas) >= 2 and all(_ETIQUETA.fullmatch(e) for e in etiquetas)
+            and bool(_TLD.fullmatch(etiquetas[-1])))
+
+
+def _url_publica(url: object) -> bool:
+    if not isinstance(url, str) or not url.startswith("https://"):
+        return False
+    try:
+        return host_publico(urlparse(url).hostname)
+    except ValueError:
+        return False
+
+
 def _url(d: dict) -> str | None:
     try:
         url = d["result"]["images"][0]["url"][0]
     except (KeyError, IndexError, TypeError):
         return None
-    return url if isinstance(url, str) and url.startswith("https://") else None
+    return url if _url_publica(url) else None
 
 
 def _limpio(texto: object) -> str:
@@ -229,13 +263,15 @@ def descargar(url: str, abrir_publico=abrir_sin_redireccion, max_bytes: int = MA
         raise RespuestaInesperada("URL de resultado ilegible") from None
     if u.scheme != "https" or not host:
         raise RespuestaInesperada("la URL del resultado no es https")
+    if not host_publico(host):
+        raise RespuestaInesperada("la URL del resultado no apunta a un nombre público (IP, localhost o red local)")
     req = urllib.request.Request(url, headers={"User-Agent": "trovefy", "Accept": "image/*"}, method="GET")
     try:
         with abrir_publico(req, timeout=60) as resp:
             codigo, datos = resp.status, resp.read(max_bytes + 1)
     except urllib.error.HTTPError as exc:
         raise RespuestaInesperada(f"la descarga respondió HTTP {exc.code}") from None
-    except (urllib.error.URLError, TimeoutError, OSError):
+    except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException):
         raise SinRed("sin red al descargar la imagen") from None
     if codigo != 200:
         raise RespuestaInesperada(f"la descarga respondió HTTP {codigo}")

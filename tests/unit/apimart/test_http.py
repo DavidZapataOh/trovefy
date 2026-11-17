@@ -1,6 +1,11 @@
+import http.client
+import http.server
 import io
 import json
+import threading
+import traceback
 import urllib.error
+from typing import ClassVar
 
 import pytest
 from trovefy.apimart.http import (
@@ -140,3 +145,62 @@ def test_http_error_lee_cuerpo_acotado():
 
     with pytest.raises(SinSaldo):
         pedir_json(_cred(), "GET", "/v1/tasks/x", abrir=abrir)
+
+
+# --- ronda de revisión de las Tareas 2–5 ------------------------------------------------------------
+
+@pytest.mark.parametrize("exc", [
+    http.client.BadStatusLine(f"Bearer {CLAVE}"),
+    http.client.IncompleteRead(CLAVE.encode()),
+    http.client.RemoteDisconnected(CLAVE),
+    http.client.LineTooLong(CLAVE),
+])
+def test_http_exception_es_sin_red_y_no_lleva_la_clave(exc):
+    def abrir(req, timeout=None):
+        raise exc
+
+    with pytest.raises(SinRed) as info:
+        pedir_json(_cred(), "POST", "/v1/images/generations", {"n": 1}, abrir=abrir)
+    texto = "".join(traceback.format_exception(info.value))
+    assert CLAVE not in texto and CLAVE not in repr(info.value)
+
+
+class _Redirige(http.server.BaseHTTPRequestHandler):
+    visitas: ClassVar[list] = []
+
+    def _responder(self):
+        type(self).visitas.append((self.command, self.path, self.headers.get("Authorization")))
+        if self.path.startswith("/destino"):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"data": [{"task_id": "robado"}]}')
+            return
+        self.send_response(302)
+        self.send_header("Location", "/destino")
+        self.end_headers()
+
+    do_GET = do_POST = _responder
+
+    def log_message(self, *_a):
+        return None
+
+
+def test_el_cliente_no_sigue_redirecciones():
+    """Servidor real en loopback (sin red externa): un 302 no se sigue y la clave no viaja al destino."""
+    from trovefy.apimart.cliente import enviar
+
+    _Redirige.visitas = []
+    servidor = http.server.HTTPServer(("127.0.0.1", 0), _Redirige)
+    hilo = threading.Thread(target=servidor.serve_forever, daemon=True)
+    hilo.start()
+    try:
+        cred = Credenciales(f"http://127.0.0.1:{servidor.server_port}", CLAVE)
+        with pytest.raises(RespuestaInesperada, match="302"):
+            enviar(cred, {"model": "gpt-image-2", "prompt": "x", "n": 1})
+        with pytest.raises(RespuestaInesperada, match="302"):
+            pedir_json(cred, "GET", "/v1/tasks/x")
+    finally:
+        servidor.shutdown()
+        servidor.server_close()
+    assert [v[1] for v in _Redirige.visitas] == ["/v1/images/generations", "/v1/tasks/x"]

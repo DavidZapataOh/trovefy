@@ -4,7 +4,7 @@
 apimart:
   tope_producto_usd: {valor: "2.00", fuente: "§4.7: portada, mockup y 6–10 ilustraciones; suma principal, bonos y upsells (contrato 7)", fecha: "2026-11-16"}
   modelos_imagen: {valor: [gpt-image-2], fuente: "P-11: se usa el más barato con precio medido de esta lista", fecha: "2026-11-16"}
-  resolucion: {valor: 1k, fuente: "§4.7 «proporción + resolution»; 4k solo en 6 proporciones", fecha: "2026-11-16"}
+  resolucion: {valor: 1k, fuente: "§4.7 «proporción + resolution»; medido en docs.apimart.ai (gpt-image-2): 15 proporciones, todas con 4k", fecha: "2026-11-16"}
 plan:
   palabras_por_pagina: {valor: 350, fuente: "§4.7 paso 2 (dp-createur dp-playbook-create:237-262)", fecha: "2026-11-16"}
   paginas_min:

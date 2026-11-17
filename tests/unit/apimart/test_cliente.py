@@ -1,4 +1,6 @@
+import http.client
 import io
+import traceback
 import urllib.error
 from decimal import Decimal
 
@@ -256,3 +258,40 @@ def test_descarga_404_es_inesperada():
 
 def test_clave_rechazada_existe():
     assert issubclass(ClaveRechazada, Exception)
+
+
+# --- ronda de revisión de las Tareas 2–5 ------------------------------------------------------------
+
+@pytest.mark.parametrize("url", [
+    "https://127.0.0.1/x.png", "https://[::1]/x.png", "https://10.0.0.8/x.png", "https://169.254.169.254/x.png",
+    "https://192.168.1.10/x.png", "https://localhost/x.png", "https://algo.localhost/x.png",
+    "https://intranet/x.png", "https://2130706433/x.png", "https://0x7f.0.0.1/x.png", "https://servidor.local/x.png",
+])
+def test_descarga_rechaza_hosts_no_publicos(respuesta_json, url):
+    abrir = respuesta_json(200, PNG)
+    with pytest.raises(RespuestaInesperada):
+        descargar(url, abrir)
+    assert abrir.peticiones == []
+
+
+def test_url_de_resultado_con_ip_es_fallida():
+    datos = fixture("tarea-completada.json")
+    datos["data"]["result"]["images"][0]["url"] = ["https://127.0.0.1/x.png"]
+    e = esperar(CRED, "t-1", secuencia(datos), dormir=lambda s: None, reloj=lambda: 0)
+    assert e.estado == "fallida" and e.url is None
+
+
+def test_url_de_resultado_publica_vale():
+    datos = fixture("tarea-completada.json")
+    e = esperar(CRED, "t-1", secuencia(datos), dormir=lambda s: None, reloj=lambda: 0)
+    assert e.estado == "completada" and e.url.startswith("https://upload.apimart.ai/")
+
+
+@pytest.mark.parametrize("exc", [http.client.BadStatusLine(CLAVE), http.client.IncompleteRead(CLAVE.encode())])
+def test_descarga_http_exception_es_sin_red(exc):
+    def abrir(req, timeout=None):
+        raise exc
+
+    with pytest.raises(SinRed) as info:
+        descargar("https://upload.apimart.ai/x.png", abrir)
+    assert CLAVE not in "".join(traceback.format_exception(info.value))

@@ -21,7 +21,7 @@ def test_matchers_exactos():
         "raw_inmutable.py": "Write|Edit|MultiEdit|Bash",
         "stop.py": "Write|Edit|MultiEdit|Bash",
         "buzon_guard.py": "Write|Edit|MultiEdit|NotebookEdit|Bash",
-        "apimart_gasto.py": "Bash|WebFetch",
+        "apimart_gasto.py": "Bash|WebFetch|Write|Edit|MultiEdit|NotebookEdit|Read|Grep",
     }
     obtenido = {}
     for grupo in reg["hooks"]["PreToolUse"]:

@@ -133,8 +133,36 @@ def iniciar_config(vault: Path) -> Path:
     return ruta
 
 
+def _tope_decidido(dir_producto: Path, p_id: str) -> Decimal | None:
+    """``tope_nuevo_usd`` de la última ``decisiones/*-tope-apimart.md`` del producto con ``cita`` no vacía."""
+    carpeta = dir_producto / "decisiones"
+    if not carpeta.is_dir():
+        return None
+    for ruta in sorted(carpeta.glob("*-tope-apimart.md"), reverse=True):  # AAAA-MM-DD-HHMMSS: orden = fecha
+        if ruta.is_symlink() or not ruta.is_file():
+            continue
+        try:
+            meta, _ = frontmatter.leer(ruta)
+        except (OSError, ValueError, yaml.YAMLError):
+            continue
+        meta = meta or {}
+        cita = meta.get("cita")
+        if meta.get("producto") != p_id or not isinstance(cita, str) or not cita.strip():
+            continue
+        try:
+            return importe_usd(meta.get("tope_nuevo_usd"), f"decisiones/{ruta.name}: tope_nuevo_usd")
+        except ConfigInvalida:
+            return None
+    return None
+
+
 def tope_de(vault: Path, p_id: str, cfg: ConfigProducto) -> Decimal:
-    """Tope de APIMart del producto: ``PRODUCTO.md`` → ``apimart_tope_usd`` si está; si no, ``cfg.tope_usd``."""
+    """Tope de APIMart del producto: ``PRODUCTO.md`` → ``apimart_tope_usd`` si está; si no, ``cfg.tope_usd``.
+
+    ``apimart_tope_usd`` solo vale si coincide con ``tope_nuevo_usd`` de la última
+    ``decisiones/*-tope-apimart.md`` del producto con ``cita`` no vacía (la escribe ``subir_tope`` con las
+    palabras del usuario). Si no coincide, ``ConfigInvalida``: falla cerrado y no se genera nada.
+    """
     ruta = Path(vault) / "productos" / validar_p_id(p_id) / "PRODUCTO.md"
     if not ruta.is_file():
         return cfg.tope_usd
@@ -142,4 +170,10 @@ def tope_de(vault: Path, p_id: str, cfg: ConfigProducto) -> Decimal:
     valor = (meta or {}).get("apimart_tope_usd")
     if valor is None:
         return cfg.tope_usd
-    return importe_usd(valor, f"productos/{p_id}/PRODUCTO.md: apimart_tope_usd")
+    tope = importe_usd(valor, f"productos/{p_id}/PRODUCTO.md: apimart_tope_usd")
+    if _tope_decidido(ruta.parent, p_id) != tope:
+        raise ConfigInvalida(
+            f"productos/{p_id}/PRODUCTO.md: apimart_tope_usd ({tope} USD) no coincide con la última decisión "
+            "con la cita del usuario (decisiones/*-tope-apimart.md); no se genera nada. El tope solo se sube "
+            "con la cita literal del usuario: pide ayuda si no sabes de dónde sale ese valor")
+    return tope

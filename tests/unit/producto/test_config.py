@@ -117,11 +117,59 @@ def _producto(v, **meta):
     frontmatter.escribir(v / "productos" / P / "PRODUCTO.md", {"tipo": "producto", **meta}, "# x\n")
 
 
+def _decision(v, nombre, nuevo, cita="súbelo a 3", producto=P):
+    meta = {"tipo": "decision", "producto": producto, "decision": "tope_apimart", "tope_anterior_usd": "2.00",
+            "tope_nuevo_usd": nuevo, "cita": cita}
+    frontmatter.escribir(v / "productos" / P / "decisiones" / f"{nombre}-tope-apimart.md", meta, "# Tope\n")
+
+
 def test_tope_del_producto_gana(tmp_path):
     iniciar_config(tmp_path)
     cfg = cargar_config(tmp_path)
     _producto(tmp_path, apimart_tope_usd="3.00")
+    _decision(tmp_path, "2026-11-14-100000", "3")
     assert tope_de(tmp_path, P, cfg) == Decimal("3.00")
+
+
+def test_tope_del_producto_sin_decision_falla_cerrado(tmp_path):
+    iniciar_config(tmp_path)
+    cfg = cargar_config(tmp_path)
+    _producto(tmp_path, apimart_tope_usd="300.00")
+    with pytest.raises(ConfigInvalida, match="cita"):
+        tope_de(tmp_path, P, cfg)
+
+
+@pytest.mark.parametrize("decisiones", [
+    [("2026-11-14-100000", "3", "")],                                    # sin cita
+    [("2026-11-14-100000", "300", "súbelo"), ("2026-11-15-100000", "3", "a 3")],  # la última manda
+    [("2026-11-14-100000", "4", "a 4")],                                  # no coincide
+])
+def test_tope_del_producto_no_coincide_con_la_decision(tmp_path, decisiones):
+    iniciar_config(tmp_path)
+    cfg = cargar_config(tmp_path)
+    _producto(tmp_path, apimart_tope_usd="300")
+    for nombre, nuevo, cita in decisiones:
+        _decision(tmp_path, nombre, nuevo, cita)
+    with pytest.raises(ConfigInvalida):
+        tope_de(tmp_path, P, cfg)
+
+
+def test_tope_ignora_decision_sin_cita_posterior(tmp_path):
+    iniciar_config(tmp_path)
+    cfg = cargar_config(tmp_path)
+    _producto(tmp_path, apimart_tope_usd="3")
+    _decision(tmp_path, "2026-11-14-100000", "3", "a 3")
+    _decision(tmp_path, "2026-11-15-100000", "300", "  ")  # sin cita: no cuenta
+    assert tope_de(tmp_path, P, cfg) == Decimal(3)
+
+
+def test_tope_decision_de_otro_producto_no_vale(tmp_path):
+    iniciar_config(tmp_path)
+    cfg = cargar_config(tmp_path)
+    _producto(tmp_path, apimart_tope_usd="3")
+    _decision(tmp_path, "2026-11-14-100000", "3", "a 3", producto="p-0043-dishai")
+    with pytest.raises(ConfigInvalida):
+        tope_de(tmp_path, P, cfg)
 
 
 def test_tope_por_defecto(tmp_path):
@@ -185,3 +233,10 @@ def test_usa_hojas_publicas_de_economia():
     assert ec.es_hoja is ec._es_hoja and ec.revisar_hojas is ec._revisar_hojas
     fuente = inspect.getsource(pc)
     assert "_es_hoja" not in fuente and "_revisar_hojas" not in fuente
+
+
+def test_fuente_de_resolucion_dice_lo_medido():
+    """Ruling R-C: la documentación de gpt-image-2 (2026-11-16) da 15 proporciones y todas admiten 4k."""
+    datos = yaml.safe_load(PLANTILLA.read_text(encoding="utf-8"))
+    fuente = datos["apimart"]["resolucion"]["fuente"]
+    assert "6 proporciones" not in fuente and "15 proporciones" in fuente and "4k" in fuente

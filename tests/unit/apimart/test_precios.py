@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from decimal import Decimal
 
@@ -64,13 +65,32 @@ def test_red_caida_es_none(tmp_path):
     assert precio_imagen(tmp_path, BASE, "gpt-image-2", "1k", HOY, sin_red) is None
 
 
-def test_precio_cache_del_dia(tmp_path, respuesta_json):
+def sin_red(*_a, **_k):
+    raise TimeoutError
+
+
+def test_precio_cache_del_dia_solo_si_no_hay_red(tmp_path, respuesta_json):
     p1 = precio_imagen(tmp_path, BASE, "gpt-image-2", "1k", HOY, respuesta_json(200, fixture("pricing-gpt-image-2.json")))
     assert (tmp_path / "data/cache/apimart-precio-gpt-image-2-2026-11-14.json").is_file()
-    p2 = precio_imagen(tmp_path, BASE, "gpt-image-2", "1k", HOY, explota)
-    assert p2 == p1
+    p2 = precio_imagen(tmp_path, BASE, "gpt-image-2", "1k", HOY, sin_red)
+    assert p2.usd_por_imagen == p1.usd_por_imagen and "caché" in p2.fuente
     # otra resolución sale de la misma caché del día
-    assert precio_imagen(tmp_path, BASE, "gpt-image-2", "2k", HOY, explota).usd_por_imagen == Decimal("0.015")
+    assert precio_imagen(tmp_path, BASE, "gpt-image-2", "2k", HOY, sin_red).usd_por_imagen == Decimal("0.015")
+
+
+def test_precio_medido_gana_a_la_cache(tmp_path, respuesta_json):
+    precio_imagen(tmp_path, BASE, "gpt-image-2", "1k", HOY, respuesta_json(200, fixture("pricing-gpt-image-2.json")))
+    abrir = respuesta_json(200, precio(0.012))
+    p = precio_imagen(tmp_path, BASE, "gpt-image-2", "1k", HOY, abrir)
+    assert p.usd_por_imagen == Decimal("0.012") and len(abrir.peticiones) == 1 and "caché" not in p.fuente
+
+
+@pytest.mark.parametrize("malo", [0, -0.01])
+def test_cache_con_precio_no_positivo_no_vale(tmp_path, malo):
+    ruta = tmp_path / "data/cache/apimart-precio-gpt-image-2-2026-11-14.json"
+    ruta.parent.mkdir(parents=True)
+    ruta.write_text(json.dumps(precio(malo)))
+    assert precio_imagen(tmp_path, BASE, "gpt-image-2", "1k", HOY, sin_red) is None
 
 
 def test_cache_de_otro_dia_no_vale(tmp_path, respuesta_json):

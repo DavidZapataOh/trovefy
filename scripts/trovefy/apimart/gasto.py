@@ -4,6 +4,10 @@
 de estado de un intento es una fila nueva, añadida bajo ``flock``. Una fila mala lanza
 ``CostesCorruptos`` y nunca se «arregla»: sin un gasto legible no se envía nada (falla cerrado).
 Importes en ``Decimal`` escritos con ``str(Decimal)``; fechas ISO 8601 con zona.
+
+Rebase del tope (ruling L4): el tope se comprueba con el **precio medido** antes de cada envío. Si APIMart
+cobra por esa imagen más de lo medido, el tope puede superarse como mucho en esa diferencia de una imagen
+(nunca en una imagen más: la siguiente ya ve el gasto real y se para).
 """
 
 from __future__ import annotations
@@ -14,7 +18,7 @@ import io
 import os
 import uuid
 from collections.abc import Callable
-from dataclasses import astuple, dataclass, fields
+from dataclasses import astuple, dataclass, fields, replace
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -36,8 +40,16 @@ ARCHIVO = "costes.csv"
 SKILL = "/producto"
 
 
+AYUDA_CORRUPTOS = ("No se genera nada con APIMart. No lo edites a mano (es el registro del gasto real): "
+                   "pide ayuda para revisarlo")
+
+
 class CostesCorruptos(ValueError):
-    """``costes.csv`` no se puede leer; nunca se reescribe para «arreglarlo»."""
+    """``costes.csv`` no se puede leer; nunca se reescribe para «arreglarlo». El mensaje pide ayuda."""
+
+    def __init__(self, motivo: str) -> None:
+        super().__init__(f"{motivo}. {AYUDA_CORRUPTOS}")
+        self.motivo = motivo
 
 
 class TopeSuperado(Exception):
@@ -201,7 +213,11 @@ def gastado_usd(filas: list[FilaCoste]) -> Decimal:
 
 
 def comprobar_tope(gastado: Decimal, estimado: Decimal, tope: Decimal) -> None:
-    """``TopeSuperado`` si ``gastado + estimado > tope`` (llegar justo al tope está permitido)."""
+    """``TopeSuperado`` si ``gastado + estimado > tope`` (llegar justo al tope está permitido).
+
+    ``estimado`` es el precio medido. Rebase aceptado (ruling L4): si el coste real de la imagen sale mayor
+    que el medido, el tope puede superarse como mucho en esa diferencia de una sola imagen.
+    """
     if gastado + estimado > tope:
         raise TopeSuperado(gastado, tope, estimado)
 
@@ -224,27 +240,40 @@ def _dia(fecha: datetime):
     return fecha.astimezone(ZONA_NEGOCIO).date()
 
 
+ALERTA_DEPOSITANDO = "alerta (depositando)"
+ALERTA_NO_DEPOSITADA = "alerta no depositada"
+
+
 def avisar_tope(vault: Path, p_id: str, gastado: Decimal, tope: Decimal, faltan: int, estimado: Decimal,
                 ahora: datetime, depositar: Callable = fuentes.depositar, *, pieza: str = "", imagen: str = "",
                 modelo: str = "", resolucion: str = "", proporcion: str = "", fuente_precio: str = "") -> str | None:
-    """Deposita la alerta de tope (una por producto y día) y anota la fila ``tope``; devuelve su id.
+    """Deposita la alerta de tope (una por producto y día) y la deja anotada en filas ``tope``; devuelve su id.
 
-    Si hoy ya hay una fila ``tope`` del producto, no deposita y devuelve ``None``. ``BuzonNoDisponible``
-    también da ``None`` (sin fila): el aviso es secundario; la parada del lote, no.
+    La marca (fila ``tope`` «alerta (depositando)») se escribe **antes** de depositar: si algo falla
+    después, otra llamada del mismo día no repite la alerta. Con el id va otra fila del mismo intento.
+    ``BuzonNoDisponible`` (no se depositó nada) cierra el intento como «alerta no depositada» y da ``None``:
+    más tarde, ese mismo día, se puede volver a avisar. El aviso es secundario; la parada del lote, no.
     """
     ahora = _con_zona(ahora)
     hoy = _dia(ahora)
-    if any(f.estado == "tope" and _dia(f.fecha) == hoy for f in leer_costes(vault, p_id)):
+    ultimas: dict[str, FilaCoste] = {}
+    for f in leer_costes(vault, p_id):
+        if f.estado == "tope":
+            ultimas[f.intento] = f
+    if any(_dia(f.fecha) == hoy and f.archivo != ALERTA_NO_DEPOSITADA for f in ultimas.values()):
         return None
-    try:
-        id_ = depositar(Path(vault), alerta_tope(p_id, gastado, tope, faltan, estimado), lambda: ahora)
-    except BuzonNoDisponible:
-        return None
-    anotar_coste(vault, p_id, FilaCoste(
+    marca = FilaCoste(
         fecha=ahora, producto=p_id, pieza=pieza, imagen=imagen, intento=str(uuid.uuid4()), task_id="",
         modelo=modelo, resolucion=resolucion, proporcion=proporcion, estado="tope",
         coste_estimado_usd=estimado, coste_real_usd=None, fuente_precio=fuente_precio, sha256="",
-        archivo=f"alerta {id_}"))
+        archivo=ALERTA_DEPOSITANDO)
+    anotar_coste(vault, p_id, marca)
+    try:
+        id_ = depositar(Path(vault), alerta_tope(p_id, gastado, tope, faltan, estimado), lambda: ahora)
+    except BuzonNoDisponible:
+        anotar_coste(vault, p_id, replace(marca, archivo=ALERTA_NO_DEPOSITADA))
+        return None
+    anotar_coste(vault, p_id, replace(marca, archivo=f"alerta {id_}"))
     return id_
 
 

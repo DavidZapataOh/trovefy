@@ -161,7 +161,9 @@ def test_una_alerta_por_dia(vault):
     assert avisar_tope(*args, AHORA, dep) == "P-20261114-001"
     assert avisar_tope(*args, AHORA + timedelta(hours=2), dep) is None
     assert len(dep.llamadas) == 1 and dep.llamadas[0]["titulo"] == "Tope de APIMart alcanzado"
-    assert [f.estado for f in leer_costes(vault, P)] == ["tope"]
+    filas = leer_costes(vault, P)
+    assert [f.estado for f in filas] == ["tope", "tope"]  # la marca antes de depositar y luego el id
+    assert filas[0].intento == filas[1].intento and filas[1].archivo == "alerta P-20261114-001"
     # otro día, otra alerta
     assert avisar_tope(*args, AHORA + timedelta(days=1), dep) == "P-20261114-002"
 
@@ -170,8 +172,43 @@ def test_sin_buzon_sigue_detenido(vault):
     def sin_buzon(vault, datos, ahora=None):
         raise BuzonNoDisponible("el buzón aún no está instalado (plan 12)")
 
-    assert avisar_tope(vault, P, Decimal("1.9950"), Decimal("2.00"), 3, Decimal("0.0255"), AHORA, sin_buzon) is None
-    assert leer_costes(vault, P) == []
+    args = (vault, P, Decimal("1.9950"), Decimal("2.00"), 3, Decimal("0.0255"))
+    assert avisar_tope(*args, AHORA, sin_buzon) is None
+    assert gastado_usd(leer_costes(vault, P)) == 0
+    # el buzón no recibió nada: más tarde, con buzón, sí se avisa
+    dep = _depositar_falso()
+    assert avisar_tope(*args, AHORA + timedelta(hours=1), dep) == "P-20261114-001"
+
+
+def test_alerta_no_se_duplica_si_algo_falla_tras_depositar(vault):
+    llamadas = []
+
+    def deposita_y_revienta(vault, datos, ahora=None):
+        llamadas.append(datos)
+        raise RuntimeError("se cayó justo después de depositar")
+
+    args = (vault, P, Decimal("1.9950"), Decimal("2.00"), 3, Decimal("0.0255"))
+    with pytest.raises(RuntimeError):
+        avisar_tope(*args, AHORA, deposita_y_revienta)
+    dep = _depositar_falso()
+    assert avisar_tope(*args, AHORA + timedelta(hours=1), dep) is None
+    assert len(llamadas) == 1 and dep.llamadas == []
+
+
+def test_costes_corruptos_no_invita_a_editar(vault):
+    ruta = ruta_costes(vault, P)
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    ruta.write_text("roto\n", encoding="utf-8")
+    with pytest.raises(CostesCorruptos) as info:
+        leer_costes(vault, P)
+    texto = str(info.value).lower()
+    assert "pide ayuda" in texto and "no lo edites" in texto
+
+
+def test_tope_puede_superarse_solo_en_la_diferencia_documentada():
+    import trovefy.apimart.gasto as g
+
+    assert "L4" in g.comprobar_tope.__doc__ and "diferencia" in g.comprobar_tope.__doc__
 
 
 def test_subir_tope_cita_literal(vault):

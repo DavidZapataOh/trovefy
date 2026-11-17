@@ -62,12 +62,18 @@ def _multipart(nombre: str, tipo: str, datos: bytes) -> tuple[bytes, str]:
     return cabeza + datos + f"\r\n--{frontera}--\r\n".encode(), f"multipart/form-data; boundary={frontera}"
 
 
-def subir(cred: Credenciales, ruta: Path, vault: Path, abrir=abrir_sin_redireccion, ahora: datetime | None = None) -> str:
-    """URL pública de ``ruta`` en APIMart: la de la caché si tiene menos de 60 h; si no, la sube."""
+def subir(cred: Credenciales, ruta: Path, vault: Path, abrir=abrir_sin_redireccion, ahora: datetime | None = None,
+          *, datos: bytes | None = None) -> str:
+    """URL pública de ``ruta`` en APIMart: la de la caché si tiene menos de 60 h; si no, la sube.
+
+    Con ``datos`` se suben esos bytes (ya leídos sin seguir enlaces y comprobados contra el manifiesto) y
+    ``ruta`` solo da el nombre; sin ``datos`` se lee ``ruta``.
+    """
     if ahora is None or ahora.tzinfo is None or ahora.utcoffset() is None:
         raise ValueError("ahora debe ser un datetime con zona horaria")
     ruta = Path(ruta)
-    datos = ruta.read_bytes()
+    if datos is None:
+        datos = ruta.read_bytes()
     if len(datos) > MAX_SUBIDA:
         raise ValueError(f"{ruta.name} pasa de 20 MB; APIMart no lo admite como referencia")
     formato = formato_imagen(datos)

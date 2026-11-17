@@ -78,9 +78,10 @@ def precio_imagen(vault: Path, base: str, modelo: str, resolucion: str, hoy: dat
                   abrir=abrir_sin_redireccion) -> Precio | None:
     """Precio por imagen de ``modelo`` en ``resolucion``, o ``None`` si no se puede medir.
 
-    Caché del día en ``data/cache/apimart-precio-<modelo>-<AAAA-MM-DD>.json`` (la respuesta tal cual);
-    solo se guarda una respuesta que da un precio válido. ``None`` (sin caché) ante red caída, error
-    HTTP, forma desconocida, falta de la resolución o precio ≤ 0 o > 1 USD.
+    Siempre se mide primero (precio fresco). Solo si la medida falla se usa la caché del día
+    ``data/cache/apimart-precio-<modelo>-<AAAA-MM-DD>.json`` (la última respuesta válida de hoy; la de otro
+    día no vale), y su ``fuente`` lo dice. ``None`` ante red caída o error HTTP sin caché de hoy, forma
+    desconocida, falta de la resolución o precio ≤ 0 o > 1 USD.
     """
     if not isinstance(modelo, str) or not _MODELO.fullmatch(modelo):
         raise ValueError(f"modelo de APIMart mal escrito: «{modelo}»")
@@ -91,18 +92,19 @@ def precio_imagen(vault: Path, base: str, modelo: str, resolucion: str, hoy: dat
     ruta_api = f"/api/pricing/model?model={quote(modelo, safe='')}"
     fuente = f"{base}{ruta_api} → data.resolution_paid_prices.{resolucion.upper()} (USD)"
     cache = _ruta_cache(vault, modelo, hoy)
-    cuerpo = _leer_cache(cache)
+    try:
+        cuerpo = pedir_json(None, "GET", ruta_api, abrir=abrir, base=base)
+    except ErrorApimart:
+        cuerpo = None
     usd = _usd(cuerpo, resolucion)
-    if usd is None:
-        try:
-            cuerpo = pedir_json(None, "GET", ruta_api, abrir=abrir, base=base)
-        except ErrorApimart:
-            return None
-        usd = _usd(cuerpo, resolucion)
-        if usd is None:
-            return None
+    if usd is not None:
         escribir_atomico(cache, json.dumps(cuerpo, ensure_ascii=False, sort_keys=True) + "\n")
-    return Precio(modelo, resolucion, usd, fuente, hoy)
+        return Precio(modelo, resolucion, usd, fuente, hoy)
+    # Sin precio fresco: solo la caché de hoy, y solo con un precio > 0 (``_usd`` lo exige).
+    usd = _usd(_leer_cache(cache), resolucion)
+    if usd is None:
+        return None
+    return Precio(modelo, resolucion, usd, f"{fuente} · caché de {hoy.isoformat()}", hoy)
 
 
 def elegir_modelo(precios: list[Precio | None]) -> Precio | None:

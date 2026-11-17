@@ -47,7 +47,7 @@
         ]
       },
       {
-        "matcher": "Bash|WebFetch",
+        "matcher": "Bash|WebFetch|Write|Edit|MultiEdit|NotebookEdit|Read|Grep",
         "hooks": [
           {
             "type": "command",
