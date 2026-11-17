@@ -314,7 +314,12 @@ def _abrir_seguro(url: str, timeout: float = _TIMEOUT_S, *, contexto: ssl.SSLCon
     if urlparse(url).scheme != "https":
         raise ValueError("solo https")
     https = urllib.request.HTTPSHandler(context=contexto or ssl.create_default_context())
-    return urllib.request.build_opener(_SinRedireccion, https).open(url, timeout=timeout)
+    # Impultienda va detrás de Cloudflare, que responde 403 al agente por defecto de urllib.
+    peticion = urllib.request.Request(url, headers={"User-Agent": AGENTE_NAVEGADOR})
+    return urllib.request.build_opener(_SinRedireccion, https).open(peticion, timeout=timeout)
+
+
+AGENTE_NAVEGADOR = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 
 
 def verificar_cloudflare(url: str, dir_landing: Path, abrir=_abrir_seguro) -> bool:
