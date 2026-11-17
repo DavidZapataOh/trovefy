@@ -44,6 +44,7 @@ from trovefy.landing.hosting import (
 )
 from trovefy.landing.panel import SERVICIO, Panel, preparar_mapa, respaldar, restaurar
 from trovefy.landing.plantilla import leer_landing_yaml, pixel_js
+from trovefy.landing.qa import comprobar_url_publicada
 from trovefy.navegador import NavegadorError, sesion
 from trovefy.producto.medios import escribir_medio
 from trovefy.secretos import buscar_secreto
@@ -90,7 +91,8 @@ def _frontmatter(ruta: Path) -> dict | None:
 
 def listo_para_publicar(vault: Path, datos: DatosLanding) -> list[str]:
     """Motivos que impiden publicar (lista vacía = se puede): estado, QA local, `nativo`, `validar` y, en la ruta
-    Cloudflare, el píxel (resolución 23)."""
+    Cloudflare, un `TRACKING.md` roto. Que falte no bloquea (ruling B): `avisos_publicacion` lo dice y
+    `landing.yaml` queda con `pixel: pendiente`."""
     from trovefy.landing.nativo import veredicto_vigente
     from trovefy.landing.validar import validar
 
@@ -121,12 +123,28 @@ def listo_para_publicar(vault: Path, datos: DatosLanding) -> list[str]:
         motivos.append(f"validar: {len(r.fallos)} fallo(s), el primero: {r.fallos[0]}")
     if leer_landing_yaml(vault, datos.p_id, datos.pais).get("hosting") == "cloudflare":
         try:
-            if pixel_js(vault, datos) is None:
-                motivos.append(f"falta el píxel en Cloudflare: checkout/{datos.pais}/TRACKING.md con dataset_id "
-                               "(trovefy tracking preparar), y vuelve a preparar y guardar")
+            pixel_js(vault, datos)  # un TRACKING.md roto bloquea; que falte no (ruling B: avisos_publicacion)
         except EntradaInvalida as e:
             motivos.append(str(e))
     return motivos
+
+
+def _sin_pixel(vault: Path, datos: DatosLanding) -> bool:
+    """Ruta Cloudflare sin ``TRACKING.md``: se publica sin píxel (ruling B)."""
+    if leer_landing_yaml(vault, datos.p_id, datos.pais).get("hosting") != "cloudflare":
+        return False
+    try:
+        return pixel_js(vault, datos) is None
+    except EntradaInvalida:
+        return False  # roto: ya lo para listo_para_publicar
+
+
+def avisos_publicacion(vault: Path, datos: DatosLanding) -> list[str]:
+    """Lo que no impide publicar pero hay que decir (ruling B: Cloudflare sin píxel; ``landing.yaml`` queda
+    con ``pixel: pendiente`` y el 19 y /listo lo exigen antes de anunciar)."""
+    from trovefy.landing.validar import aviso_sin_pixel
+
+    return [aviso_sin_pixel(datos.pais)] if _sin_pixel(Path(vault), datos) else []
 
 
 # --- Impultienda ---------------------------------------------------------------------------------
@@ -286,8 +304,10 @@ def registrar_publicacion(vault: Path, datos: DatosLanding, url: str, hosting: H
         avanzar_estado(vault, datos.p_id, datos.pais, "producido", "con_landing",
                        [f"landing/{datos.pais}/QA.md", url], "landing", ahora)
         estado = "con_landing"
-    _escribir_landing_yaml(vault, datos, {"url": url, "publicada": fecha, "version": version,
-                                          "hosting": hosting.ruta}, f"publicada en {url} ({hosting.ruta})", ahora)
+    cambios = {"url": url, "publicada": fecha, "version": version, "hosting": hosting.ruta}
+    if hosting.ruta == "cloudflare":  # ruling B: sin TRACKING.md, publicada sin píxel y pendiente de él
+        cambios["pixel"] = "pendiente" if _sin_pixel(vault, datos) else "activo"
+    _escribir_landing_yaml(vault, datos, cambios, f"publicada en {url} ({hosting.ruta})", ahora)
     return estado
 
 
@@ -337,9 +357,11 @@ def publicar(vault: Path, datos: DatosLanding, url_cloudflare: str | None = None
             raise NoPublicable(f"ruta Cloudflare: sube la carpeta landing/{datos.pais}/ a Cloudflare Pages (proyecto "
                                f"{_slug(datos.p_id)}-{datos.pais.lower()}), conecta {sub} y vuelve con "
                                f"--url https://{sub}/")
-        host = (urlparse(url_cloudflare).hostname or "").lower()
-        if urlparse(url_cloudflare).scheme != "https" or not (host == datos.dominio or host.endswith(f".{datos.dominio}")):
-            raise NoPublicable(f"«{url_cloudflare}» no es https de tu dominio ({datos.dominio}): usa https://{sub}/")
+        try:  # la misma regla que la QA publicada (I2): https, sin usuario, puerto 443, dominio o <pais>.<dominio>
+            comprobar_url_publicada(datos, "cloudflare", url_cloudflare)
+        except EntradaInvalida:
+            raise NoPublicable(f"«{url_cloudflare}» no es https de tu dominio ({datos.dominio}): usa "
+                               f"https://{sub}/") from None
         if not (verificar or verificar_cloudflare)(url_cloudflare, raiz):
             raise NoPublicable(f"{url_cloudflare} no sirve la versión {version} (o redirige a otro sitio): revisa la "
                                "subida a Cloudflare Pages y vuelve a lanzar")

@@ -10,7 +10,12 @@ from zoneinfo import ZoneInfo
 import pytest
 from trovefy import cli, landing_cli
 from trovefy.landing.entrada import EntradaInvalida, ruta_landing
-from trovefy.landing.nativo import registrar_veredicto, texto_visible, veredicto_vigente
+from trovefy.landing.nativo import (
+    registrar_veredicto,
+    texto_landing,
+    texto_visible,
+    veredicto_vigente,
+)
 from trovefy.landing.plantilla import guardar, version_de
 from trovefy.landing.qa import Clic, evaluar
 from trovefy.landing.validar import Resultado
@@ -66,7 +71,7 @@ def test_registrar_y_leer_veredicto(v):
     assert veredicto_vigente(v, P, "ZZ") == ("ok", version_de(_html(v)))
     meta, cuerpo = frontmatter.leer(ruta)
     assert meta == {"tipo": "qa_idioma", "agente": "nativo", "veredicto": "ok", "version": version_de(_html(v)),
-                    "fecha": "2026-11-17T11:00:00-05:00"}
+                    "texto_sha256": texto_landing(v, P, "ZZ").sha256, "fecha": "2026-11-17T11:00:00-05:00"}
     assert cuerpo == OK
     assert "nativo" in (v / "log.md").read_text(encoding="utf-8")
 
@@ -108,10 +113,78 @@ def test_veredicto_queda_viejo_tras_editar(v, tmp_path):
                                          encoding="utf-8")
     nueva = guardar(v, cargar(v), borrador)
     assert nueva != vieja
+    assert veredicto_vigente(v, P, "ZZ") is None  # el texto que leyó el nativo ya no es el de la landing
+    r = evaluar(Resultado(True, (), ()), [], Clic(None, "x"), [], veredicto_vigente(v, P, "ZZ"), nueva, False)
+    fila = next(f for f in r.filas if f[0].startswith("Idioma"))
+    assert fila[1] == "NO MEDIDO"
+
+
+def test_veredicto_de_otra_version_con_el_mismo_texto(v, tmp_path):
+    """Un cambio que no toca el texto (una clase) cambia la versión: el veredicto queda de la versión vieja."""
+    registrar_veredicto(v, P, "ZZ", "ok", OK, AHORA)
+    vieja = version_de(_html(v))
+    borrador = tmp_path / "borrador"
+    (borrador / "index.html").write_text(BUENA.read_text(encoding="utf-8").replace("<body>", '<body class="x">', 1),
+                                         encoding="utf-8")
+    nueva = guardar(v, cargar(v), borrador)
+    assert nueva != vieja
     assert veredicto_vigente(v, P, "ZZ") == ("ok", vieja)
     r = evaluar(Resultado(True, (), ()), [], Clic(None, "x"), [], veredicto_vigente(v, P, "ZZ"), nueva, False)
     fila = next(f for f in r.filas if f[0].startswith("Idioma"))
     assert fila[1] == "NO MEDIDO" and vieja in fila[2]
+
+
+def test_veredicto_caduca_si_cambia_el_content_del_css(v):
+    """I4: el CSS no entra en la versión, pero su ``content:`` sí es texto que lee el comprador."""
+    registrar_veredicto(v, P, "ZZ", "ok", OK, AHORA)
+    css = ruta_landing(v, P, "ZZ") / "assets" / "estilo.css"
+    css.write_text(css.read_text(encoding="utf-8") + '\n.precio::after{content:"само днес"}\n', encoding="utf-8")
+    assert veredicto_vigente(v, P, "ZZ") is None
+
+
+def test_veredicto_con_nativo_md_sin_hash_no_vale(v):
+    ruta = registrar_veredicto(v, P, "ZZ", "ok", OK, AHORA)
+    meta, cuerpo = frontmatter.leer(ruta)
+    frontmatter.escribir(ruta, {k: x for k, x in meta.items() if k != "texto_sha256"}, cuerpo)
+    assert veredicto_vigente(v, P, "ZZ") is None
+
+
+def test_registrar_exige_la_version_y_el_texto_actuales(v):
+    actual = texto_landing(v, P, "ZZ")
+    with pytest.raises(EntradaInvalida, match="versión"):
+        registrar_veredicto(v, P, "ZZ", "ok", OK, AHORA, version="000000000000")
+    with pytest.raises(EntradaInvalida, match="sha256"):
+        registrar_veredicto(v, P, "ZZ", "ok", OK, AHORA, version=actual.version, texto_sha256="0" * 64)
+    registrar_veredicto(v, P, "ZZ", "ok", OK, AHORA, version=actual.version, texto_sha256=actual.sha256)
+    assert veredicto_vigente(v, P, "ZZ") == ("ok", actual.version)
+
+
+def test_index_editado_a_mano_no_da_texto(v):
+    ruta = ruta_landing(v, P, "ZZ") / "index.html"
+    ruta.write_text(ruta.read_text(encoding="utf-8").replace("Искам наръчника", "Вземи го"), encoding="utf-8")
+    with pytest.raises(EntradaInvalida, match="guardar"):
+        texto_landing(v, P, "ZZ")
+    with pytest.raises(EntradaInvalida, match="guardar"):
+        registrar_veredicto(v, P, "ZZ", "ok", OK, AHORA)
+
+
+def test_texto_visible_sin_secciones_es_error():
+    with pytest.raises(EntradaInvalida, match="secci"):
+        texto_visible("<html><body><main><p>Само текст</p></main></body></html>")
+
+
+def test_texto_visible_con_otro_numero_de_secciones_es_error(v):
+    with pytest.raises(EntradaInvalida, match="wireframe"):
+        texto_visible(_html(v), esperadas=16)
+    assert texto_visible(_html(v), esperadas=15).count("## Sección ") == 15
+
+
+def test_texto_visible_anade_el_content_del_css():
+    html = ('<html><head><style>.a::before{content:"Само днес"}</style></head><body>'
+            '<section data-tf-seccion="1" data-tf-tipo="hero"><p>Уно</p></section></body></html>')
+    t = texto_visible(html, css='.b::after{content:"\\2014  внимание"} .c{content:attr(title)}')
+    assert "Само днес" in t and "— внимание" in t
+    assert t.index("Само днес") > t.index("Уно")
 
 
 def test_veredicto_invalido(v, tmp_path):
@@ -119,7 +192,7 @@ def test_veredicto_invalido(v, tmp_path):
     notas.write_text(OK, encoding="utf-8")
     with pytest.raises(SystemExit) as e:
         cli.main(["landing", "nativo", "--producto", P, "--pais", "ZZ", "--veredicto", "aprobado",
-                  "--notas-archivo", str(notas)])
+                  "--notas-archivo", str(notas), "--version", version_de(_html(v))])
     assert e.value.code == 2
     with pytest.raises(ValueError):
         registrar_veredicto(v, P, "ZZ", "aprobado", OK, AHORA)  # type: ignore[arg-type]
@@ -132,7 +205,7 @@ def test_notas_con_secreto_rechazadas(v, tmp_path):
     notas = tmp_path / "notas.txt"
     notas.write_text(f"token {SECRETO}\nVEREDICTO: ok\n", encoding="utf-8")
     assert cli.main(["landing", "nativo", "--producto", P, "--pais", "ZZ", "--veredicto", "ok",
-                     "--notas-archivo", str(notas)]) == 2
+                     "--notas-archivo", str(notas), "--version", version_de(_html(v))]) == 2
 
 
 def test_sin_landing_guardada_es_error(tmp_path):
@@ -146,15 +219,42 @@ def test_sin_landing_guardada_es_error(tmp_path):
 def test_cli_texto_y_nativo(v, tmp_path, capsys):
     assert cli.main(["landing", "texto", "--producto", P, "--pais", "ZZ"]) == 0
     out = capsys.readouterr().out
+    actual = texto_landing(v, P, "ZZ")
+    assert out.splitlines()[:2] == [f"Versión: {actual.version}", f"Texto-sha256: {actual.sha256}"]
     assert out.count("## Sección ") == 15 and "Спокойно тяло" in out
     notas = tmp_path / "notas.txt"
     notas.write_text(OK, encoding="utf-8")
-    args = ["landing", "nativo", "--producto", P, "--pais", "ZZ", "--notas-archivo", str(notas)]
+    args = ["landing", "nativo", "--producto", P, "--pais", "ZZ", "--notas-archivo", str(notas),
+            "--version", actual.version]
     assert cli.main([*args, "--veredicto", "corregir"]) == 2  # no cuadra con la respuesta del agente
     assert cli.main([*args, "--veredicto", "ok"]) == 0
     assert veredicto_vigente(v, P, "ZZ") == ("ok", version_de(_html(v)))
     assert cli.main(args) == 0  # sin --veredicto, el de la respuesta
-    assert cli.main([*args[:-1], str(tmp_path / "no-existe.txt")]) == 2
+    assert cli.main([*args, "--texto-sha256", actual.sha256]) == 0
+    assert cli.main([*args, "--texto-sha256", "0" * 64]) == 2
+    assert cli.main([*args[:-1], "000000000000"]) == 2  # el texto que leyó el nativo era de otra versión
+    no_existe = [*args]
+    no_existe[no_existe.index(str(notas))] = str(tmp_path / "no-existe.txt")
+    assert cli.main(no_existe) == 2
+
+
+def test_cli_nativo_exige_version(v, tmp_path):
+    notas = tmp_path / "notas.txt"
+    notas.write_text(OK, encoding="utf-8")
+    with pytest.raises(SystemExit) as e:
+        cli.main(["landing", "nativo", "--producto", P, "--pais", "ZZ", "--notas-archivo", str(notas)])
+    assert e.value.code == 2
+
+
+def test_cli_nativo_guarda_la_respuesta_tal_cual_con_crlf(v, tmp_path):
+    notas = tmp_path / "notas.txt"
+    notas.write_bytes(OK.replace("\n", "\r\n").encode("utf-8"))
+    version = texto_landing(v, P, "ZZ").version
+    assert cli.main(["landing", "nativo", "--producto", P, "--pais", "ZZ", "--notas-archivo", str(notas),
+                     "--version", version]) == 0
+    guardado = (ruta_landing(v, P, "ZZ") / "nativo.md").read_bytes()
+    assert guardado.endswith(OK.replace("\n", "\r\n").encode("utf-8"))
+    assert veredicto_vigente(v, P, "ZZ") == ("ok", version)
 
 
 def test_qa_con_nativo_vigente_es_apta(v, tmp_path, monkeypatch, capsys):

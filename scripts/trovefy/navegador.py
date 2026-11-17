@@ -104,16 +104,23 @@ def sesion(
     visible: bool = True,
     perfil_persistente: bool = True,
     viewport: tuple[int, int] | None = None,
+    *,
+    _contexto: dict | None = None,
 ) -> Iterator:
     """Página viva de Playwright con el perfil del servicio, bajo el mismo candado que `capturar`.
 
     Con `perfil_persistente=False` usa un contexto efímero sin perfil (vista de comprador, QA): no hay sesión
     iniciada ni se guarda nada. Cierra el contexto (y el navegador) al salir, también si algo falla dentro.
     La página no hace clics por su cuenta: quien escribe o pulsa es `trovefy.tienda.conductor.Conductor`.
+
+    `_contexto` (interno, solo para el contexto efímero): opciones extra de `new_context`, p. ej. la QA de la
+    landing con `service_workers="block"` y el móvil con `is_mobile` y DPR 2 (plan 18).
     """
     from playwright.sync_api import Error as PlaywrightError
     from playwright.sync_api import sync_playwright
 
+    if _contexto and perfil_persistente:
+        raise ValueError("_contexto solo vale para un contexto efímero (perfil_persistente=False)")
     if perfil_persistente:
         perfil(servicio)  # valida el nombre antes de arrancar nada
     elif not _SERVICIO.fullmatch(servicio):
@@ -125,7 +132,7 @@ def sesion(
         else:
             try:
                 navegador = p.chromium.launch(headless=not visible, chromium_sandbox=True)
-                ctx = navegador.new_context(**_viewport(viewport))
+                ctx = navegador.new_context(**_viewport(viewport), **(_contexto or {}))
             except Exception as exc:
                 if navegador is not None:
                     navegador.close()

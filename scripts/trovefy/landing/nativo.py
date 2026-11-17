@@ -6,13 +6,18 @@ de la propia respuesta con :func:`trovefy.producto.qc_registro.parsear_veredicto
 ``~ `` son sugerencias. Una respuesta sin veredicto claro, o que no dice lo mismo que ``--veredicto``, no se
 registra (falla cerrado).
 
-``nativo.md`` lleva la versión de la landing guardada (``landing.yaml``); al guardar otra versión el
-veredicto deja de valer y la QA lo da por «no medido».
+``nativo.md`` lleva la versión de la landing guardada (``landing.yaml``) y el SHA-256 del texto que se le
+pasó al agente (``texto_sha256``: HTML visible más los ``content:`` del CSS, que no entran en la versión).
+``trovefy landing texto`` imprime los dos; ``trovefy landing nativo --version`` exige que sean los actuales.
+:func:`veredicto_vigente` vuelve a calcular el texto y, si ya no es el leído, el veredicto no vale; con otra
+versión pero el mismo texto, la QA lo da por «no medido» (la versión manda).
 """
 
 from __future__ import annotations
 
+import hashlib
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from html.parser import HTMLParser
 from pathlib import Path
@@ -35,6 +40,15 @@ _VACIOS = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input",
                      "wbr"})
 
 
+@dataclass(frozen=True)
+class TextoLanding:
+    """Lo que lee el nativo: la versión guardada, el texto y su SHA-256."""
+
+    version: str
+    texto: str
+    sha256: str
+
+
 class _Texto(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -42,6 +56,8 @@ class _Texto(HTMLParser):
         self.titulo: list[str] = []
         self.descripcion: str | None = None
         self.partes: list[str] = []  # texto con "\n" en los cortes de bloque
+        self.secciones = 0
+        self.estilos: list[str] = []  # contenido de los <style> (sus content: también se leen)
 
     def _oculto(self) -> bool:
         return any(t in _OCULTOS for t in self.pila)
@@ -52,6 +68,7 @@ class _Texto(HTMLParser):
             self.descripcion = a.get("content", "")
         if not self._oculto():
             if tag == "section" and "data-tf-seccion" in a:
+                self.secciones += 1
                 tipo = a.get("data-tf-tipo") or "sin tipo"
                 self.partes.append(f"\n\n## Sección {a['data-tf-seccion']} ({tipo})\n\n")
             elif tag in _BLOQUES:
@@ -77,6 +94,8 @@ class _Texto(HTMLParser):
     def handle_data(self, data):
         if "title" in self.pila and "svg" not in self.pila:
             self.titulo.append(data)
+        elif self.pila and self.pila[-1] == "style" and "svg" not in self.pila:
+            self.estilos.append(data)
         elif not self._oculto():
             self.partes.append(data)
 
@@ -85,12 +104,23 @@ def _una_linea(texto: str) -> str:
     return re.sub(r"\s+", " ", texto).strip()
 
 
-def texto_visible(html: str) -> str:
+def texto_visible(html: str, css: str = "", esperadas: int | None = None) -> str:
     """Título, descripción, ``alt`` de las imágenes y el texto visible por sección (cabeceras
-    ``## Sección N (<tipo>)``), una línea por bloque; sin ``<script>`` ni ``<style>``."""
+    ``## Sección N (<tipo>)``), una línea por bloque; sin ``<script>`` ni ``<style>``. Al final, bajo
+    ``## CSS (content)``, las cadenas de ``content:`` de los ``<style>`` y de ``css`` (también se leen).
+
+    ``EntradaInvalida`` si no hay ninguna sección o, con ``esperadas``, si no son las del wireframe: un texto
+    a medias no se le pasa al nativo."""
+    from trovefy.landing.validar import textos_content_css
+
     p = _Texto()
     p.feed(html)
     p.close()
+    if p.secciones == 0:
+        raise EntradaInvalida("el HTML no tiene ninguna sección data-tf-seccion: no hay texto que pasar al nativo")
+    if esperadas is not None and p.secciones != esperadas:
+        raise EntradaInvalida(f"el HTML tiene {p.secciones} secciones y el wireframe {esperadas}: el nativo leería "
+                              "un texto a medias (trovefy landing validar)")
     salida = [f"# {_una_linea(''.join(p.titulo)) or '(sin título)'}", ""]
     if p.descripcion is not None:
         salida += [f"Descripción: {_una_linea(p.descripcion)}", ""]
@@ -104,6 +134,9 @@ def texto_visible(html: str) -> str:
             salida.append(limpia)
     while salida and salida[-1] == "":
         salida.pop()
+    contenidos = [t for t in (_una_linea(x) for x in textos_content_css("\n".join([*p.estilos, css]))) if t]
+    if contenidos:
+        salida += ["", "## CSS (content)", "", *contenidos]
     return "\n".join(salida) + "\n"
 
 
@@ -116,12 +149,47 @@ def _version_actual(vault: Path, p_id: str, pais: str) -> str:
     return version
 
 
+def _leer(ruta: Path) -> str | None:
+    return None if ruta.is_symlink() or not ruta.is_file() else ruta.read_text(encoding="utf-8")
+
+
+def _secciones_wireframe(raiz: Path) -> int | None:
+    import yaml
+
+    try:
+        texto = _leer(raiz / "wireframe.yaml")
+        secciones = (yaml.safe_load(texto) or {}).get("secciones") if texto else None
+    except (yaml.YAMLError, AttributeError):
+        return None
+    return len(secciones) if isinstance(secciones, list) else None
+
+
+def texto_landing(vault: Path, p_id: str, pais: str) -> TextoLanding:
+    """El texto de la landing guardada para el nativo (``index.html`` + ``assets/estilo.css``), con su versión y
+    su SHA-256. ``EntradaInvalida`` si no está guardada, si ``index.html`` no es la versión de ``landing.yaml``
+    (editado a mano) o si no tiene las secciones del wireframe."""
+    from trovefy.landing.plantilla import version_de
+
+    vault = Path(vault)
+    version = _version_actual(vault, p_id, pais)
+    raiz = ruta_landing(vault, p_id, pais)
+    html = _leer(raiz / "index.html")
+    if html is None:
+        raise EntradaInvalida(f"falta landing/{pais}/index.html: trovefy landing guardar")
+    if version_de(html) != version:
+        raise EntradaInvalida(f"landing/{pais}/index.html no es la versión guardada ({version}): ¿editado a mano? "
+                              "vuelve a trovefy landing guardar")
+    texto = texto_visible(html, _leer(raiz / "assets" / "estilo.css") or "", _secciones_wireframe(raiz))
+    return TextoLanding(version, texto, hashlib.sha256(texto.encode("utf-8")).hexdigest())
+
+
 def registrar_veredicto(vault: Path, p_id: str, pais: str, veredicto: Literal["ok", "corregir"], notas: str,
-                        ahora: datetime) -> Path:
+                        ahora: datetime, *, version: str | None = None, texto_sha256: str | None = None) -> Path:
     """Escribe ``landing/<PAIS>/nativo.md`` con ``{tipo: qa_idioma, agente: nativo, veredicto, version,
-    fecha}`` y la respuesta del agente tal cual. ``ValueError`` si el veredicto no es ``ok|corregir``;
-    ``EntradaInvalida`` si la respuesta no termina en ese mismo ``VEREDICTO:`` (``parsear_veredicto``), si
-    lleva algo con forma de secreto o si no hay landing guardada."""
+    texto_sha256, fecha}`` y la respuesta del agente tal cual. ``ValueError`` si el veredicto no es
+    ``ok|corregir``; ``EntradaInvalida`` si la respuesta no termina en ese mismo ``VEREDICTO:``
+    (``parsear_veredicto``), si lleva algo con forma de secreto, si no hay landing guardada o si ``version``
+    o ``texto_sha256`` (lo que leyó el agente, de ``trovefy landing texto``) no son los actuales."""
     from trovefy.producto.medios import carpeta_segura
     from trovefy.vault.escritura import anadir_log, escribir_atomico
     from trovefy.vault.frontmatter import renderizar
@@ -139,7 +207,13 @@ def registrar_veredicto(vault: Path, p_id: str, pais: str, veredicto: Literal["o
     if patron:
         raise EntradaInvalida(f"las notas del nativo llevan algo con forma de secreto ({patron}): no se guardan")
     vault = Path(vault)
-    version = _version_actual(vault, p_id, pais)
+    actual = texto_landing(vault, p_id, pais)
+    if version is not None and version != actual.version:
+        raise EntradaInvalida(f"el nativo leyó la versión {version} y la guardada es {actual.version}: vuelve a "
+                              "trovefy landing texto y pásale el texto nuevo")
+    if texto_sha256 is not None and texto_sha256.strip().lower() != actual.sha256:
+        raise EntradaInvalida(f"el texto que leyó el nativo (Texto-sha256 {texto_sha256}) no es el de la landing "
+                              f"actual ({actual.sha256}): vuelve a trovefy landing texto")
     raiz = ruta_landing(vault, p_id, pais)
     try:
         carpeta_segura(vault, raiz, crear=False)
@@ -148,18 +222,20 @@ def registrar_veredicto(vault: Path, p_id: str, pais: str, veredicto: Literal["o
     ruta = raiz / NOMBRE
     if ruta.is_symlink():
         raise EntradaInvalida(f"{ruta} es un enlace simbólico: no se escribe a través de él")
-    meta = {"tipo": "qa_idioma", "agente": "nativo", "veredicto": veredicto, "version": version,
-            "fecha": ahora.isoformat(timespec="seconds")}
+    meta = {"tipo": "qa_idioma", "agente": "nativo", "veredicto": veredicto, "version": actual.version,
+            "texto_sha256": actual.sha256, "fecha": ahora.isoformat(timespec="seconds")}
     escribir_atomico(ruta, renderizar(meta, notas))
     rel = ruta.relative_to(vault).as_posix()
-    anadir_log(vault, "landing", f"{p_id} {pais}: veredicto del nativo {veredicto} (versión {version})", [rel])
+    anadir_log(vault, "landing", f"{p_id} {pais}: veredicto del nativo {veredicto} (versión {actual.version})",
+               [rel])
     return ruta
 
 
 def veredicto_vigente(vault: Path, p_id: str, pais: str) -> tuple[str, str] | None:
-    """``(veredicto, version)`` de ``nativo.md``; ``None`` si no hay, está roto o enlazado, o si el
-    frontmatter no dice lo mismo que la respuesta guardada (falla cerrado). La versión puede ser vieja:
-    lo decide quien compara (``qa.evaluar``)."""
+    """``(veredicto, version)`` de ``nativo.md``; ``None`` si no hay, está roto o enlazado, si el
+    frontmatter no dice lo mismo que la respuesta guardada, o si el texto de la landing ya no es el que leyó
+    el agente (``texto_sha256``; falla cerrado). La versión puede ser vieja con el mismo texto: lo decide quien
+    compara (``qa.evaluar``)."""
     from trovefy.vault import frontmatter
 
     ruta = ruta_landing(Path(vault), p_id, pais) / NOMBRE
@@ -175,5 +251,14 @@ def veredicto_vigente(vault: Path, p_id: str, pais: str) -> tuple[str, str] | No
     if veredicto not in VEREDICTOS or not isinstance(version, str) or not version:
         return None
     if parsear_veredicto(cuerpo) != veredicto:
+        return None
+    leido = meta.get("texto_sha256")
+    if not isinstance(leido, str) or not leido:
+        return None
+    try:
+        actual = texto_landing(Path(vault), p_id, pais)
+    except (EntradaInvalida, OSError, UnicodeDecodeError):
+        return None
+    if actual.sha256 != leido:
         return None
     return veredicto, version

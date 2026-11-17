@@ -27,7 +27,7 @@ GOLDEN = Path(__file__).resolve().parents[2] / "golden" / "landing" / "QA-zz.md"
 VERSION = "a1b2c3d4e5f6"
 VALIDA = Resultado(True, (), ())
 AHORA = datetime(2026, 11, 17, 10, 30, tzinfo=ZoneInfo("America/Bogota"))
-CLIC_BIEN = Clic("http://127.0.0.1:8000/checkout" + UTM_PRUEBA, None)
+CLIC_BIEN = Clic("http://127.0.0.1:8000/checkout" + UTM_PRUEBA, None, intactos=True)
 
 
 def _wf(n: int = 15) -> list[dict]:
@@ -133,7 +133,7 @@ def test_peticion_externa_falla():
 
 
 def test_clic_sin_utm_falla():
-    r = _ev(clic=Clic("http://127.0.0.1:8000/checkout?utm_source=fb", None))
+    r = _ev(clic=Clic("http://127.0.0.1:8000/checkout?utm_source=fb", None, intactos=False))
     assert not r.ok and _fila(r, "Clic")[1] == "FALLA"
 
 
@@ -178,7 +178,10 @@ def test_publicada_exige_200_y_la_version():
     assert not r.ok
     assert _fila(r, "Respuesta (movil)")[1] == "FALLA"
     assert _fila(r, "Versión servida (escritorio)")[1] == "FALLA"
-    assert _ev(publicada=True).ok
+    from trovefy.landing.qa import UTM_PUBLICADA
+
+    assert _ev(publicada=True, clic=Clic("https://ejemplo-demo.test/checkout" + UTM_PUBLICADA, None,
+                                         intactos=True)).ok
 
 
 def test_local_no_mira_la_respuesta():
@@ -186,11 +189,101 @@ def test_local_no_mira_la_respuesta():
 
 
 def test_render_qa_golden(tmp_path):
-    d = cargar(vault_demo(tmp_path))
-    meds = [_med("movil"), _med("escritorio", lcp_ms=[800.0, 850.0, 820.0], peso_bytes=190_000)]
+    """Las capturas, como en `ejecutar_qa`: en `landing/<PAIS>/qa/` y relativas a `productos/<p-id>/`."""
+    from trovefy.vault.producto import ruta_producto
+
+    v = vault_demo(tmp_path)
+    d = cargar(v)
+    qa_dir = ruta_landing(v, P, "ZZ") / "qa"
+    meds = [_med("movil", captura=qa_dir / f"movil-{VERSION}.png"),
+            _med("escritorio", lcp_ms=[800.0, 850.0, 820.0], peso_bytes=190_000,
+                 captura=qa_dir / f"escritorio-{VERSION}.png")]
     r = _ev(meds)
-    texto = render_qa(d, r, meds, AHORA, None, clic=CLIC_BIEN, version=VERSION)
+    texto = render_qa(d, r, meds, AHORA, None, clic=CLIC_BIEN, version=VERSION,
+                      raiz_producto=ruta_producto(v, P).parent)
     assert texto == GOLDEN.read_text(encoding="utf-8")
+    assert "  captura: landing/ZZ/qa/movil-a1b2c3d4e5f6.png\n" in texto
+    assert "  fuente: landing/ZZ/QA.md\n" in texto  # M5: de dónde sale utm_checkout
+
+
+# --- ronda de revisión T6–7 -----------------------------------------------------------------------
+
+
+def test_desborde_con_culpable_falla_aunque_scrollwidth_cuadre():
+    """I3: con ``overflow-x: hidden`` en html/body el scrollWidth no crece; manda el elemento que sale."""
+    r = _ev([_med("movil", ancho_scroll=390, desborde_selector="table.comparativa"), _med("escritorio")])
+    assert not r.ok
+    fila = _fila(r, "Desborde (movil)")
+    assert fila[1] == "FALLA" and "table.comparativa" in fila[2]
+
+
+@pytest.mark.parametrize("peso", [0, -1])
+def test_peso_cero_no_medido(peso):
+    """M3: un peso de 0 bytes no es una medida (la página no se descargó o no hubo tamaños)."""
+    r = _ev([_med("movil", peso_bytes=peso), _med("escritorio")])
+    assert not r.ok and _fila(r, "Peso (movil)")[1] == "NO MEDIDO"
+
+
+def test_clic_sin_intactos_no_medido():
+    """M2: sin `intactos` (nadie comparó con el checkout de landing.yaml) no hay medida."""
+    r = _ev(clic=Clic("http://127.0.0.1:8000/checkout" + UTM_PRUEBA, None))
+    assert not r.ok and _fila(r, "Clic")[1] == "NO MEDIDO"
+
+
+def test_version_servida_tambien_en_local():
+    """I4: la QA local también comprueba que la página medida es la versión guardada."""
+    r = _ev([_med("movil", version_servida="ffffffffffff"), _med("escritorio")])
+    assert not r.ok and _fila(r, "Versión servida (movil)")[1] == "FALLA"
+    r = _ev([_med("movil", version_servida=None), _med("escritorio")])
+    assert not r.ok and _fila(r, "Versión servida (movil)")[1] == "NO MEDIDO"
+    assert _fila(_ev(), "Versión servida (escritorio)")[1] == "OK"
+
+
+def test_publicada_sin_fbclid():
+    """M6: la QA publicada no lleva `fbclid` (no genera eventos falsos para Meta)."""
+    from trovefy.landing.qa import UTM_PUBLICADA
+
+    assert "fbclid" not in UTM_PUBLICADA and UTM_PRUEBA.startswith(UTM_PUBLICADA)
+    bien = Clic("https://ejemplo-demo.test/checkout" + UTM_PUBLICADA, None, intactos=True)
+    assert _ev(clic=bien, publicada=True).ok
+    con_fbclid = Clic("https://ejemplo-demo.test/checkout" + UTM_PRUEBA, None, intactos=True)
+    r = _ev(clic=con_fbclid, publicada=True)
+    assert not r.ok and _fila(r, "Clic")[1] == "FALLA" and "fbclid" in _fila(r, "Clic")[2]
+    assert not _ev(clic=bien, publicada=False).ok  # en local, sí: UTM_PRUEBA con fbclid
+
+
+def test_perfil_4g_de_devtools():
+    """M1: Slow 4G ajustado como DevTools (latencia ×3,75; caudal ×0,9)."""
+    from trovefy.landing import constantes as k
+
+    assert k.LATENCIA_MS == 562.5
+    assert k.BAJADA_BPS == round(1.6 * 1024 * 1000 * 0.9) and k.SUBIDA_BPS == round(750 * 1000 * 0.9)
+    assert qa.perfil_red() == "4G simulado: 562,5 ms, 1,47 Mbit/s bajada, 0,68 Mbit/s subida, CPU ×4"
+
+
+def test_pagina_abre_contexto_movil_sin_service_workers(monkeypatch):
+    """M1 + I5: móvil con is_mobile y DPR 2; en las dos vistas, service workers bloqueados."""
+    from contextlib import contextmanager
+
+    import trovefy.navegador
+
+    vistas = []
+
+    @contextmanager
+    def sesion_falsa(servicio, **kw):
+        vistas.append((servicio, kw))
+        yield object()
+
+    monkeypatch.setattr(trovefy.navegador, "sesion", sesion_falsa)
+    for vista in ("movil", "escritorio"):
+        with qa._pagina(vista):
+            pass
+    (s1, movil), (_, escritorio) = vistas
+    assert s1 == qa.SERVICIO_QA and movil["perfil_persistente"] is False
+    assert movil["viewport"] == (390, 844)
+    assert movil["_contexto"] == {"service_workers": "block", "is_mobile": True, "has_touch": True,
+                                  "device_scale_factor": 2}
+    assert escritorio["_contexto"] == {"service_workers": "block"}
 
 
 def test_utm_intactos():
@@ -219,9 +312,9 @@ class Falso:
         captura.write_bytes(b"\x89PNG falso")
         return _med(vista, lcp_ms=self.lcp, captura=captura, hitos=self.hitos, version_servida=self.version)
 
-    def clic(self, url, checkout_url, interceptar=True):
-        self.llamadas.append(("clic", url, checkout_url, interceptar))
-        return Clic(url.rsplit("/", 1)[0] + "/checkout" + UTM_PRUEBA, None, intactos=True)
+    def clic(self, url, checkout_url, interceptar=True, utm=UTM_PRUEBA):
+        self.llamadas.append(("clic", url, checkout_url, interceptar, utm))
+        return Clic(url.rsplit("/", 1)[0] + "/checkout" + utm, None, intactos=True)
 
 
 @pytest.fixture
@@ -263,6 +356,8 @@ def test_ejecutar_qa_local_escribe_qa_md(montada):
 
 def test_ejecutar_qa_cloudflare_silencia_el_pixel(tmp_path, monkeypatch):
     v = montar(tmp_path, hosting="cloudflare")
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))  # T3: ni el HOME ni el vault reales
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     falso = Falso()
     falso.hitos, falso.version = _hitos(), qa.version_guardada(v, cargar(v))
     monkeypatch.setattr(qa, "medir", falso.medir)
@@ -280,6 +375,56 @@ def test_ejecutar_qa_publicada_mide_la_url(montada):
     assert all(x[1] == "https://ejemplo-demo.test/" and x[3] == ("ejemplo-demo.test",) for x in medidas)
     meta, _ = frontmatter.leer(ruta_landing(v, P, "ZZ") / "QA.md")
     assert meta["url"] == "https://ejemplo-demo.test/"
+    clic = next(x for x in falso.llamadas if x[0] == "clic")
+    assert clic[1] == "https://ejemplo-demo.test/" and "fbclid" not in clic[4]  # M6
+    assert "fbclid" not in meta["utm_checkout"]["destino"] and meta["utm_checkout"]["ok"] is True
+
+
+def test_ejecutar_qa_local_lleva_fbclid(montada):
+    v, falso = montada
+    qa.ejecutar_qa(v, cargar(v))
+    assert next(x for x in falso.llamadas if x[0] == "clic")[4] == UTM_PRUEBA
+
+
+@pytest.mark.parametrize("url", [
+    "http://ejemplo-demo.test/", "https://usuario@ejemplo-demo.test/", "https://u:clave@ejemplo-demo.test/",
+    "https://ejemplo-demo.test:8443/", "https://127.0.0.1/", "https://[::1]/", "https://169.254.169.254/",
+    "https://otro.test/", "https://ejemplo-demo.test.evil.test/", "https://zz.ejemplo-demo.test/",
+    "file:///etc/passwd", "https:///sin-host", "https://2130706433/", "https://0x7f.0.0.1/",
+])
+def test_ejecutar_qa_rechaza_url_publicada_fuera_de_lo_nuestro(montada, url):
+    """I2: solo https, sin usuario, puerto por defecto, sin IP y al dominio propio o la tienda."""
+    from trovefy.landing.entrada import EntradaInvalida
+
+    v, falso = montada
+    with pytest.raises(EntradaInvalida):
+        qa.ejecutar_qa(v, cargar(v), url=url)
+    assert falso.llamadas == []
+    assert not (ruta_landing(v, P, "ZZ") / "QA.md").exists()
+
+
+@pytest.mark.parametrize("url", ["https://ejemplo-demo.test/", "https://EJEMPLO-demo.test:443/x",
+                                 "https://tienda.demo.test/"])
+def test_ejecutar_qa_admite_dominio_y_tienda_en_impultienda(montada, url):
+    v, falso = montada
+    qa.ejecutar_qa(v, cargar(v), url=url)
+    assert falso.llamadas
+
+
+def test_ejecutar_qa_cloudflare_admite_dominio_y_subdominio_del_pais(tmp_path, monkeypatch):
+    from trovefy.landing.entrada import EntradaInvalida
+
+    v = montar(tmp_path, hosting="cloudflare")
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    falso = Falso()
+    falso.hitos, falso.version = _hitos(), qa.version_guardada(v, cargar(v))
+    monkeypatch.setattr(qa, "medir", falso.medir)
+    monkeypatch.setattr(qa, "probar_clic", falso.clic)
+    for url in ("https://ejemplo-demo.test/", "https://zz.ejemplo-demo.test/"):
+        qa.ejecutar_qa(v, cargar(v), url=url)
+    with pytest.raises(EntradaInvalida):  # en Cloudflare la landing no la sirve la tienda
+        qa.ejecutar_qa(v, cargar(v), url="https://tienda.demo.test/")
 
 
 def test_ejecutar_qa_sin_guardar_es_error(tmp_path):

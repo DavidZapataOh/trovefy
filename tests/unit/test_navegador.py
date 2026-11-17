@@ -192,3 +192,17 @@ def test_sesion_rechaza_servicio_invalido(pw_falso):
 
     with pytest.raises(ValueError), sesion("../x", perfil_persistente=False):
         pass
+
+
+def test_sesion_efimera_admite_opciones_de_contexto_internas(pw_falso):
+    """Plan 18 (QA): `_contexto` solo en la ruta efímera (service workers bloqueados, móvil con DPR 2)."""
+    from trovefy.navegador import sesion
+
+    opciones = {"service_workers": "block", "is_mobile": True, "device_scale_factor": 2}
+    with sesion("qa-landing", visible=False, perfil_persistente=False, viewport=(390, 844), _contexto=opciones):
+        pass
+    assert pw_falso.navegador.new_context.call_args.kwargs == {
+        "viewport": {"width": 390, "height": 844}, **opciones}
+    with pytest.raises(ValueError, match="efímer"), sesion("impultienda", _contexto={"is_mobile": True}):
+        pass
+    pw_falso.p.chromium.launch_persistent_context.assert_not_called()

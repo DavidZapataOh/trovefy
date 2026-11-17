@@ -488,3 +488,42 @@ def test_landing_yaml_roto_es_error_de_entrada(v, monkeypatch, capsys):
     assert cli.main(["landing", "validar", "--producto", P, "--pais", "ZZ"]) == 2
     assert cli.main(["landing", "estado", "--producto", P, "--pais", "ZZ"]) == 2
     assert "landing.yaml" in capsys.readouterr().err
+
+
+# --- ronda de revisión T6–7: target del botón y desbordes ocultos (I1, I3) -------------------------
+
+
+@pytest.mark.parametrize("target", ["_blank", "nueva", " _BLANK ", ""])
+def test_target_en_el_boton_de_compra_falla(v, target):
+    mutar(v, lambda h: h.replace('<a data-tf-checkout href="/checkout">Искам наръчника',
+                                 f'<a data-tf-checkout target="{target}" href="/checkout">Искам наръчника', 1))
+    falla(v, "target", "a[data-tf-checkout]")
+
+
+def test_target_self_en_el_boton_vale(v):
+    mutar(v, lambda h: h.replace('<a data-tf-checkout href="/checkout">',
+                                 '<a data-tf-checkout target="_self" href="/checkout">'))
+    assert resultado(v).ok, resultado(v).fallos
+
+
+@pytest.mark.parametrize("css", [
+    "html,body{overflow-x:hidden}", "body { overflow-x: clip }", "html{overflow:hidden}",
+    "body{overflow:visible clip}", ":root{overflow-x:hidden}", "main, body.x{overflow-x : HIDDEN !important}",
+    "@media (max-width:600px){body{overflow-x:hidden}}", "*{overflow-x:hidden}", "body{overflow-x:h\\69 dden}",
+])
+def test_overflow_oculto_en_html_o_body_falla(v, css):
+    ruta = ruta_landing(v, P, "ZZ") / "assets" / "estilo.css"
+    ruta.write_text(ruta.read_text(encoding="utf-8") + "\n" + css + "\n", encoding="utf-8")
+    falla(v, "overflow", "desborde")
+
+
+def test_overflow_oculto_en_linea_en_body_falla(v):
+    mutar(v, lambda h: h.replace("<body>", '<body style="overflow-x:hidden">', 1))
+    falla(v, "overflow", "<body>")
+
+
+@pytest.mark.parametrize("css", [".tabla{overflow-x:auto}", "body .caja{overflow:hidden}", "body{overflow-y:auto}"])
+def test_overflow_fuera_de_html_y_body_vale(v, css):
+    ruta = ruta_landing(v, P, "ZZ") / "assets" / "estilo.css"
+    ruta.write_text(ruta.read_text(encoding="utf-8") + "\n" + css + "\n", encoding="utf-8")
+    assert resultado(v).ok, resultado(v).fallos

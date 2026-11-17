@@ -3,10 +3,13 @@
 Tres capas:
 
 - **Medir** (`medir`, `probar_clic`): Chromium real por `trovefy.navegador.sesion` con un contexto efímero
-  (sin perfil: la QA no necesita sesión). Solo lee y navega; ningún clic salvo el del botón de compra de la
-  propia landing, cuyo destino se intercepta con un 204 (no se abre el checkout). Toda petición a un host
+  (sin perfil: la QA no necesita sesión; sin service workers; el móvil con ``is_mobile`` y DPR 2). Solo lee y
+  navega; ningún clic salvo el del botón de compra de la propia landing, cuyo destino se intercepta con un
+  204 (no se abre el checkout). La intercepción va en el **contexto**: una ventana nueva (``target``,
+  ``window.open``) se cierra y su navegación se aborta, y los WebSocket no conectan. Toda petición a un host
   fuera de `permitidos` se aborta y se anota; las de `silenciar` (el píxel de Meta en la ruta Cloudflare,
-  resolución 23) se abortan sin anotar: una QA nunca manda eventos a Meta.
+  resolución 23) se abortan sin anotar: una QA nunca manda eventos a Meta. La QA publicada no lleva
+  ``fbclid`` (ruling M6) y solo mide https del dominio propio o de la tienda (:func:`comprobar_url_publicada`).
 - **Evaluar** (`evaluar`): pura. Cada comprobación da una fila ``(comprobación, OK|FALLA|AVISO|NO MEDIDO,
   detalle)``; un dato ausente es «NO MEDIDO» con su motivo y bloquea igual que un fallo (contrato 9).
 - **Escribir** (`render_qa`, `ejecutar_qa`): `landing/<PAIS>/QA.md` con las capturas en `qa/` (0640).
@@ -16,6 +19,8 @@ from __future__ import annotations
 
 import functools
 import http.server
+import ipaddress
+import re
 import statistics
 import threading
 from collections.abc import Iterator
@@ -28,6 +33,7 @@ from urllib.parse import parse_qs, urljoin, urlsplit
 from trovefy.landing.constantes import (
     BAJADA_BPS,
     CPU_X,
+    DPR_MOVIL,
     LATENCIA_MS,
     LCP_MAX_MS,
     RONDAS_LCP,
@@ -43,8 +49,10 @@ from trovefy.landing.entrada import (
 )
 from trovefy.landing.validar import HOSTS_PIXEL, Resultado, validar
 
-UTM_PRUEBA = "?utm_source=fb&utm_medium=paid&utm_campaign=QA%7C0&utm_term=QA%7C0&utm_content=QA%7C0&fbclid=QA"
+UTM_PUBLICADA = "?utm_source=fb&utm_medium=paid&utm_campaign=QA%7C0&utm_term=QA%7C0&utm_content=QA%7C0"
+UTM_PRUEBA = UTM_PUBLICADA + "&fbclid=QA"  # la local (interceptada) lleva fbclid (resolución 22)
 PARES_PRUEBA = {k: v[0] for k, v in parse_qs(UTM_PRUEBA[1:]).items()}
+PARES_PUBLICADA = {k: v[0] for k, v in parse_qs(UTM_PUBLICADA[1:]).items()}
 ESPERA_TRAS_LOAD_MS = 3000  # LCP tras `load` + 3 s (plan 18, Tarea 6)
 ESPERA_CLIC_MS = 5000  # tope para ver salir la navegación del botón
 TIEMPO_CARGA_MS = 60_000  # tope de una carga (en 4G simulado una página pesada tarda)
@@ -101,30 +109,93 @@ def _rondas(valores: list[float]) -> str:
     return " / ".join(_miles(x) for x in valores)
 
 
+def _coma(x: float, decimales: int) -> str:
+    return f"{x:.{decimales}f}".replace(".", ",")
+
+
 def perfil_red() -> str:
-    """La línea del perfil de red, desde las constantes (Slow 4G de Lighthouse)."""
-    bajada = f"{BAJADA_BPS / 1_024_000:.1f}".replace(".", ",")
-    return (f"4G simulado: {LATENCIA_MS} ms, {bajada} Mbit/s bajada, {SUBIDA_BPS // 1000} kbit/s subida, "
-            f"CPU ×{CPU_X}")
+    """La línea del perfil de red, desde las constantes (Slow 4G con el ajuste de DevTools, en Mbit/s SI)."""
+    latencia = f"{LATENCIA_MS:g}".replace(".", ",")
+    return (f"4G simulado: {latencia} ms, {_coma(BAJADA_BPS / 1e6, 2)} Mbit/s bajada, "
+            f"{_coma(SUBIDA_BPS / 1e6, 2)} Mbit/s subida, CPU ×{CPU_X}")
 
 
 # --- UTM -----------------------------------------------------------------------------------------
 
 
-def _pares_intactos(url: str) -> bool:
+def _pares_intactos(url: str, pares: dict[str, str] = PARES_PRUEBA) -> bool:
     q = parse_qs(urlsplit(url).query, keep_blank_values=True)
-    return all(q.get(k) == [v] for k, v in PARES_PRUEBA.items())
+    return all(q.get(k) == [v] for k, v in pares.items())
 
 
-def utm_intactos(url_pedida: str, checkout_url: str, base: str) -> bool:
+def _problema_utm(url: str, publicada: bool) -> str | None:
+    """Qué falla en los UTM de la URL pedida (``None`` si nada): los pares de la prueba intactos y, en la
+    publicada, sin ``fbclid`` (ruling M6)."""
+    if not _pares_intactos(url, PARES_PUBLICADA if publicada else PARES_PRUEBA):
+        return "los UTM no llegan intactos al checkout"
+    if publicada and "fbclid" in parse_qs(urlsplit(url).query, keep_blank_values=True):
+        return "la QA publicada no lleva fbclid y el checkout lo recibe"
+    return None
+
+
+def utm_intactos(url_pedida: str, checkout_url: str, base: str, pares: dict[str, str] = PARES_PRUEBA) -> bool:
     """Misma ruta de checkout (``checkout_url`` resuelta contra ``base``: esquema, host, puerto y ruta) y
-    todos los pares de :data:`UTM_PRUEBA` presentes una sola vez con el mismo valor."""
+    todos los ``pares`` (los de :data:`UTM_PRUEBA`) presentes una sola vez con el mismo valor."""
     if not isinstance(url_pedida, str) or not url_pedida:
         return False
     pedida, esperada = urlsplit(url_pedida), urlsplit(urljoin(base, checkout_url))
     misma = (pedida.scheme, pedida.netloc.lower(), pedida.path or "/") == \
             (esperada.scheme, esperada.netloc.lower(), esperada.path or "/")
-    return misma and _pares_intactos(url_pedida)
+    return misma and _pares_intactos(url_pedida, pares)
+
+
+# --- URL publicada (I2) --------------------------------------------------------------------------
+
+_NOMBRE_HOST = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z](?:[a-z0-9-]*[a-z0-9])?")
+
+
+def hosts_publicables(datos: DatosLanding, hosting: object) -> frozenset[str]:
+    """Hosts donde puede estar la landing publicada: el dominio propio (paso 07) y, en Cloudflare,
+    ``<pais>.<dominio>``; en Impultienda, el dominio propio o el host de la tienda (ruling D)."""
+    from trovefy.landing.plantilla import host_tienda
+
+    dominio = (datos.dominio or "").strip().lower().rstrip(".") or None
+    cloudflare = {dominio, f"{datos.pais.lower()}.{dominio}"} if dominio else set()
+    tienda = host_tienda(datos.tienda)
+    impultienda = {dominio, tienda.lower() if tienda else None}
+    hosts = {"cloudflare": cloudflare, "impultienda": impultienda}.get(str(hosting), cloudflare | impultienda)
+    return frozenset(h for h in hosts if h)
+
+
+def comprobar_url_publicada(datos: DatosLanding, hosting: object, url: object) -> str:
+    """La URL publicada que se puede medir, o ``EntradaInvalida``: https, sin usuario ni clave, puerto por
+    defecto, un nombre (no una IP) y uno de :func:`hosts_publicables`. Devuelve el host."""
+    if not isinstance(url, str) or not url.strip():
+        raise EntradaInvalida("no hay URL publicada que medir: trovefy landing publicar")
+    partes = urlsplit(url.strip())
+    if partes.scheme != "https":
+        raise EntradaInvalida(f"«{url}»: la landing publicada se mide solo por https")
+    if "@" in partes.netloc or partes.username is not None or partes.password is not None:
+        raise EntradaInvalida(f"«{url}»: sin usuario ni clave en la URL")
+    try:
+        puerto = partes.port
+    except ValueError:
+        raise EntradaInvalida(f"«{url}»: puerto mal escrito") from None
+    if puerto not in (None, 443):
+        raise EntradaInvalida(f"«{url}»: solo el puerto https por defecto")
+    host = (partes.hostname or "").lower()
+    try:
+        ipaddress.ip_address(host)
+        es_ip = True
+    except ValueError:
+        es_ip = False
+    if es_ip or not _NOMBRE_HOST.fullmatch(host):
+        raise EntradaInvalida(f"«{url}»: hace falta el nombre del dominio, no una IP")
+    validos = hosts_publicables(datos, hosting)
+    if host not in validos:
+        raise EntradaInvalida(f"«{url}»: la landing publicada se mide en tu dominio o tu tienda "
+                              f"({', '.join(sorted(validos)) or 'sin dominio ni tienda'}), no en {host}")
+    return host
 
 
 # --- medir (Chromium) ----------------------------------------------------------------------------
@@ -149,43 +220,89 @@ _JS_HITOS = """() => {
   return salida;
 }"""
 
+# El primer elemento (en orden de documento: el más externo) que sale por la derecha del viewport y no está
+# dentro de un contenedor con scroll horizontal propio (overflow-x auto|scroll que no sea html/body). No se
+# fía de scrollWidth: con overflow-x hidden|clip en html/body no crece aunque algo se salga (I3).
 _JS_DESBORDE = """() => {
   const ancho = document.documentElement.clientWidth;
-  const sale = (el) => el.getBoundingClientRect().right > ancho + 0.5;
+  const sale = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.right > ancho + 0.5; };
+  const raiz = (el) => el === document.body || el === document.documentElement;
+  const enScroll = (el) => {
+    for (let p = el.parentElement; p && !raiz(p); p = p.parentElement) {
+      const o = getComputedStyle(p).overflowX;
+      if (o === "auto" || o === "scroll") return true;
+    }
+    return false;
+  };
   const nombre = (el) => {
     if (el.id) return el.tagName.toLowerCase() + "#" + el.id;
     const clases = [...el.classList].slice(0, 2);
     return el.tagName.toLowerCase() + clases.map((c) => "." + c).join("");
   };
   for (const el of document.body.querySelectorAll("*")) {
-    if (sale(el) && !(el.parentElement && el.parentElement !== document.body && sale(el.parentElement))) {
-      return {ancho: document.documentElement.scrollWidth, selector: nombre(el)};
-    }
+    if (sale(el) && !enScroll(el)) return {ancho: document.documentElement.scrollWidth, selector: nombre(el)};
   }
   return {ancho: document.documentElement.scrollWidth, selector: null};
 }"""
+
+
+def opciones_contexto(vista: str) -> dict:
+    """Opciones del contexto efímero de la QA: sin service workers (I5) y, en móvil, un móvil de verdad
+    (``is_mobile``, táctil y DPR 2; ruling M1)."""
+    opciones: dict = {"service_workers": "block"}
+    if vista == "movil":
+        opciones |= {"is_mobile": True, "has_touch": True, "device_scale_factor": DPR_MOVIL}
+    return opciones
 
 
 @contextmanager
 def _pagina(vista: str) -> Iterator:
     from trovefy.navegador import sesion
 
-    with sesion(SERVICIO_QA, visible=_VISIBLE, perfil_persistente=False, viewport=VIEWPORTS[vista]) as page:
+    with sesion(SERVICIO_QA, visible=_VISIBLE, perfil_persistente=False, viewport=VIEWPORTS[vista],
+                _contexto=opciones_contexto(vista)) as page:
         yield page
+
+
+def _de_otra_pagina(req, page) -> bool:
+    """La petición no sale de la página medida (una ventana nueva, un worker): no se deja salir."""
+    try:
+        return req.frame.page is not page
+    except Exception:  # noqa: BLE001 - sin frame (service worker): fuera
+        return True
+
+
+def _blindar(page) -> None:
+    """Toda ventana nueva se cierra en cuanto aparece (su navegación ya la aborta la ruta del contexto) y
+    ningún WebSocket conecta (I1, I5)."""
+    ctx = page.context
+
+    def cerrar(nueva) -> None:
+        if nueva is not page:
+            try:
+                nueva.close()
+            except Exception:  # noqa: BLE001, S110 - ya cerrada
+                pass
+
+    ctx.on("page", cerrar)
+    if hasattr(ctx, "route_web_socket"):
+        ctx.route_web_socket("**/*", lambda ws: ws.close())
 
 
 def _filtro(page, permitidos: tuple[str, ...], silenciar: tuple[str, ...], externas: list[str]) -> None:
     def ruta(route):
-        url = route.request.url
+        req = route.request
+        url = req.url
         host = (urlsplit(url).hostname or "").lower()
-        if host in permitidos:
+        if host in permitidos and not _de_otra_pagina(req, page):
             route.continue_()
             return
         if host not in silenciar and url not in externas:
             externas.append(url)
         route.abort()
 
-    page.route("**/*", ruta)
+    _blindar(page)
+    page.context.route("**/*", ruta)
 
 
 def _red_4g(page) -> None:
@@ -279,18 +396,20 @@ def medir(url: str, vista: str, captura: Path, permitidos: tuple[str, ...], red_
     return Medicion(
         vista=vista, lcp_ms=[float(x) for x in lcp] if valido else None, peso_bytes=datos["peso"],
         peticiones_externas=tuple(externas), ancho_scroll=datos["ancho"],
-        desborde_selector=datos["selector"] if datos["ancho"] > VIEWPORTS[vista][0] else None,
+        desborde_selector=datos["selector"],
         hitos=datos["hitos"], captura=captura,
         motivo=None if valido else "el navegador no dio LCP en alguna ronda",
         http=datos["http"], version_servida=datos["version"],
     )
 
 
-def probar_clic(url: str, checkout_url: str, interceptar: bool = True) -> Clic:
-    """Abre ``url + UTM_PRUEBA`` a 390 px y pulsa el primer ``a[data-tf-checkout]``.
+def probar_clic(url: str, checkout_url: str, interceptar: bool = True, utm: str = UTM_PRUEBA) -> Clic:
+    """Abre ``url + utm`` a 390 px y pulsa el primer ``a[data-tf-checkout]``. ``utm`` es :data:`UTM_PRUEBA`
+    (local, con ``fbclid``) o :data:`UTM_PUBLICADA` (sin ``fbclid``, ruling M6).
 
-    Con ``interceptar`` (QA de la landing) la navegación que sale del clic se responde con un 204 sin salir a
-    la red, y toda petición a otro host que no sea el de la landing se aborta; devuelve la URL pedida. Sin
+    Con ``interceptar`` (QA de la landing) la navegación de la página que sale del clic se responde con un 204
+    sin salir a la red; toda petición a otro host que no sea el de la landing, o de otra ventana, se aborta, y
+    tras la carga también todo lo que no sea un GET (beacons, fetch POST); devuelve la URL pedida. Sin
     ``interceptar`` (``/listo``, plan 20) sigue la navegación real y devuelve la URL final."""
     from playwright.sync_api import Error as PlaywrightError
 
@@ -298,7 +417,8 @@ def probar_clic(url: str, checkout_url: str, interceptar: bool = True) -> Clic:
 
     host = (urlsplit(url).hostname or "").lower()
     destino = url.split("#", 1)[0]
-    destino = destino + ("&" + UTM_PRUEBA[1:] if "?" in destino else UTM_PRUEBA)
+    destino = destino + ("&" + utm[1:] if "?" in destino else utm)
+    pares = {k: v[0] for k, v in parse_qs(utm[1:]).items()}
     pedidas: list[str] = []
     try:
         with _pagina("movil") as page:
@@ -306,16 +426,21 @@ def probar_clic(url: str, checkout_url: str, interceptar: bool = True) -> Clic:
 
             def ruta(route):
                 req = route.request
-                if cargada["si"] and req.is_navigation_request() and req.frame == page.main_frame:
+                if _de_otra_pagina(req, page):
+                    route.abort()
+                elif cargada["si"] and req.is_navigation_request() and req.frame == page.main_frame:
                     pedidas.append(req.url)
                     route.fulfill(status=204, body="")
+                elif cargada["si"] and req.method != "GET":
+                    route.abort()
                 elif (urlsplit(req.url).hostname or "").lower() == host:
                     route.continue_()
                 else:
                     route.abort()
 
             if interceptar:
-                page.route("**/*", ruta)
+                _blindar(page)
+                page.context.route("**/*", ruta)
             page.goto(destino, wait_until="load", timeout=TIEMPO_CARGA_MS)
             cargada["si"] = True
             boton = page.locator("a[data-tf-checkout]")
@@ -336,7 +461,7 @@ def probar_clic(url: str, checkout_url: str, interceptar: bool = True) -> Clic:
         return Clic(None, f"no se pudo probar el clic ({type(exc).__name__})")
     if pedida is None:
         return Clic(None, "el botón de compra no navegó")
-    return Clic(pedida, None, intactos=utm_intactos(pedida, checkout_url, url))
+    return Clic(pedida, None, intactos=utm_intactos(pedida, checkout_url, url, pares))
 
 
 # --- evaluar (puro) ------------------------------------------------------------------------------
@@ -377,13 +502,13 @@ def _filas_medicion(m: Medicion, wf: list[dict], version: str, publicada: bool) 
             filas.append((f"Respuesta ({m.vista})", NO_MEDIDO, motivo))
         else:
             filas.append((f"Respuesta ({m.vista})", OK if m.http == 200 else FALLA, f"HTTP {m.http}"))
-        if m.version_servida is None:
-            filas.append((f"Versión servida ({m.vista})", NO_MEDIDO, motivo))
-        elif m.version_servida != version:
-            filas.append((f"Versión servida ({m.vista})", FALLA,
-                          f"sirve «{m.version_servida}»; la guardada es «{version}»"))
-        else:
-            filas.append((f"Versión servida ({m.vista})", OK, version))
+    if m.version_servida is None:  # también en local: lo medido es la versión guardada (I4)
+        filas.append((f"Versión servida ({m.vista})", NO_MEDIDO, motivo))
+    elif m.version_servida != version:
+        filas.append((f"Versión servida ({m.vista})", FALLA,
+                      f"sirve «{m.version_servida}»; la guardada es «{version}»"))
+    else:
+        filas.append((f"Versión servida ({m.vista})", OK, version))
     if m.vista == "movil":
         if m.lcp_ms is None:
             filas.append(("LCP (movil, 4G simulado)", NO_MEDIDO, motivo))
@@ -393,13 +518,16 @@ def _filas_medicion(m: Medicion, wf: list[dict], version: str, publicada: bool) 
             filas.append(("LCP (movil, 4G simulado)", FALLA if med >= LCP_MAX_MS else OK, detalle))
     if m.peso_bytes is None:
         filas.append((f"Peso ({m.vista})", NO_MEDIDO, motivo))
+    elif m.peso_bytes <= 0:  # M3: 0 bytes no es una medida
+        filas.append((f"Peso ({m.vista})", NO_MEDIDO, f"no medido: el navegador no dio tamaños ({m.peso_bytes} B)"))
     else:
         filas.append((f"Peso ({m.vista})", OK, _kb(m.peso_bytes)))
     if m.peso_bytes is None and m.hitos is None:
         filas.append((f"Desborde ({m.vista})", NO_MEDIDO, motivo))
-    elif m.ancho_scroll > ancho:
+    elif m.ancho_scroll > ancho or m.desborde_selector:  # I3: el culpable manda, aunque scrollWidth cuadre
         culpable = m.desborde_selector or "elemento sin identificar"
-        filas.append((f"Desborde ({m.vista})", FALLA, f"scrollWidth {m.ancho_scroll} px > {ancho} px: {culpable}"))
+        filas.append((f"Desborde ({m.vista})", FALLA,
+                      f"sale de los {ancho} px sin contenedor con scroll: {culpable} (scrollWidth {m.ancho_scroll} px)"))
     else:
         filas.append((f"Desborde ({m.vista})", OK, f"scrollWidth {m.ancho_scroll} px"))
     if m.peticiones_externas:
@@ -410,13 +538,21 @@ def _filas_medicion(m: Medicion, wf: list[dict], version: str, publicada: bool) 
     return filas
 
 
-def _fila_clic(c: Clic) -> tuple[str, str, str]:
+def _fila_clic(c: Clic, publicada: bool) -> tuple[str, str, str]:
     nombre = "Clic al checkout con UTM"
     if c.url_pedida is None:
         return (nombre, NO_MEDIDO, f"no medido: {c.motivo or 'sin URL pedida'}")
-    if c.intactos is False or not _pares_intactos(c.url_pedida):
-        return (nombre, FALLA, f"los UTM no llegan intactos al checkout: {c.url_pedida}")
+    if c.intactos is False:
+        return (nombre, FALLA, f"no va al checkout de landing.yaml con los UTM intactos: {c.url_pedida}")
+    if c.intactos is not True:  # M2: nadie lo comparó con el checkout de landing.yaml
+        return (nombre, NO_MEDIDO, f"no medido: sin comparar con el checkout de landing.yaml: {c.url_pedida}")
+    if (problema := _problema_utm(c.url_pedida, publicada)) is not None:
+        return (nombre, FALLA, f"{problema}: {c.url_pedida}")
     return (nombre, OK, c.url_pedida)
+
+
+def _clic_ok(c: Clic | None, publicada: bool) -> bool:
+    return c is not None and _fila_clic(c, publicada)[1] == OK
 
 
 def _fila_nativo(nativo: tuple[str, str] | None, version: str) -> tuple[str, str, str]:
@@ -441,7 +577,7 @@ def evaluar(validacion: Resultado, mediciones: list[Medicion], clic: Clic, wiref
             filas.append((f"Medición ({vista})", NO_MEDIDO, "no medido: no se midió esta vista"))
             continue
         filas += _filas_medicion(vistas[vista], wireframe, version, publicada)
-    filas.append(_fila_clic(clic))
+    filas.append(_fila_clic(clic, publicada))
     filas.append(_fila_nativo(nativo, version))
     ok = not any(f[1] in (FALLA, NO_MEDIDO) for f in filas)
     return ResultadoQA(ok, tuple(filas))
@@ -478,9 +614,9 @@ def render_qa(datos: DatosLanding, r: ResultadoQA, mediciones: list[Medicion], a
         "fecha": ahora.isoformat(timespec="seconds"), "url": url,
         "movil_390": {"http": movil.http if movil else None,
                       "captura": _captura_rel(movil, raiz_producto) if movil else None},
-        "utm_checkout": {"ok": bool(clic and clic.url_pedida and clic.intactos is not False
-                                    and _pares_intactos(clic.url_pedida)),
-                         "destino": clic.url_pedida if clic else None, "captura": None, "interceptado": True},
+        "utm_checkout": {"ok": _clic_ok(clic, url is not None),
+                         "destino": clic.url_pedida if clic else None, "captura": None, "interceptado": True,
+                         "fuente": f"landing/{datos.pais}/QA.md"},
     }
     donde = f"publicada en {url}" if url else "local (127.0.0.1)"
     lineas = [f"# QA de la landing · {datos.p_id} · {datos.pais}", "",
@@ -585,6 +721,8 @@ def ejecutar_qa(vault: Path, datos: DatosLanding, url: str | None = None, *,
     checkout = landing.get("checkout_url")
     if not isinstance(checkout, str) or not checkout:
         raise EntradaInvalida("landing.yaml no trae checkout_url: trovefy landing preparar")
+    if url is not None:  # I2: antes de abrir nada, solo https a lo nuestro
+        comprobar_url_publicada(datos, landing.get("hosting"), url)
     raiz = ruta_landing(vault, datos.p_id, datos.pais)
     try:
         carpeta_segura(vault, raiz / "qa", crear=True)
@@ -598,7 +736,7 @@ def ejecutar_qa(vault: Path, datos: DatosLanding, url: str | None = None, *,
         permitidos = ((urlsplit(pagina).hostname or "").lower(),)
         meds = [medir(pagina, vista, raiz / "qa" / f"{vista}-{version}.png", permitidos,
                       red_4g=(vista == "movil"), silenciar=silenciar) for vista in VIEWPORTS]
-        return meds, probar_clic(pagina, checkout)
+        return meds, probar_clic(pagina, checkout, utm=UTM_PRUEBA if url is None else UTM_PUBLICADA)
 
     if url is None:
         with servir_local(raiz) as pagina:

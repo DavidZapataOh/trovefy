@@ -116,6 +116,12 @@ _URL_CSS = re.compile(r"url\(\s*(['\"]?)(.*?)\1\s*\)", re.IGNORECASE | re.DOTALL
 _IMAGE_SET = re.compile(r"image-set\(([^)]*)\)", re.IGNORECASE | re.DOTALL)
 _CADENA_CSS = re.compile(r"(['\"])(.*?)\1", re.DOTALL)
 _CONTENT_CSS = re.compile(r"(?<![\w-])content\s*:\s*([^;}]*)", re.IGNORECASE)
+_REGLA_CSS = re.compile(r"([^{}]*)\{([^{}]*)\}")
+_OVERFLOW_CSS = re.compile(r"(?<![\w-])overflow(-x)?\s*:\s*([^;}]*)", re.IGNORECASE)
+_SUJETO_RAIZ = re.compile(r"(?:html|body|\*|:root)(?![\w-])", re.IGNORECASE)
+_COMBINADOR = re.compile(r"\s*[>+~]\s*|\s+")
+_MENSAJE_OVERFLOW = ("overflow oculto en html/body esconde los desbordes (la QA no los vería): quítalo y mete lo ancho "
+                     "en un contenedor con overflow-x:auto")
 
 # --- prueba social (D-01) -----------------------------------------------------------------------------------
 _ESTRELLAS = re.compile("[★☆✩✪✫✬✭✮✯✰⋆⭑⭒⭐\U0001f31f]+")
@@ -287,6 +293,9 @@ class _Lector(HTMLParser):
         self._reglas_de_etiqueta(tag, a)
         if "style" in a:
             self.estilos.append(("estilo en línea", a["style"]))
+            if tag in ("html", "body") and (decl := overflow_oculto(
+                    _desescapar_css(_COMENTARIO_CSS.sub(" ", a["style"])))) is not None:
+                self.fuera.append(f"<{tag}> con style «{decl}»: {_MENSAJE_OVERFLOW}")
         if "aria-label" in a:
             self.aria.append(a["aria-label"])
         if tag == "html" and "lang" in a:
@@ -307,6 +316,9 @@ class _Lector(HTMLParser):
         if "data-tf-hito" in a and actual is not None:
             actual.hitos += 1
         if tag == "a" and "data-tf-checkout" in a:
+            if "target" in a and a["target"].strip().lower() != "_self":
+                self.fuera.append(f'target="{a["target"]}" en a[data-tf-checkout]: el botón de compra abre en la '
+                                  "misma pestaña (sin target, o _self)")
             href = a.get("href", "")
             idx = next((i for i, s in enumerate(self.secciones) if s is actual), None)
             self.botones.append((idx, href))
@@ -466,9 +478,42 @@ def _url_css_mala(u: str) -> str | None:
     return None
 
 
+def overflow_oculto(declaraciones: str) -> str | None:
+    """La declaración ``overflow-x: hidden|clip`` u ``overflow: … hidden|clip …`` de un bloque (ya sin
+    comentarios ni escapes), o ``None``."""
+    for m in _OVERFLOW_CSS.finditer(declaraciones):
+        valores = m.group(2).lower().replace("!important", " ").split()
+        if any(v in ("hidden", "clip") for v in valores):
+            return " ".join(m.group(0).split())
+    return None
+
+
+def _overflow_en_raiz(donde: str, limpio: str, fallos: list[str]) -> None:
+    """I3: ``overflow-x: hidden|clip`` (o ``overflow``) en ``html``, ``body``, ``:root`` o ``*`` esconde los
+    desbordes horizontales en vez de arreglarlos."""
+    for regla in _REGLA_CSS.finditer(limpio):
+        selectores = [s.strip() for s in regla.group(1).split(",") if s.strip()]
+        sujetos = [s for s in selectores if _SUJETO_RAIZ.match(_COMBINADOR.split(s)[-1])]
+        if sujetos and (decl := overflow_oculto(regla.group(2))) is not None:
+            fallos.append(f"{donde}: «{', '.join(sujetos)} {{{decl}}}»: {_MENSAJE_OVERFLOW}")
+
+
+def textos_content_css(css: str) -> list[str]:
+    """Las cadenas de ``content:`` de un CSS (sin comentarios y con los escapes resueltos): texto que el
+    comprador lee aunque no esté en el HTML."""
+    limpio = _desescapar_css(_COMENTARIO_CSS.sub(" ", css))
+    textos = []
+    for m in _CONTENT_CSS.finditer(limpio):
+        cadenas = [c.group(2) for c in _CADENA_CSS.finditer(m.group(1)) if c.group(2).strip()]
+        if cadenas:
+            textos.append(" ".join(cadenas))
+    return textos
+
+
 def _revisar_css(donde: str, css: str, fallos: list[str]) -> list[str]:
     """Revisa un CSS ya sin comentarios y con los escapes resueltos; devuelve los textos de ``content:``."""
     limpio = _desescapar_css(_COMENTARIO_CSS.sub(" ", css))
+    _overflow_en_raiz(donde, limpio, fallos)
     remotos = list(_REMOTO_CSS.finditer(limpio))
     if remotos:
         mas = f" (y {len(remotos) - 1} más)" if len(remotos) > 1 else ""
@@ -684,10 +729,17 @@ def _r_scripts(raiz: Path, lec: _Lector, pixel: bool, fallos: list[str]) -> None
     fallos.extend(dict.fromkeys(lec.fuera))
 
 
+def aviso_sin_pixel(pais: str) -> str:
+    """Ruling B: en Cloudflare sin ``TRACKING.md`` se publica sin píxel; el 19 y /listo lo exigen antes de
+    anunciar."""
+    return (f"sin píxel: falta checkout/{pais}/TRACKING.md con dataset_id (trovefy tracking preparar); se "
+            "publica sin píxel y landing.yaml queda con pixel: pendiente (hace falta antes de anunciar)")
+
+
 def _r_pixel(vault: Path, raiz: Path, datos: DatosLanding, lec: _Lector, fallos: list[str],
              avisos: list[str]) -> None:
     """R1: en Cloudflare, ``assets/pixel.js`` es byte a byte la plantilla con el dataset de ``TRACKING.md`` y el
-    HTML lo carga; sin ``TRACKING.md`` no va (aviso: publicar lo exige)."""
+    HTML lo carga; sin ``TRACKING.md`` no va (aviso: se publica sin píxel, ruling B)."""
     try:
         esperado = pixel_js(vault, datos)
     except EntradaInvalida as e:
@@ -700,8 +752,7 @@ def _r_pixel(vault: Path, raiz: Path, datos: DatosLanding, lec: _Lector, fallos:
         if hay:
             fallos.append(f"assets/{PIXEL_JS} sin checkout/{datos.pais}/TRACKING.md: sobra (vuelve a trovefy "
                           "landing preparar y guardar)")
-        avisos.append(f"sin píxel: falta checkout/{datos.pais}/TRACKING.md con dataset_id (trovefy tracking "
-                      "preparar); publicar en Cloudflare lo exige")
+        avisos.append(aviso_sin_pixel(datos.pais))
         return
     if not hay or archivo.read_bytes() != esperado:
         fallos.append(f"assets/{PIXEL_JS} no es el de la plantilla con el dataset de TRACKING.md: vuelve a "

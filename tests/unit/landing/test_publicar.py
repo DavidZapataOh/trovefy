@@ -140,10 +140,72 @@ def test_no_publica_con_fallos_de_validar(tmp_path):
     assert any(m.startswith("validar") for m in listo_para_publicar(v, cargar(v)))
 
 
-def test_cloudflare_sin_pixel_no_publica(tmp_path):
-    v = lista(tmp_path, hosting="cloudflare")
-    motivos = listo_para_publicar(v, cargar(v))
-    assert any("TRACKING.md" in m for m in motivos), motivos
+def _cloudflare_sin_pixel(tmp_path) -> Path:
+    from trovefy.landing.plantilla import guardar, preparar
+
+    v = montar_landing(tmp_path, "cloudflare")
+    d = cargar(v)
+    b = preparar(v, d, "cloudflare", tmp_path / "b2")
+    html = (ruta_landing(v, P, "ZZ") / "index.html").read_text(encoding="utf-8")
+    (b / "index.html").write_text(html.replace('href="/checkout"', 'href="https://tienda.demo.test/checkout"'),
+                                  encoding="utf-8")
+    guardar(v, d, b)
+    escribir_qa(v)
+    nativo_ok(v)
+    evidencia(v, replace(TODO_SI, dominio_propio=False))
+    return v
+
+
+def test_cloudflare_sin_pixel_publica_con_aviso_y_pixel_pendiente(tmp_path):
+    """Ruling B: sin TRACKING.md se publica SIN píxel, con aviso explícito y `pixel: pendiente` en landing.yaml
+    (el 19 y /listo lo exigen antes de anunciar)."""
+    from trovefy.landing.publicar import avisos_publicacion
+
+    v = _cloudflare_sin_pixel(tmp_path)
+    assert listo_para_publicar(v, cargar(v)) == []
+    avisos = avisos_publicacion(v, cargar(v))
+    assert len(avisos) == 1 and "sin píxel" in avisos[0] and "TRACKING.md" in avisos[0]
+    url = f"https://zz.{DOMINIO}/"
+    assert publicar(v, cargar(v), url, qa=QAFalsa(), verificar=lambda *_a: True, ahora=AHORA) == url
+    ly = leer_landing_yaml(v, P, "ZZ")
+    assert ly["pixel"] == "pendiente" and ly["publicada"]
+    assert producto(v)[0]["paises"]["ZZ"]["estado"] == "con_landing"
+
+
+def test_cli_publicar_cloudflare_sin_pixel_avisa(tmp_path, monkeypatch, capsys):
+    from trovefy import landing_cli
+    from trovefy.landing import publicar as mod
+
+    from .conftest import Ejecutar
+
+    v = _cloudflare_sin_pixel(tmp_path)
+    monkeypatch.setenv("TROVEFY_VAULT", str(v))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(landing_cli, "_ejecutar_orden", Ejecutar())
+    monkeypatch.setattr(mod, "verificar_cloudflare", lambda *_a: True)
+    monkeypatch.setattr(mod, "_qa_publicada", QAFalsa())
+    assert cli.main(["landing", "publicar", "--producto", P, "--pais", "ZZ", "--url", f"https://zz.{DOMINIO}/"]) == 0
+    salida = capsys.readouterr()
+    assert "Aviso: sin píxel" in salida.out + salida.err and "pixel: pendiente" in salida.out + salida.err
+
+
+def test_cloudflare_con_pixel_no_lo_marca_pendiente(tmp_path):
+    from trovefy.landing.publicar import avisos_publicacion
+
+    v = _cloudflare_lista(tmp_path)
+    assert avisos_publicacion(v, cargar(v)) == []
+    url = f"https://zz.{DOMINIO}/"
+    publicar(v, cargar(v), url, qa=QAFalsa(), verificar=lambda *_a: True, ahora=AHORA)
+    assert leer_landing_yaml(v, P, "ZZ")["pixel"] == "activo"
+
+
+def test_publicar_cloudflare_solo_dominio_o_subdominio_del_pais(tmp_path):
+    """I2: la misma regla que la QA publicada (dominio propio o `<pais>.<dominio>`), antes de tocar nada."""
+    v = _cloudflare_lista(tmp_path)
+    for mala in (f"https://otro.zz.{DOMINIO}/", f"https://zz.{DOMINIO}:8443/", f"https://u@zz.{DOMINIO}/"):
+        with pytest.raises(NoPublicable, match="dominio"):
+            publicar(v, cargar(v), mala, qa=QAFalsa(), verificar=lambda *_a: True, ahora=AHORA)
+    assert leer_landing_yaml(v, P, "ZZ").get("url") is None
 
 
 # --- registrar_publicacion ----------------------------------------------------------------------

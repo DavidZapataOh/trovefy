@@ -83,6 +83,10 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
     n.add_argument("--veredicto", choices=("ok", "corregir"), default=None,
                    help="el que dio el agente; si falta, se lee de su respuesta (VEREDICTO: …)")
     n.add_argument("--notas-archivo", required=True, help="archivo con la respuesta del agente, tal cual")
+    n.add_argument("--version", required=True,
+                   help="la «Versión:» que imprimió trovefy landing texto (la que leyó el agente)")
+    n.add_argument("--texto-sha256", default=None,
+                   help="el «Texto-sha256:» que imprimió trovefy landing texto; si se da, tiene que ser el actual")
     r = sub.add_parser("resena", help="añade una reseña real (con su pedido o email de origen)")
     _comunes(r)
     r.add_argument("--texto", required=True, help="texto literal de la reseña")
@@ -157,10 +161,12 @@ def _capturar(args: argparse.Namespace, vault: Path) -> int:
 @_con_paradas
 def _publicar(args: argparse.Namespace, vault: Path) -> int:
     from trovefy.landing.entrada import cargar_datos
-    from trovefy.landing.publicar import publicar
+    from trovefy.landing.publicar import avisos_publicacion, publicar
     from trovefy.vault.producto import estado_pais
 
     d = cargar_datos(vault, args.producto, args.pais, correr=_orden())
+    for aviso in avisos_publicacion(vault, d):
+        print(f"Aviso: {aviso}")
     url = publicar(vault, d, args.url)
     print(f"{d.pais} → {estado_pais(vault, d.p_id, d.pais)}: {url}")
     return 0
@@ -307,14 +313,15 @@ def _qa(args: argparse.Namespace, vault: Path) -> int:
 
 
 def _texto(args: argparse.Namespace, vault: Path) -> int:
-    from trovefy.landing.entrada import EntradaInvalida, cargar_datos, ruta_landing
-    from trovefy.landing.nativo import texto_visible
+    from trovefy.landing.entrada import cargar_datos
+    from trovefy.landing.nativo import texto_landing
 
     d = cargar_datos(vault, args.producto, args.pais, correr=_orden())
-    indice = ruta_landing(vault, d.p_id, d.pais) / "index.html"
-    if indice.is_symlink() or not indice.is_file():
-        raise EntradaInvalida(f"falta landing/{d.pais}/index.html: trovefy landing guardar")
-    print(texto_visible(indice.read_text(encoding="utf-8")), end="")
+    t = texto_landing(vault, d.p_id, d.pais)
+    print(f"Versión: {t.version}")
+    print(f"Texto-sha256: {t.sha256}")
+    print()
+    print(t.texto, end="")
     return 0
 
 
@@ -327,11 +334,12 @@ def _nativo(args: argparse.Namespace, vault: Path) -> int:
     from trovefy.vault.escritura import ZONA_NEGOCIO
 
     d = cargar_datos(vault, args.producto, args.pais, correr=_orden())
-    notas = Path(args.notas_archivo).read_text(encoding="utf-8")
+    notas = Path(args.notas_archivo).read_bytes().decode("utf-8")  # tal cual, con sus \r\n si los trae
     veredicto = args.veredicto or parsear_veredicto(notas)
     if veredicto is None:
         raise EntradaInvalida("no medido: la respuesta del nativo no termina en «VEREDICTO: ok|corregir»")
-    ruta = registrar_veredicto(vault, d.p_id, d.pais, veredicto, notas, datetime.now(ZONA_NEGOCIO))
+    ruta = registrar_veredicto(vault, d.p_id, d.pais, veredicto, notas, datetime.now(ZONA_NEGOCIO),
+                               version=args.version.strip(), texto_sha256=args.texto_sha256)
     print(f"Veredicto del nativo: {veredicto} ({ruta.relative_to(vault).as_posix()})")
     return 0
 
