@@ -389,9 +389,10 @@ def _escribir_landing_yaml(vault: Path, datos: DatosLanding, cambios: dict, que:
 
 
 def registrar_publicacion(vault: Path, datos: DatosLanding, url: str, hosting: Hosting, version: str, qa,
-                          ahora: datetime) -> str:
+                          ahora: datetime, extra: dict | None = None) -> str:
     """Deja la publicación en `PRODUCTO.md` (fusionando: `paises.<PAIS>.landing` y una línea en el cuerpo), pasa
-    `producido → con_landing` (un estado posterior no se toca) y anota `landing.yaml`. Devuelve el estado.
+    `producido → con_landing` (un estado posterior no se toca) y anota `landing.yaml` (con `extra`, p. ej.
+    `{"publicacion": "manual"}` en el pegado manual). Devuelve el estado.
 
     `EstadoNoPermite` (sin escribir nada) si el país no está en `producido` o después; `NoPublicable` si la QA
     publicada no está en verde."""
@@ -414,6 +415,7 @@ def registrar_publicacion(vault: Path, datos: DatosLanding, url: str, hosting: H
                "hosting": hosting.ruta}
     if hosting.ruta == "cloudflare":  # ruling B: sin TRACKING.md, publicada sin píxel y pendiente de él
         cambios["pixel"] = "pendiente" if _sin_pixel(vault, datos) else "activo"
+    cambios.update(extra or {})
     _escribir_landing_yaml(vault, datos, cambios, f"publicada en {url} ({hosting.ruta})", ahora)
     return estado
 
@@ -475,7 +477,7 @@ def _ruta(vault: Path, landing: dict) -> tuple[Hosting, Capacidades | None]:
         c = capacidades_vigentes(vault)
         h = elegir_hosting(c)
     except (CapacidadNoMedida, ValueError) as e:
-        raise NoPublicable(str(e)) from None
+        raise NoPublicable(f"{e}; o pégala tú en tu panel, sin sonda: trovefy landing publicar … --manual") from None
     if landing.get("hosting") != h.ruta:
         raise NoPublicable(f"la landing se preparó para {landing.get('hosting')} y la sonda dice {h.ruta} ({h.motivo}): "
                            "trovefy landing preparar --rehacer, guardar, validar, nativo y qa")

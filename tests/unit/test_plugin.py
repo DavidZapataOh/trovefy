@@ -61,10 +61,11 @@ def test_skill_landing_nunca_ejecuta_capturar_ni_confirma_por_el_usuario():
     meta, cuerpo = _skill_landing()
     assert "capturar" not in meta["allowed-tools"]
     lineas = [linea for linea in cuerpo.splitlines() if "landing capturar" in linea]
-    assert lineas, "la skill tiene que darle al usuario la orden de capturar"
+    assert lineas, "la ruta automática (opcional) sigue nombrando capturar"
     for linea in lineas:  # cada mención dice que la lanza el usuario, en su terminal
         assert "él" in linea and "terminal" in linea, linea
         assert "nunca lo ejecutas" in linea or "tú no la ejecutas" in linea, linea
+        assert _en_la_ruta_opcional(cuerpo, linea), linea
     # La confirmación vive fuera del vault (F1-1): la skill no nombra la copia antigua del vault ni escribe la
     # ruta literal del directorio de configuración en ninguna orden (el hook bloquea esa ruta en Bash).
     assert "pantallas-confirmadas.yaml" not in cuerpo
@@ -75,7 +76,15 @@ def test_skill_landing_nunca_ejecuta_capturar_ni_confirma_por_el_usuario():
     assert "Nunca cambies `TROVEFY_VAULT`" in cuerpo
 
 
-SEGUROS_LANDING = ("estado", "medios", "preparar", "guardar", "validar", "texto", "nativo", "qa", "resena")
+OPCIONAL = "## Ruta automática de Impultienda (opcional, si algún día el panel se puede automatizar)"
+
+
+def _en_la_ruta_opcional(cuerpo: str, linea: str) -> bool:
+    return OPCIONAL in cuerpo and cuerpo.index(linea) > cuerpo.index(OPCIONAL)
+
+
+SEGUROS_LANDING = ("estado", "medios", "preparar", "guardar", "validar", "texto", "nativo", "qa", "resena",
+                   "respaldo")
 
 
 def _subcomandos_landing() -> set[str]:
@@ -90,7 +99,8 @@ def _subcomandos_landing() -> set[str]:
 
 
 def test_skill_landing_preautoriza_solo_los_subcomandos_seguros():
-    """M5: sonda, capturar y publicar los lanza el usuario en su terminal: no van en allowed-tools."""
+    """M5: sonda, capturar y publicar los lanza el usuario en su terminal: no van en allowed-tools (respaldo sí:
+    solo guarda en el cerebro la copia que hizo el usuario, plan 18b)."""
     meta, _ = _skill_landing()
     herramientas = {t.strip() for t in meta["allowed-tools"].split(",")}
     landing = {t for t in herramientas if t.startswith("Bash(trovefy landing")}
@@ -102,17 +112,34 @@ def test_skill_landing_preautoriza_solo_los_subcomandos_seguros():
         assert peligroso not in meta["allowed-tools"]
 
 
-def test_skill_landing_decide_la_sonda_por_estado_y_guia_el_dominio():
-    """M4: la sonda hace falta según la línea `Hosting:` de `trovefy landing estado` (capacidades_vigentes +
-    elegir_hosting), no por si hay un archivo; conectar el dominio es un paso guiado (resolución 25)."""
+def test_skill_landing_decide_la_ruta_por_estado_y_guia_el_dominio():
+    """La ruta sale de la línea `Hosting:` de `trovefy landing estado`; sin sonda, Impultienda con pegado manual
+    (plan 18b). Conectar el dominio es un paso guiado en el navegador del usuario (resolución 25)."""
     _, cuerpo = _skill_landing()
     assert "p05-impultienda-*.json" not in cuerpo
     paso2 = next(linea for linea in cuerpo.splitlines() if linea.startswith("2. **Hosting"))
-    assert "`Hosting:`" in paso2 and "no medido" in paso2 and "trovefy landing estado" in paso2
-    assert re.search(r"^\d+\. \*\*Conectar el dominio", cuerpo, re.MULTILINE)
+    assert "`Hosting:`" in paso2 and "trovefy landing estado" in paso2 and "pegado manual" in paso2
+    assert "no medido" in paso2 and "ni sonda" in paso2
+    assert re.search(r"^\d+\. \*\*Dónde se verá", cuerpo, re.MULTILINE)
+    assert "https://impultienda.ar/login" in cuerpo
     assert "--hosting cloudflare" in cuerpo  # I1: la salida cuando Impultienda no la guarda entera
-    assert "--campo-vacio" in cuerpo
     assert "QA-publicada.md" in cuerpo and "-publicada.png" in cuerpo  # M2
+
+
+def test_skill_landing_impultienda_es_pegado_manual_sin_panel():
+    """Plan 18b: la ruta normal de Impultienda es el pegado manual; nada de navegador, capturar ni sonda fuera de
+    la sección opcional de la ruta automática."""
+    _, cuerpo = _skill_landing()
+    principal, opcional = cuerpo.split(OPCIONAL)
+    for x in ("--manual", "publicar/impultienda.html", ("trovefy landing respaldo --producto <p-id> --pais <PAIS> "
+              "--desde <archivo>"), "--manual --url https://", "¿guardaste en el panel?", "publicacion: manual",
+              "Diseño de tienda → Contenido", "copia de seguridad"):
+        assert x in principal, x
+    for prohibido in ("navegador abrir impultienda", "landing capturar", "landing sonda", "app.impultienda.ar/",
+                      "--campo-vacio"):
+        assert prohibido not in principal, prohibido
+    for x in ("landing capturar", "landing sonda", "--campo-vacio", "restaura solo", "sin `--manual`"):
+        assert x in opcional, x
 
 
 def test_skill_landing_cloudflare_sube_solo_la_carpeta_limpia():
@@ -124,8 +151,7 @@ def test_skill_landing_cloudflare_sube_solo_la_carpeta_limpia():
 def test_skill_landing_sigue_el_cli_real():
     _, cuerpo = _skill_landing()
     for x in ("--version", "--texto-sha256", "Texto-sha256:", "`ok` o `corregir`", "trovefy landing resena",
-              "trovefy navegador abrir impultienda https://app.impultienda.ar/", "pixel: pendiente",
-              "no toques `assets/`", "restaura solo", "D-01", "Claude nunca escribe en Meta"):
+              "pixel: pendiente", "no toques `assets/`", "D-01", "Claude nunca escribe en Meta"):
         assert x in cuerpo, x
     assert "/trovefy/*.env" in cuerpo
     assert "aprobado" not in cuerpo  # el veredicto del nativo es ok|corregir (resolución 17)

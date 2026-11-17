@@ -187,3 +187,92 @@ def test_abrir_seguro_real_no_sigue_redirecciones(tmp_path, https_local):
     with pytest.raises(ValueError, match="https"):
         _abrir_seguro(base.replace("https", "http") + "/", contexto=contexto)
     assert verificar_cloudflare(base + "/", raiz) is False  # sin el certificado de prueba: el sistema no lo cree
+
+
+# --- Plan 18b: pegado manual (la QA publicada prueba que la tienda guardó el script) -----------------
+
+
+def _pagina_tienda(v, sin_script: bool = False) -> bytes:
+    """La tienda con el paquete pegado dentro, como la serviría Impultienda (con o sin el `<script>`)."""
+    import re
+
+    from trovefy.landing.entrada import ruta_landing
+    from trovefy.landing.hosting import empaquetar_en_linea
+    from unit.landing.conftest import P
+
+    paquete = empaquetar_en_linea(ruta_landing(v, P, "ZZ"))
+    if sin_script:
+        paquete = re.sub(r"<script>.*?</script>", "", paquete, flags=re.DOTALL)
+        assert "<script" not in paquete
+    return (f"<!doctype html><html lang=bg><head><meta charset=utf-8><title>Tienda</title></head>"
+            f"<body><header>Tienda demo</header>{paquete}</body></html>").encode()
+
+
+@pytest.fixture
+def tienda_http():
+    """La «tienda» en http://127.0.0.1 (el clic de la QA no sale de ahí: el checkout se intercepta con un 204)."""
+    import http.server
+    import threading
+
+    cuerpo = {"html": b""}
+
+    class Manejador(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_a):
+            pass
+
+        def do_GET(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(cuerpo["html"])))
+            self.end_headers()
+            self.wfile.write(cuerpo["html"])
+
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Manejador)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        yield f"http://127.0.0.1:{srv.server_address[1]}/", cuerpo
+    finally:
+        srv.shutdown()
+
+
+@pytest.mark.parametrize("sin_script", [False, True])
+def test_pegado_manual_sin_utm_js_la_qa_publicada_sale_en_rojo(tmp_path, tienda_http, sin_script):
+    """Sin evidencia de la sonda, el clic de la QA publicada es lo que prueba que la tienda guardó `utm.js`: si
+    Impultienda lo quitó, el botón va al checkout sin los UTM y la QA sale en rojo."""
+    from trovefy.landing.qa import UTM_PUBLICADA, evaluar, probar_clic
+    from trovefy.landing.validar import Resultado
+    from unit.landing.test_hosting import montar
+
+    v = montar(tmp_path)
+    url, cuerpo = tienda_http
+    cuerpo["html"] = _pagina_tienda(v, sin_script)
+    c = probar_clic(url, "/checkout", utm=UTM_PUBLICADA)
+    assert c.url_pedida is not None, c.motivo
+    r = evaluar(Resultado(True, (), ()), [], c, [], ("ok", "x"), "x", publicada=True)
+    clic = next(f for f in r.filas if f[0] == "Clic al checkout con UTM")
+    if sin_script:
+        assert c.intactos is False and clic[1] == "FALLA" and r.ok is False
+    else:
+        assert c.intactos is True and clic[1] == "OK"
+
+
+def test_pegado_manual_verifica_la_version_servida_por_https(tmp_path, https_local):
+    """La verificación del pegado manual con el `_abrir_seguro` real: la tienda sirve el paquete con la versión
+    actual (sí) o una anterior (no)."""
+    import functools
+
+    from trovefy.landing.entrada import ruta_landing
+    from trovefy.landing.plantilla import leer_landing_yaml
+    from trovefy.landing.publicar import _abrir_seguro, verificar_cloudflare
+    from unit.landing.conftest import P
+    from unit.landing.test_hosting import montar
+
+    base, contexto, cuerpo = https_local
+    v = montar(tmp_path)
+    raiz = ruta_landing(v, P, "ZZ")
+    abrir = functools.partial(_abrir_seguro, contexto=contexto)
+    cuerpo["html"] = _pagina_tienda(v)
+    assert verificar_cloudflare(base + "/", raiz, abrir=abrir) is True
+    version = leer_landing_yaml(v, P, "ZZ")["version"]
+    cuerpo["html"] = _pagina_tienda(v).replace(version.encode(), b"0123456789ab")
+    assert verificar_cloudflare(base + "/", raiz, abrir=abrir) is False

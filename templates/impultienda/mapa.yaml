@@ -4,6 +4,12 @@
 # Mientras sea null, el verificador del paso 09 devuelve «no medido» y guarda la captura como provisional.
 # Se confirma de dos maneras equivalentes: el usuario, con `trovefy arranque confirmar 09` sobre el texto provisional de
 # su pantalla real (queda en config/confirmaciones.yaml del vault), o un commit que ajusta firmas y patrones y pone aquí la fecha.
+#
+# OJO (plan 18b, prueba real del 2026-11-17): las URLs app.impultienda.ar/dashboard/* de abajo están SIN VERIFICAR.
+# https://app.impultienda.ar/ responde «No hay ninguna tienda acá», y el inicio de sesión real está en
+# https://impultienda.ar/login. Por eso la landing se publica con pegado manual (`trovefy landing publicar --manual`):
+# trovefy no inicia sesión en el panel. No cambies aquí url/firma/campos/controles sin verificarlos en la pantalla
+# real: entran en la huella de la pantalla y anularían las confirmaciones del usuario.
 capturado: null
 fuente: >-
   https://impultienda.ar/ (página pública, leída el 2026-11-10): planes Free/Starter/Pro/Max/Unlimited,

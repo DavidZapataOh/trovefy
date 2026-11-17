@@ -59,9 +59,17 @@ def _configurar_impultienda(sub) -> None:
     pu = sub.add_parser("publicar", help="publica (Impultienda) o verifica la subida (Cloudflare), QA publicada y "
                                          "estado con_landing")
     _comunes(pu)
-    pu.add_argument("--url", default=None, help="ruta Cloudflare: la URL https donde subiste la landing")
+    pu.add_argument("--url", default=None, help="ruta Cloudflare: la URL https donde subiste la landing; con "
+                                                "--manual: la URL pública de tu tienda donde la pegaste")
     pu.add_argument("--campo-vacio", action="store_true",
                     help="el campo «HTML completo de la tienda» está vacío de verdad (lo has mirado tú): sin esto, un campo leído vacío para sin tocar nada")
+    pu.add_argument("--manual", action="store_true",
+                    help="Impultienda con pegado manual: sin --url deja publicar/impultienda.html y los pasos; "
+                         "con --url comprueba tu tienda, QA publicada y estado con_landing (sin abrir el panel)")
+    rs = sub.add_parser("respaldo", help="guarda tu copia del contenido de Impultienda (de la entrada o --desde) "
+                                         "en landing/<PAIS>/respaldo/")
+    _comunes(rs)
+    rs.add_argument("--desde", default=None, help="archivo con la copia (si no, se lee de la entrada: pega y Ctrl-D)")
 
 
 def _configurar(parser: argparse.ArgumentParser) -> None:
@@ -174,6 +182,8 @@ def _publicar(args: argparse.Namespace, vault: Path) -> int:
     from trovefy.landing.publicar import avisos_publicacion, publicar
     from trovefy.vault.producto import estado_pais
 
+    if args.manual:
+        return _publicar_manual(args, vault)
     d = cargar_datos(vault, args.producto, args.pais, correr=_orden())
     for aviso in avisos_publicacion(vault, d):
         print(f"Aviso: {aviso}")
@@ -182,7 +192,46 @@ def _publicar(args: argparse.Namespace, vault: Path) -> int:
     return 0
 
 
-_ACCIONES_IMPULTIENDA = {"sonda": _sonda, "capturar": _capturar, "publicar": _publicar}
+def _publicar_manual(args: argparse.Namespace, vault: Path) -> int:
+    """Pegado manual en Impultienda (plan 18b): sin `--url`, el paquete y los pasos; con `--url`, la verificación.
+    Nunca abre el navegador ni el panel."""
+    from trovefy.landing import manual
+    from trovefy.landing.entrada import EntradaInvalida, cargar_datos
+
+    if args.campo_vacio:
+        raise EntradaInvalida("--campo-vacio no va con --manual: el campo lo pegas tú en tu panel")
+    d = cargar_datos(vault, args.producto, args.pais, correr=_orden())
+    if args.url is None:
+        ruta = manual.preparar_pegado(vault, d)
+        print(manual.instrucciones_pegado(vault, d, ruta))
+        return 0
+    r = manual.verificar_manual(vault, d, args.url)
+    if r.tienda_guardada:
+        print(f"Tienda de {d.pais} guardada en config/mercados.yaml: {r.tienda_guardada}")
+    print(f"{d.pais} → {r.estado}: {r.url} (pegado manual)")
+    return 0
+
+
+@_con_paradas
+def _respaldo(args: argparse.Namespace, vault: Path) -> int:
+    from trovefy.landing import manual
+    from trovefy.vault.producto import ruta_producto
+
+    if not ruta_producto(vault, args.producto).is_file():
+        raise FileNotFoundError(f"no existe productos/{args.producto}/PRODUCTO.md")
+    if args.desde:
+        contenido = Path(args.desde).read_bytes().decode("utf-8")
+    else:
+        if sys.stdin.isatty():
+            print("Pega aquí lo que tenía el campo «HTML completo de la tienda» y pulsa Ctrl-D en una línea nueva "
+                  "(si es muy largo, mejor guárdalo en un archivo y usa --desde).", file=sys.stderr)
+        contenido = sys.stdin.read()
+    ruta = manual.guardar_respaldo(vault, args.producto, args.pais, contenido)
+    print(f"Copia guardada: {ruta} ({len(contenido)} caracteres)")
+    return 0
+
+
+_ACCIONES_IMPULTIENDA = {"sonda": _sonda, "capturar": _capturar, "publicar": _publicar, "respaldo": _respaldo}
 
 
 def _faltan(vault: Path, p_id: str, pais: str) -> list[str]:
@@ -216,12 +265,15 @@ def _linea_hosting(vault: Path) -> str:
         elegir_hosting,
     )
 
+    manual = ("Hosting: impultienda (pegado manual) — la pegas tú en tu panel y la QA publicada comprueba que tu "
+              "tienda la sirve entera (trovefy landing preparar … --hosting impultienda; después trovefy landing "
+              "publicar … --manual); sonda automática: ")
     try:
         h = elegir_hosting(capacidades_vigentes(vault))
     except CapacidadNoMedida as e:
-        return f"Hosting: {e}"
+        return manual + str(e)
     except ValueError as e:
-        return f"Hosting: no medido: {e} (trovefy landing sonda)"
+        return manual + f"no medido: {e}"
     return f"Hosting: {h.ruta} — {h.motivo}"
 
 

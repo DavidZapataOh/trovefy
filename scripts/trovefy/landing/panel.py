@@ -149,16 +149,21 @@ def sha_texto(texto: str) -> str:
     return hashlib.sha256(texto.encode("utf-8")).hexdigest()
 
 
-def _respaldar_en(vault: Path, carpeta: Path, contenido: str, ahora: datetime, que: str) -> Path:
+def nombre_respaldo(ahora: datetime, sufijo: str = "") -> str:
+    """`impultienda-AAAA-MM-DDTHHMMSS<sufijo>.html` (la hora, en la zona de negocio)."""
+    return f"impultienda-{ahora.astimezone(ZONA_NEGOCIO):%Y-%m-%dT%H%M%S}{sufijo}.html"
+
+
+def _respaldar_en(vault: Path, carpeta: Path, contenido: str, ahora: datetime, que: str, sufijo: str = "") -> Path:
     patron = buscar_secreto(contenido)
     if patron:
         raise ValueError(f"lo que tiene ahora el campo de Impultienda parece llevar un secreto ({patron}): no lo "
                          "guardo ni toco nada. Revísalo tú en la pantalla.")
     carpeta_segura(vault, carpeta, crear=True)
-    marca = ahora.astimezone(ZONA_NEGOCIO).strftime("%Y-%m-%dT%H%M%S")
-    ruta, n = carpeta / f"impultienda-{marca}.html", 2
+    base = nombre_respaldo(ahora, sufijo).removesuffix(".html")
+    ruta, n = carpeta / f"{base}.html", 2
     while ruta.exists() or ruta.is_symlink():
-        ruta, n = carpeta / f"impultienda-{marca}-{n}.html", n + 1
+        ruta, n = carpeta / f"{base}-{n}.html", n + 1
     escribir_medio(ruta, contenido.encode("utf-8"), base=vault)
     anadir_log(vault, "landing", que, [ruta.relative_to(vault).as_posix()], ahora=ahora)
     return ruta
@@ -172,8 +177,10 @@ def respaldar(vault: Path, p_id: str, pais: str, contenido: str, ahora: datetime
                          f"{p_id} {pais}: respaldo del contenido de Impultienda")
 
 
-# Nombres nuevos con hora (AAAA-MM-DDTHHMMSS) y los antiguos solo con fecha (cuentan como de las 00:00:00).
-_RESPALDO = re.compile(r"impultienda-([0-9]{4}-[0-9]{2}-[0-9]{2})(?:T([0-9]{6}))?(?:-([0-9]+))?\.html")
+# Nombres nuevos con hora (AAAA-MM-DDTHHMMSS) y los antiguos solo con fecha (cuentan como de las 00:00:00); los
+# que guarda el usuario para el pegado manual llevan «-manual» (`trovefy landing respaldo`, plan 18b).
+_RESPALDO = re.compile(
+    r"impultienda-([0-9]{4}-[0-9]{2}-[0-9]{2})(?:T([0-9]{6}))?(?:-manual)?(?:-([0-9]+))?\.html")
 
 
 def ultimo_respaldo(vault: Path, pais: str) -> Path | None:
