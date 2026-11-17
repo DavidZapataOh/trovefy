@@ -90,3 +90,34 @@ def test_falta_evento_o_emisor_raro():
                                                           "Purchase": "ninguno"}))
     assert any("Otro" in p for p in validar_emisores({**tabla, "InitiateCheckout": "impultienda",
                                                       "Otro": "impultienda"}))
+
+
+# --- ronda de revisión (L-7, L-8) ----------------------------------------------------------------------------------
+
+
+def test_ия_final_es_ia():
+    # Ley de transliteración búlgara: «-ия» a final de palabra → «ia» (София → Sofia).
+    assert nombre_dataset("София", P, "BG") == "SOFIA BG"
+    assert nombre_dataset("Енергия плюс", P, "BG") == "ENERGIA PLYUS BG"
+    assert nombre_dataset("Ияна", P, "BG") == "IYANA BG"  # dentro de palabra, la regla general
+
+
+@pytest.mark.parametrize("marca", ["Ёжик", "Мысль", "Київ", "Ґанок", "Эра", "Њива", "Ўсход"])
+def test_cirilico_no_bulgaro_se_rechaza(marca):
+    with pytest.raises(ValueError, match="cirílic"):
+        nombre_dataset(marca, P, "BG")
+
+
+def test_llamadas_pixel_en_html():
+    from trovefy.tracking.modelo import llamadas_pixel
+
+    html = """<script>!function(f,b,e,v,n,t,s){}(window,document,'script',
+    'https://connect.facebook.net/en_US/fbevents.js');
+    fbq('init', '1111111111111111'); fbq ( "track", "PageView" );</script>
+    <noscript><img src="https://www.facebook.com/tr?id=1111111111111111&ev=PageView&noscript=1"/></noscript>
+    <p>fbqueue no es una llamada</p>"""
+    llamadas = llamadas_pixel(html)
+    assert len([x for x in llamadas if x.startswith("fbq(")]) == 2
+    assert any("fbevents.js" in x for x in llamadas)
+    assert any("facebook.com/tr" in x for x in llamadas)
+    assert llamadas_pixel("<p>Hola, fbqueue y fbq sin paréntesis</p>") == []

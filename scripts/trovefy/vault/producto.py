@@ -74,14 +74,15 @@ def secreto_en(valor: object) -> str | None:
     return None
 
 
-def _guardar(vault: Path, ruta: Path, meta: dict, cuerpo: str, skill: str, que: str, ahora: datetime) -> Path:
+def _guardar(vault: Path, ruta: Path, meta: dict, cuerpo: str, skill: str, que: str, ahora: datetime,
+             archivos_log: Sequence[str] = ()) -> Path:
     texto = frontmatter.renderizar(meta, cuerpo)
     # RevisionSecretosNoDisponible: no se escribe nada
     nombre = secreto_en(meta) or buscar_secreto(texto)
     if nombre:
         raise ValueError(f"{ruta.name}: aparece un secreto ({nombre}); no se escribe nada")
     escribir_atomico(ruta, texto)
-    anadir_log(vault, skill, que, [ruta.relative_to(vault).as_posix()], ahora=ahora)
+    anadir_log(vault, skill, que, [*archivos_log, ruta.relative_to(vault).as_posix()], ahora=ahora)
     return ruta
 
 
@@ -194,13 +195,14 @@ def _sin_protegidas(cambios: dict) -> dict:
 
 
 def actualizar_producto(vault: Path, p_id: str, cambios: dict, enlaces: list[str], skill: str,
-                        ahora: datetime) -> Path:
+                        ahora: datetime, *, archivos_log: Sequence[str] = ()) -> Path:
     """Fusiona ``cambios`` en el frontmatter (mapas en profundidad) y añade al cuerpo los enlaces que falten.
 
     Los códigos de ``cambios["paises"]`` se normalizan a mayúsculas. Si no cambia nada (mismo
     frontmatter y ningún enlace nuevo) devuelve la ruta sin escribir ni anotar en ``log.md``.
     Al reescribir, el frontmatter conserva su significado pero no sus comentarios ni el formato
-    hecho a mano; el cuerpo se conserva byte a byte.
+    hecho a mano; el cuerpo se conserva byte a byte. ``archivos_log`` (rutas relativas al vault) se anotan en
+    la misma línea de ``log.md``, para que quien escribe otro archivo junto a este deje una sola línea.
     """
     vault = Path(vault)
     ahora = _con_zona(ahora)
@@ -225,4 +227,4 @@ def actualizar_producto(vault: Path, p_id: str, cambios: dict, enlaces: list[str
     que = f"{p_id}: actualiza {', '.join(map(str, cambios)) or 'enlaces'}"
     if nuevos:
         que += f" (+{len(nuevos)} enlaces)"
-    return _guardar(vault, ruta, meta, cuerpo, skill, que, ahora)
+    return _guardar(vault, ruta, meta, cuerpo, skill, que, ahora, archivos_log)

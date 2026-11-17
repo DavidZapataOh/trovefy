@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path, PurePosixPath
 from typing import Literal
+from urllib.parse import urljoin, urlsplit
 
 import yaml
 
@@ -154,14 +155,33 @@ def _piezas(pasos: dict, dir_producto: Path, entregable: dict, motivos: list[str
     return piezas
 
 
+def _https(url: str | None) -> bool:
+    try:
+        partes = urlsplit(url or "")
+    except ValueError:
+        return False
+    return partes.scheme == "https" and bool(partes.hostname)
+
+
 def _absoluta(url: str | None, tienda: str | None) -> str | None:
     if not url:
         return None
     if url.startswith("https://"):
         return url
     if url.startswith("/") and tienda:
-        return tienda.rstrip("/") + url
+        return urljoin(tienda + "/", url)
     return None
+
+
+def _checkout_url(checkout: str | None, tienda: str | None, motivos: list[str]) -> str | None:
+    """``checkout_url`` de landing.yaml (o ``<tienda>/checkout``), solo https y en el host de la tienda (L-5)."""
+    if tienda is None:
+        return None
+    url = _absoluta(checkout, tienda) if checkout else tienda + "/checkout"
+    if url is None or not _https(url) or urlsplit(url).hostname != urlsplit(tienda).hostname:
+        motivos.append(f"no medido: checkout_url «{checkout}» no es https en la tienda ({tienda})")
+        return None
+    return url
 
 
 def cargar_contexto(vault: Path, producto: str, pais: str) -> Contexto:
@@ -175,11 +195,14 @@ def cargar_contexto(vault: Path, producto: str, pais: str) -> Contexto:
         raise ValueError(f"el país {pais} no está en config/mercados.yaml")
     escalera = _meta(dir_producto / "ESCALERA.md").get("paises")
     bloque = escalera.get(pais) if isinstance(escalera, dict) else None
+    if isinstance(bloque, dict) and bloque.get("pasos") is None and bloque.get("pasos_motivo"):
+        raise ValueError(f"ESCALERA.md: paises.{pais} sin pasos: {bloque['pasos_motivo']}")
     if not isinstance(bloque, dict) or not isinstance(bloque.get("pasos"), dict):
         raise ValueError(f"ESCALERA.md no trae paises.{pais}.pasos: /modelar")  # noqa: TRY004 - dato del vault mal escrito
-    moneda = str(bloque.get("moneda") or m.moneda)
-    if moneda != m.moneda:
-        motivos.append(f"no medido: la moneda de ESCALERA.md ({moneda}) no es la del mercado ({m.moneda})")
+    moneda = m.moneda
+    if bloque.get("moneda") not in (None, "", m.moneda):
+        raise ValueError(f"la moneda de ESCALERA.md ({bloque.get('moneda')}) no es la del mercado {pais} "
+                         f"({m.moneda}): rehaz la escalera con /modelar")
 
     producto_meta = _meta(dir_producto / "PRODUCTO.md")
     por_idioma = producto_meta.get("entregable", {})
@@ -194,6 +217,9 @@ def cargar_contexto(vault: Path, producto: str, pais: str) -> Contexto:
     tienda = m.tienda.rstrip("/") if m.tienda else None
     if tienda is None:
         motivos.append(f"no medido: falta la tienda de {pais} en config/mercados.yaml (trovefy landing sonda --tienda)")
+    elif not _https(tienda):
+        motivos.append(f"no medido: la tienda de {pais} no es https ({tienda})")
+        tienda = None
     try:
         landing = leer_landing_yaml(vault, producto, pais)
     except EntradaInvalida as exc:
@@ -202,7 +228,7 @@ def cargar_contexto(vault: Path, producto: str, pais: str) -> Contexto:
     hosting = landing.get("hosting") if landing.get("hosting") in ("impultienda", "cloudflare") else None
     landing_url = _absoluta(landing.get("url") if isinstance(landing.get("url"), str) else None, tienda)
     checkout = landing.get("checkout_url") if isinstance(landing.get("checkout_url"), str) else None
-    checkout_url = _absoluta(checkout, tienda) or (tienda + "/checkout" if tienda else None)
+    checkout_url = _checkout_url(checkout, tienda, motivos)
     if landing_url is None:
         motivos.append(f"no medido: la landing de {pais} no está publicada (/landing)")
 

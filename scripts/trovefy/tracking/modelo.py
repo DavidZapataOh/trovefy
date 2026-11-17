@@ -59,8 +59,19 @@ def utm_de_prueba() -> dict[str, str]:
     return dict(PARES_PUBLICADA)
 
 
+_IYA_FINAL = re.compile(r"ия\b")
+
+
 def _latin(texto: str) -> str:
-    t = "".join(_BG.get(ch, ch) for ch in texto.lower())
+    """Latín en mayúsculas con la tabla búlgara: «-ия» a final de palabra → «ia» (България → BULGARIA). Otro
+    cirílico (ё, ы, э, і, ї, є, ґ, ў, љ, њ…) no tiene transliteración búlgara: ``ValueError``."""
+    t = texto.lower()
+    ajenas = sorted({ch for ch in t if "CYRILLIC" in unicodedata.name(ch, "") and ch not in _BG})
+    if ajenas:
+        raise ValueError(f"letras cirílicas que no son búlgaras ({''.join(ajenas)}): escribe la marca en búlgaro "
+                         "o en latín")
+    t = _IYA_FINAL.sub("ia", t)
+    t = "".join(_BG.get(ch, ch) for ch in t)
     t = "".join(ch for ch in unicodedata.normalize("NFKD", t) if not unicodedata.combining(ch))
     return " ".join(re.sub(r"[^a-z0-9]+", " ", t).split()).upper()
 
@@ -116,3 +127,18 @@ def validar_emisores(tabla: dict) -> list[str]:
         elif emisor == "ninguno" and evento == "Purchase":
             problemas.append("Purchase: sin emisor no hay compra que optimizar")
     return problemas
+
+
+# Llamadas al píxel de Meta en un HTML (L-8): `fbq(` (no «fbqueue»), el script fbevents.js y el <img> de /tr.
+_PIXEL_EN_HTML = re.compile(
+    r"(?<![\w$.])fbq\s*\([^)]{0,200}\)?"
+    r"|connect\.facebook\.net/[^\s\"'<>]*fbevents\.js"
+    r"|facebook\.com/tr/?\?[^\s\"'<>]*",
+    re.IGNORECASE,
+)
+
+
+def llamadas_pixel(html: str) -> list[str]:
+    """Las llamadas al píxel de Meta que hay en `html` (``fbq(…)`` sin espacios, ``fbevents.js``, ``facebook.com/tr``),
+    en orden; ``[]`` si no hay. Sirve para comprobar que un evento tiene un único emisor [D-17]."""
+    return [re.sub(r"^fbq\s*\(", "fbq(", m.group(0), flags=re.IGNORECASE) for m in _PIXEL_EN_HTML.finditer(html)]

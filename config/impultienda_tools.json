@@ -507,7 +507,13 @@
         "type": "object"
       },
       "clase": "escritura",
-      "motivo": "receta: precio y foto arriba del checkout (S1 5:40) en tienda clásica; nunca bloques countdown ni stock (D-01)"
+      "motivo": "receta: precio y foto arriba del checkout (S1 5:40) en tienda clásica; nunca bloques countdown ni stock (D-01)",
+      "valores_prohibidos": {
+        "bloques[].tipo": [
+          "countdown",
+          "stock"
+        ]
+      }
     },
     {
       "nombre": "impultienda_cambiar_email_comprador",
@@ -721,7 +727,8 @@
         "type": "object"
       },
       "clase": "escritura",
-      "motivo": "receta: logo de los mails si el 17 lo generó"
+      "motivo": "receta: logo de los mails si el 17 lo generó",
+      "devuelve_url_firmada": true
     },
     {
       "nombre": "impultienda_cambiar_moneda",
@@ -915,8 +922,11 @@
         ],
         "type": "object"
       },
-      "clase": "prohibida",
-      "motivo": "toca «meta» por el parámetro meta_descripcion (SEO de la landing, plan 18); el título va al respaldo manual"
+      "clase": "escritura",
+      "motivo": "R-e: título de la pestaña (receta); meta_descripcion es SEO, no Meta: permitido por ruling",
+      "parametros_permitidos_por_ruling": {
+        "meta_descripcion": "R-e"
+      }
     },
     {
       "nombre": "impultienda_campanas_utm",
@@ -1043,7 +1053,8 @@
         "type": "object"
       },
       "clase": "escritura",
-      "motivo": "receta: PDF vigente de cada pieza (plan 17)"
+      "motivo": "receta: PDF vigente de cada pieza (plan 17)",
+      "devuelve_url_firmada": true
     },
     {
       "nombre": "impultienda_carritos_abandonados",
@@ -1399,8 +1410,8 @@
         ],
         "type": "object"
       },
-      "clase": "escritura",
-      "motivo": "receta: datos del comprador (email, nombre y teléfono del comprador, V1 0:31:50) y textos del checkout; no toca métodos de pago"
+      "clase": "prohibida",
+      "motivo": "toca «pagar» (color_boton_pagar, texto_boton_pagar) por la regla de temas de la ronda 3–5; probable falso positivo (botón de pagar), pendiente de ruling: hasta entonces, a mano"
     },
     {
       "nombre": "impultienda_configurar_disparo_postcompra",
@@ -1809,8 +1820,8 @@
         },
         "type": "object"
       },
-      "clase": "lectura",
-      "motivo": "base de conocimiento de la plataforma, sin datos de la cuenta"
+      "clase": "prohibida",
+      "motivo": "base de conocimiento de la plataforma; sin verbo de consulta ni «SOLO LECTURA» en la descripción, no puede ser lectura (regla H-2): fuera del 19"
     },
     {
       "nombre": "impultienda_crear_embudo",
@@ -2341,8 +2352,22 @@
         ],
         "type": "object"
       },
-      "clase": "prohibida",
-      "motivo": "toca «pago» y «anuncio» por sus parámetros (pago_expres_arriba, pago_al_final, anuncio_bonos); el diseño va al respaldo manual"
+      "clase": "escritura",
+      "motivo": "R-e: diseño del checkout permitido solo sin pago_* ni anuncio_bonos/texto_anuncio_bonos (M-4); nunca estilo_bump «escasez» y siempre minutos_timer_bump 0 (sin urgencia falsa, D-01)",
+      "parametros_prohibidos": [
+        "pago_expres_arriba",
+        "pago_al_final",
+        "anuncio_bonos",
+        "texto_anuncio_bonos"
+      ],
+      "valores_prohibidos": {
+        "estilo_bump": [
+          "escasez"
+        ]
+      },
+      "valores_obligatorios": {
+        "minutos_timer_bump": 0
+      }
     },
     {
       "nombre": "impultienda_editar_producto",
@@ -2424,7 +2449,8 @@
         "type": "object"
       },
       "clase": "escritura",
-      "motivo": "receta: nombre, descripción, imagen y marca «solo post-compra» de U1"
+      "motivo": "receta: nombre, descripción, imagen y marca «solo post-compra» de U1",
+      "devuelve_url_firmada": true
     },
     {
       "nombre": "impultienda_editar_texto_landing",
@@ -2709,8 +2735,8 @@
         },
         "type": "object"
       },
-      "clase": "lectura",
-      "motivo": "base de conocimiento de la plataforma, sin datos de la cuenta"
+      "clase": "prohibida",
+      "motivo": "base de conocimiento de la plataforma; sin verbo de consulta ni «SOLO LECTURA» en la descripción, no puede ser lectura (regla H-2): fuera del 19"
     },
     {
       "nombre": "impultienda_fijar_precio",
@@ -3256,7 +3282,8 @@
         "type": "object"
       },
       "clase": "escritura",
-      "motivo": "receta: subir la foto del producto a Recursos"
+      "motivo": "receta: subir la foto del producto a Recursos",
+      "devuelve_url_firmada": true
     },
     {
       "nombre": "impultienda_listar_embudos",
@@ -4049,8 +4076,8 @@
         "properties": {},
         "type": "object"
       },
-      "clase": "lectura",
-      "motivo": "fecha del primer cobro del plan (resolución 40); lo que la cuenta paga a Impultienda, no cobros a compradores; solo consulta"
+      "clase": "prohibida",
+      "motivo": "toca «cobr» (cobros del plan de Impultienda): dinero, fuera del 19"
     },
     {
       "nombre": "impultienda_ver_landing",
@@ -4341,10 +4368,10 @@
   "faltan": [
     "Pixel ID, token CAPI, token de UTMify y proyecto de Clarity: configurar_tracking es prohibida (lleva tokens); los pega el usuario en su panel (Configuraciones → Tracking), como en los vídeos (V1 1:15:11)",
     "Clarity solo tras el consentimiento: va por el banner propio de la landing (Tarea 7), no por la tienda",
-    "Diseño del checkout (plantilla, colores, posición del resumen): disenar_checkout es prohibida por sus parámetros pago_* y anuncio_bonos",
-    "Título de la pestaña: cambiar_titulo_pagina es prohibida (meta_descripcion, SEO de la landing del 18)",
     "Precio propio de un embudo de checkout: solo en la pestaña Embudos del panel (lo dice actualizar_embudo)",
     "Bloques arriba/abajo del checkout en tiendas tipo checkout: solo en el panel, por embudo (lo dice bloques_checkout)",
-    "Reembolso de la compra de prueba: no hay herramienta; lo hace el usuario en su panel"
+    "Reembolso de la compra de prueba: no hay herramienta; lo hace el usuario en su panel",
+    "Pago exprés arriba, pago al final y anuncio de bonos del checkout: nunca por el conector (R-e, M-4); si hicieran falta, los toca el usuario en su panel",
+    "Teléfono del comprador, textos y colores del botón de pagar, garantía y barra de compradores: configurar_checkout es prohibida (toca «pagar»), pendiente de ruling; hasta entonces, a mano en el panel"
   ]
 }

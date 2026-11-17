@@ -139,3 +139,57 @@ def test_pais_sin_escalera(tmp_path):
     v = vault_embudo(tmp_path)
     with pytest.raises(ValueError, match="ZY"):
         cargar_contexto(v, P, "ZY")
+
+
+# --- ronda de revisión (L-3, L-4, L-5) -----------------------------------------------------------------------------
+
+
+def _escalera(v, bloque: dict) -> None:
+    from trovefy.vault import frontmatter
+    ruta = v / "productos" / P / "ESCALERA.md"
+    meta, cuerpo = frontmatter.leer(ruta)
+    meta["paises"][PAIS] = bloque
+    frontmatter.escribir(ruta, meta, cuerpo)
+
+
+def test_moneda_distinta_del_mercado_se_rechaza(tmp_path):
+    v = vault_embudo(tmp_path)
+    from embudo.ejemplos_embudo import PASOS_FICTICIOS
+    _escalera(v, {"moneda": "BGN", "pasos": PASOS_FICTICIOS})
+    with pytest.raises(ValueError, match="moneda"):
+        cargar_contexto(v, P, PAIS)
+    _escalera(v, {"pasos": PASOS_FICTICIOS})  # sin moneda: la del mercado
+    assert cargar_contexto(v, P, PAIS).moneda == "EUR"
+
+
+def test_pasos_motivo_se_conserva(tmp_path):
+    v = vault_embudo(tmp_path)
+    _escalera(v, {"moneda": "EUR", "pasos": None, "pasos_motivo": "no medido: ZZ sin banda de precios"})
+    with pytest.raises(ValueError, match="sin banda de precios"):
+        cargar_contexto(v, P, PAIS)
+
+
+@pytest.mark.parametrize("checkout", ["https://otra.example/checkout", "http://prueba.impultienda.example/checkout",
+                                      "https://prueba.impultienda.example.evil.example/checkout",
+                                      "//otra.example/checkout"])
+def test_checkout_url_solo_https_en_la_tienda(tmp_path, checkout):
+    v = vault_embudo(tmp_path, landing={"hosting": "impultienda", "version": "v2", "url": TIENDA + "/",
+                                        "checkout_url": checkout})
+    ctx = cargar_contexto(v, P, PAIS)
+    assert ctx.checkout_url is None
+    assert any("checkout" in m for m in ctx.motivos)
+
+
+def test_tienda_sin_https_no_cuenta(tmp_path):
+    v = vault_embudo(tmp_path)
+    (v / "config" / "mercados.yaml").write_text(
+        "ZZ: {idioma: bg, moneda: EUR, zona: Europe/Sofia, banda_eur: [9, 19], estado: activo, "
+        "tienda: \"http://prueba.impultienda.example\"}\n", encoding="utf-8")
+    ctx = cargar_contexto(v, P, PAIS)
+    assert ctx.tienda is None and ctx.checkout_url is None
+    assert any("https" in m for m in ctx.motivos)
+
+
+def test_home_aislado(tmp_path):
+    from pathlib import Path
+    assert Path.home() == tmp_path
