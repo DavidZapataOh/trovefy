@@ -19,6 +19,15 @@ from trovefy.cli import registrar
 _ejecutar_orden = subprocess.run  # punto de inyección de los tests (pdftoppm, ffmpeg, pdfinfo)
 
 
+def _cache() -> Path:
+    """Raíz de la caché de trabajo (fuera del vault); los tests la cambian."""
+    return Path.home() / ".cache" / "trovefy"
+
+
+def _borrador(p_id: str, pais: str) -> Path:
+    return _cache() / "landing" / p_id / pais.upper()
+
+
 def _error(msg: object, codigo: int = 2) -> int:
     print(f"Error: {msg}", file=sys.stderr)
     return codigo
@@ -35,6 +44,12 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
     m = sub.add_parser("medios", help="vistas previas reales del PDF e imágenes propias a assets/")
     _comunes(m)
     m.add_argument("--paginas", default="1,2,3", help="páginas del PDF para la vista previa (1,4,7)")
+    pr = sub.add_parser("preparar", help="borrador con el esqueleto propio, wireframe.yaml y landing.yaml")
+    _comunes(pr)
+    pr.add_argument("--hosting", choices=("impultienda", "cloudflare"), default=None,
+                    help="dónde se publica (por defecto, el que mida la sonda)")
+    pr.add_argument("--rehacer", action="store_true", help="vuelve a escribir el index.html del borrador")
+    _comunes(sub.add_parser("guardar", help="copia el borrador al vault (sin secretos) y fija la versión"))
 
 
 # --- acciones ------------------------------------------------------------------------------------
@@ -104,7 +119,48 @@ def _medios(args: argparse.Namespace, vault: Path) -> int:
     return 0
 
 
-_ACCIONES = {"estado": _estado, "medios": _medios}
+def _hosting_por_defecto() -> tuple[str, str | None]:
+    """(hosting, aviso). Hasta que exista la sonda (Tarea 8), Cloudflare provisional."""
+    try:
+        from trovefy.landing.hosting import elegir_hosting  # Tarea 8
+    except ImportError:
+        return "cloudflare", "hosting no medido: cloudflare provisional (mide Impultienda con trovefy landing sonda)"
+    from trovefy.vault.rutas import vault_root
+
+    hosting = elegir_hosting(vault_root())
+    if hosting not in ("impultienda", "cloudflare"):
+        return "cloudflare", f"hosting {hosting}: cloudflare provisional (trovefy landing sonda)"
+    return hosting, None
+
+
+def _preparar(args: argparse.Namespace, vault: Path) -> int:
+    from trovefy.landing.entrada import cargar_datos
+    from trovefy.landing.plantilla import preparar
+
+    d = cargar_datos(vault, args.producto, args.pais, correr=_ejecutar_orden)
+    hosting, aviso = (args.hosting, None) if args.hosting else _hosting_por_defecto()
+    if aviso:
+        print(f"Aviso: {aviso}")
+    destino = _borrador(d.p_id, d.pais)
+    ya = (destino / "index.html").exists() and not args.rehacer
+    ruta = preparar(vault, d, hosting, destino, rehacer=args.rehacer)
+    print(f"Borrador ({hosting}): {ruta}")
+    if ya:
+        print("El index.html del borrador ya existía y no se ha tocado (usa --rehacer para empezar de cero).")
+    return 0
+
+
+def _guardar(args: argparse.Namespace, vault: Path) -> int:
+    from trovefy.landing.entrada import cargar_datos
+    from trovefy.landing.plantilla import guardar
+
+    d = cargar_datos(vault, args.producto, args.pais, correr=_ejecutar_orden)
+    version = guardar(vault, d, _borrador(d.p_id, d.pais))
+    print(f"Landing guardada en el vault: versión {version}")
+    return 0
+
+
+_ACCIONES = {"estado": _estado, "medios": _medios, "preparar": _preparar, "guardar": _guardar}
 
 
 def _ejecutar(args: argparse.Namespace) -> int:
