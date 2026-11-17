@@ -22,7 +22,7 @@ Una lista; cada imagen con estos campos y ninguno más:
 - **portada** (`2:3`): la imagen de la portada del PDF. La maqueta la usa sola si existe `medios/portada.png`. Sin texto: el título lo pone la maqueta. Cada pieza puede tener la suya (`id: portada` con `pieza: principal`, otra con `pieza: bono-1`…).
 - **mockup** (`3:2` o `4:3`): el producto como objeto (cuaderno, tableta) para la landing. Sin texto.
 - **il-01 … il-10** (6 a 10): una por sección que lo necesite. Sencillas, del mismo estilo; usa `referencias: [portada]` para que no cambie el estilo.
-- **f-01, f-02…**: una por ficha imprimible que se anuncie ilustrada (kits: «fichas ilustradas»), con la `pieza` de la ficha. La ficha la usa con `imagen: f-01` en su `fuente/fichas/<id>.yaml` (ver `patron-de-seccion.md`). Proporción `4:3` o `1:1`: se acota a unos 70 mm de alto. Mismo estilo con `referencias: [portada]`.
+- **f-01, f-02…**: una por ficha imprimible que se anuncie ilustrada (kits: «fichas ilustradas»), con la `pieza` de la ficha. La ficha la usa con `imagen: f-01` en su `fuente/fichas/<id>.yaml` (ver `patron-de-seccion.md`). Proporción `4:3` o `1:1`: se acota a unos 115 mm de alto. Mismo estilo con `referencias: [portada]`.
 - La lista puede crecer hasta unas 80 imágenes por producto (sumando todas las piezas). El límite real es el tope de US$ 2: antes de generar, `--simular` dice lo que costaría.
 - Escribe el prompt en español o en inglés, nunca con la marca ni con el nombre del anunciante original. Pide siempre «sin texto».
 - Personas: adultos genéricos, nunca famosos ni personas reales. Nada que parezca un antes y después ni un resultado médico.
