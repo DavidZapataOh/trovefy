@@ -1,0 +1,13 @@
+# Léxico semilla de promesas prohibidas en búlgaro (QG-10 ingresos, QG-11 salud). Propio del plan 17.
+# Lo revisa el agente `nativo` en el primer uso real; las ampliaciones van al vault
+# (config/promesas/bg.yaml, mismas claves) y se suman a estas; nunca se cambian en el código.
+# «гаранция» (la garantía de reembolso) NO es una promesa.
+ingresos:
+  - '\bпасивен доход'
+  - '\bпечелете \d+'
+salud:
+  - '\bлекува'
+  - '\bизлекува(не)?'
+  - '\bвместо лекар'
+  - '\bбез лекарства'
+  - '\bгарантиран(о|и)? резултат'

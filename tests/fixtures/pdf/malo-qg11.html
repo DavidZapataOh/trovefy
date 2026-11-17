@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Respira Lento</title>
+<style>
+@page{size:A4;margin:0}
+@page flujo{size:A4;margin:20mm 18mm 22mm;@bottom-center{content:counter(page)}}
+:root{--color-primario:#1F4E5F;--color-fondo:#FAF7F2;--fuente-titulos:'DejaVu Serif', serif;--fuente-texto:'DejaVu Sans', sans-serif}
+*{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+body{font-family:var(--fuente-texto);color:var(--color-primario);background:var(--color-fondo)}
+.flujo{page:flujo}
+.page{width:210mm;height:296.8mm;display:flex;flex-direction:column;break-after:page}
+.push{margin-top:auto}
+.seccion{break-before:page}
+figure,.plantilla,.ejercicio{break-inside:avoid}
+</style>
+</head>
+<body>
+<div class="page portada">
+<span id="ini-portada"></span>
+<h1>Respira Lento</h1>
+<img src="medios/portada.png" alt="Portada de Respira Lento">
+<span class="push" id="fin-portada"></span>
+</div>
+<nav class="indice">
+<ol>
+<li><a href="#s-01">Por qué te cuesta dormir</a></li>
+<li><a href="#s-02">La respiración lenta</a></li>
+<li><a href="#s-03">Tu plan de 21 días</a></li>
+<li><a href="#fuentes">Fuentes</a></li>
+</ol>
+</nav>
+<aside class="aviso-salud">
+<p>Este libro es una guía de hábitos. No es un tratamiento: si duermes mal desde hace semanas, habla con tu médico.</p>
+</aside>
+<section class="seccion flujo" id="s-01">
+<h2>Por qué te cuesta dormir</h2>
+<div class="lograr"><p>Al terminar este capítulo sabrás qué mantiene tu cabeza despierta por la noche y qué puedes cambiar hoy.</p></div>
+<h3>La cabeza a mil</h3>
+<p>Cuando te acuestas, el día sigue dando vueltas. Repasas la reunión, la lista de la compra y el mensaje que no contestaste. Es normal: el cuerpo está cansado, pero la atención sigue en marcha.</p>
+<h3>Lo que dicen los datos</h3>
+<p>Casi 1 de cada 3 adultos dice dormir mal varias noches por semana <a class="fuente" href="#fuente-1">[1]</a>. No estás solo, y tampoco es un fallo tuyo.</p>
+<h3>El móvil en la cama</h3>
+<p>Este método va a sanar tu trauma.</p>
+<p>La pantalla mantiene la mente ocupada justo cuando debería bajar el ritmo. Dejar el móvil fuera del dormitorio es el primer paso, y el más sencillo de todos.</p>
+<div class="ejercicio"><p>Esta noche, deja el móvil en otra habitación y anota a qué hora apagas la luz.</p></div>
+<div class="recordar"><p>Recuerda: tu cuerpo sabe dormir; solo necesita que la cabeza baje el ritmo.</p></div>
+</section>
+<section class="seccion flujo" id="s-02">
+<h2>La respiración lenta</h2>
+<div class="lograr"><p>Al terminar este capítulo sabrás respirar despacio durante diez minutos sin perder la cuenta.</p></div>
+<h3>Contar hasta cuatro</h3>
+<p>Siéntate en el borde de la cama. Toma aire por la nariz mientras cuentas hasta cuatro, sin forzar. Nota cómo se llena la parte baja del pecho y cómo se mueve la tripa.</p>
+<h3>Sostener y soltar</h3>
+<p>Mantén el aire un momento y suéltalo despacio por la boca, como si apagaras una vela lejana. La salida larga es la parte que más ayuda a relajarse.</p>
+<h3>Diez minutos bastan</h3>
+<p>No hace falta más. Diez minutos cada noche, siempre a la misma hora, enseñan al cuerpo que ya es momento de descansar y de dejar el día atrás.</p>
+<div class="plantilla"><p>Hora de empezar: ____ · Minutos: ____ · Cómo me siento: ____</p></div>
+<div class="recordar"><p>Recuerda: la salida del aire más larga que la entrada.</p></div>
+</section>
+<section class="seccion flujo" id="s-03">
+<h2>Tu plan de 21 días</h2>
+<div class="lograr"><p>Al terminar este capítulo tendrás tu plan de tres semanas listo para empezar mañana.</p></div>
+<h3>Semana uno</h3>
+<p>Practica cada noche diez minutos con la cuenta de cuatro. Anota en el diario a qué hora te acuestas y cuánto tardas en dormirte, aunque sea de forma aproximada.</p>
+<h3>Semana dos</h3>
+<p>Añade una pausa de tres respiraciones a media tarde. Así el cuerpo aprende la calma también de día, y por la noche le cuesta menos encontrarla.</p>
+<h3>Semana tres</h3>
+<p>Repasa el diario y elige la hora que mejor te funciona. Mantén esa hora fija, también el fin de semana, para que el hábito quede asentado.</p>
+<div class="ejercicio"><p>Marca en el calendario los 21 días y tacha cada noche que practiques.</p></div>
+<div class="recordar"><p>Recuerda: poco cada día vale más que mucho un día.</p></div>
+</section>
+<div class="page ficha">
+<span id="ini-diario"></span>
+<h2>Diario de sueño</h2>
+<table>
+<thead><tr><th>Día</th><th>Hora</th><th>Minutos</th></tr></thead>
+<tbody><tr><td>1</td><td></td><td></td></tr><tr><td>2</td><td></td><td></td></tr></tbody>
+</table>
+<span class="push" id="fin-diario"></span>
+</div>
+<section class="fuentes" id="fuentes">
+<h2>Fuentes</h2>
+<ol>
+<li id="fuente-1">Encuesta ficticia de hábitos de sueño, 2025 (dato de prueba).</li>
+</ol>
+</section>
+</body>
+</html>
