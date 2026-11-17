@@ -34,3 +34,57 @@ def test_cada_agente_tiene_frontmatter_valido():
         assert herramientas <= {"Read", "Glob", "Grep"}
         assert "VEREDICTO: ok" in cuerpo
         assert "VEREDICTO: corregir" in cuerpo
+
+
+def _skill_landing() -> tuple[dict, str]:
+    texto = (RAIZ / "skills/landing/SKILL.md").read_text()
+    _, cabecera, cuerpo = texto.split("---", 2)
+    return yaml.safe_load(cabecera), cuerpo
+
+
+def test_skill_landing_existe_con_sus_herramientas():
+    meta, cuerpo = _skill_landing()
+    assert meta["name"] == "landing"
+    for disparo in ("«landing»", "«página de venta»", "«publicar la landing»"):
+        assert disparo in meta["description"], disparo
+    herramientas = {t.strip() for t in meta["allowed-tools"].split(",")}
+    assert {"Read", "Bash(trovefy landing *)", "Agent", "Skill",
+            "Write(~/.cache/trovefy/landing/**)", "Edit(~/.cache/trovefy/landing/**)"} <= herramientas
+    # Solo escribe en el borrador: nada del vault ni de la configuración.
+    assert all(not t.startswith(("Write", "Edit")) or "~/.cache/trovefy/landing/" in t for t in herramientas)
+    assert (RAIZ / "skills/landing/references/secciones.md").is_file()
+    assert "¿Estás en el cerebro?" in cuerpo
+
+
+def test_skill_landing_nunca_ejecuta_capturar_ni_confirma_por_el_usuario():
+    meta, cuerpo = _skill_landing()
+    assert "capturar" not in meta["allowed-tools"]
+    lineas = [linea for linea in cuerpo.splitlines() if "landing capturar" in linea]
+    assert lineas, "la skill tiene que darle al usuario la orden de capturar"
+    for linea in lineas:  # cada mención dice que la lanza el usuario, en su terminal
+        assert "él" in linea and "terminal" in linea, linea
+        assert "nunca lo ejecutas" in linea or "tú no la ejecutas" in linea, linea
+    for linea in cuerpo.splitlines():
+        if "pantallas-confirmadas.yaml" in linea:
+            assert "nunca escribes" in linea, linea
+    assert "nunca respondes «sí» por él" in cuerpo
+
+
+def test_skill_landing_sigue_el_cli_real():
+    _, cuerpo = _skill_landing()
+    for x in ("--version", "--texto-sha256", "Texto-sha256:", "`ok` o `corregir`", "trovefy landing resena",
+              "trovefy navegador abrir impultienda https://app.impultienda.ar/", "pixel: pendiente",
+              "no toques `assets/`", "restaura solo", "D-01", "Claude nunca escribe en Meta"):
+        assert x in cuerpo, x
+    assert "/trovefy/*.env" in cuerpo
+    assert "aprobado" not in cuerpo  # el veredicto del nativo es ok|corregir (resolución 17)
+
+
+def test_secciones_de_landing_cubren_todos_los_tipos():
+    from trovefy.modelar.esquema import TIPOS_SECCION
+
+    texto = (RAIZ / "skills/landing/references/secciones.md").read_text()
+    for tipo in TIPOS_SECCION:
+        assert f"**`{tipo}`**" in texto, tipo
+    for x in ("D-01", "páginas", "Garantía explícita", "data-tf-formato", "data-tf-garantia"):
+        assert x in texto, x
