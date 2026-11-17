@@ -50,6 +50,12 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
                     help="dónde se publica (por defecto, el que mida la sonda)")
     pr.add_argument("--rehacer", action="store_true", help="vuelve a escribir el index.html del borrador")
     _comunes(sub.add_parser("guardar", help="copia el borrador al vault (sin secretos) y fija la versión"))
+    _comunes(sub.add_parser("validar", help="comprobación estática de la landing guardada"))
+    r = sub.add_parser("resena", help="añade una reseña real (con su pedido o email de origen)")
+    _comunes(r)
+    r.add_argument("--texto", required=True, help="texto literal de la reseña")
+    r.add_argument("--fecha", required=True, help="fecha de la reseña (AAAA-MM-DD)")
+    r.add_argument("--fuente", required=True, help="pedido o email de origen")
 
 
 # --- acciones ------------------------------------------------------------------------------------
@@ -160,7 +166,41 @@ def _guardar(args: argparse.Namespace, vault: Path) -> int:
     return 0
 
 
-_ACCIONES = {"estado": _estado, "medios": _medios, "preparar": _preparar, "guardar": _guardar}
+def _validar(args: argparse.Namespace, vault: Path) -> int:
+    from trovefy.landing.entrada import cargar_datos
+    from trovefy.landing.validar import validar
+
+    d = cargar_datos(vault, args.producto, args.pais, correr=_ejecutar_orden)
+    r = validar(vault, d)
+    if r.fallos:
+        print(f"{len(r.fallos)} fallo(s):")
+        for f in r.fallos:
+            print(f"- {f}")
+    else:
+        print("Landing sin fallos.")
+    if r.avisos:
+        print(f"{len(r.avisos)} aviso(s) (no bloquean):")
+        for a in r.avisos:
+            print(f"- {a}")
+    return 0 if r.ok else 1
+
+
+def _resena(args: argparse.Namespace, vault: Path) -> int:
+    from datetime import date
+
+    from trovefy.landing.validar import anadir_resena
+
+    try:
+        fecha = date.fromisoformat(args.fecha)
+    except ValueError:
+        raise ValueError(f"--fecha mal escrita: «{args.fecha}» (AAAA-MM-DD)") from None
+    rid = anadir_resena(vault, args.producto, args.pais, args.texto, fecha, args.fuente)
+    print(f"Reseña real añadida: {rid}")
+    return 0
+
+
+_ACCIONES = {"estado": _estado, "medios": _medios, "preparar": _preparar, "guardar": _guardar,
+             "validar": _validar, "resena": _resena}
 
 
 def _ejecutar(args: argparse.Namespace) -> int:
