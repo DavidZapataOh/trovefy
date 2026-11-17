@@ -29,7 +29,7 @@ from urllib.parse import urlsplit
 from trovefy.landing.entrada import DatosLanding, EntradaInvalida, ruta_landing
 from trovefy.landing.hosting import Hosting, empaquetar_en_linea, guardar_tienda
 from trovefy.landing.panel import _respaldar_en, nombre_respaldo, ultimo_respaldo
-from trovefy.landing.plantilla import host_tienda, leer_landing_yaml
+from trovefy.landing.plantilla import leer_landing_yaml
 from trovefy.landing.publicar import (
     CARPETA_SUBIDA,
     NoPublicable,
@@ -169,7 +169,7 @@ def _origen(url: str) -> str:
 def _con_tienda(datos: DatosLanding, url: str) -> tuple[DatosLanding, str | None]:
     """Sin tienda en `mercados.yaml`, una URL `https://<slug>.impultienda.ar/` es la de la tienda: se acepta y se
     apuntará. Devuelve los datos (con esa tienda) y la tienda nueva, o los datos tal cual y None."""
-    if host_tienda(datos.tienda) is not None:
+    if datos.tienda:
         return datos, None
     host = (urlsplit(url.strip()).hostname or "").lower() if isinstance(url, str) else ""
     if _TIENDA_IMPULTIENDA.fullmatch(host):
@@ -205,8 +205,6 @@ def verificar_manual(vault: Path, datos: DatosLanding, url: str, *, qa=None, abr
                            f"la página de tu tienda no es la versión actual: ¿guardaste en el panel? Pega el "
                            f"contenido de landing/{datos.pais}/{CARPETA_SUBIDA}/{ARCHIVO_PEGADO} en «{PANTALLA}», "
                            "guarda y vuelve a lanzar la orden")
-    if tienda_nueva is not None:
-        guardar_tienda(vault, datos.pais, tienda_nueva, ahora, "trovefy landing publicar --manual")
     r = (qa or _qa_publicada)(vault, d, url)
     if not r.ok:
         ultimo = ultimo_respaldo(vault, datos.pais)
@@ -215,6 +213,8 @@ def verificar_manual(vault: Path, datos: DatosLanding, url: str, *, qa=None, abr
                  f"landing/{datos.pais}/respaldo/)")
         raise NoPublicable(f"la QA publicada no pasa: mira landing/{datos.pais}/{QA_PUBLICADA}. No la doy por "
                            f"publicada y no he registrado nada. Para dejar tu tienda como estaba, {copia}.")
+    if tienda_nueva is not None:
+        guardar_tienda(vault, datos.pais, tienda_nueva, ahora, "trovefy landing publicar --manual")
     estado = registrar_publicacion(vault, d, url, Hosting("impultienda", "pegada a mano por el usuario"), version,
                                    r, ahora, extra={"publicacion": "manual"})
     return PublicadaManual(url, estado, tienda_nueva)

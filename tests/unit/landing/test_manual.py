@@ -258,6 +258,25 @@ def test_verificar_sin_tienda_no_acepta_cualquier_host(tmp_path):
         _verificar(v, "https://mitienda.otra-plataforma.test/")
 
 
+def test_verificar_qa_roja_no_guarda_la_tienda(tmp_path):
+    v = lista_sin_sonda(tmp_path)
+    _sin_tienda(v)
+    antes = (v / "config" / "mercados.yaml").read_bytes()
+    with pytest.raises(NoPublicable, match="no he registrado nada"):
+        _verificar(v, "https://mitienda.impultienda.ar/", qa=QAFalsa(LCP_ALTO))
+    assert (v / "config" / "mercados.yaml").read_bytes() == antes
+
+
+def test_verificar_con_tienda_invalida_para_limpio(tmp_path):
+    v = lista_sin_sonda(tmp_path)
+    (v / "config" / "mercados.yaml").write_text(
+        MERCADOS.replace(f'tienda: "{TIENDA}"', 'tienda: "http://vieja.impultienda.ar"'), encoding="utf-8")
+    antes = (v / "config" / "mercados.yaml").read_bytes()
+    with pytest.raises(NoPublicable):
+        _verificar(v, "https://mitienda.impultienda.ar/")
+    assert (v / "config" / "mercados.yaml").read_bytes() == antes
+
+
 def test_verificar_con_tienda_ya_guardada_no_la_toca(tmp_path):
     v = lista_sin_sonda(tmp_path)
     antes = (v / "config" / "mercados.yaml").read_bytes()
