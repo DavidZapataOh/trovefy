@@ -201,3 +201,51 @@ def test_tienda_con_dominio_propio_se_reconoce_por_su_subdominio(zz):
     assert t["id"] == "x"
     t, motivo = _tienda_de(replace(ctx, tienda="https://nadie.impultienda.ar"), resp)
     assert t is None and "no encuentro" in motivo
+
+
+U1 = "00000000-0000-4000-8000-000000000011"
+DESCUENTO = {"store_id": STORE, "item_id": U1, "descuento_pct": 0, "aplicar_a": "upsell"}
+
+
+def _postcompra(descuento_u1: object) -> dict:
+    """La forma real de `ver_postcompra` (BG, 2026-11-18): el upsell U1 con el 15 % por defecto y su downsell de
+    recuperación con el 40 % (R-c), los dos con el mismo `item_id`."""
+    return {"tienda": "x", "plan_permite_postcompra": True,
+            "funnels": [{"funnel_id": "00000000-0000-4000-8000-0000000000f1", "nombre": "Somatix ZZ"}],
+            "funnel": {"funnel_id": "00000000-0000-4000-8000-0000000000f1", "ofertas": [
+                {"oferta_id": "00000000-0000-4000-8000-0000000000a1", "item_id": U1, "posicion": 1,
+                 "tipo": "upsell", "descuento": descuento_u1, "precio_que_ve_el_comprador": "16.92 USD"},
+                {"oferta_id": "00000000-0000-4000-8000-0000000000a2", "item_id": U1, "posicion": 2,
+                 "tipo": "downsell", "descuento": "40%", "precio_que_ve_el_comprador": "11.94 USD"}]},
+            "solo_postcompra": [], "downsell": None, "link_panel": "https://impultienda.ar/panel/upsells"}
+
+
+def test_descuento_del_upsell_se_lee_de_ver_postcompra(zz):
+    ctx, _ = zz
+    inst, _ = _inst(ctx, impultienda_ver_postcompra=_postcompra("15%"))
+    ofertas = inst["postcompra"]["ofertas"]
+    assert [(o["tipo"], o["descuento"]) for o in ofertas] == [("upsell", "15"), ("downsell", "40")]
+    # El oferta_id de U1 es el del upsell, no el del downsell con el mismo producto.
+    assert valores_de(ctx, inst, {"<item_id:u1>": U1})["<oferta_id:u1>"] == "00000000-0000-4000-8000-0000000000a1"
+    al_reves = _postcompra("15%")
+    al_reves["funnel"]["ofertas"].reverse()
+    inst_reves, _ = _inst(ctx, impultienda_ver_postcompra=al_reves)
+    assert valores_de(ctx, inst_reves, {"<item_id:u1>": U1})["<oferta_id:u1>"] == \
+        "00000000-0000-4000-8000-0000000000a1"
+    plan =_plan(_op(1, "impultienda_modificar_oferta_postcompra", DESCUENTO, "postcompra.u1.descuento",
+                     "impultienda_ver_postcompra"))
+    respuesta = {"producto": {"id": U1}, "ofertas_actualizadas": 1, "antes": "15%", "descuento": "0%",
+                 "precio_que_ve_el_comprador": "19.90 USD"}
+    # Releído con el 15 %: distinto (aunque la escritura diga 0 %, manda la relectura).
+    [r] = releer(plan, inst, {1: respuesta}, ctx=ctx)
+    assert (r.estado, r.pedido, r.leido) == ("distinto", "0", "15")
+    for leido in ("0%", 0, "0", 0.0):
+        inst, _ = _inst(ctx, impultienda_ver_postcompra=_postcompra(leido))
+        [r] = releer(plan, inst, {1: respuesta}, ctx=ctx)
+        assert (r.estado, r.leido) == ("ok", "0"), leido
+    # Sin el descuento en la lectura, vale la respuesta de la escritura; si su forma no se conoce, «no medido».
+    inst, _ = _inst(ctx, impultienda_ver_postcompra=_postcompra(None))
+    assert releer(plan, inst, {1: respuesta}, ctx=ctx)[0].estado == "ok"
+    assert releer(plan, inst, {1: {**respuesta, "descuento": "15%"}}, ctx=ctx)[0].estado == "distinto"
+    for raro in ({"ok": True}, {"descuento": "mucho"}, {"descuento": True}, []):
+        assert releer(plan, inst, {1: raro}, ctx=ctx)[0].estado == "no_medido", raro

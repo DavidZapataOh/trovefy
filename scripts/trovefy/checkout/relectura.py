@@ -228,7 +228,10 @@ def instantanea(ctx: Contexto, lecturas: Mapping[str, object], previa: dict | No
     r = lecturas.get("impultienda_ver_postcompra")
     if isinstance(r, dict) and "funnels" in r:
         funnel = r.get("funnel") if isinstance(r.get("funnel"), dict) else {}
-        ofertas = [{"oferta_id": o.get("oferta_id"), "item_id": o.get("item_id")}
+        # El upsell y su downsell de recuperación llevan el mismo item_id: se distinguen por `tipo`. El descuento
+        # llega como "15%" (o "0%"/0 ya corregido): se guarda normalizado («15», «0»), None si no se lee.
+        ofertas = [{"oferta_id": o.get("oferta_id"), "item_id": o.get("item_id"), "tipo": o.get("tipo"),
+                    "descuento": normalizar("porcentaje", o.get("descuento"))}
                    for o in funnel.get("ofertas") or [] if isinstance(o, dict)]
         inst["postcompra"] = {"funnels": len(r.get("funnels") or []), "ofertas": ofertas}
     r = lecturas.get("impultienda_ver_recursos")
@@ -264,7 +267,8 @@ def valores_de(ctx: Contexto, inst: dict, valores: Mapping[str, object] | None =
             salida[f"<item_id:{clave}>"] = casan[0]["id"]
         item = salida.get(f"<item_id:{clave}>")
         oferta = next((o["oferta_id"] for o in (inst.get("postcompra") or {}).get("ofertas", [])
-                       if item and o.get("item_id") == item and o.get("oferta_id")), None)
+                       if item and o.get("item_id") == item and o.get("oferta_id")
+                       and o.get("tipo") in (None, "upsell")), None)
         if oferta:
             salida[f"<oferta_id:{clave}>"] = oferta
     mercados = (inst.get("markets") or {}).get("mercados") or []

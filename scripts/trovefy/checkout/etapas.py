@@ -130,12 +130,15 @@ def requiere(paso: Paso) -> set[str]:
 
 def depende_de(paso: Paso, pasos: list[Paso]) -> set[str]:
     """Las claves de los pasos que tienen que estar hechos antes (en una etapa anterior o antes en la misma): el
-    funnel de ``uN`` va después de crear ``uN``, fijarle el precio y cargar su PDF; activar la página propia de una
-    oferta, después de guardarla."""
+    funnel de ``uN`` va después de crear ``uN``, fijarle el precio y cargar su PDF; el descuento de su oferta, después
+    de meterla en el funnel; activar la página propia de una oferta, después de guardarla."""
     if paso.herramienta in ("impultienda_crear_funnel_postcompra", "impultienda_agregar_oferta_postcompra"):
         piezas = {pieza_de(x) for x in paso.ajustes} - {None}
         previos = {f"postcompra.{p}.{c}" for p in piezas for c in ("titulo", "precio", "entregable")}
         return {q.clave for q in pasos if q is not paso and set(q.ajustes) & previos}
+    if paso.herramienta == "impultienda_modificar_oferta_postcompra":
+        activos = {f"postcompra.{p}.activo" for p in {pieza_de(x) for x in paso.ajustes} - {None}}
+        return {q.clave for q in pasos if q is not paso and set(q.ajustes) & activos}
     if paso.herramienta == "impultienda_alternar_html_postcompra":
         return {q.clave for q in pasos if q.herramienta == "impultienda_guardar_html_postcompra"
                 and q.argumentos.get("oferta_id") == paso.argumentos.get("oferta_id")}

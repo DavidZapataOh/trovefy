@@ -617,3 +617,46 @@ def test_tienda_que_no_es_clasica_no_se_planifica(entorno, tmp_path, capsys):
     assert cli.main(_args("plan")) == 1
     assert "tienda clásica" in capsys.readouterr().out
     assert not (_carpeta(v) / "PLAN-MCP.json").exists()
+
+
+def test_tienda_con_funnel_activo_solo_corrige_el_descuento_de_u1(entorno, tmp_path, capsys):
+    """La tienda real: el funnel ya existe y está activo (``postcompra.u1.activo`` ok), pero se montó antes de esta
+    corrección y U1 sale con el 15 % por defecto (16,92 en vez de 19,90). El siguiente `plan` es una etapa con solo
+    la corrección del descuento; el downsell de recuperación conserva el suyo (R-c)."""
+    from trovefy.checkout.etapas import clave_de
+
+    v, _, mcp = entorno
+    claude, _ = _todo(entorno, tmp_path)
+    u1 = next(p for p in mcp.productos if p["tipo"] == "upsell")
+    upsell = next(o for f in mcp.funnels for o in f["ofertas"] if o["item_id"] == u1["id"] and o["tipo"] == "upsell")
+    assert upsell["descuento"] == "0%"
+    # Como la dejó la receta anterior: el descuento por defecto y sin la corrección entre lo hecho.
+    upsell["descuento"] = "15%"
+    ruta = _carpeta(v) / "MCP-ESTADO.json"
+    estado = json.loads(ruta.read_text(encoding="utf-8"))
+    clave = clave_de("impultienda_modificar_oferta_postcompra", {"store_id": "<store_id>", "item_id": "<item_id:u1>",
+                                                                 "descuento_pct": 0, "aplicar_a": "upsell"})
+    assert estado["hechas"].pop(clave)["estado"] == "ok"
+    ruta.write_text(json.dumps(estado, ensure_ascii=False), encoding="utf-8")
+    escrituras = len(mcp.escrituras)
+    claude.lecturas_base()
+    claude.releer()
+    capsys.readouterr()
+    plan = claude.plan()
+    assert plan["operaciones"] == [{"herramienta": "impultienda_modificar_oferta_postcompra",
+                                    "argumentos": {"store_id": STORE, "item_id": u1["id"], "descuento_pct": 0,
+                                                   "aplicar_a": "upsell"}}]
+    resumen = (_carpeta(v) / "PLAN-MCP.md").read_text(encoding="utf-8")
+    assert "1. Poner la oferta «Сън без болка» al precio de la escalera (sin descuento)" in resumen
+    assert "2. " not in resumen
+    assert claude.aprobar() == 0
+    claude.aplicar(plan)
+    claude.releer()
+    assert len(mcp.escrituras) == escrituras + 1
+    assert upsell["descuento"] == "0%"
+    downsell = next(o for f in mcp.funnels for o in f["ofertas"] if o["tipo"] == "downsell")
+    assert downsell["descuento"] == "40%"
+    _, cuerpo = frontmatter.leer(_carpeta(v) / "CHECKOUT.md")
+    fila = next(linea for linea in cuerpo.splitlines() if linea.startswith("| postcompra.u1.descuento |"))
+    assert "| 0 | 0 | mcp | ok" in fila
+    assert claude.plan() is None

@@ -269,3 +269,27 @@ def test_aplicado_con_los_nombres_reales_del_conector():
     pedido = {"store_id": STORE, "minutos_timer_bump": 0}
     assert rdis(pedido, None, {"aplicado": {"checkout_bump_timer_minutes": 0}})[2] == "ok"
     assert rdis(pedido, None, {"aplicado": {"checkout_bump_timer_minutes": 5}})[2] == "distinto"
+
+
+# --- U1 al precio de la escalera ----------------------------------------------------------------------------------
+
+
+def test_descuento_de_u1_se_corrige_si_el_funnel_lo_puso(zz):
+    from .test_relectura import U1, _postcompra
+
+    ctx, _ = zz
+    est = _estado(ctx, _lecturas(impultienda_ver_postcompra=_postcompra("15%")))
+    est["valores"]["<item_id:u1>"] = U1
+    _, _, plan = _plan(zz, estado=est)
+    op = next(o for o in plan.operaciones if o.herramienta == "impultienda_modificar_oferta_postcompra")
+    assert op.argumentos == {"store_id": STORE, "item_id": U1, "descuento_pct": 0, "aplicar_a": "upsell"}
+    assert op.ajustes == ("postcompra.u1.descuento",) and not op.dos_pasos
+    assert violaciones(CATALOGO[op.herramienta], op.argumentos) == []
+    texto = resumen_en_seco(plan, ctx)
+    assert "Poner la oferta «Сън без болка» al precio de la escalera (sin descuento)" in texto
+    # Ya a 0 %: no se reescribe.
+    est = _estado(ctx, _lecturas(impultienda_ver_postcompra=_postcompra("0%")))
+    est["valores"]["<item_id:u1>"] = U1
+    _, _, plan = _plan(zz, estado=est)
+    assert all(o.herramienta != "impultienda_modificar_oferta_postcompra" for o in plan.operaciones)
+    assert "postcompra.u1.descuento" in {a.clave for a in plan.ya_estan}

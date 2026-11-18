@@ -282,8 +282,7 @@ class MCPFalso:
                                 token: str | None = None, **resto) -> dict:
         def aplicar():
             fid = self._nuevo_id()
-            ofertas = [{"oferta_id": self._nuevo_id(), "item_id": p["id"], "tipo": "upsell", "descuento_pct": 15}
-                       for p in self.productos if p.get("solo_post_compra")]
+            ofertas = [o for p in self.productos if p.get("solo_post_compra") for o in self._ofertas(p["id"], "15%")]
             self.funnels.append({"funnel_id": fid, "nombre": nombre, "ofertas": ofertas})
             return {"modo": "aplicado", "funnel": {"funnel_id": fid, "nombre": nombre}, "activo": True}
         return self._dos_pasos("crear_funnel_postcompra", {"store_id": store_id, "nombre": nombre, "modo": modo,
@@ -291,8 +290,29 @@ class MCPFalso:
 
     def agregar_oferta_postcompra(self, store_id: str, item_id: str, funnel_id: str | None = None) -> dict:
         f = self.funnels[0]
-        f["ofertas"].append({"oferta_id": self._nuevo_id(), "item_id": item_id, "tipo": "upsell"})
+        f["ofertas"] += self._ofertas(item_id, "20%")
         return {"funnel": {"funnel_id": f["funnel_id"]}, "agregado": item_id, "link_panel": "https://x.example/u"}
+
+    def _ofertas(self, item_id: str, descuento: str) -> list[dict]:
+        """Como el funnel real: el upsell con su descuento por defecto y un downsell de recuperación (40 %, R-c)
+        del mismo producto."""
+        return [{"oferta_id": self._nuevo_id(), "item_id": item_id, "tipo": tipo, "descuento": d}
+                for tipo, d in (("upsell", descuento), ("downsell", "40%"))]
+
+    def modificar_oferta_postcompra(self, store_id: str, item_id: str, descuento_pct: float | None = None,
+                                    precio_final: float | None = None, aplicar_a: str = "upsell",
+                                    funnel_id: str | None = None) -> dict:
+        tipos = ("upsell", "downsell") if aplicar_a == "ambas" else (aplicar_a,)
+        ofertas = [o for f in self.funnels for o in f["ofertas"] if o["item_id"] == item_id and o["tipo"] in tipos]
+        if not ofertas or descuento_pct is None:
+            return {"error": "ese producto no está en el funnel"}
+        antes = ofertas[0]["descuento"]
+        for o in ofertas:
+            o["descuento"] = f"{descuento_pct:g}%"
+        p = self._producto(item_id)
+        return {"producto": {"id": item_id, "titulo": p["titulo"]}, "ofertas_actualizadas": len(ofertas),
+                "antes": antes, "descuento": ofertas[0]["descuento"],
+                "precio_que_ve_el_comprador": f"{p['precio'] * (1 - descuento_pct / 100):.2f} USD"}
 
     def guardar_html_postcompra(self, store_id: str, oferta_id: str, html: str, confirmar: bool = False,
                                 token: str | None = None) -> dict:

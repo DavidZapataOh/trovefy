@@ -42,7 +42,7 @@ VOCABULARIO: tuple[str, ...] = (
     r"producto\.front\.(titulo|precio|entregable)",
     r"checkout\.(idioma|campos|temporizador|cupos|foto|plantilla|boton|garantia|clarity)",
     r"bump\.(titulo|precio|entregable|activo)",
-    r"postcompra\.u[123]\.(titulo|precio|entregable|pagina|activo)",
+    r"postcompra\.u[123]\.(titulo|precio|entregable|pagina|activo|descuento)",
     r"downsell\.[a-z_]+",
     r"emails\.(entrega|seguimiento_72h)",
 )
@@ -96,7 +96,7 @@ class Llamada:
 @dataclass(frozen=True)
 class Ajuste:
     clave: str
-    valor: str | bool | Path
+    valor: str | bool | int | Path
     motivo: str
     cita: str | None
     fuera: bool
@@ -523,8 +523,9 @@ class _Receta:
                 self.avisos.append(f"la página de {clave} no vale: {'; '.join(problemas)}")
             usados += 1
         if usados:
-            self.avisos.append("el funnel post-compra aplica sus descuentos progresivos (15→35 %) a cada oferta y "
-                               "crea un downsell de recuperación por upsell (40→60 %, descuento real, R-c)")
+            self.avisos.append("el funnel post-compra aplica sus descuentos progresivos (15→35 %) a cada oferta "
+                               "(la primera se corrige a 0 %: al precio de la escalera) y crea un downsell de "
+                               "recuperación por upsell (40→60 %, descuento real, R-c)")
 
     def _upsell(self, clave: str, pieza: Pieza, pagina: Path | None, *, primero: bool) -> None:
         item = f"<item_id:{clave}>"
@@ -565,6 +566,15 @@ class _Receta:
             activo = Llamada("impultienda_agregar_oferta_postcompra", {"store_id": "<store_id>", "item_id": item},
                              "impultienda_ver_postcompra")
         self.poner(f"postcompra.{clave}.activo", True, "en el funnel post-compra, activo", CITA_FUNNEL, False, activo)
+        if primero:
+            # El funnel da a la primera oferta un 15 % por defecto (16,92 en vez de los 19,90 € que dice su página):
+            # U1 va al precio de la ESCALERA. Solo el downsell de recuperación conserva su descuento real (R-c).
+            self.poner(f"postcompra.{clave}.descuento", 0,
+                       "la primera oferta al precio de la escalera, sin el descuento por defecto del funnel (el "
+                       "downsell de recuperación conserva el suyo, R-c)", None, False,
+                       Llamada("impultienda_modificar_oferta_postcompra",
+                               {"store_id": "<store_id>", "item_id": item, "descuento_pct": 0, "aplicar_a": "upsell"},
+                               "impultienda_ver_postcompra"))
 
     def downsell(self) -> None:
         self.avisos.append(AVISO_DOWNSELL)
