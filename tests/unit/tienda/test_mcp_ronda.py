@@ -59,7 +59,7 @@ ESCRITURA = {
     "cambiar_logo", "cambiar_producto_oferta_postcompra", "cambiar_titulo_pagina", "cargar_entregable",
     "conectar_oferta_postcompra", "configurar_agradecimiento", "configurar_checkout", "configurar_disparo_postcompra",
     "configurar_mercado", "configurar_tienda", "crear_embudo", "crear_funnel_postcompra", "crear_producto",
-    "desactivar_producto", "disenar_checkout", "editar_producto", "fijar_precio", "guardar_html_postcompra",
+    "desactivar_producto", "disenar_checkout", "editar_producto", "fijar_precio", "guardar_html", "guardar_html_postcompra",
     "link_subida_recursos", "modificar_oferta_postcompra", "precio_por_pais", "quitar_item_embudo",
     "reordenar_oferta_postcompra", "subir_recurso_desde_url",
 }
@@ -69,7 +69,7 @@ def test_golden_lectura_y_escritura_exactas():
     cat = cargar_catalogo()
     assert {n.removeprefix("impultienda_") for n in mcp.permitidas(cat, "lectura")} == LECTURA
     assert {n.removeprefix("impultienda_") for n in mcp.permitidas(cat, "escritura")} == ESCRITURA
-    assert len(cat) - len(LECTURA) - len(ESCRITURA) == 38
+    assert len(cat) - len(LECTURA) - len(ESCRITURA) == 37
 
 
 def test_ver_cobros_plan_sigue_prohibida():

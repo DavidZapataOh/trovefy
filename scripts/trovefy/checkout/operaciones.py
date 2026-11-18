@@ -13,6 +13,8 @@ Funciones puras: leen el estado (`MCP-ESTADO.json`, ya cargado) y no escriben na
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import json
 import re
@@ -287,10 +289,43 @@ def _tokens_de(ruta: Path) -> dict[str, str] | None:
         return None
 
 
-def valores_locales(ajustes: list[Ajuste]) -> tuple[dict[str, str], dict[str, str]]:
-    """``(valores, manuales)``: ``<html:uN>`` de cada página de upsell de la receta y, si no se puede (faltan los
-    botones o el archivo), el motivo por el que esa página va a mano."""
+# Impultienda guarda cada imagen incrustada de más de 8 KB como archivo, con este nombre (sha256 de sus bytes):
+# se manda ya con su dirección para no reenviar cientos de KB en cada publicación.
+_ALMACEN = "https://aekpgsbqjzqntlbucbts.supabase.co/storage/v1/object/public/store-resources/{tienda}/inline/{sha}.webp"
+_DATA_WEBP = re.compile(r"data:image/webp;base64,([A-Za-z0-9+/=]+)")
+_INCRUSTADA_MAX = 8 * 1024
+
+
+def landing_para_conector(html: str, tienda: str | None) -> str:
+    """El HTML de la landing con las imágenes WebP incrustadas de más de 8 KB cambiadas por la dirección donde
+    Impultienda ya las guarda (``store-resources/<tienda>/inline/<sha256>.webp``). Sin ``tienda``, tal cual."""
+    if not tienda or not re.fullmatch(r"[0-9a-f-]{36}", tienda):
+        return html
+
+    def cambiar(m: re.Match) -> str:
+        try:
+            datos = base64.b64decode(m.group(1), validate=True)
+        except (ValueError, binascii.Error):
+            return m.group(0)
+        if len(datos) <= _INCRUSTADA_MAX:
+            return m.group(0)
+        return _ALMACEN.format(tienda=tienda, sha=hashlib.sha256(datos).hexdigest())
+
+    return _DATA_WEBP.sub(cambiar, html)
+
+
+def valores_locales(ajustes: list[Ajuste], conocidos: dict | None = None) -> tuple[dict[str, str], dict[str, str]]:
+    """``(valores, manuales)``: ``<html:uN>`` de cada página de upsell de la receta y ``<html:landing>`` (la landing
+    lista, ver :func:`landing_para_conector`); si no se puede (faltan los botones o el archivo), el motivo por el
+    que esa página va a mano."""
     valores: dict[str, str] = {}
+    tienda = (conocidos or {}).get("<store_id>")
+    for a in ajustes:
+        if a.clave == "landing.html" and isinstance(a.valor, Path):
+            try:
+                valores["<html:landing>"] = landing_para_conector(a.valor.read_text(encoding="utf-8"), tienda)
+            except (OSError, UnicodeDecodeError):
+                pass
     manuales: dict[str, str] = {}
     for a in ajustes:
         if not re.fullmatch(r"postcompra\.u[123]\.pagina(?:_recuperacion)?", a.clave):
@@ -465,6 +500,20 @@ def _frase_descuento(a: dict, i: Info) -> str:
 
 def _frase_guardar_html(a: dict, i: Info) -> str:
     return f"Guardar la página propia de la oferta «{_titulo(i)}» ({len(a.get('html') or '')} caracteres)"
+
+
+def _frase_landing(a: dict, i: Info) -> str:
+    m = re.search(r'data-tf-version="([0-9a-f]+)"', a.get("html") or "")
+    return f"Publicar la landing versión {m.group(1) if m else '?'} entera ({len(a.get('html') or '')} caracteres)"
+
+
+def _r_landing(a: dict, i: Info, r: object):
+    m = re.search(r'data-tf-version="([0-9a-f]+)"', a.get("html") or "")
+    pedido = m.group(1) if m else None
+    leida = (i.inst.get("landing") or {}).get("version") if i.inst.get("landing") else None
+    if not i.inst.get("landing"):
+        return pedido, None, "no_medido"
+    return pedido, leida, "ok" if pedido and pedido == leida else "distinto"
 
 
 def _frase_alternar_html(a: dict, i: Info) -> str:
@@ -754,6 +803,7 @@ REGLAS: dict[str, Regla] = {
     "impultienda_agregar_oferta_postcompra": Regla(_frase_agregar, _ya_oferta, _r_oferta),
     "impultienda_modificar_oferta_postcompra": Regla(_frase_descuento, _ya_descuento, _r_descuento),
     "impultienda_guardar_html_postcompra": Regla(_frase_guardar_html, _nunca, _r_guardar_html),
+    "impultienda_guardar_html": Regla(_frase_landing, _nunca, _r_landing),
     "impultienda_alternar_html_postcompra": Regla(_frase_alternar_html, _ya_alternar, _r_alternar_html),
     "impultienda_link_subida_recursos": Regla(_frase_recursos, _nunca, _r_recursos),
 }
@@ -764,7 +814,7 @@ LECTURAS_BASE: tuple[str, ...] = ("impultienda_listar_tiendas", "impultienda_lis
 HECHA = frozenset({"ok", "no_medido", "pendiente_aprobar_panel"})
 # Llamadas cuyo contenido sale de un archivo local (la página del upsell): si el archivo o su plantilla cambian, la
 # llamada se vuelve a planificar aunque ya se hubiera aplicado.
-_CON_CONTENIDO_LOCAL = frozenset({"impultienda_guardar_html_postcompra"})
+_CON_CONTENIDO_LOCAL = frozenset({"impultienda_guardar_html_postcompra", "impultienda_guardar_html"})
 
 
 def huella_contenido(herramienta: str, argumentos: object) -> str | None:
@@ -873,6 +923,9 @@ def _lecturas_despues(ops: list[Operacion], valores: dict) -> list[dict]:
     vistas: set[str] = set()
     for o in ops:
         oferta = o.argumentos.get("oferta_id")
+        if o.herramienta == "impultienda_guardar_html" and "landing" not in vistas:
+            vistas.add("landing")
+            lecturas.append({"herramienta": "impultienda_leer_html", "argumentos": {"store_id": store}})
         if o.lectura == "impultienda_leer_html_postcompra" and oferta and oferta not in vistas:
             vistas.add(oferta)
             lecturas.append({"herramienta": "impultienda_leer_html_postcompra",
@@ -888,7 +941,7 @@ def planificar(ctx: Contexto, ajustes: list[Ajuste], catalogo: dict[str, Herrami
     inst = estado_actual.get("instantanea") or {}
     valores = dict(estado_actual.get("valores") or {})
     hechas = estado_actual.get("hechas") or {}
-    locales, manuales_locales = valores_locales(ajustes)
+    locales, manuales_locales = valores_locales(ajustes, valores)
     motivos = _manuales(ajustes, catalogo, estado_actual, manuales_locales)
     manuales = [a for a in ajustes if a.clave in motivos]
     validos = [a for a in ajustes if a.clave not in motivos]

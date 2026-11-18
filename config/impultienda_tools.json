@@ -2896,8 +2896,12 @@
         ],
         "type": "object"
       },
-      "clase": "prohibida",
-      "motivo": "landing: dueño el plan 18 (resolución 39)"
+      "clase": "escritura",
+      "motivo": "landing ya guardada, validada, revisada por el nativo y con QA apta (plan 18), publicada entera por el plan del checkout aprobado (pedido del usuario, 2026-11-18)",
+      "parametros_prohibidos": [
+        "reemplazos",
+        "reescritura_confirmada"
+      ]
     },
     {
       "nombre": "impultienda_guardar_html_postcompra",
