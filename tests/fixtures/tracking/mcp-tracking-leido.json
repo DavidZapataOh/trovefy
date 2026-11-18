@@ -1,0 +1,18 @@
+{
+  "structuredContent": {
+    "cuenta": {"plan": "Max", "estado_suscripcion": "trial"},
+    "tiendas": [
+      {
+        "id": "00000000-0000-4000-8000-000000000000",
+        "nombre": "Prueba",
+        "tipo": "store",
+        "puede_cobrar": {"listo": true, "bloqueos": []},
+        "listo_para_anunciar": {"listo": true, "bloqueos": []},
+        "advertencias": [],
+        "tracking": {"pixels": [{"pixel_id": "1111111111111111", "tiene_token": true}]},
+        "no_configurado": [],
+        "sin_ventas_todavia": ["Purchase"]
+      }
+    ]
+  }
+}

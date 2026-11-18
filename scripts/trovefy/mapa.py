@@ -14,20 +14,23 @@ escribe en ella (ruling R-1: confirmar el paso 09 no vuelve escribible una panta
 Claves opcionales (un mapa de la fase 0 carga igual):
 
 - raíz `hosts: [str]`: hosts permitidos (por defecto, los de las `url` de las pantallas);
-- raíz `limites_plan: {<Plan>: {tiendas, bumps, upsells, downsell}}` con `fuente_limites` obligatoria;
+- raíz `limites_plan: {<Plan>: {tiendas, bumps, upsells, downsell}}` con `fuente_limites` obligatoria; un límite
+  que el proveedor no publica va como `null` («no medido»: se lee con la herramienta del plan);
 - por pantalla `prohibida: bool` (cobros, pasarelas, retiros…: nunca se escribe en ella ni se captura; una
   pantalla con una palabra prohibida en la url, la firma o un control cuenta como prohibida aunque no lo diga) y
   `controles: {<nombre>: {etiqueta | css, rol?, tipo, secreto?}}`.
 """
 
 import re
-import unicodedata
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 import yaml
+
+from trovefy.fichas import HOMOGLIFOS as _HOMOGLIFOS  # noqa: F401 - se reexporta
+from trovefy.fichas import fichas as _fichas
 
 TIPOS = ("texto", "numero", "precio", "select", "interruptor", "archivo", "boton", "area")
 # Las diez primeras son la lista mínima del plan 19; las siguientes, de la revisión de las tareas 1–2 (M-2), y
@@ -115,40 +118,6 @@ def _validar_control(origen, pantalla: str, nombre: str, c) -> Control:
     return Control(pantalla, nombre, etiqueta, rol, css, tipo, secreto)
 
 
-# Letras cirílicas y griegas que se confunden con latinas (mayúsculas y minúsculas por separado: la «ν» griega
-# minúscula parece una «v», la «Ν» mayúscula una «N»).
-_HOMOGLIFOS = str.maketrans({
-    # cirílico
-    "А": "A", "В": "B", "Е": "E", "К": "K", "М": "M", "Н": "H", "О": "O", "Р": "P", "С": "C", "Т": "T",
-    "У": "Y", "Х": "X", "Ѕ": "S", "І": "I", "Ј": "J", "Ү": "Y", "Ԛ": "Q", "Ԝ": "W",
-    "а": "a", "в": "b", "е": "e", "к": "k", "м": "m", "н": "h", "о": "o", "р": "p", "с": "c", "т": "t",
-    "у": "y", "х": "x", "ѕ": "s", "і": "i", "ј": "j", "ԁ": "d", "һ": "h", "ԛ": "q", "ԝ": "w", "ӏ": "l",
-    "ү": "y", "ɡ": "g",
-    # griego
-    "Α": "A", "Β": "B", "Ε": "E", "Ζ": "Z", "Η": "H", "Ι": "I", "Κ": "K", "Μ": "M", "Ν": "N", "Ο": "O",
-    "Ρ": "P", "Τ": "T", "Υ": "Y", "Χ": "X",
-    "α": "a", "β": "b", "ε": "e", "η": "n", "ι": "i", "κ": "k", "ν": "v", "ο": "o", "ρ": "p", "τ": "t",
-    "υ": "u", "χ": "x", "ω": "w", "ϲ": "c",
-})
-
-
-def _fichas(texto: str) -> list[str]:
-    """Las palabras de `texto`, comparables: %-decodificado (hasta 3 veces), sin acentos (NFKD), homoglifos
-    cirílicos y griegos pasados a latín, en minúsculas, sin caracteres invisibles (ancho cero, guion blando) y
-    partido por cualquier separador (espacios, guiones, puntos, barras, «_»…).
-    """
-    t = str(texto)
-    for _ in range(3):
-        decodificado = unquote(t)
-        if decodificado == t:
-            break
-        t = decodificado
-    t = "".join(ch for ch in unicodedata.normalize("NFKD", t) if not unicodedata.combining(ch))
-    t = t.translate(_HOMOGLIFOS).casefold()
-    t = "".join(ch for ch in t if unicodedata.category(ch) != "Cf")
-    return [f for f in re.split(r"[\W_]+", t) if f]
-
-
 def _normal(texto: str) -> str:
     """Texto comparable y sin separadores: «impul-pay», «Impul_Pay», «impul%20pay» e «IMPULPAY» son lo mismo.
 
@@ -193,6 +162,8 @@ def _validar_limites(ruta: Path, mapa: dict) -> None:
             raise MapaInvalido(f"{ruta}: «limites_plan.{plan}» necesita exactamente tiendas, bumps, upsells y downsell")
         for clave, tipo in _CLAVES_LIMITES.items():
             v = valores[clave]
+            if v is None:  # no publicado: «no medido»
+                continue
             if tipo is int and (isinstance(v, bool) or not isinstance(v, int) or v < 0):
                 raise MapaInvalido(f"{ruta}: «limites_plan.{plan}.{clave}» debe ser un entero ≥ 0")
             if tipo is bool and not isinstance(v, bool):

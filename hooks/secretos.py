@@ -16,12 +16,17 @@ import re
 
 from _comun import ejecutar_guardia, herramienta, resolver, vault_root
 
+_TOKEN_36 = r"(?<![A-Za-z0-9_-])(?=[A-Za-z_-]*[0-9])[A-Za-z0-9_-]{36}(?![A-Za-z0-9_-])"
+
 PATRONES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("token de Meta", re.compile(r"EAA[A-Za-z0-9]{20,}")),
     # Con o sin prefijo «bot»: no se exige \b antes de los dígitos.
     ("token de bot de Telegram", re.compile(r"(?<!\d)\d{6,12}:[A-Za-z0-9_-]{30,}\b")),
     ("clave sk-", re.compile(r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}")),
     ("clave de Firecrawl", re.compile(r"(?<![A-Za-z0-9_-])fc-[A-Za-z0-9]{20,}")),
+    # M4: el token de la integración de UTMify (un UUID o 36 caracteres con algún dígito) cerca de «utmify».
+    ("token de UTMify", re.compile(
+        r"utmify.{0,120}?" + _TOKEN_36 + "|" + _TOKEN_36 + r".{0,120}?utmify", re.IGNORECASE | re.DOTALL)),
     ("access_token=", re.compile(r"access_token=")),
 )
 

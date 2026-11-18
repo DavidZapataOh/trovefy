@@ -1,0 +1,5 @@
+{"total": 1, "count": 1, "offset": 0, "has_more": false, "productos": [
+  {"id": "00000000-0000-4000-8000-000000000002", "origen": "ebook_ia", "titulo": "Стар продукт", "tipo": "main",
+   "precio": 9.9, "precio_original": 19.9, "moneda": null, "descripcion": "", "activo": true,
+   "solo_post_compra": false, "suscripcion": false, "estado_generacion": "generated", "creado": "2026-11-01"}
+]}

@@ -34,6 +34,7 @@ from .estado import Almacen
 from .graph import ClienteGraph
 from .instalacion import OffsetDistinto, fijar_offset
 from .limites import Limites, LimitesInvalidos, cargar_limites, limites_a_dict
+from .permitidos import comprobar_dataset, permitir_en_archivo
 from .secretos import Secretos, SecretosInseguros, borrar_secretos, cargar_secretos
 from .servicio import GraphConStop, servir
 from .simulado import simulacro
@@ -183,6 +184,65 @@ def _cmd_comprobar_meta(a: argparse.Namespace, rutas: RutasEjecutor) -> int:
         Auditoria(rutas.auditoria).anotar(EV_LIMITE_CAMBIADO, clave="offset", de=None, a=nuevo)
         _salida(f"offset fijado en limites.yaml: {nuevo}", secretos)
     return codigo
+
+
+# -- permitir / comprobar-dataset (plan 19, Tarea 9) ------------------------------------------------
+def _cuenta_de(a: argparse.Namespace, lim: Limites) -> str | None:
+    act = a.cuenta
+    if act is None:
+        if len(lim.cuentas_permitidas) != 1:
+            _salida("Hay varias cuentas permitidas: indica --cuenta act_…", err=True)
+            return None
+        act = next(iter(lim.cuentas_permitidas))
+    if act not in lim.cuentas_permitidas:
+        _salida("Esa cuenta no está en cuentas_permitidas de limites.yaml", err=True)
+        return None
+    return act
+
+
+def _cmd_permitir(a: argparse.Namespace, rutas: RutasEjecutor) -> int:
+    """Añade un dataset o una página a la cuenta en ``limites.yaml`` (solo listas; lo ejecuta el usuario)."""
+    lim = _leer_limites(rutas)
+    if lim is None:
+        return 2
+    act = _cuenta_de(a, lim)
+    if act is None:
+        return 2
+    clave, id_ = ("datasets_permitidos", a.dataset) if a.dataset is not None else ("paginas_permitidas", a.pagina)
+    try:
+        cambiado = permitir_en_archivo(rutas.limites, act, clave, id_)
+    except (LimitesInvalidos, ValueError, OSError) as e:
+        _salida(f"No se cambió limites.yaml: {e}", err=True)
+        return 2
+    if not cambiado:
+        print(f"{clave}: {id_} ya estaba")
+        return 0
+    Auditoria(rutas.auditoria).anotar(EV_LIMITE_CAMBIADO, clave=clave, de=None, a=id_)
+    print(f"{clave}: {id_} añadido (el servicio lo recarga solo)")
+    return 0
+
+
+def _cmd_comprobar_dataset(a: argparse.Namespace, rutas: RutasEjecutor) -> int:
+    """Lee el dataset con el token del ejecutor y deja ``estado/dataset.json`` (lo lee Claude)."""
+    secretos = _leer_secretos(rutas)
+    lim = _leer_limites(rutas)
+    if secretos is None or lim is None:
+        return 2
+    if not secretos.meta_token:
+        _salida("Falta META_TOKEN en secretos.env (paso 13 de /arranque)", err=True)
+        return 2
+    act = _cuenta_de(a, lim)
+    if act is None:
+        return 2
+    try:
+        d = comprobar_dataset(GraphConStop(ClienteGraph(secretos.meta_token), rutas), a.dataset_id, lim, act,
+                              _ahora(), a.pagina)
+    except ValueError as e:
+        _salida(str(e), secretos, err=True)
+        return 2
+    Buzon(rutas.spool).escribir_estado("dataset", d)
+    _salida(json.dumps(d, ensure_ascii=False, indent=2), secretos)
+    return 0 if d["lectura_ok"] and d["en_limites"] and d["pagina_en_limites"] else 1
 
 
 # -- estado ------------------------------------------------------------------------------------------
@@ -350,6 +410,15 @@ def _parser() -> argparse.ArgumentParser:
     si = sub.add_parser("simular", help="recorre el ejecutor con Telegram y Meta simulados")
     si.add_argument("--raiz", help="carpeta de trabajo (por defecto, temporal)")
     sub.add_parser("limites", help="muestra los límites por cuenta")
+    pe = sub.add_parser("permitir", help="añade un dataset o una página a los límites de la cuenta")
+    grupo = pe.add_mutually_exclusive_group(required=True)
+    grupo.add_argument("--dataset", help="id del dataset (solo dígitos)")
+    grupo.add_argument("--pagina", help="id de la página de Facebook (solo dígitos)")
+    pe.add_argument("--cuenta", help="act_… (por defecto, la única de cuentas_permitidas)")
+    cd = sub.add_parser("comprobar-dataset", help="comprueba que el ejecutor ve el dataset y lo tiene en sus límites")
+    cd.add_argument("dataset_id", help="id del dataset")
+    cd.add_argument("--pagina", required=True, help="id de la página de Facebook del producto (solo dígitos)")
+    cd.add_argument("--cuenta", help="act_… (por defecto, la única de cuentas_permitidas)")
     st = sub.add_parser("stop", help="STOP inmediato sin Telegram (no pausa campañas)")
     st.add_argument("motivo", nargs="*", help="motivo (queda en la auditoría)")
     re_ = sub.add_parser("reanudar", help="quita el STOP (pide escribir «sí»)")
@@ -362,7 +431,8 @@ def _parser() -> argparse.ArgumentParser:
 
 _ORDENES = {"emparejar": _cmd_emparejar, "comprobar-meta": _cmd_comprobar_meta, "servir": _cmd_servir,
             "estado": _cmd_estado, "simular": _cmd_simular, "limites": _cmd_limites,
-            "auditoria": _cmd_auditoria, "stop": _cmd_stop, "reanudar": _cmd_reanudar}
+            "auditoria": _cmd_auditoria, "stop": _cmd_stop, "reanudar": _cmd_reanudar,
+            "permitir": _cmd_permitir, "comprobar-dataset": _cmd_comprobar_dataset}
 
 
 def main(argv: list[str] | None = None) -> int:

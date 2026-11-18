@@ -1,0 +1,4 @@
+{"markets_activo": false, "multidivisa_lista": true, "moneda_tienda": "USD", "mercados": [
+  {"id": "00000000-0000-4000-8000-000000000009", "nombre": "Default", "moneda": "USD", "es_default": true,
+   "paises": [], "precios_fijos": 0, "avisos": []}
+], "link_panel": "https://impultienda.ar/panel/markets"}

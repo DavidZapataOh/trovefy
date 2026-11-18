@@ -133,3 +133,42 @@ def test_lista_blanca_igual_en_hook_y_permisos():
     spec.loader.exec_module(mod)
     assert mod._PREFIJOS_LECTURA == permisos._PREFIJOS_LECTURA
     assert mod._LECTURA_EXACTA == permisos._LECTURA_EXACTA
+
+
+# --- H2 (revisión T6–10): Meta por el nombre de la herramienta, sea cual sea el servidor ---
+@pytest.mark.parametrize("nombre", [
+    "mcp__higgsfield__meta_ads_write",
+    "mcp__higgsfield__meta_ads_connect",
+    "mcp__higgsfield__meta_ads_publicar_campana",
+    "mcp__otro__metaads_crear",
+    "mcp__otro__facebook_page_post",
+    "mcp__otro__instagram_publish",
+    "mcp__otro__facebookads_update",
+    "MCP__HIGGSFIELD__META_ADS_WRITE",
+    "meta_ads_connect",
+    "mcp__higgsfield__meta_ads",
+    "mcp__otro__facebook_ads_get_campaigns",  # ads_get_ solo como prefijo: lo demás, cerrado
+])
+def test_meta_por_nombre_escritura_deniega(correr_hook, vault_tmp, nombre):
+    assert correr_hook("meta_guard", {"tool_name": nombre, "tool_input": {}}, vault_tmp)[0] == "deny", nombre
+
+
+@pytest.mark.parametrize("nombre", [
+    "mcp__higgsfield__meta_ads_read",
+    "mcp__higgsfield__meta_ads_tools",
+    "mcp__otro__instagram_media_read",
+    "mcp__otro__ads_get_campaigns",
+])
+def test_meta_por_nombre_lectura_clara_pasa(correr_hook, vault_tmp, nombre):
+    assert correr_hook("meta_guard", {"tool_name": nombre, "tool_input": {}}, vault_tmp)[0] == "allow", nombre
+
+
+@pytest.mark.parametrize("nombre", [
+    "mcp__higgsfield__generate_image",
+    "mcp__higgsfield__tiktok_publish_status",
+    "mcp__obsidian-metadata__get",
+    "mcp__x__meta_info",
+    "mcp__x__get_metadata",
+])
+def test_sin_ficha_meta_no_cambia(correr_hook, vault_tmp, nombre):
+    assert correr_hook("meta_guard", {"tool_name": nombre, "tool_input": {}}, vault_tmp)[0] == "allow", nombre

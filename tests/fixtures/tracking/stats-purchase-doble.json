@@ -1,0 +1,10 @@
+{
+  "data": [
+    {"start_time": "2026-11-17T10:00:00+0000", "aggregation": "event",
+     "data": [{"value": "PageView", "count": 10}, {"value": "ViewContent", "count": 4},
+              {"value": "InitiateCheckout", "count": 1}]},
+    {"start_time": "2026-11-17T11:00:00+0000", "aggregation": "event",
+     "data": [{"value": "PageView", "count": 5}, {"value": "ViewContent", "count": 3},
+              {"value": "InitiateCheckout", "count": 2}, {"value": "Purchase", "count": 2}]}
+  ]
+}

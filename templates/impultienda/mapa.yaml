@@ -16,6 +16,17 @@ fuente: >-
   «Tiendas activas» y «Ranking de tiendas» del panel de muestra, menú Inicio/Configuraciones, pasarelas
   MercadoPago, Stripe, PayPal y Whop. Las rutas /dashboard/plan y /dashboard/configuraciones son una
   suposición a partir del menú de la maqueta (solo /dashboard/inicio aparece en la página pública).
+# Límites por plan (plan 19, Tarea 10): fuera de las pantallas, no entran en la huella del paso 09. null = no
+# publicado en la página pública: se lee con impultienda_ver_plan (límites efectivos con addons) antes de la receta.
+limites_plan:
+  Free: {tiendas: 1, bumps: null, upsells: 1, downsell: null}
+  Starter: {tiendas: 2, bumps: null, upsells: 1, downsell: null}
+  Pro: {tiendas: 3, bumps: null, upsells: 2, downsell: null}
+  Max: {tiendas: 10, bumps: null, upsells: 3, downsell: null}
+fuente_limites: >-
+  https://impultienda.ar/ (página pública de planes, leída el 2026-11-17): «Cantidad de tiendas» y upsells
+  post-compra por plan. Order bumps y downsell no se publican (null); Unlimited (ilimitados) no se usa. Los límites
+  efectivos de la cuenta (base + addons) se leen con impultienda_ver_plan.
 pantallas:
   plan:
     url: https://app.impultienda.ar/dashboard/plan

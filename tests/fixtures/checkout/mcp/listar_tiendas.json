@@ -1,0 +1,10 @@
+{"total": 2, "tiendas": [
+  {"id": "00000000-0000-4000-8000-000000000001", "nombre": "Tienda vieja", "tipo": "store",
+   "tipo_descripcion": "Tienda clásica", "url": "https://prueba.impultienda.example", "subdominio": "prueba",
+   "dominio_propio": null, "dominio_propio_verificado": false, "estado": "activa", "moneda": "USD",
+   "idioma": "es-AR", "plan": "max", "logo_url": null, "creada": "2026-11-01"},
+  {"id": "00000000-0000-4000-8000-0000000000aa", "nombre": "Otra tienda", "tipo": "store",
+   "tipo_descripcion": "Tienda clásica", "url": "https://otra.impultienda.example", "subdominio": "otra",
+   "dominio_propio": null, "dominio_propio_verificado": false, "estado": "activa", "moneda": "USD",
+   "idioma": "es-AR", "plan": "max", "logo_url": null, "creada": "2026-11-02"}
+]}

@@ -16,7 +16,7 @@ from pathlib import Path
 
 ZONA_COT = timezone(timedelta(hours=-5))
 SPOOL_POR_DEFECTO = "/var/spool/trovefy"
-ESTADOS = ("latido", "stop", "limites", "meta", "emparejamiento")
+ESTADOS = ("latido", "stop", "limites", "meta", "emparejamiento", "dataset")
 _MAX_BYTES = 1 << 20
 _ACT = re.compile(r"\bact_(\d+)")
 

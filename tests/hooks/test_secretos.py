@@ -130,7 +130,7 @@ def _cargar_secretos():
 def test_patrones_token_se_eligen_por_nombre():
     mod = _cargar_secretos()
     nombres = {nombre for nombre, _ in mod.PATRONES_TOKEN}
-    assert nombres == {"token de Meta", "token de bot de Telegram", "clave sk-", "clave de Firecrawl"}
+    assert nombres == {"token de Meta", "token de bot de Telegram", "clave sk-", "clave de Firecrawl", "token de UTMify"}
     assert "access_token=" not in nombres
     assert {n for n, _ in mod.PATRONES_BASH} == {"token de Meta", "token de bot de Telegram"}
 
@@ -160,3 +160,34 @@ def test_clave_de_firecrawl_en_env_permitido(correr_hook, vault_tmp, tmp_path, m
     e = {"tool_name": "Write", "tool_input": {"file_path": str(tmp_path / ".config/trovefy/claude.env"),
                                               "content": f"FIRECRAWL_API_KEY={_clave_firecrawl()}"}}
     assert correr_hook("secretos", e, vault_tmp)[0] == "allow"
+
+
+# --- M4 (revisión T6–10): el token de UTMify (un UUID o 36 caracteres cerca de «utmify») -------------------------
+def _uuid_falso():
+    return "3f9a2c1e" + "-" + "7b4d-4e2a-9c1f-" + "0a1b2c3d4e5f"  # construido: nunca un literal
+
+
+def _token36_falso():
+    return "Ab3" * 12
+
+
+def test_token_de_utmify_se_deniega(correr_hook, vault_tmp):
+    for texto in (f"Token de UTMify: {_uuid_falso()}", f"utmify_token={_token36_falso()}",
+                  f"{_uuid_falso()}\n(es el de la integración con UTMify)"):
+        e = {"tool_name": "Write", "tool_input": {"file_path": str(vault_tmp / "wiki/x.md"), "content": texto}}
+        decision, motivo = correr_hook("secretos", e, vault_tmp)
+        assert decision == "deny" and "UTMify" in motivo, texto
+
+
+def test_utmify_sin_token_o_uuid_lejos_pasa(correr_hook, vault_tmp):
+    lejos = "UTMify es gratis. " + "x " * 200 + f"pedido {_uuid_falso()}"
+    for texto in ("Pega el token de UTMify en «Meta / Tracking».", lejos, f"pedido {_uuid_falso()}",
+                  "utmify: " + "a" * 36):
+        e = {"tool_name": "Write", "tool_input": {"file_path": str(vault_tmp / "wiki/x.md"), "content": texto}}
+        assert correr_hook("secretos", e, vault_tmp)[0] == "allow", texto
+
+
+def test_trovefy_secretos_ve_el_token_de_utmify():
+    from trovefy.secretos import buscar_secreto
+
+    assert buscar_secreto(f"UTMify {_uuid_falso()}") == "token de UTMify"

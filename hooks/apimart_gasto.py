@@ -29,6 +29,16 @@ las grafías del vault y los globs, expandidos y como patrón), al modo de ``raw
 - ``productos/*/entregable/**/QC.md``, ``.QC.md.lock`` y ``entregable/**/*.pdf`` (M3 de las Tareas 11–12):
   solo los escribe ``trovefy producto``; ni Write/Edit/MultiEdit ni Bash (``>``, ``cp``, ``mv``, ``rm``,
   ``sed -i``, intérpretes…), tampoco en bloque sobre una carpeta que los contenga. Leerlos sí.
+- El registro de los mensajes del usuario (``~/.config/trovefy/mensajes-usuario.json``, plan 19, Tarea 11), que
+  prueba que una aprobación de `trovefy checkout aprobar` es suya: solo lo escribe el hook ``UserPromptSubmit``. Se
+  deniega cualquier Bash que importe ``trovefy.checkout.mensajes``, llame a ``registrar_mensaje``, nombre el
+  archivo o lance ``hooks/mensaje_usuario.py`` (salvo un segmento de solo lectura/desarrollo, como arriba).
+- El checkout por el MCP (C1 de la revisión de la Tarea 11 del 19): ``productos/*/checkout/*/{APROBACION.md,
+  PLAN-MCP.json,PLAN-MCP.md,MCP-ESTADO.json,COMPROBACION.md,CHECKOUT.md}`` y ``checkout/*/mcp/**`` (el historial de
+  etapas y las citas usadas) solo los escribe ``trovefy checkout …``: ni Write/Edit/MultiEdit/NotebookEdit ni Bash,
+  tampoco en bloque. Leerlos sí. Y ``trovefy checkout aprobar`` (H2) lo ejecuta solo el usuario en su terminal: se
+  deniega cualquier Bash que lo lance (``uv run``, ``python -m``, ``script``, ``unbuffer``, ``expect``, ``pty``,
+  ``cli.main([...])``) o importe ``checkout.mcp_cli``/``hay_terminal`` (salvo un segmento de solo lectura/desarrollo).
 - ``.trovefy/STOP``: crearlo sí; borrarlo o moverlo no (lo quita el usuario).
 - ``git checkout|restore|stash|reset|clean|switch…`` con el vault como directorio (cwd, ``cd``, ``-C``) o
   sobre una ruta del vault cuentan como escritura y se deniegan.
@@ -96,6 +106,8 @@ MOTIVO_PANTALLAS = ("las confirmaciones de pantalla las escribe solo `trovefy la
                     "usuario en su terminal con la pantalla delante: no se crean, editan, mueven ni borran a mano")
 MOTIVO_CAPTURAR = ("`trovefy landing capturar` (la confirmación de la pantalla) lo ejecuta el usuario en su "
                    "terminal, no Claude: dale la orden y espera a que te diga que terminó")
+MOTIVO_MENSAJES = ("el registro de tus mensajes (la prueba de que una aprobación es tuya) solo lo escribe el hook al "
+                   "enviar tú un mensaje: Claude no lo escribe ni lanza ese hook a mano")
 MOTIVO_OTRO_VAULT = ("`trovefy landing sonda|publicar` se lanza con el vault de siempre, sin cambiar TROVEFY_VAULT: "
                      "lo ejecuta el usuario en su terminal")
 MOTIVO_EVIDENCIA = ("config/evidencia/p05-* (la evidencia de la sonda y las capturas de las pantallas confirmadas) "
@@ -107,6 +119,11 @@ MOTIVO_QC = ("QC.md, su cerrojo y los PDF del entregable solo los escribe `trove
              "anotar-qc): no se editan, crean, mueven ni borran a mano")
 MOTIVO_GIT = ("git checkout/restore/stash/reset/clean sobre el vault puede reescribir el registro del gasto, el tope "
               "o STOP: si hace falta, que lo haga el usuario")
+MOTIVO_CHECKOUT = ("el plan del MCP, su aprobación, el estado, la comprobación, CHECKOUT.md y el historial "
+                   "checkout/<PAIS>/mcp/ solo los escribe `trovefy checkout …`: no se crean, editan, mueven ni borran "
+                   "a mano")
+MOTIVO_APROBAR = ("`trovefy checkout aprobar` (tu «sí» al plan del MCP) lo ejecutas tú en tu terminal, fuera de "
+                  "Claude, con la frase del resumen: Claude no lo ejecuta (ni con script, unbuffer, expect o pty)")
 
 _MENCION = re.compile(
     r"(?i:apimart\.ai|trovefy\.apimart|from\s+trovefy\s+import\s+apimart|claude\.env|apimart_tope_usd)|APIMART")
@@ -125,6 +142,12 @@ _INTERPRETE = re.compile(
 _GASTO = re.compile(r"costes\.csv|\.apimart-intentos\.jsonl|\.apimart\.lock", re.IGNORECASE)
 _CAPTURAR = re.compile(r"landing\w*\s+capturar|tienda\.confirmacion|tienda\s+import\s+confirmacion"
                        r"|confirmar_pantalla|capturar_pantalla")
+# El registro de los mensajes del usuario (plan 19, Tarea 11): solo lo escribe el hook UserPromptSubmit.
+_MENSAJES = re.compile(r"checkout\.mensajes|checkout\s+import\s+mensajes|registrar_mensaje|mensajes-usuario"
+                       r"|mensaje_usuario\.py")
+# H2 de la revisión de la Tarea 11 del 19: `trovefy checkout aprobar` solo lo ejecuta el usuario, en su terminal.
+# Cualquier forma: `uv run`, `python -m`, `script`, `unbuffer`, `expect`, `pty`, `cli.main([...])`, importar mcp_cli.
+_APROBAR = re.compile(r"\bcheckout\w*\b.*\baprobar\b|checkout\.mcp_cli\b|\bimport\s+mcp_cli\b|\bhay_terminal\b")
 _OTRO_VAULT = re.compile(r"\bTROVEFY_VAULT\s*=|\benv\b[^;&|\n]*\bTROVEFY_VAULT\b")
 _SONDA_PUBLICAR = re.compile(r"landing\w*\s+(?:sonda|publicar)\b")
 _ARCHIVOS_GASTO = (".apimart-intentos.jsonl", ".apimart.lock")
@@ -145,6 +168,11 @@ _QC = (("productos", "*", "entregable", "**", "QC.md"),
        ("productos", "*", "entregable", "**", ".QC.md.lock"),
        ("productos", "*", "entregable", "**", "*.[pP][dD][fF]"))
 _QC_NOMBRE = re.compile(r"(?:QC\.md|\.QC\.md\.lock|.*\.pdf)", re.IGNORECASE)
+# C1 (revisión de la Tarea 11 del 19): el plan del MCP, su aprobación y lo que resulta de aplicarlo. Solo
+# `trovefy checkout …`.
+_CHECKOUT_MCP = tuple(("productos", "*", "checkout", "*", nombre) for nombre in (
+    "APROBACION.md", "PLAN-MCP.json", "PLAN-MCP.md", "MCP-ESTADO.json", "COMPROBACION.md", "CHECKOUT.md")) + (
+    ("productos", "*", "checkout", "*", "mcp", "**"),)
 _QC_MAX_RECORRIDO = 5000
 
 # Clases de escritura de cada ruta alcanzada por un comando.
@@ -444,6 +472,8 @@ def _bash_rutas(original: str, c: str, cwd: str | None) -> str | None:
                 return MOTIVO_EVIDENCIA
             if _toca(partes, _QC, False) or (en_bloque and _contiene_qc(ruta, partes)):
                 return MOTIVO_QC
+            if _toca(partes, _CHECKOUT_MCP, en_bloque):
+                return MOTIVO_CHECKOUT
             if clase in _QUITA and _toca(partes, _STOP, True):
                 return MOTIVO_STOP
             if any(coincide_patron(partes, p) for p in _PRODUCTO):
@@ -549,14 +579,15 @@ def _sin_cuerpo_qc(comando: str) -> str:
     return primera  # sin línea de cierre, bash lee el cuerpo hasta el final
 
 
-def _capturar(c: str, segmentos: list[str]) -> bool:
-    """¿El comando lanza (o importa) la confirmación de pantallas? Solo la lanza el usuario (F1-1)."""
-    if not _CAPTURAR.search(c):
+def _capturar(c: str, segmentos: list[str], patron: re.Pattern[str] = _CAPTURAR) -> bool:
+    """¿El comando lanza (o importa) la confirmación de pantallas? Solo la lanza el usuario (F1-1). Con
+    ``patron=_MENSAJES``: ¿toca el registro de los mensajes del usuario? Solo lo escribe su hook (Tarea 11 del 19)."""
+    if not patron.search(c):
         return False
     if _SUBCOMANDO.search(c) or _fondo(c):
         return True
     for seg in segmentos:
-        if _INTERPRETE.match(seg) or _CAPTURAR.search(seg) and not (
+        if _INTERPRETE.match(seg) or patron.search(seg) and not (
                 _LECTURA.match(seg) and not _OPCION_PELIGROSA.search(seg) and not _escribe(seg)):
             return True
     return False
@@ -569,6 +600,10 @@ def _bash(comando: str, cwd: str | None = None) -> tuple[str, str]:
         segmentos = _segmentos(c)
         if _capturar(c, segmentos):
             return "deny", MOTIVO_CAPTURAR
+        if _capturar(c, segmentos, _MENSAJES):
+            return "deny", MOTIVO_MENSAJES
+        if _capturar(c, segmentos, _APROBAR):
+            return "deny", MOTIVO_APROBAR
         if _OTRO_VAULT.search(c) and _SONDA_PUBLICAR.search(c):
             return "deny", MOTIVO_OTRO_VAULT
         motivo = _bash_rutas(variante, c, cwd)
@@ -773,6 +808,8 @@ def _escritura(nombre: str, datos: dict, cwd: str | None) -> tuple[str, str]:
         return "deny", MOTIVO_PANTALLAS
     if any(coincide_patron(partes, p) for p in _EVIDENCIA):
         return "deny", MOTIVO_EVIDENCIA
+    if any(coincide_patron(partes, p) for p in _CHECKOUT_MCP):
+        return "deny", MOTIVO_CHECKOUT
     if len(partes) < 3 or partes[0] != "productos":
         return "allow", ""
     if partes[2] == "entregable" and (partes[-1] == "costes.csv" or partes[-1] in _ARCHIVOS_GASTO):

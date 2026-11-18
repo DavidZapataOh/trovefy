@@ -11,6 +11,15 @@
         ]
       },
       {
+        "matcher": "mcp__.*[Ii][Mm][Pp][Uu][Ll][Tt][Ii][Ee][Nn][Dd][Aa].*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/impultienda_guard.py\""
+          }
+        ]
+      },
+      {
         "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash",
         "hooks": [
           {
@@ -47,6 +56,15 @@
         ]
       },
       {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/ejecutor_guard.py\""
+          }
+        ]
+      },
+      {
         "matcher": "Bash|WebFetch|Write|Edit|MultiEdit|NotebookEdit|Read|Grep",
         "hooks": [
           {
@@ -73,6 +91,17 @@
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/cierre_sesion.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/mensaje_usuario.py\"",
             "timeout": 5
           }
         ]
