@@ -66,14 +66,36 @@ def _precio(valor: object) -> Decimal | None:
         return None
 
 
+_PCT = re.compile(r"\s*(\d+(?:[.,]\d+)?)\s*%?\s*")
+
+
+def _porcentaje(valor: object) -> str | None:
+    if isinstance(valor, bool):
+        return None
+    if isinstance(valor, (int, float, Decimal)):
+        texto = str(valor)
+    elif isinstance(valor, str) and (m := _PCT.fullmatch(valor)):
+        texto = m.group(1).replace(",", ".")
+    else:
+        return None
+    try:
+        d = Decimal(texto)
+    except (InvalidOperation, ValueError):
+        return None
+    return format(d.normalize(), "f") if d.is_finite() and 0 <= d <= 100 else None
+
+
 def normalizar(tipo: str, valor: object) -> object:
     """Valor comparable: ``precio`` → `Decimal` con dos decimales («13,90 €», «EUR 13.9», 13.9 → 13.90); ``texto`` →
     NFC, sin mayúsculas ni espacios de más; ``bool``; ``archivo`` → el nombre, sin mayúsculas; ``lista`` → códigos
-    ordenados. None si no se puede leer (nunca un valor inventado)."""
+    ordenados; ``porcentaje`` → la cifra como texto («15%», 15, «15.0» → «15»; «0%», 0 → «0»). None si no se puede
+    leer (nunca un valor inventado)."""
     if valor is None:
         return None
     if tipo == "precio":
         return _precio(valor)
+    if tipo == "porcentaje":
+        return _porcentaje(valor)
     if tipo == "texto":
         return " ".join(unicodedata.normalize("NFC", str(valor)).casefold().split())
     if tipo == "bool":
@@ -307,6 +329,13 @@ def _frase_agregar(a: dict, i: Info) -> str:
     return f"Añadir «{_titulo(i)}» al funnel post-compra"
 
 
+def _frase_descuento(a: dict, i: Info) -> str:
+    pct = normalizar("porcentaje", a.get("descuento_pct"))
+    if pct == "0":
+        return f"Poner la oferta «{_titulo(i)}» al precio de la escalera (sin descuento)"
+    return f"Poner la oferta «{_titulo(i)}» con un {pct or '?'} % de descuento"
+
+
 def _frase_guardar_html(a: dict, i: Info) -> str:
     return f"Guardar la página propia de la oferta «{_titulo(i)}» ({len(a.get('html') or '')} caracteres)"
 
@@ -375,6 +404,19 @@ def _ya_crear(a: dict, i: Info) -> bool:
 def _ya_oferta(a: dict, i: Info) -> bool:
     item = a.get("item_id") or i.valores.get(f"<item_id:{_pieza(i)}>")
     return bool(item) and any(o.get("item_id") == item for o in _ofertas(i))
+
+
+def _upsell_en_funnel(a: dict, i: Info) -> dict | None:
+    """La oferta **upsell** del producto en el funnel (el downsell de recuperación lleva el mismo ``item_id``)."""
+    item = a.get("item_id") or i.valores.get(f"<item_id:{_pieza(i)}>")
+    return next((o for o in _ofertas(i) if item and o.get("item_id") == item
+                 and o.get("tipo") in (None, "upsell")), None)
+
+
+def _ya_descuento(a: dict, i: Info) -> bool:
+    o = _upsell_en_funnel(a, i)
+    leido = o.get("descuento") if o else None
+    return leido is not None and leido == normalizar("porcentaje", a.get("descuento_pct"))
 
 
 def _ya_alternar(a: dict, i: Info) -> bool:
@@ -527,6 +569,19 @@ def _r_oferta(a: dict, i: Info, r: object):
     return "en el funnel", "en el funnel" if esta else "no está", "ok" if esta else "distinto"
 
 
+def _r_descuento(a: dict, i: Info, r: object):
+    """El descuento de la oferta upsell releído con ``ver_postcompra`` (``"15%"``, ``"0%"`` o ``0``); sin él, el
+    ``descuento`` que devolvió la escritura. Una forma que no se conoce es «no medido»."""
+    pedido = normalizar("porcentaje", a.get("descuento_pct"))
+    o = _upsell_en_funnel(a, i)
+    leido = o.get("descuento") if o else None
+    if leido is None and isinstance(r, dict):
+        leido = normalizar("porcentaje", r.get("descuento"))
+    if pedido is None or leido is None:
+        return pedido, None, "no_medido"
+    return pedido, leido, "ok" if leido == pedido else "distinto"
+
+
 def _r_guardar_html(a: dict, i: Info, r: object):
     h = _html(i, a.get("oferta_id"))
     if h is None:
@@ -570,6 +625,7 @@ REGLAS: dict[str, Regla] = {
     "impultienda_crear_producto": Regla(_frase_crear, _ya_crear, _r_crear),
     "impultienda_crear_funnel_postcompra": Regla(_frase_funnel, _ya_oferta, _r_oferta),
     "impultienda_agregar_oferta_postcompra": Regla(_frase_agregar, _ya_oferta, _r_oferta),
+    "impultienda_modificar_oferta_postcompra": Regla(_frase_descuento, _ya_descuento, _r_descuento),
     "impultienda_guardar_html_postcompra": Regla(_frase_guardar_html, _nunca, _r_guardar_html),
     "impultienda_alternar_html_postcompra": Regla(_frase_alternar_html, _ya_alternar, _r_alternar_html),
     "impultienda_link_subida_recursos": Regla(_frase_recursos, _nunca, _r_recursos),
@@ -766,7 +822,7 @@ def _plantilla(argumentos: object, valores: dict) -> object:
 
 
 _PARTES = {"titulo": "nombre", "precio": "precio", "entregable": "PDF", "pagina": "página propia",
-           "activo": "en el funnel post-compra"}
+           "activo": "en el funnel post-compra", "descuento": "al precio de la escalera (sin descuento)"}
 
 
 def _etiqueta(a: Ajuste) -> str:

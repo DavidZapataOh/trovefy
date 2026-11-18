@@ -175,6 +175,24 @@ def test_u1_completo(zz):
     assert aj["postcompra.u1.activo"].llamadas[0].herramienta == "impultienda_crear_funnel_postcompra"
 
 
+def test_u1_al_precio_de_la_escalera(zz_tres_activos):
+    """El funnel da a la primera oferta un 15 % por defecto (16,92 en vez de los 19,90 € de su página): tras
+    activarlo, U1 se pone a descuento 0. Solo el downsell de recuperación conserva su descuento real (R-c)."""
+    ctx, emails = zz_tres_activos
+    aj, _ = ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))
+    claves = [a.clave for a in aj]
+    assert claves.index("postcompra.u1.descuento") == claves.index("postcompra.u1.activo") + 1
+    descuento = _por_clave(aj)["postcompra.u1.descuento"]
+    assert descuento.valor == 0 and not descuento.fuera
+    assert descuento.llamadas == (
+        Llamada("impultienda_modificar_oferta_postcompra",
+                {"store_id": "<store_id>", "item_id": "<item_id:u1>", "descuento_pct": 0, "aplicar_a": "upsell"},
+                "impultienda_ver_postcompra"),)
+    assert not {"postcompra.u2.descuento", "postcompra.u3.descuento"} & set(claves)
+    args = rellenar(descuento.llamadas[0], {"<store_id>": UUID.format(1), "<item_id:u1>": UUID.format(2)})
+    assert violaciones(CATALOGO["impultienda_modificar_oferta_postcompra"], args) == []
+
+
 def test_u2_u3_inactivos_dan_aviso(zz):
     ctx, emails = zz
     aj, av = ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))
@@ -521,6 +539,31 @@ def test_m6_plan_por_etapas_con_ids_de_la_lectura(zz):
     etapas_con_mercado = etapas_de(aj, leidos | {"<market_id>"})
     assert any(p.herramienta == "impultienda_precio_por_pais" and "item_id" not in p.argumentos
                for p in etapas_con_mercado[0])
+
+
+def test_descuento_de_u1_va_despues_del_funnel(zz):
+    """El descuento de U1 se toca en el funnel: va en una etapa posterior a crearlo (o en la misma, después), nunca
+    antes; y con todo lo demás hecho, la etapa que queda es solo él."""
+    from trovefy.checkout.etapas import etapas_de, pasos_de
+
+    ctx, emails = zz
+    aj, _ = ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))
+    etapas = etapas_de(aj, {"<store_id>", "<item_id:front>"})
+    orden = [p.herramienta for e in etapas for p in e]
+    assert orden.index("impultienda_modificar_oferta_postcompra") > orden.index("impultienda_crear_funnel_postcompra")
+    # Aunque el <item_id:u1> se conozca desde la lectura, sin el funnel hecho el descuento espera.
+    conocidos = {"<store_id>", "<item_id:front>", "<item_id:u1>", "<market_id>", "<ruta:front>", "<ruta:u1>",
+                 "<oferta_id:u1>", "<bloques:abajo>", "<url:mockup>"}
+    pasos = pasos_de(aj)
+    descuento = next(p for p in pasos if p.herramienta == "impultienda_modificar_oferta_postcompra")
+    funnel = next(p for p in pasos if p.herramienta == "impultienda_crear_funnel_postcompra")
+    sin_funnel = {p.clave for p in pasos} - {descuento.clave, funnel.clave}
+    primera = etapas_de(aj, conocidos, sin_funnel)[0]
+    assert [p.herramienta for p in primera] == ["impultienda_crear_funnel_postcompra",
+                                                "impultienda_modificar_oferta_postcompra"]
+    # Funnel ya activo (tienda existente): la etapa siguiente es solo la corrección del descuento.
+    assert etapas_de(aj, conocidos, sin_funnel | {funnel.clave}) == [[descuento]]
+    assert descuento.ajustes == ("postcompra.u1.descuento",)
 
 
 # --- hallazgos en la tienda real (2026-11-17) ----------------------------------------------------------------------
