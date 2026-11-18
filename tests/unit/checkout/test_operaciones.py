@@ -10,6 +10,7 @@ import pytest
 from embudo.ejemplos_embudo import PAIS, P, vault_embudo
 from trovefy.checkout.operaciones import (
     REGLAS,
+    huella_contenido,
     normalizar,
     pagina_html,
     planificar,
@@ -155,14 +156,22 @@ def test_reaplicar_no_reescribe_lo_igual(zz):
                           "impultienda_editar_producto"}
     # Lo ya aplicado y releído «ok» tampoco se repite: con todo hecho, cero operaciones.
     hechas = {}
+    valores = {**est["valores"], "<item_id:u1>": "u1", "<ruta:front>": "r", "<ruta:u1>": "r",
+               "<bloques:abajo>": [], "<url:mockup>": "https://cdn.ejemplo.test/m.webp", "<oferta_id:u1>": "o"}
     for _ in range(6):
         if not plan.operaciones:
             break
-        hechas |= {o.clave: {"estado": "ok", "etapa": 1} for o in plan.operaciones}
-        _, _, plan = _plan(zz, estado={**est, "hechas": hechas, "valores": {
-            **est["valores"], "<item_id:u1>": "u1", "<ruta:front>": "r", "<ruta:u1>": "r",
-            "<bloques:abajo>": [], "<url:mockup>": "https://cdn.ejemplo.test/m.webp", "<oferta_id:u1>": "o"}})
+        hechas |= {o.clave: {"estado": "ok", "etapa": 1, "huella": huella_contenido(o.herramienta, o.argumentos)}
+                   for o in plan.operaciones}
+        _, _, plan = _plan(zz, estado={**est, "hechas": hechas, "valores": valores})
     assert plan.operaciones == []
+
+
+def test_huella_contenido_solo_para_la_pagina_del_upsell():
+    a = huella_contenido("impultienda_guardar_html_postcompra", {"oferta_id": "o", "html": "<p>a</p>"})
+    b = huella_contenido("impultienda_guardar_html_postcompra", {"oferta_id": "o", "html": "<p>b</p>"})
+    assert a and b and a != b and len(a) == 16
+    assert huella_contenido("impultienda_editar_producto", {"x": 1}) is None
 
 
 def test_mercado_existente_sin_el_pais_usa_asignar(zz):

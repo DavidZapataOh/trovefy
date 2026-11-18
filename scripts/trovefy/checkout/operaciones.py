@@ -13,6 +13,8 @@ Funciones puras: leen el estado (`MCP-ESTADO.json`, ya cargado) y no escriben na
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import unicodedata
 from collections.abc import Callable
@@ -723,6 +725,17 @@ LECTURAS_BASE: tuple[str, ...] = ("impultienda_listar_tiendas", "impultienda_lis
                                   "impultienda_ver_markets", "impultienda_ver_postcompra")
 # Estados de una escritura ya aplicada que no se vuelven a planificar.
 HECHA = frozenset({"ok", "no_medido", "pendiente_aprobar_panel"})
+# Llamadas cuyo contenido sale de un archivo local (la página del upsell): si el archivo o su plantilla cambian, la
+# llamada se vuelve a planificar aunque ya se hubiera aplicado.
+_CON_CONTENIDO_LOCAL = frozenset({"impultienda_guardar_html_postcompra"})
+
+
+def huella_contenido(herramienta: str, argumentos: object) -> str | None:
+    """Huella de los argumentos de una llamada con contenido local (None para las demás)."""
+    if herramienta not in _CON_CONTENIDO_LOCAL or not isinstance(argumentos, dict):
+        return None
+    datos = json.dumps(argumentos, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha256(datos.encode("utf-8")).hexdigest()[:16]
 
 
 # --- el plan de una etapa ------------------------------------------------------------------------------------------
@@ -849,7 +862,12 @@ def planificar(ctx: Contexto, ajustes: list[Ajuste], catalogo: dict[str, Herrami
     hechos: set[str] = set()
     ya: set[str] = set()  # igual en la tienda, o aplicado y releído «ok»
     for p in pasos:
-        estado_paso = (hechas.get(p.clave) or {}).get("estado")
+        hecha = hechas.get(p.clave) or {}
+        estado_paso = hecha.get("estado")
+        huella = (huella_contenido(p.herramienta, rellenar(Llamada(p.herramienta, p.argumentos, None), todos))
+                  if requiere(p) <= conocidos else None)
+        if estado_paso in HECHA and huella is not None and hecha.get("huella") != huella:
+            estado_paso = None  # el contenido local cambió desde que se aplicó: se vuelve a planificar
         if estado_paso in HECHA:
             hechos.add(p.clave)
             if estado_paso == "ok":

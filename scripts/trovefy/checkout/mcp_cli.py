@@ -46,6 +46,7 @@ from trovefy.checkout.operaciones import (
     LECTURAS_BASE,
     Operacion,
     Plan,
+    huella_contenido,
     planificar,
     resumen_en_seco,
 )
@@ -545,6 +546,8 @@ def releer_cli(args, ahora: datetime) -> int:
             peor = next((e for e in ("distinto", "no_medido", "pendiente_aprobar_panel") if e in por_op[op.clave]),
                         "ok")
             estado.setdefault("hechas", {})[op.clave] = {"estado": peor, "etapa": plan.etapa}
+            if (huella := huella_contenido(op.herramienta, op.argumentos)) is not None:
+                estado["hechas"][op.clave]["huella"] = huella
             if peor == "distinto":
                 intentos = estado.setdefault("intentos", {}).get(op.clave, 0) + 1
                 estado["intentos"][op.clave] = intentos
