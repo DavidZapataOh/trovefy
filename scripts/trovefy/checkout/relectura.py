@@ -271,6 +271,10 @@ def valores_de(ctx: Contexto, inst: dict, valores: Mapping[str, object] | None =
                        and o.get("tipo") in (None, "upsell")), None)
         if oferta:
             salida[f"<oferta_id:{clave}>"] = oferta
+        recuperacion = [o["oferta_id"] for o in (inst.get("postcompra") or {}).get("ofertas", [])
+                        if item and o.get("item_id") == item and o.get("oferta_id") and o.get("tipo") == "downsell"]
+        if len(recuperacion) == 1:
+            salida[f"<oferta_id:{clave}r>"] = recuperacion[0]
     mercados = (inst.get("markets") or {}).get("mercados") or []
     propio = [m for m in mercados if not m["es_default"] and ctx.pais in m["paises"]]
     if not propio:

@@ -610,3 +610,25 @@ def test_garantia_sin_oferta_no_medida(zz):
 def test_limpiar_bloques_respuesta_real_sin_bloques():
     """La vista previa real describe la posición vacía como ["(sin bloques)"] (BG, 2026-11-18)."""
     assert limpiar_bloques(["(sin bloques)"]) == ([], [])
+
+
+def test_guion_upsell_con_contador_real():
+    """El contador real (se cierra de verdad) y su aviso de vencida no cuentan como escasez; sin su aviso, no vale."""
+    real = _pagina_u1() + "\n[[contador: 7 | Отстъпката е активна още]]\n[[vencido: Времето изтече.]]\n"
+    assert validar_pagina_upsell(real) == []
+    assert any("[[vencido" in p for p in validar_pagina_upsell(_pagina_u1() + "\n[[contador: 7 | Още]]\n"))
+    assert any("1 a 60" in p for p in validar_pagina_upsell(
+        _pagina_u1() + "\n[[contador: 90 | Още]]\n[[vencido: Край.]]\n"))
+    # Fuera de su marcador, la urgencia sigue sin pasar.
+    assert any("escasez" in p for p in validar_pagina_upsell(real + "\nИзтича скоро!\n"))
+
+
+def test_pagina_de_recuperacion_va_a_su_oferta(tmp_path):
+    v = vault_embudo(tmp_path)
+    emails = _preparar(v)
+    (v / "productos" / P / "checkout" / PAIS / "upsells" / "u1-recuperacion.md").write_text(
+        _pagina_u1(), encoding="utf-8")
+    aj, _ = ajustes_de_checkout(cargar_contexto(v, P, PAIS), MAX, emails, OpcionesReceta("Max"))
+    rec = next(a for a in aj if a.clave == "postcompra.u1.pagina_recuperacion")
+    assert [ll.argumentos["oferta_id"] for ll in rec.llamadas] == ["<oferta_id:u1r>"] * 2
+    assert rec.llamadas[0].argumentos["html"] == "<html:u1r>"
