@@ -14,7 +14,8 @@ escribe en ella (ruling R-1: confirmar el paso 09 no vuelve escribible una panta
 Claves opcionales (un mapa de la fase 0 carga igual):
 
 - raíz `hosts: [str]`: hosts permitidos (por defecto, los de las `url` de las pantallas);
-- raíz `limites_plan: {<Plan>: {tiendas, bumps, upsells, downsell}}` con `fuente_limites` obligatoria;
+- raíz `limites_plan: {<Plan>: {tiendas, bumps, upsells, downsell}}` con `fuente_limites` obligatoria; un límite
+  que el proveedor no publica va como `null` («no medido»: se lee con la herramienta del plan);
 - por pantalla `prohibida: bool` (cobros, pasarelas, retiros…: nunca se escribe en ella ni se captura; una
   pantalla con una palabra prohibida en la url, la firma o un control cuenta como prohibida aunque no lo diga) y
   `controles: {<nombre>: {etiqueta | css, rol?, tipo, secreto?}}`.
@@ -161,6 +162,8 @@ def _validar_limites(ruta: Path, mapa: dict) -> None:
             raise MapaInvalido(f"{ruta}: «limites_plan.{plan}» necesita exactamente tiendas, bumps, upsells y downsell")
         for clave, tipo in _CLAVES_LIMITES.items():
             v = valores[clave]
+            if v is None:  # no publicado: «no medido»
+                continue
             if tipo is int and (isinstance(v, bool) or not isinstance(v, int) or v < 0):
                 raise MapaInvalido(f"{ruta}: «limites_plan.{plan}.{clave}» debe ser un entero ≥ 0")
             if tipo is bool and not isinstance(v, bool):

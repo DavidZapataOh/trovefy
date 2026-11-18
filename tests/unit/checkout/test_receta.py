@@ -1,0 +1,398 @@
+"""Receta del checkout como datos (plan 19, Tarea 10; «DESVÍOS RESUELTOS» de la cabecera del plan).
+
+La receta se expresa con las herramientas reales del catálogo del MCP de Impultienda y sus nombres de parámetro
+reales: cada llamada tiene que pasar `violaciones()` y la guarda del hook. Ningún test llama al MCP.
+"""
+from __future__ import annotations
+
+import hashlib
+import importlib
+import json
+import re
+from decimal import Decimal
+from pathlib import Path
+
+import pytest
+from embudo.ejemplos_embudo import PAIS, PASOS_FICTICIOS, P, vault_embudo
+from trovefy.checkout.receta import (
+    GUION_UPSELL,
+    Ajuste,
+    Llamada,
+    OpcionesReceta,
+    ajustes_de_checkout,
+    hay_escasez,
+    hay_testimonio,
+    marcadores,
+    operaciones,
+    receta_manual,
+    rellenar,
+    validar_pagina_upsell,
+)
+from trovefy.embudo.contexto import cargar_contexto, ruta_pais
+from trovefy.mapa import cargar, limites_de_plan
+from trovefy.tienda.mcp import cargar_catalogo, huella_plan, violaciones
+
+RAIZ = Path(__file__).resolve().parents[3]
+MAPA = cargar(RAIZ / "templates/impultienda/mapa.yaml")
+MAX = limites_de_plan(MAPA, "Max")
+FREE = limites_de_plan(MAPA, "Free")
+CATALOGO = cargar_catalogo()
+UUID = "00000000-0000-4000-8000-00000000000{}"
+
+EMAIL_BG = """---
+asunto: Вашето ръководство е готово
+---
+Здравейте,
+
+Благодарим ви за поръчката. Ръководството „Спокойно тяло“ е прикачено към този имейл и можете да го
+изтеглите веднага. Ако имате въпроси, просто отговорете на това писмо и ще ви помогнем.
+
+Поздрави,
+Екипът на Somatix
+"""
+
+
+def _pagina_u1() -> str:
+    partes = []
+    for clave, _ in GUION_UPSELL:
+        partes.append(f"<!-- guion: {clave} -->\n## {clave}\n\nТекст за {clave}.\n")
+    return "\n".join(partes)
+
+
+def _preparar(v: Path, *, mockup: bool = True, pagina_u1: bool = True) -> dict[str, Path]:
+    prod = v / "productos" / P
+    if mockup:
+        (prod / "entregable" / "medios").mkdir(parents=True, exist_ok=True)
+        (prod / "entregable" / "medios" / "mockup.png").write_bytes(b"\x89PNG ficticio")
+    pais = prod / "checkout" / PAIS
+    if pagina_u1:
+        (pais / "upsells").mkdir(parents=True, exist_ok=True)
+        (pais / "upsells" / "u1.md").write_text(_pagina_u1(), encoding="utf-8")
+    (pais / "emails").mkdir(parents=True, exist_ok=True)
+    (pais / "emails" / "entrega.md").write_text(EMAIL_BG, encoding="utf-8")
+    return {"entrega": pais / "emails" / "entrega.md"}
+
+
+@pytest.fixture
+def zz(tmp_path):
+    v = vault_embudo(tmp_path)
+    emails = _preparar(v)
+    return cargar_contexto(v, P, PAIS), emails
+
+
+@pytest.fixture
+def zz_tres_activos(tmp_path):
+    pasos = {k: dict(v) for k, v in PASOS_FICTICIOS.items()}
+    for k in ("u2", "u3"):
+        pasos[k].update(activo=True, motivo_inactivo=None)
+    v = vault_embudo(tmp_path, pasos=pasos)
+    prod = v / "productos" / P
+    from trovefy.vault import frontmatter
+    meta, cuerpo = frontmatter.leer(prod / "PRODUCTO.md")
+    for k in ("u2", "u3"):
+        rel = f"entregable/upsells/{k}/{k}-bg-v1.pdf"
+        (prod / rel).parent.mkdir(parents=True, exist_ok=True)
+        (prod / rel).write_bytes(b"%PDF-1.7 ficticio")
+        meta["entregable"]["bg"][k] = {"version": 1, "pdf": rel, "paginas": 2}
+    frontmatter.escribir(prod / "PRODUCTO.md", meta, cuerpo)
+    emails = _preparar(v)
+    for k in ("u2", "u3"):
+        (prod / "checkout" / PAIS / "upsells" / f"{k}.md").write_text(_pagina_u1(), encoding="utf-8")
+    return cargar_contexto(v, P, PAIS), emails
+
+
+def _por_clave(aj: list[Ajuste]) -> dict[str, Ajuste]:
+    return {a.clave: a for a in aj}
+
+
+# --- reglas de la receta -----------------------------------------------------------------------------------------
+
+
+def test_receta_por_defecto_sigue_a_los_videos(zz):
+    ctx, emails = zz
+    aj, av = ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))
+    claves = {a.clave for a in aj}
+    assert f"market.{PAIS}.activo" in claves and f"market.{PAIS}.moneda" in claves
+    assert not any(c.startswith("bump.") for c in claves)
+    assert ("producto.front.precio", "13.90") in [(a.clave, a.valor) for a in aj]
+    assert _por_clave(aj)["tienda.nombre"].valor == "Somatix"
+    assert _por_clave(aj)["checkout.campos"].valor == "email,nombre,telefono"  # teléfono: sí (ruling)
+    assert _por_clave(aj)["checkout.idioma"].valor == "bg"
+    assert "emails.entrega" in claves and "emails.seguimiento_72h" not in claves
+    assert not any(c.startswith("downsell.") for c in claves)
+    assert any("downsell" in a and "R-c" in a for a in av)
+
+
+def test_market_en_eur_con_las_herramientas_de_markets(zz):
+    ctx, emails = zz
+    aj = _por_clave(ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))[0])
+    assert [ll.herramienta for ll in aj[f"market.{PAIS}.activo"].llamadas] == ["impultienda_activar_markets"]
+    mercado = aj[f"market.{PAIS}.moneda"].llamadas[0]
+    assert mercado.herramienta == "impultienda_configurar_mercado"
+    assert mercado.argumentos["moneda"] == "EUR" and mercado.argumentos["paises"] == [PAIS]
+    assert aj[f"market.{PAIS}.paises"].llamadas[0].herramienta == "impultienda_asignar_paises"
+    precio = aj["producto.front.precio"].llamadas[0]
+    assert precio.herramienta == "impultienda_precio_por_pais"
+    assert precio.argumentos["precio"] == 13.9 and Decimal(repr(precio.argumentos["precio"])) == Decimal("13.90")
+    assert precio.argumentos["market_id"] == "<market_id>" and "item_id" not in precio.argumentos
+
+
+def test_misma_moneda_que_la_tienda_usa_fijar_precio(zz):
+    ctx, emails = zz
+    aj = _por_clave(ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max", moneda_tienda="EUR"))[0])
+    assert not any(c.startswith("market.") for c in aj)
+    assert aj["producto.front.precio"].llamadas[0].herramienta == "impultienda_fijar_precio"
+
+
+def test_bump_apagado_opcion(zz):
+    ctx, emails = zz
+    aj = _por_clave(ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max", bump_apagado=True))[0])
+    assert aj["bump.activo"].valor is False
+    # El bump no se crea por el conector: no podría quedar apagado en una tienda clásica.
+    assert all(not aj[c].llamadas for c in aj if c.startswith("bump."))
+
+
+def test_telefono_opcion(zz):
+    ctx, emails = zz
+    aj = _por_clave(ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max", telefono=False))[0])
+    assert aj["checkout.campos"].valor == "email,nombre"
+    args = aj["checkout.campos"].llamadas[0].argumentos
+    assert args["pedir_telefono"] is False and args["pedir_nombre"] is True
+
+
+def test_u1_completo(zz):
+    ctx, emails = zz
+    aj = _por_clave(ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))[0])
+    for campo in ("titulo", "precio", "entregable", "pagina", "activo"):
+        assert f"postcompra.u1.{campo}" in aj
+    assert aj["postcompra.u1.precio"].valor == "19.90"
+    assert aj["postcompra.u1.pagina"].valor == ruta_pais(ctx) / "upsells" / "u1.md"
+    creado = aj["postcompra.u1.titulo"].llamadas[0]
+    assert creado.herramienta == "impultienda_crear_producto"
+    assert creado.argumentos["tipo"] == "upsell" and creado.argumentos["solo_post_compra"] is True
+    assert aj["postcompra.u1.activo"].llamadas[0].herramienta == "impultienda_crear_funnel_postcompra"
+
+
+def test_u2_u3_inactivos_dan_aviso(zz):
+    ctx, emails = zz
+    aj, av = ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))
+    assert not any(a.clave.startswith(("postcompra.u2", "postcompra.u3")) for a in aj)
+    for k in ("u2", "u3"):
+        assert any(a.startswith("no disponible") and k in a for a in av)
+
+
+def test_free_un_solo_upsell(zz_tres_activos):
+    ctx, emails = zz_tres_activos
+    aj, av = ajustes_de_checkout(ctx, FREE, emails, OpcionesReceta("Free"))
+    assert {a.clave.split(".")[1] for a in aj if a.clave.startswith("postcompra.")} == {"u1"}
+    assert any(a.startswith("desvío") and "u2" in a for a in av)
+    aj_max, _ = ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))
+    assert {a.clave.split(".")[1] for a in aj_max if a.clave.startswith("postcompra.")} == {"u1", "u2", "u3"}
+    otros = _por_clave(aj_max)
+    assert otros["postcompra.u2.activo"].llamadas[0].herramienta == "impultienda_agregar_oferta_postcompra"
+
+
+def test_limites_desconocidos_no_meten_upsells(zz):
+    ctx, emails = zz
+    aj, av = ajustes_de_checkout(ctx, None, emails, OpcionesReceta("Max"))
+    assert not any(a.clave.startswith("postcompra.") for a in aj)
+    assert any(a.startswith("no medido") and "ver_plan" in a for a in av)
+
+
+def test_sin_temporizador_ni_cupos(zz):
+    ctx, emails = zz
+    aj = _por_clave(ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))[0])
+    assert aj["checkout.temporizador"].valor is False and aj["checkout.cupos"].valor is False
+    disenos = [ll for a in aj.values() for ll in a.llamadas if ll.herramienta == "impultienda_disenar_checkout"]
+    assert disenos and all(ll.argumentos["minutos_timer_bump"] == 0 for ll in disenos)
+    bloques = [b for a in aj.values() for ll in a.llamadas if ll.herramienta == "impultienda_bloques_checkout"
+               for b in ll.argumentos["bloques"]]
+    assert bloques and not any(b["tipo"] in ("countdown", "stock") for b in bloques)
+
+
+def test_foto_y_plantilla(zz):
+    ctx, emails = zz
+    aj, _ = ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))
+    d = _por_clave(aj)
+    assert d["checkout.foto"].valor == ctx.vault / "productos" / P / "entregable" / "medios" / "mockup.png"
+    assert d["checkout.plantilla"].valor == "Bambú" and not d["checkout.plantilla"].llamadas
+    assert "si tu panel la ofrece" in d["checkout.plantilla"].motivo
+    assert d["checkout.boton"].llamadas[0].argumentos["color_boton_pagar"].startswith("#")
+
+
+def test_sin_mockup_no_medido(tmp_path):
+    v = vault_embudo(tmp_path)
+    emails = _preparar(v, mockup=False)
+    aj, av = ajustes_de_checkout(cargar_contexto(v, P, PAIS), MAX, emails, OpcionesReceta("Max"))
+    assert "checkout.foto" not in {a.clave for a in aj}
+    assert any(a.startswith("no medido") and "mockup" in a for a in av)
+
+
+def test_sin_pdf_front_error(tmp_path):
+    v = vault_embudo(tmp_path)
+    emails = _preparar(v)
+    (v / "productos" / P / "entregable" / "prueba-bg-v1.pdf").unlink()
+    with pytest.raises(ValueError, match="falta el PDF del front"):
+        ajustes_de_checkout(cargar_contexto(v, P, PAIS), MAX, emails, OpcionesReceta("Max"))
+
+
+def test_sin_email_de_entrega_no_medido(zz):
+    ctx, _ = zz
+    aj, av = ajustes_de_checkout(ctx, MAX, {}, OpcionesReceta("Max"))
+    assert "emails.entrega" not in {a.clave for a in aj}
+    assert any(a.startswith("no medido") and "entrega" in a for a in av)
+
+
+def test_email_72h_opcion(zz):
+    ctx, emails = zz
+    _, av = ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max", email_72h=True))
+    assert any(a.startswith("no medido") and "seguimiento_72h" in a for a in av)
+
+
+def test_pagina_upsell_mal_da_aviso(tmp_path):
+    v = vault_embudo(tmp_path)
+    emails = _preparar(v, pagina_u1=False)
+    aj, av = ajustes_de_checkout(cargar_contexto(v, P, PAIS), MAX, emails, OpcionesReceta("Max"))
+    assert "postcompra.u1.pagina" not in {a.clave for a in aj}
+    assert any("u1" in a and "página" in a for a in av)
+
+
+def test_vocabulario_cerrado():
+    with pytest.raises(ValueError):
+        Ajuste("tienda.contraseña", "x", "m", None, False)
+    Ajuste(f"market.{PAIS}.activo", True, "m", None, False)
+
+
+def test_opciones_por_defecto():
+    o = OpcionesReceta("Max")
+    assert (o.telefono, o.bump_apagado, o.email_72h, o.moneda_tienda) == (True, False, False, "USD")
+
+
+# --- las llamadas pasan el catálogo y la guarda del hook ----------------------------------------------------------
+
+
+def _relleno(llamadas: list[Llamada]) -> dict[str, str]:
+    todos = sorted({m for ll in llamadas for m in marcadores(ll.argumentos)})
+    return {m: UUID.format(i % 10) for i, m in enumerate(todos)}
+
+
+def test_cada_llamada_pasa_violaciones(zz_tres_activos):
+    ctx, emails = zz_tres_activos
+    for opciones in (OpcionesReceta("Max"), OpcionesReceta("Max", telefono=False, bump_apagado=True)):
+        aj, _ = ajustes_de_checkout(ctx, MAX, emails, opciones)
+        llamadas = [ll for a in aj for ll in a.llamadas]
+        assert llamadas
+        valores = _relleno(llamadas)
+        for ll in llamadas:
+            h = CATALOGO[ll.herramienta]
+            assert h.clase == "escritura", ll.herramienta
+            args = rellenar(ll, valores)
+            assert not marcadores(args)
+            assert violaciones(h, args) == [], (ll.herramienta, args)
+            assert ll.lectura is None or CATALOGO[ll.lectura].clase == "lectura"
+            assert "confirmar" not in args and "token" not in args
+
+
+def test_marcadores_y_rellenar():
+    ll = Llamada("impultienda_fijar_precio", {"store_id": "<store_id>", "item_id": "<item_id:u1>", "precio": 1},
+                 "impultienda_listar_productos")
+    assert marcadores(ll.argumentos) == {"<store_id>", "<item_id:u1>"}
+    with pytest.raises(ValueError, match="item_id:u1"):
+        rellenar(ll, {"<store_id>": "s"})
+    assert rellenar(ll, {"<store_id>": "s", "<item_id:u1>": "i"}) == {"store_id": "s", "item_id": "i", "precio": 1}
+
+
+def test_operaciones_en_orden_y_sin_repetir(zz):
+    ctx, emails = zz
+    aj, _ = ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))
+    ops = operaciones(aj)
+    assert ops[0]["herramienta"] == "impultienda_configurar_tienda"
+    nombres = [o["herramienta"] for o in ops]
+    assert nombres.index("impultienda_activar_markets") < nombres.index("impultienda_configurar_mercado") \
+        < nombres.index("impultienda_precio_por_pais")
+    assert len({json.dumps(o, sort_keys=True) for o in ops}) == len(ops)
+
+
+def test_la_guarda_del_hook_deja_pasar_el_plan_aprobado(zz, monkeypatch):
+    ctx, emails = zz
+    aj, _ = ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))
+    ops = operaciones(aj)
+    valores = _relleno([Llamada(o["herramienta"], o["argumentos"], None) for o in ops])
+    ops = [{"herramienta": o["herramienta"], "argumentos": rellenar(Llamada(o["herramienta"], o["argumentos"], None),
+                                                                     valores)} for o in ops]
+    carpeta = ruta_pais(ctx)
+    carpeta.mkdir(parents=True, exist_ok=True)
+    huella = huella_plan(ops)
+    assert huella == hashlib.sha256(json.dumps(ops, sort_keys=True, ensure_ascii=False,
+                                               separators=(",", ":")).encode()).hexdigest()
+    (carpeta / "PLAN-MCP.json").write_text(json.dumps({"operaciones": ops, "huella": huella}), encoding="utf-8")
+    (carpeta / "APROBACION.md").write_text(f'---\nplan_huella: {huella}\ncita: "sí, dale"\n---\n', encoding="utf-8")
+    monkeypatch.setenv("TROVEFY_VAULT", str(ctx.vault))
+    monkeypatch.syspath_prepend(str(RAIZ / "hooks"))
+    guarda = importlib.import_module("impultienda_guard")
+    for o in ops:
+        assert guarda.clasificar("mcp__impultienda__" + o["herramienta"], o["argumentos"]) == ("allow", ""), o
+    # Una llamada con temporizador o con bloques de cupos no pasaría nunca.
+    malo = {"store_id": UUID.format(1), "minutos_timer_bump": 7}
+    assert guarda.clasificar("mcp__impultienda__impultienda_disenar_checkout", malo)[0] == "deny"
+
+
+# --- escasez, testimonios, guion -----------------------------------------------------------------------------------
+
+
+def test_hay_escasez():
+    assert hay_escasez("Остават 2 места · 09:59") == ["остават", "09:59"]
+    assert hay_escasez("¡Solo hoy! Quedan pocas plazas") == ["solo hoy", "quedan"]
+    assert hay_escasez("Ръководство за спокойно тяло, 13,90 €") == []
+
+
+def test_hay_testimonio():
+    assert hay_testimonio("«Това ръководство промени живота ми!» — Мария, София")
+    assert hay_testimonio("★★★★★ 5/5")
+    assert not hay_testimonio("Ще се радваме да ни оставите честен отзив, ако искате.")
+
+
+def test_guion_upsell_completo():
+    assert len(GUION_UPSELL) == 8
+    assert validar_pagina_upsell(_pagina_u1()) == []
+
+
+def test_guion_upsell_incompleto():
+    texto = _pagina_u1().replace(f"<!-- guion: {GUION_UPSELL[3][0]} -->", "")
+    problemas = validar_pagina_upsell(texto)
+    assert any(GUION_UPSELL[3][0] in p for p in problemas)
+
+
+def test_guion_upsell_desordenado_y_con_escasez():
+    claves = [c for c, _ in GUION_UPSELL]
+    orden = claves[1:2] + claves[:1] + claves[2:]
+    texto = "\n".join(f"<!-- guion: {c} -->\nТекст." for c in orden) + "\nОстават 3 места!"
+    problemas = validar_pagina_upsell(texto)
+    assert any("orden" in p for p in problemas) and any("escasez" in p for p in problemas)
+
+
+# --- receta manual (respaldo) ------------------------------------------------------------------------------------
+
+
+def test_receta_manual_sin_app_impultienda(zz):
+    ctx, emails = zz
+    aj, _ = ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))
+    pasos = receta_manual(aj)
+    texto = "\n".join(f"{p.pestana} {p.instruccion}" for p in pasos)
+    assert "app.impultienda.ar" not in texto
+    assert "https://impultienda.ar/login" in texto
+    assert {c for p in pasos for c in p.ajustes} == {a.clave for a in aj}
+    vistas = {"General", "Pagos", "Meta / Tracking", "Remarketing", "GhostAds", "Dominio", "Webhooks"}
+    for p in pasos:
+        assert p.pestana in vistas or p.pestana.startswith("búscalo en tu panel: ") or p.pestana == "Entrar"
+    assert re.search(r"13[,.]90", texto)
+
+
+# --- límites del plan en el mapa -----------------------------------------------------------------------------------
+
+
+def test_limites_del_plan_en_el_mapa():
+    assert MAX["upsells"] == 3 and FREE["upsells"] == 1
+    assert limites_de_plan(MAPA, "Starter")["upsells"] == 1 and limites_de_plan(MAPA, "Pro")["upsells"] == 2
+    assert MAX["bumps"] is None and MAX["downsell"] is None  # no publicado: se lee con impultienda_ver_plan
+    assert "ver_plan" in MAPA["fuente_limites"]
