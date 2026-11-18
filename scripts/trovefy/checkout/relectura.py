@@ -155,6 +155,19 @@ def _host(url: object) -> str | None:
         return None
 
 
+_SUBDOMINIO = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")
+
+
+def _hosts_de_tienda(t: dict) -> set[str]:
+    """Los hosts con los que se sirve una tienda: su `url`, su dominio propio y, aunque tenga dominio propio, su
+    `<subdominio>.impultienda.ar` (que sigue funcionando)."""
+    hosts = {_host(t.get("url")), _host(t.get("dominio_propio"))}
+    sub = t.get("subdominio")
+    if isinstance(sub, str) and _SUBDOMINIO.fullmatch(sub.casefold()):
+        hosts.add(f"{sub.casefold()}.impultienda.ar")
+    return hosts - {None}
+
+
 def _tienda_de(ctx: Contexto, resp: object) -> tuple[dict | None, str | None]:
     tiendas = resp.get("tiendas") if isinstance(resp, dict) else None
     if not isinstance(tiendas, list):
@@ -162,8 +175,7 @@ def _tienda_de(ctx: Contexto, resp: object) -> tuple[dict | None, str | None]:
     host = _host(ctx.tienda)
     if host is None:
         return None, "no medido: falta la tienda del país en config/mercados.yaml"
-    casan = [t for t in tiendas if isinstance(t, dict)
-             and host in {_host(t.get("url")), _host(t.get("dominio_propio"))} - {None}]
+    casan = [t for t in tiendas if isinstance(t, dict) and host in _hosts_de_tienda(t)]
     if len(casan) != 1:
         return None, f"no medido: no encuentro una sola tienda {host} en tu cuenta ({len(casan)})"
     return casan[0], None
