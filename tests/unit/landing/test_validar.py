@@ -15,6 +15,7 @@ from trovefy.landing.plantilla import guardar, preparar, version_de
 from trovefy.landing.validar import (
     Resultado,
     anadir_resena,
+    completar_resena,
     prueba_social_falsa,
     validar,
 )
@@ -527,3 +528,50 @@ def test_overflow_fuera_de_html_y_body_vale(v, css):
     ruta = ruta_landing(v, P, "ZZ") / "assets" / "estilo.css"
     ruta.write_text(ruta.read_text(encoding="utf-8") + "\n" + css + "\n", encoding="utf-8")
     assert resultado(v).ok, resultado(v).fallos
+
+
+def _con_bloque(v, rid, dentro):
+    mutar(v, lambda h: h.replace("<h2 data-tf-hito>Вижте страниците отвътре</h2>",
+                                 f"<h2 data-tf-hito>Вижте страниците отвътре</h2>{dentro}"))
+
+
+def test_resena_con_extracto_estrellas_y_nota_media(v):
+    texto = "Много полезно. Упражненията са кратки. Спя по-добре."
+    r1 = anadir_resena(v, P, "ZZ", texto, date(2026, 11, 18), "mensaje al usuario")
+    r2 = anadir_resena(v, P, "ZZ", "Добро е.", date(2026, 11, 18), "mensaje al usuario")
+    completar_resena(v, P, "ZZ", r1, nombre="Мария К., София", estrellas=5,
+                     extracto="Много полезно. […] Спя по-добре.")
+    completar_resena(v, P, "ZZ", r2, nombre="Иван П., Варна", estrellas=4)
+    bloque = (f'<p data-tf-nota>4,5 ★★★★★ · 2 отзива</p>'
+              f'<blockquote data-tf-resena="{r1}">★★★★★ Много полезно. […] Спя по-добре. — Мария К., София</blockquote>'
+              f'<blockquote data-tf-resena="{r2}">★★★★☆ Добро е. — Иван П., Варна</blockquote>')
+    _con_bloque(v, r1, bloque)
+    assert resultado(v).ok, resultado(v).fallos
+
+
+def test_estrellas_y_nota_que_no_cuadran_fallan(v):
+    r1 = anadir_resena(v, P, "ZZ", "Добро е.", date(2026, 11, 18), "mensaje al usuario")
+    completar_resena(v, P, "ZZ", r1, estrellas=4)
+    _con_bloque(v, r1, f'<p data-tf-nota>4,9 ★★★★★ · 1 отзив</p>'
+                       f'<blockquote data-tf-resena="{r1}">★★★★★ Добро е.</blockquote>')
+    falla(v, "estrellas")
+    falla(v, "4,0")
+
+
+def test_estrellas_sin_valoracion_guardada_fallan(v):
+    r1 = anadir_resena(v, P, "ZZ", "Добро е.", date(2026, 11, 18), "mensaje al usuario")
+    _con_bloque(v, r1, f'<blockquote data-tf-resena="{r1}">★★★★★ Добро е.</blockquote>')
+    falla(v, "estrellas")
+
+
+def test_nota_fuera_de_bloque_sigue_prohibida(v):
+    mutar(v, lambda h: h.replace("<h2 data-tf-hito>Цена</h2>", "<h2 data-tf-hito>Цена</h2><p>4,9/5 ★★★★★</p>"))
+    falla(v, "estrellas")
+
+
+def test_completar_resena_exige_trozos_literales(v):
+    r1 = anadir_resena(v, P, "ZZ", "Много полезно.", date(2026, 11, 18), "mensaje al usuario")
+    with pytest.raises(ValueError, match="literales"):
+        completar_resena(v, P, "ZZ", r1, extracto="Най-доброто!")
+    with pytest.raises(ValueError, match="1 a 5"):
+        completar_resena(v, P, "ZZ", r1, estrellas=6)
