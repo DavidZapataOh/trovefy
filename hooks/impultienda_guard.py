@@ -1,15 +1,20 @@
-"""Hook PreToolUse (matcher ``mcp__impultienda__.*``): el conector de Impultienda solo con el catálogo clasificado.
+"""Hook PreToolUse (matcher: cualquier ``mcp__…impultienda…``): el conector de Impultienda solo con el catálogo.
 
 Deniega:
 
+- una herramienta cuyo nombre lleva «impultienda» (sin mirar mayúsculas) y no empieza exactamente por
+  ``mcp__impultienda__`` (otro servidor con el mismo conector, p. ej. ``mcp__claude_ai_Impultienda__…``);
 - una herramienta que no sea ``lectura`` o ``escritura`` en ``config/impultienda_tools.json`` (``cargar_catalogo``:
   si el catálogo no carga o está mal clasificado, se deniega todo);
 - cualquier clave de ``tool_input`` (recursiva) que no esté en el esquema catalogado, y lo que prohíben las
   restricciones de la herramienta (parámetros y valores prohibidos, valores obligatorios);
-- una ``escritura`` con STOP activo, o que no esté en un ``checkout/<PAIS>/PLAN-MCP.json`` aprobado por el
-  ``plan_huella`` de su ``APROBACION.md`` con estos argumentos exactos.
+- una ``escritura`` con STOP activo, o que no esté en un ``checkout/<PAIS>/PLAN-MCP.json`` aprobado
+  (``trovefy.tienda.mcp.plan_que_aprueba``: huella del plan, la frase atada a él y el mensaje del usuario en su
+  registro, marcado para ese plan y sin cerrar), o que ya pasó igual en la etapa (``anotar_escritura``: cada
+  escritura que deja pasar queda anotada; se repite solo el paso ``confirmar: true`` de un cambio en dos pasos).
 
-Solo biblioteca estándar (importa ``trovefy.tienda.mcp`` de ``scripts/``, sin YAML); falla cerrado.
+Solo biblioteca estándar (importa ``trovefy.tienda.mcp`` y ``trovefy.checkout.mensajes`` de ``scripts/``, sin YAML);
+falla cerrado.
 """
 from __future__ import annotations
 
@@ -34,8 +39,8 @@ def _mcp():
 
 def clasificar(tool_name: str, tool_input: dict) -> tuple[str, str]:
     if not tool_name.startswith(PREFIJO):
-        if tool_name.lower().startswith(PREFIJO):
-            return "deny", f"{tool_name}: el conector de Impultienda se llama exactamente {PREFIJO}…"
+        if "impultienda" in tool_name.casefold():
+            return "deny", f"{tool_name}: el conector de Impultienda solo se usa como {PREFIJO}… (con su catálogo)"
         return "allow", ""
     nombre = tool_name[len(PREFIJO):]
     mcp = _mcp()
@@ -52,7 +57,10 @@ def clasificar(tool_name: str, tool_input: dict) -> tuple[str, str]:
         vault = vault_root()
         if stop_activo(vault):
             return "deny", MOTIVO_STOP
-        motivo = mcp.escritura_aprobada(vault, h, tool_input)
+        motivo, plan = mcp.plan_que_aprueba(vault, h, tool_input)
+        if motivo is not None or plan is None:
+            return "deny", motivo or "esa escritura no está en un plan aprobado"
+        motivo = mcp.anotar_escritura(plan["huella"], h, tool_input)
         if motivo is not None:
             return "deny", motivo
     return "allow", ""

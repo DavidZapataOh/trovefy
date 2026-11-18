@@ -132,9 +132,15 @@ def test_formato_desconocido_no_medido(zz):
                      "checkout.temporizador"))
     rs = releer(plan, _inst(ctx)[0], {1: {"raro": 1}, 2: {"aplicado": "sí"}}, ctx=ctx)
     assert [r.estado for r in rs] == ["no_medido", "no_medido"]
+    # M2: otra columna con el mismo número de claves ya no es «ok»: no se sabe (no medido).
     rs = releer(plan, _inst(ctx)[0], {1: {"aplicado": ["pedir_telefono"]},
                                       2: {"aplicado": {"timer_bump": 0}}}, ctx=ctx)
+    assert [r.estado for r in rs] == ["ok", "no_medido"]
+    rs = releer(plan, _inst(ctx)[0], {1: {"aplicado": ["pedir_telefono"]},
+                                      2: {"aplicado": {"minutos_timer_bump": 0}}}, ctx=ctx)
     assert [r.estado for r in rs] == ["ok", "ok"]
+    rs = releer(plan, _inst(ctx)[0], {2: {"aplicado": {"minutos_timer_bump": 7}}}, ctx=ctx)
+    assert [r.estado for r in rs] == ["distinto"]
 
 
 def test_error_del_conector_es_distinto(zz):

@@ -19,6 +19,7 @@ from trovefy import cli
 from trovefy.checkout.mensajes import registrar_mensaje
 from trovefy.checkout.receta import GUION_UPSELL, marcadores
 from trovefy.tienda import mcp as mcp_mod
+from trovefy.tienda.mcp import ESCRITURAS, frase_aprobacion, huella_del_plan
 from trovefy.vault import frontmatter
 
 from .mcp_falso import FRONT, STORE, URL_FIRMADA, GuardaDeniega, MCPFalso, fixture
@@ -139,7 +140,13 @@ class Claude:
         ruta = _carpeta(self.v) / "PLAN-MCP.json"
         return json.loads(ruta.read_text(encoding="utf-8")) if ruta.exists() else None
 
-    def aprobar(self, cita: str = "sí, dale") -> int:
+    def frase(self) -> str:
+        plan = json.loads((_carpeta(self.v) / "PLAN-MCP.json").read_text(encoding="utf-8"))
+        return frase_aprobacion(plan["etapa"], plan["huella"])
+
+    def aprobar(self, cita: str | None = None) -> int:
+        """El usuario escribe en el chat la frase del resumen (el hook la anota) y se ejecuta `aprobar`."""
+        cita = self.frase() if cita is None else cita
         registrar_mensaje(cita, ahora=self.reloj().timestamp())
         return cli.main(_args("aprobar", "--cita", cita))
 
@@ -240,7 +247,11 @@ def test_cada_escritura_pasa_la_guarda_solo_con_su_aprobacion(entorno, tmp_path)
     # Y queda en el historial de la etapa, con la cita literal.
     historial = _carpeta(v) / "mcp" / "etapa-1" / "APROBACION.md"
     meta, _ = frontmatter.leer(historial)
-    assert meta["cita"] == "sí, dale" and meta["plan_huella"] == plan["huella"] and meta["etapa"] == 1
+    assert meta["cita"] == frase_aprobacion(1, plan["huella"])
+    assert meta["plan_huella"] == plan["huella"] and meta["etapa"] == 1
+    # El mensaje usado queda en la lista de al lado: no aprueba otro plan.
+    usadas = json.loads((_carpeta(v) / "mcp" / "citas-usadas.json").read_text(encoding="utf-8"))
+    assert [u["huella"] for u in usadas] == [plan["huella"]]
 
 
 def test_releer_redacta_las_urls_firmadas(entorno, tmp_path):
@@ -283,8 +294,13 @@ def test_plan_escribe_resumen_en_seco(entorno, tmp_path, capsys):
     assert "impultienda_" not in resumen and STORE not in resumen
     assert "Poner el nombre de la tienda: «Somatix»" in resumen
     assert plan["etapa"] == 1 and plan["huella"]
-    from trovefy.tienda.mcp import huella_plan
-    assert huella_plan(plan["operaciones"]) == plan["huella"]
+    assert huella_del_plan(plan) == plan["huella"]
+    assert set(plan) >= {"operaciones", "creado", "etapa", "producto", "pais"}
+    # El resumen termina con la frase atada a este plan y la orden para la terminal del usuario.
+    frase = f"sí, aplica la etapa 1 ({plan['huella'][:4]})"
+    assert f"«{frase}»" in resumen
+    assert f'trovefy checkout aprobar --producto {P} --pais {PAIS} --cita "{frase}"' in resumen
+    assert "sí, dale" not in resumen
 
 
 def test_plan_con_etapa_aprobada_sin_releer_se_niega(entorno, tmp_path, capsys):
@@ -311,42 +327,111 @@ def _plan_listo(entorno, tmp_path) -> Claude:
     return claude
 
 
-def test_cita_sin_afirmacion_rechazada(entorno, tmp_path, capsys):
+def test_solo_vale_la_frase_atada_al_plan(entorno, tmp_path, capsys):
     claude = _plan_listo(entorno, tmp_path)
-    for cita in ("", "   ", "luego lo vemos", "sí, pero todavía no", "no, espera"):
+    frase = claude.frase()
+    # Ninguna afirmación genérica ni condicional; tampoco la frase de otro plan o con algo más.
+    for cita in ("", "   ", "sí", "sí, dale", "ok", "si te parece, sí", "sí, aplica la etapa 1 (0000)",
+                 "sí, aplica la etapa 2 " + frase[-6:], frase + " y cambia el precio", "no " + frase, frase + "."):
         registrar_mensaje(cita, ahora=claude.reloj().timestamp())
         assert cli.main(_args("aprobar", "--cita", cita)) == 2, cita
     assert not (_carpeta(entorno[0]) / "APROBACION.md").exists()
 
 
+def test_la_frase_sin_mayusculas_ni_tildes_vale(entorno, tmp_path):
+    claude = _plan_listo(entorno, tmp_path)
+    cita = claude.frase().upper().replace("Í", "I")
+    assert claude.aprobar(cita) == 0
+
+
 def test_cita_que_el_usuario_no_escribio_se_rechaza(entorno, tmp_path, capsys):
-    _plan_listo(entorno, tmp_path)
-    assert cli.main(_args("aprobar", "--cita", "sí, dale")) == 2
+    claude = _plan_listo(entorno, tmp_path)
+    assert cli.main(_args("aprobar", "--cita", claude.frase())) == 2
     assert "escríbelo tú" in capsys.readouterr().err.casefold()
     assert not (_carpeta(entorno[0]) / "APROBACION.md").exists()
 
 
 def test_cita_anterior_al_plan_no_vale(entorno, tmp_path, capsys):
-    registrar_mensaje("sí, dale", ahora=(AHORA - timedelta(hours=1)).timestamp())
-    _plan_listo(entorno, tmp_path)
-    assert cli.main(_args("aprobar", "--cita", "sí, dale")) == 2
+    claude = _plan_listo(entorno, tmp_path)
+    frase = claude.frase()
+    registrar_mensaje(frase, ahora=(AHORA - timedelta(hours=1)).timestamp())
+    assert cli.main(_args("aprobar", "--cita", frase)) == 2
 
 
 def test_cita_con_secreto_rechazada(entorno, tmp_path):
     claude = _plan_listo(entorno, tmp_path)
-    cita = f"sí, dale {TOKEN_FALSO}"
+    cita = f"{claude.frase()} {TOKEN_FALSO}"
     registrar_mensaje(cita, ahora=claude.reloj().timestamp())
     assert cli.main(_args("aprobar", "--cita", cita)) == 2
     assert not (_carpeta(entorno[0]) / "APROBACION.md").exists()
 
 
 def test_cita_en_la_terminal_del_usuario(entorno, tmp_path, monkeypatch):
-    _plan_listo(entorno, tmp_path)
+    v, _, mcp = entorno
+    claude = _plan_listo(entorno, tmp_path)
     from trovefy.checkout import mcp_cli
     monkeypatch.setattr(mcp_cli, "hay_terminal", lambda: True)
-    assert cli.main(_args("aprobar", "--cita", "Sí, adelante")) == 0
-    texto = (_carpeta(entorno[0]) / "APROBACION.md").read_text(encoding="utf-8")
-    assert 'cita: "Sí, adelante"' in texto
+    assert cli.main(_args("aprobar", "--cita", "Sí, adelante")) == 2  # en la terminal, también la frase
+    frase = claude.frase()
+    assert cli.main(_args("aprobar", "--cita", frase)) == 0
+    texto = (_carpeta(v) / "APROBACION.md").read_text(encoding="utf-8")
+    assert f'cita: "{frase}"' in texto
+    # La guarda acepta lo aprobado en la terminal (el registro lleva la marca de esa aprobación).
+    plan = json.loads((_carpeta(v) / "PLAN-MCP.json").read_text(encoding="utf-8"))
+    op = plan["operaciones"][0]
+    mcp.llamar(op["herramienta"], op["argumentos"])
+
+
+def test_un_mensaje_aprueba_un_solo_plan(entorno, tmp_path, capsys):
+    v, reloj, mcp = entorno
+    claude = _plan_listo(entorno, tmp_path)
+    plan1 = json.loads((_carpeta(v) / "PLAN-MCP.json").read_text(encoding="utf-8"))
+    assert claude.aprobar() == 0
+    aprobacion = (_carpeta(v) / "APROBACION.md").read_text(encoding="utf-8")
+    claude.aplicar(plan1)
+    claude.releer()
+    # Tras releer, aunque alguien reponga a mano el plan y la aprobación de la etapa 1, la guarda no los acepta:
+    # el mensaje ya se usó y su aprobación quedó cerrada en el registro.
+    (_carpeta(v) / "PLAN-MCP.json").write_text(json.dumps(plan1, ensure_ascii=False), encoding="utf-8")
+    (_carpeta(v) / "APROBACION.md").write_text(aprobacion, encoding="utf-8")
+    op = plan1["operaciones"][0]
+    with pytest.raises(GuardaDeniega):
+        mcp.llamar(op["herramienta"], op["argumentos"])
+    # Y la frase de la etapa 1 no aprueba la etapa 2.
+    (_carpeta(v) / "APROBACION.md").unlink()
+    claude.plan()
+    viejo = frase_aprobacion(1, plan1["huella"])
+    registrar_mensaje(viejo, ahora=reloj().timestamp())
+    assert cli.main(_args("aprobar", "--cita", viejo)) == 2
+
+
+def test_releer_borra_el_registro_de_escrituras_de_la_etapa(entorno, tmp_path):
+    v, _, mcp = entorno
+    claude = _plan_listo(entorno, tmp_path)
+    plan = json.loads((_carpeta(v) / "PLAN-MCP.json").read_text(encoding="utf-8"))
+    assert claude.aprobar() == 0
+    op = plan["operaciones"][0]
+    claude.llamar(op["herramienta"], op["argumentos"])
+    registro = tmp_path / ".config" / "trovefy" / ESCRITURAS
+    assert plan["huella"] in registro.read_text(encoding="utf-8")
+    # Repetir la misma escritura en la etapa: la guarda la deniega.
+    with pytest.raises(GuardaDeniega):
+        mcp.llamar(op["herramienta"], op["argumentos"])
+    claude.releer()
+    assert plan["huella"] not in registro.read_text(encoding="utf-8")
+
+
+def test_releer_archivo_roto_lo_deja_redactado(entorno, tmp_path, capsys):
+    destino = _cache(tmp_path) / "roto.json"
+    destino.parent.mkdir(parents=True, exist_ok=True)
+    destino.write_text('{"llamadas": [{"herramienta": "impultienda_cargar_entregable", "respuesta": '
+                       f'{{"url_subida": "{URL_FIRMADA}", "codigo": "c0d1g0abc"}}}}', encoding="utf-8")
+    assert cli.main(_args("releer", "--respuesta", str(destino))) == 2
+    texto = destino.read_text(encoding="utf-8")
+    assert "X-Amz-Signature" not in texto and "c0d1g0abc" not in texto
+    destino.write_text(f'{{"llamadas": 3, "x": "{TOKEN_FALSO}"}}', encoding="utf-8")
+    assert cli.main(_args("releer", "--respuesta", str(destino))) == 2
+    assert TOKEN_FALSO not in destino.read_text(encoding="utf-8")
 
 
 # --- releer -------------------------------------------------------------------------------------------------------
@@ -369,8 +454,7 @@ def test_plan_cambiado_invalida_aprobacion(entorno, tmp_path, capsys):
     ruta = _carpeta(v) / "PLAN-MCP.json"
     plan = json.loads(ruta.read_text(encoding="utf-8"))
     plan["operaciones"][0]["argumentos"]["nombre"] = "Otra marca"
-    from trovefy.tienda.mcp import huella_plan
-    plan["huella"] = huella_plan(plan["operaciones"])
+    plan["huella"] = huella_del_plan(plan)
     ruta.write_text(json.dumps(plan, ensure_ascii=False), encoding="utf-8")
     op = plan["operaciones"][0]
     with pytest.raises(GuardaDeniega):

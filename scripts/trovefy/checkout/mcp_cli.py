@@ -7,14 +7,18 @@ La CLI nunca llama al MCP: Claude lo llama en la sesión. trovefy orquesta los *
    ``trovefy checkout releer --respuesta <archivo>``: de ahí salen los ids y la foto de la tienda.
 2. ``trovefy checkout plan``: el plan de la etapa siguiente (``checkout/<PAIS>/PLAN-MCP.json``, solo con ids ya
    conocidos) y su resumen en seco en español (``PLAN-MCP.md``), que Claude enseña al usuario.
-3. El usuario responde en el chat; ``trovefy checkout aprobar --cita "<su mensaje, tal cual>"`` escribe
-   ``APROBACION.md`` con la cita, la fecha y la huella del plan. La cita tiene que ser un mensaje que el usuario
-   escribió después del plan (lo anota el hook ``UserPromptSubmit``; ver `trovefy.checkout.mensajes`) o el usuario
-   ejecuta el comando en su terminal.
+3. El usuario aprueba con la frase atada a ese plan, «sí, aplica la etapa N (xxxx)» (``xxxx``: los cuatro
+   primeros caracteres de la huella del plan; ver `trovefy.tienda.mcp.frase_aprobacion`):
+   ``trovefy checkout aprobar --cita "<la frase>"`` escribe ``APROBACION.md`` con la cita, la fecha y la huella del
+   plan, y deja el mensaje marcado para ese plan en el registro (un mensaje aprueba un solo plan; lista de citas
+   usadas en ``checkout/<PAIS>/mcp/citas-usadas.json``). **Solo lo ejecuta el usuario**, en su terminal
+   (``apimart_gasto`` se lo niega a Claude en cualquier forma); sin terminal, la frase tiene que ser un mensaje entero
+   que el usuario escribió en el chat después del plan (lo anota el hook ``UserPromptSubmit``; ver
+   `trovefy.checkout.mensajes`).
 4. Claude aplica cada operación del plan, en orden (la guarda del hook solo deja pasar las del plan aprobado; las de
-   dos pasos, primero la vista previa y luego ``confirmar: true`` con su token), relee y vuelve al paso 1 con el
-   archivo de esa etapa. Tras releer, la aprobación de la etapa se retira: nada de esa etapa se puede repetir sin
-   un nuevo «sí».
+   dos pasos, primero la vista previa y luego ``confirmar: true`` con su token; cada llamada, una sola vez), relee
+   y vuelve al paso 1 con el archivo de esa etapa. Tras releer, la aprobación de la etapa se retira y se cierra en
+   el registro: nada de esa etapa se puede repetir sin una nueva frase.
 
 Códigos de salida: 0 bien · 1 algo no está bien o falta medirlo · 2 error de uso o de entrada. Nunca una traza.
 """
@@ -32,7 +36,12 @@ from datetime import datetime
 from pathlib import Path
 
 from trovefy.checkout.etapas import Paso
-from trovefy.checkout.mensajes import es_mensaje_del_usuario
+from trovefy.checkout.mensajes import (
+    cerrar_mensajes,
+    es_mensaje_del_usuario,
+    huella_mensaje,
+    usar_mensaje,
+)
 from trovefy.checkout.operaciones import (
     LECTURAS_BASE,
     Operacion,
@@ -54,17 +63,25 @@ from trovefy.checkout.relectura import (
     valores_de,
     valores_de_escritura,
 )
-from trovefy.tienda.mcp import APROBACION, PLAN_MCP, casa_con_operacion, huella_plan
+from trovefy.tienda.mcp import (
+    APROBACION,
+    PLAN_MCP,
+    casa_con_operacion,
+    creado_de,
+    es_la_frase,
+    frase_aprobacion,
+    huella_del_plan,
+    motivo_aprobacion,
+    olvidar_escrituras,
+    redactar_urls_firmadas,
+)
 
 PLAN_MD = "PLAN-MCP.md"
 HISTORIAL = "mcp"
-AFIRMACIONES = frozenset({"sí", "si", "dale", "ok", "okay", "okey", "aprobado", "aprobada", "apruebo", "adelante"})
-NEGACIONES = frozenset({"no", "espera", "esperá", "espérate", "todavía", "aún", "aun", "cancela", "cancelá",
-                        "cancelar", "detente", "stop", "nunca"})
-_PALABRA = re.compile(r"\w+", re.UNICODE)
+CITAS_USADAS = "citas-usadas.json"
 NO_ES_TUYA = ("no veo ese mensaje tuyo: la aprobación tiene que ser tu mensaje entero, escrito por ti en el chat "
-              "después de ver el resumen. Escríbelo tú (por ejemplo «sí, dale») o ejecuta tú este comando en tu "
-              "terminal")
+              "después de ver el resumen. Escríbelo tú (la frase del resumen, tal cual) o ejecuta tú este comando en "
+              "tu terminal")
 
 
 def hay_terminal() -> bool:
@@ -168,19 +185,21 @@ def _leer_plan(ctx) -> dict | None:
     except (OSError, ValueError) as exc:
         raise ErrorDeUso(f"{PLAN_MCP} está roto ({type(exc).__name__})") from exc
     if not isinstance(plan, dict) or not isinstance(plan.get("operaciones"), list) \
-            or plan.get("huella") != huella_plan(plan["operaciones"]):
+            or plan.get("huella") != huella_del_plan(plan):
         raise ErrorDeUso(f"{PLAN_MCP} no está íntegro (su huella no casa): rehazlo con trovefy checkout plan")
     return plan
 
 
 def _aprobacion_viva(ctx, plan: dict | None, estado: dict) -> bool:
+    """¿La aprobación de la etapa vale? Lo mismo que mira la guarda (`motivo_aprobacion`: huella, frase y mensaje del
+    usuario en el registro, marcado y sin cerrar) y que la etapa esté aprobada en el estado."""
     from trovefy.tienda.mcp import _frontmatter
 
     ruta = _carpeta(ctx) / APROBACION
     if plan is None or not ruta.is_file() or ruta.is_symlink():
         return False
     meta = _frontmatter(ruta.read_text(encoding="utf-8"))
-    return (meta.get("plan_huella") == plan["huella"] and bool(meta.get("cita", "").strip())
+    return (motivo_aprobacion(plan, meta, producto=ctx.producto, pais=ctx.pais) is None
             and estado.get("aprobada") == plan.get("etapa"))
 
 
@@ -277,14 +296,16 @@ def plan(args, ahora: datetime) -> int:
         print("No queda nada que aplicar por el conector. Lo de «a mano» y la comprobación desde fuera siguen "
               "(trovefy checkout comprobar).")
         return 0
+    creado = ahora.isoformat()
+    datos = {"producto": ctx.producto, "pais": ctx.pais, "etapa": etapa, "creado": creado,
+             "operaciones": [{"herramienta": o.herramienta, "argumentos": o.argumentos} for o in p.operaciones]}
+    p.huella = huella_del_plan(datos)  # H1: la que se aprueba (y la de la frase del resumen)
     detalle = [{"n": o.n, "clave": o.clave, "ajustes": list(o.ajustes), "herramienta": o.herramienta,
                 "lectura": o.lectura, "dos_pasos": o.dos_pasos, "solo_vista_previa": o.solo_vista_previa,
                 "frase": o.frase} for o in p.operaciones]
-    datos = {"producto": ctx.producto, "pais": ctx.pais, "etapa": etapa, "creado": ahora.isoformat(),
-             "huella": p.huella, "catalogo_huella": p.huella_catalogo,
-             "operaciones": [{"herramienta": o.herramienta, "argumentos": o.argumentos} for o in p.operaciones],
-             "detalle": detalle, "lecturas_despues": p.lecturas_despues,
-             "pendientes": [{"frase": e.frase, "faltan": list(e.faltan)} for e in p.pendientes]}
+    datos.update({"huella": p.huella, "catalogo_huella": p.huella_catalogo,
+                  "detalle": detalle, "lecturas_despues": p.lecturas_despues,
+                  "pendientes": [{"frase": e.frase, "faltan": list(e.faltan)} for e in p.pendientes]})
     texto = resumen_en_seco(p, ctx)
     for nombre, contenido in (("PLAN-MCP.json", datos), ("PLAN-MCP.md", texto)):
         patron = secreto_en(contenido)
@@ -307,20 +328,38 @@ def plan(args, ahora: datetime) -> int:
 # --- aprobar ------------------------------------------------------------------------------------------------------
 
 
-def validar_cita(cita: str) -> str | None:
-    """Por qué la cita no vale como aprobación (None si vale): vacía, con controles invisibles, sin una afirmación
-    de la lista cerrada o con una negación o una espera."""
+def validar_cita(cita: str, plan: dict) -> str | None:
+    """Por qué la cita no vale como aprobación de ``plan`` (None si vale): vacía, con controles invisibles o que no
+    es, entera, la frase atada a ese plan (H3; sin mirar mayúsculas ni tildes). Sin lista de afirmaciones: un «sí»,
+    un «ok» o un «sí, pero…» no aprueban nada."""
     if not isinstance(cita, str) or not cita.strip():
         return "hace falta tu mensaje literal (--cita)"
     raros = sorted({f"U+{ord(c):04X}" for c in cita if unicodedata.category(c) in ("Cc", "Cf") and c not in "\n\t"})
     if raros:
         return f"la cita lleva caracteres de control ({', '.join(raros)}): escríbela de nuevo sin ellos"
-    palabras = {p for p in _PALABRA.findall(unicodedata.normalize("NFC", cita).casefold())}
-    if palabras & NEGACIONES:
-        return "la cita tiene una negación o una espera: no la tomo como un «sí»"
-    if not palabras & AFIRMACIONES:
-        return "la cita no dice que sí (vale «sí», «dale», «ok», «aprobado», «adelante»)"
+    frase = frase_aprobacion(plan.get("etapa"), plan.get("huella", ""))
+    if not es_la_frase(cita, plan.get("etapa"), plan.get("huella", "")):
+        return f"para aprobar este plan escribe exactamente «{frase}» (está atada a este plan; nada más en el mensaje)"
     return None
+
+
+def _citas_usadas(ctx) -> Path:
+    return _carpeta(ctx) / HISTORIAL / CITAS_USADAS
+
+
+def _leer_usadas(ctx) -> list[dict]:
+    ruta = _citas_usadas(ctx)
+    if not ruta.exists():
+        return []
+    if ruta.is_symlink():
+        raise ErrorDeUso(f"{CITAS_USADAS} es un enlace: no se lee")
+    try:
+        datos = json.loads(ruta.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise ErrorDeUso(f"{CITAS_USADAS} está roto ({type(exc).__name__}): no sigo") from exc
+    if not isinstance(datos, list):
+        raise ErrorDeUso(f"{CITAS_USADAS} no tiene la forma esperada: no sigo")
+    return [d for d in datos if isinstance(d, dict)]
 
 
 def aprobar(args, ahora: datetime) -> int:
@@ -335,19 +374,27 @@ def aprobar(args, ahora: datetime) -> int:
         raise ErrorDeUso("el plan escrito no es el de la etapa en curso: rehazlo con trovefy checkout plan")
     if estado.get("aprobada") == plan["etapa"]:
         raise ErrorDeUso(f"la etapa {plan['etapa']} ya está aprobada")
-    motivo = validar_cita(args.cita)
-    if motivo:
-        raise ErrorDeUso(motivo)
     patron = secreto_en(args.cita)
     if patron:
         raise ErrorDeUso(f"la cita lleva algo con forma de secreto ({patron}): no se guarda")
-    try:
-        creado = datetime.fromisoformat(plan["creado"]).timestamp()
-    except (KeyError, TypeError, ValueError) as exc:
-        raise ErrorDeUso(f"{PLAN_MCP} sin fecha de creación: rehazlo con trovefy checkout plan") from exc
-    if not (hay_terminal() or es_mensaje_del_usuario(args.cita, desde=creado)):
-        raise ErrorDeUso(NO_ES_TUYA)
+    motivo = validar_cita(args.cita, plan)
+    if motivo:
+        raise ErrorDeUso(motivo)
+    creado = creado_de(plan)
+    if creado is None:
+        raise ErrorDeUso(f"{PLAN_MCP} sin fecha de creación: rehazlo con trovefy checkout plan")
     cita = args.cita.strip()
+    usadas = _leer_usadas(ctx)
+    if any(u.get("h") == huella_mensaje(cita) for u in usadas):
+        raise ErrorDeUso("ese mensaje ya aprobó un plan: cada plan se aprueba con su propia frase")
+    terminal = hay_terminal()
+    if not (terminal or es_mensaje_del_usuario(cita, desde=creado)):
+        raise ErrorDeUso(NO_ES_TUYA)
+    # Un mensaje aprueba un solo plan: queda marcado en el registro (lo que mira la guarda) y en la lista de al lado.
+    usado = usar_mensaje(cita, desde=creado, huella=plan["huella"], terminal=terminal, ahora=ahora.timestamp())
+    if usado is None:
+        raise ErrorDeUso(NO_ES_TUYA if not terminal else
+                         "no puedo anotar tu aprobación en el registro de mensajes (o ese mensaje ya se usó)")
     fecha = ahora.isoformat(timespec="seconds")
     texto = (f"---\nplan_huella: {plan['huella']}\ncita: {json.dumps(cita, ensure_ascii=False)}\n"
              f"fecha: {json.dumps(fecha)}\netapa: {plan['etapa']}\nproducto: {ctx.producto}\npais: {ctx.pais}\n---\n\n"
@@ -356,6 +403,9 @@ def aprobar(args, ahora: datetime) -> int:
     viva = _carpeta(ctx) / APROBACION
     escribir_atomico(viva, texto)
     shutil.copyfile(viva, _historial(ctx, plan["etapa"]) / APROBACION)
+    usadas.append({"h": usado["h"], "t": usado["t"], "huella": plan["huella"], "etapa": plan["etapa"],
+                   "via": "terminal" if terminal else "chat"})
+    escribir_atomico(_citas_usadas(ctx), json.dumps(usadas, ensure_ascii=False, indent=1))
     estado["aprobada"] = plan["etapa"]
     estado.setdefault("aprobaciones", []).append({"etapa": plan["etapa"], "fecha": fecha, "cita": cita,
                                                   "plan_huella": plan["huella"]})
@@ -393,13 +443,35 @@ def _guardar_redactado(ruta: Path, texto: str) -> None:
     os.replace(tmp, ruta)
 
 
+_CLAVE_SUBIDA = re.compile(r'("(?:codigo|url_subida|upload_url|url_firmada)"\s*:\s*)"[^"]*"')
+NO_GUARDADA_CRUDO = "no se guardó: el archivo no se entendía y tenía algo con forma de secreto"
+
+
+def _redactar_crudo(ruta: Path) -> None:
+    """La copia de la caché que no se pudo leer como respuestas: sin URLs firmadas ni códigos de subida; con algo con
+    forma de secreto, no se guarda nada de ella."""
+    try:
+        texto = ruta.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        texto = ""
+    if secreto_en(texto):
+        limpio = json.dumps({"llamadas": [], "nota": NO_GUARDADA_CRUDO}, ensure_ascii=False)
+    else:
+        limpio = redactar_urls_firmadas(_CLAVE_SUBIDA.sub(r'\1"[redactado]"', texto))
+    _guardar_redactado(ruta, limpio)
+
+
 def releer_cli(args, ahora: datetime) -> int:
     from trovefy.tienda.mcp import cargar_catalogo
 
     vault, ctx = _contexto(args.producto, args.pais)
     ruta = _archivo_en_cache(ctx, args.respuesta)
     catalogo = cargar_catalogo()
-    respuestas, guardable = leer_respuestas(ruta, catalogo)
+    try:
+        respuestas, guardable = leer_respuestas(ruta, catalogo)
+    except ValueError:
+        _redactar_crudo(ruta)  # aunque no se entienda, la copia de la caché no se queda con URLs firmadas ni secretos
+        raise
     _guardar_redactado(ruta, guardable)  # la copia de la caché, ya sin URLs firmadas ni secretos
     for r in respuestas:
         h = catalogo.get(r.herramienta)
@@ -483,6 +555,8 @@ def releer_cli(args, ahora: datetime) -> int:
                                   "en tu panel)"}
         estado["releida"] = plan.etapa
         _retirar_aprobacion(ctx, plan.etapa)
+        cerrar_mensajes(plan.huella)  # la aprobación ya no vale, ni repuesta a mano
+        olvidar_escrituras(plan.huella)  # M1: fuera del registro de la guarda las escrituras de esta etapa
     guardar_estado(ctx, estado)
     if estado.get("etapa"):
         _escribir_checkout(vault, ctx, estado, argparse.Namespace(plan_tienda=(estado.get("opciones") or {}).get(

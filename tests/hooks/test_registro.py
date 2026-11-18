@@ -23,7 +23,7 @@ def test_matchers_exactos():
         "stop.py": "Write|Edit|MultiEdit|Bash",
         "buzon_guard.py": "Write|Edit|MultiEdit|NotebookEdit|Bash",
         "apimart_gasto.py": "Bash|WebFetch|Write|Edit|MultiEdit|NotebookEdit|Read|Grep",
-        "impultienda_guard.py": "mcp__impultienda__.*",
+        "impultienda_guard.py": "mcp__.*[Ii][Mm][Pp][Uu][Ll][Tt][Ii][Ee][Nn][Dd][Aa].*",
         "ejecutor_guard.py": "Bash",
     }
     obtenido = {}

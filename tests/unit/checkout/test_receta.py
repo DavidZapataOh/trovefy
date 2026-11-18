@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 from embudo.ejemplos_embudo import PAIS, PASOS_FICTICIOS, P, vault_embudo
+from plan_aprobado import plan_aprobado
 from trovefy.checkout.receta import (
     GUION_UPSELL,
     Ajuste,
@@ -400,8 +401,8 @@ def test_la_guarda_del_hook_deja_pasar_el_plan_aprobado(zz, monkeypatch):
     huella = huella_plan(ops)
     assert huella == hashlib.sha256(json.dumps(ops, sort_keys=True, ensure_ascii=False,
                                                separators=(",", ":")).encode()).hexdigest()
-    (carpeta / "PLAN-MCP.json").write_text(json.dumps({"operaciones": ops, "huella": huella}), encoding="utf-8")
-    (carpeta / "APROBACION.md").write_text(f'---\nplan_huella: {huella}\ncita: "sí, dale"\n---\n', encoding="utf-8")
+    # Aprobado como lo deja `trovefy checkout aprobar` (huella del plan, su frase y el mensaje en el registro).
+    plan_aprobado(ctx.vault, ops, pais=ctx.pais, producto=ctx.producto)
     monkeypatch.setenv("TROVEFY_VAULT", str(ctx.vault))
     monkeypatch.syspath_prepend(str(RAIZ / "hooks"))
     guarda = importlib.import_module("impultienda_guard")

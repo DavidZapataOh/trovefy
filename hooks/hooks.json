@@ -11,7 +11,7 @@
         ]
       },
       {
-        "matcher": "mcp__impultienda__.*",
+        "matcher": "mcp__.*[Ii][Mm][Pp][Uu][Ll][Tt][Ii][Ee][Nn][Dd][Aa].*",
         "hooks": [
           {
             "type": "command",

@@ -212,7 +212,29 @@ def test_resumen_en_seco_sin_ids_de_herramienta(zz):
     assert "(primero verás una vista previa)" in texto
     assert "## Irá a mano" in texto and "Plantilla" in texto
     assert "## En las etapas siguientes" in texto
-    assert texto.rstrip().endswith("(por ejemplo: «sí, dale»).")
+    # H3: la frase de aprobación va atada a este plan (etapa y huella), sin afirmaciones genéricas.
+    frase = f"sí, aplica la etapa {plan.etapa} ({plan.huella[:4]})"
+    assert f"«{frase}»" in texto and f'--cita "{frase}"' in texto
+    assert "sí, dale" not in texto
+
+
+# --- M2: `aplicado` se compara por valores ------------------------------------------------------------------------
+
+
+def test_aplicado_por_valores_no_por_numero_de_claves():
+    pedido = {"store_id": STORE, "minutos_timer_bump": 0}
+    releer = REGLAS["impultienda_disenar_checkout"].releer
+    assert releer(pedido, None, {"aplicado": {"minutos_timer_bump": 0}})[2] == "ok"
+    assert releer(pedido, None, {"aplicado": {"minutos_timer_bump": 7}})[2] == "distinto"
+    # Mismo número de claves, pero otra columna: no se sabe → no medido (antes salía «ok»).
+    assert releer(pedido, None, {"aplicado": {"timer": 7}})[2] == "no_medido"
+    assert releer(pedido, None, {"aplicado": {}})[2] == "no_medido"
+    assert releer(pedido, None, {"otra": 1})[2] == "no_medido"
+    campos = {"store_id": STORE, "pedir_telefono": True, "color_boton_pagar": "#16a34a"}
+    rcampos = REGLAS["impultienda_configurar_checkout"].releer
+    assert rcampos(campos, None, {"aplicado": {"pedir_telefono": True, "color_boton_pagar": "#16A34A"}})[2] == "ok"
+    assert rcampos(campos, None, {"aplicado": {"pedir_telefono": False, "color_boton_pagar": "#16a34a"}})[2] \
+        == "distinto"
 
 
 # --- página del upsell --------------------------------------------------------------------------------------------

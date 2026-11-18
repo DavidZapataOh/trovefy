@@ -7,10 +7,14 @@ import stat
 
 from trovefy.checkout.mensajes import (
     MAX_MENSAJES,
+    cerrar_mensajes,
     es_mensaje_del_usuario,
+    huella_mensaje,
     normalizar_mensaje,
+    plegar,
     registrar_mensaje,
     ruta_registro,
+    usar_mensaje,
 )
 
 
@@ -64,3 +68,43 @@ def test_registro_roto_o_enlace_no_vale(tmp_path):
 def test_vacio_no_se_registra(tmp_path):
     assert not registrar_mensaje("   ", ahora=1.0)
     assert not ruta_registro().exists()
+
+
+# --- revisión de la Tarea 11 (H1, H3) ------------------------------------------------------------------------------
+
+
+def test_la_huella_no_distingue_mayusculas_ni_tildes(tmp_path):
+    assert huella_mensaje("Sí, aplica la etapa 1 (ab12)") == huella_mensaje("SI, APLICA LA ETAPA 1 (AB12)")
+    assert huella_mensaje("sí, aplica la etapa 1 (ab12)") != huella_mensaje("sí, aplica la etapa 1 (ab12).")
+    assert plegar("  Sí,\n APLICA ") == "si, aplica"
+
+
+def test_un_mensaje_se_usa_para_un_solo_plan(tmp_path):
+    registrar_mensaje("sí, aplica la etapa 1 (ab12)", ahora=100.0)
+    assert usar_mensaje("sí, aplica la etapa 1 (ab12)", desde=50.0, huella="a" * 64) is not None
+    # Ya marcado para el plan «a…»: no aprueba otro plan, sí se puede volver a comprobar para el suyo.
+    assert usar_mensaje("sí, aplica la etapa 1 (ab12)", desde=50.0, huella="b" * 64) is None
+    assert es_mensaje_del_usuario("sí, aplica la etapa 1 (ab12)", desde=50.0, huella="a" * 64)
+    assert not es_mensaje_del_usuario("sí, aplica la etapa 1 (ab12)", desde=50.0, huella="b" * 64)
+    # Sin marcar (nadie lo usó para aprobar), la guarda no lo acepta.
+    registrar_mensaje("sí, aplica la etapa 2 (cd34)", ahora=200.0)
+    assert not es_mensaje_del_usuario("sí, aplica la etapa 2 (cd34)", desde=50.0, huella="c" * 64)
+    # Al releer, la aprobación se cierra: ya no vale ni para su plan.
+    cerrar_mensajes("a" * 64)
+    assert not es_mensaje_del_usuario("sí, aplica la etapa 1 (ab12)", desde=50.0, huella="a" * 64)
+    assert usar_mensaje("sí, aplica la etapa 1 (ab12)", desde=50.0, huella="a" * 64) is None
+
+
+def test_en_la_terminal_se_anota_con_su_marca(tmp_path):
+    assert usar_mensaje("sí, aplica la etapa 1 (ab12)", desde=50.0, huella="a" * 64) is None
+    e = usar_mensaje("sí, aplica la etapa 1 (ab12)", desde=50.0, huella="a" * 64, terminal=True, ahora=60.0)
+    assert e is not None and e["u"] == "a" * 64
+    assert es_mensaje_del_usuario("sí, aplica la etapa 1 (ab12)", desde=50.0, huella="a" * 64)
+
+
+def test_las_marcadas_no_se_pierden_al_recortar(tmp_path):
+    registrar_mensaje("frase", ahora=1.0)
+    assert usar_mensaje("frase", desde=0.0, huella="a" * 64) is not None
+    for i in range(MAX_MENSAJES + 5):
+        registrar_mensaje(f"m{i}", ahora=10.0 + i)
+    assert es_mensaje_del_usuario("frase", desde=0.0, huella="a" * 64)

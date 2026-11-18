@@ -1,13 +1,14 @@
 """Hook PreToolUse `impultienda_guard` (H-1): el conector de Impultienda solo con el catálogo, las restricciones por
 herramienta y, para escribir, un plan aprobado. Procesos reales con el python3 del sistema; nunca llama al MCP."""
 
-import hashlib
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+from plan_aprobado import plan_aprobado
 
 RAIZ = Path(__file__).resolve().parents[2]
 P = "p-0099-prueba-abc123"
@@ -19,18 +20,17 @@ def _entrada(corto: str, args: dict) -> dict:
     return {"tool_name": f"mcp__impultienda__impultienda_{corto}", "tool_input": args, "cwd": str(RAIZ)}
 
 
-def _huella(ops) -> str:
-    texto = json.dumps(ops, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    return hashlib.sha256(texto.encode("utf-8")).hexdigest()
+@pytest.fixture(autouse=True)
+def _home_aislado(tmp_path, monkeypatch):
+    """El registro de mensajes y el de escrituras viven en el HOME: nunca el real (correr_hook pasa este HOME)."""
+    casa = tmp_path / "casa"
+    casa.mkdir()
+    monkeypatch.setenv("HOME", str(casa))
 
 
 def _aprobar(vault: Path, ops: list[dict], pais: str = "ZZ") -> None:
-    d = vault / "productos" / P / "checkout" / pais
-    d.mkdir(parents=True, exist_ok=True)
-    h = _huella(ops)
-    (d / "PLAN-MCP.json").write_text(json.dumps({"operaciones": ops, "huella": h}), encoding="utf-8")
-    (d / "APROBACION.md").write_text(f'---\nplan_huella: {h}\ncita: "sí, dale"\nfecha: 2026-11-17\n---\n',
-                                     encoding="utf-8")
+    """Como lo deja `trovefy checkout aprobar`: huella del plan, su frase y el mensaje del usuario en el registro."""
+    plan_aprobado(vault, ops, pais=pais, producto=P)
 
 
 def test_lectura_pasa(correr_hook, vault_tmp):
@@ -146,7 +146,9 @@ def _copia_plugin(tmp_path: Path) -> Path:
         shutil.copy(RAIZ / "hooks" / nombre, raiz / "hooks" / nombre)
     destino = raiz / "scripts" / "trovefy"
     (destino / "tienda").mkdir(parents=True)
-    for rel in ("__init__.py", "fichas.py", "tienda/__init__.py", "tienda/mcp.py"):
+    (destino / "checkout").mkdir()
+    for rel in ("__init__.py", "fichas.py", "tienda/__init__.py", "tienda/mcp.py", "checkout/__init__.py",
+                "checkout/mensajes.py"):
         shutil.copy(RAIZ / "scripts" / "trovefy" / rel, destino / rel)
     (raiz / "config").mkdir()
     return raiz
@@ -155,7 +157,7 @@ def _copia_plugin(tmp_path: Path) -> Path:
 def _correr(raiz: Path, entrada: dict, vault: Path) -> tuple[str, str]:
     proc = subprocess.run(["python3", "-s", "-E", str(raiz / "hooks" / "impultienda_guard.py")],
                           input=json.dumps(entrada), capture_output=True, text=True, timeout=30, check=False,
-                          env={"TROVEFY_VAULT": str(vault), "PATH": "/usr/bin:/bin"})
+                          env={"TROVEFY_VAULT": str(vault), "PATH": "/usr/bin:/bin", "HOME": os.environ["HOME"]})
     assert proc.returncode == 0, proc.stderr
     if not proc.stdout.strip():
         return "allow", ""
@@ -168,6 +170,10 @@ def test_solo_biblioteca_estandar_y_falla_cerrado(tmp_path, vault_tmp):
     shutil.copy(RAIZ / "config" / "impultienda_tools.json", raiz / "config" / "impultienda_tools.json")
     # Sin yaml ni el resto del paquete: la lectura pasa con el catálogo real.
     assert _correr(raiz, _entrada("listar_ventas", {"store_id": STORE}), vault_tmp)[0] == "allow"
+    # Y una escritura aprobada también (registro de mensajes y de escrituras con la biblioteca estándar), una vez.
+    _aprobar(vault_tmp, [{"herramienta": "impultienda_fijar_precio", "argumentos": FIJAR}])
+    assert _correr(raiz, _entrada("fijar_precio", FIJAR), vault_tmp)[0] == "allow"
+    assert _correr(raiz, _entrada("fijar_precio", FIJAR), vault_tmp)[0] == "deny"
     # Catálogo roto o mal clasificado: todo se deniega.
     (raiz / "config" / "impultienda_tools.json").write_text("{roto", encoding="utf-8")
     decision, motivo = _correr(raiz, _entrada("listar_ventas", {"store_id": STORE}), vault_tmp)

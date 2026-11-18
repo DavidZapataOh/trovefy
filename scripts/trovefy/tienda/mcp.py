@@ -23,9 +23,12 @@ rutas de parámetro del tipo ``a.b`` o ``bloques[].tipo``:
   `redactar_urls_firmadas` antes de guardarla.
 
 Escrituras: solo las que lista un ``checkout/<PAIS>/PLAN-MCP.json`` (``{"operaciones": [{herramienta, argumentos}],
-"huella": sha256}``) cuya huella está en el ``plan_huella`` de un ``APROBACION.md`` al lado, con la cita literal del
-usuario en ``cita`` (ver `escritura_aprobada`). Desde la Tarea 11 ese plan es el de una etapa
-(`trovefy.checkout.mcp_cli`): `trovefy checkout releer` retira la aprobación al releer la etapa.
+"creado", "etapa", "producto", "pais", "huella"}``, con `huella_del_plan`) cuya huella está en el ``plan_huella`` de un
+``APROBACION.md`` al lado, con la frase atada a ese plan (`frase_aprobacion`) en ``cita``, y solo si el registro de
+mensajes del usuario (`trovefy.checkout.mensajes`, en la carpeta de configuración de trovefy, lo único que Claude no
+puede escribir) tiene esa frase, posterior al plan, marcada para él y sin cerrar (ver `escritura_aprobada`). Cada
+escritura que pasa queda anotada (`anotar_escritura`) y no se repite en la etapa. Ese plan es el de una etapa
+(`trovefy.checkout.mcp_cli`): `trovefy checkout releer` retira la aprobación y la cierra en el registro.
 
 Solo biblioteca estándar: el hook lo importa con el python3 del sistema. La CLI nunca llama al MCP.
 """
@@ -548,8 +551,40 @@ def violaciones(h: Herramienta, argumentos: object) -> list[str]:
 
 
 def huella_plan(operaciones: list[dict]) -> str:
-    """sha256 del JSON canónico de ``[{herramienta, argumentos}]`` (claves ordenadas, sin espacios)."""
+    """sha256 del JSON canónico de ``[{herramienta, argumentos}]`` (claves ordenadas, sin espacios): lo que cambia
+    de un plan a otro (`trovefy.checkout.operaciones.planificar`). La que se aprueba es `huella_del_plan`."""
     return _sha(operaciones)
+
+
+CAMPOS_HUELLA = ("operaciones", "creado", "etapa", "producto", "pais")
+
+
+def huella_del_plan(plan: dict) -> str:
+    """La huella que se aprueba (H1): sha256 del JSON canónico de ``{operaciones, creado, etapa, producto, pais}`` de
+    ``PLAN-MCP.json``. La escribe `trovefy checkout plan` y la exige la guarda: la misma función en los dos."""
+    return _sha({k: plan.get(k) for k in CAMPOS_HUELLA})
+
+
+def frase_aprobacion(etapa: object, huella: str) -> str:
+    """La frase con que el usuario aprueba ese plan y solo ese (H3): «sí, aplica la etapa N (xxxx)», con los cuatro
+    primeros caracteres de su huella. Se compara entera, sin mayúsculas ni tildes (`trovefy.checkout.mensajes`)."""
+    return f"sí, aplica la etapa {etapa} ({str(huella)[:4]})"
+
+
+def es_la_frase(cita: object, etapa: object, huella: str) -> bool:
+    from trovefy.checkout.mensajes import plegar
+
+    return isinstance(cita, str) and plegar(cita) == plegar(frase_aprobacion(etapa, huella))
+
+
+def creado_de(plan: dict) -> float | None:
+    """La hora (epoch) en que se escribió el plan, o None si falta o no se lee."""
+    from datetime import datetime
+
+    try:
+        return datetime.fromisoformat(str(plan["creado"])).timestamp()
+    except (KeyError, TypeError, ValueError):
+        return None
 
 
 def _frontmatter(texto: str) -> dict[str, str]:
@@ -605,10 +640,41 @@ def casa_con_operacion(op: object, h: Herramienta, argumentos: dict) -> bool:
     return _casa(op, h, argumentos)
 
 
-def escritura_aprobada(vault: Path, h: Herramienta, argumentos: dict) -> str | None:
-    """``None`` si algún ``productos/<p>/checkout/<PAIS>/APROBACION.md`` aprueba (``plan_huella`` + ``cita``) un
-    ``PLAN-MCP.json`` íntegro que lista esta herramienta con estos argumentos exactos (en los cambios en dos pasos,
-    también su confirmación con el token de la vista previa). Si no, el motivo para denegar."""
+MOTIVO_SIN_MENSAJE = ("la aprobación no es tuya: su frase no está en tu registro de mensajes como aprobación de este "
+                      "plan (o ya se releyó la etapa, o el registro no se puede leer)")
+
+
+def motivo_aprobacion(plan: object, meta: dict, *, producto: str, pais: str) -> str | None:
+    """Por qué un ``PLAN-MCP.json`` y el frontmatter de su ``APROBACION.md`` no forman una aprobación válida (None si
+    la forman): plan íntegro (`huella_del_plan`) de esa carpeta, la cita es la frase atada a su huella y el registro
+    de mensajes del usuario la tiene, posterior al plan, marcada para él y sin cerrar (C1). Falla cerrado."""
+    if not isinstance(plan, dict) or not isinstance(plan.get("operaciones"), list):
+        return f"{PLAN_MCP} sin operaciones"
+    huella = meta.get("plan_huella", "")
+    if not _HUELLA.fullmatch(huella) or plan.get("huella") != huella or huella_del_plan(plan) != huella:
+        return f"{APROBACION} no aprueba este {PLAN_MCP} (su huella no casa)"
+    if plan.get("producto") != producto or plan.get("pais") != pais:
+        return f"{PLAN_MCP} es de otro producto o país"
+    cita = meta.get("cita", "")
+    if not es_la_frase(cita, plan.get("etapa"), huella):
+        return f"la cita no es la frase de este plan: «{frase_aprobacion(plan.get('etapa'), huella)}»"
+    creado = creado_de(plan)
+    if creado is None:
+        return f"{PLAN_MCP} sin fecha de creación"
+    try:
+        from trovefy.checkout.mensajes import es_mensaje_del_usuario
+
+        if not es_mensaje_del_usuario(cita, desde=creado, huella=huella):
+            return MOTIVO_SIN_MENSAJE
+    except Exception:  # noqa: BLE001 - sin registro legible no hay aprobación
+        return MOTIVO_SIN_MENSAJE
+    return None
+
+
+def plan_que_aprueba(vault: Path, h: Herramienta, argumentos: dict) -> tuple[str | None, dict | None]:
+    """``(None, plan)`` si algún ``productos/<p>/checkout/<PAIS>/APROBACION.md`` aprueba (`motivo_aprobacion`) un
+    ``PLAN-MCP.json`` que lista esta herramienta con estos argumentos exactos (en los cambios en dos pasos, también
+    su confirmación con el token de la vista previa). Si no, ``(motivo, None)``."""
     vault = Path(vault)
     motivo = (f"esa escritura no está en un plan aprobado: hace falta checkout/<PAIS>/{APROBACION} con el "
               f"plan_huella de un {PLAN_MCP} que liste {h.nombre} con estos argumentos exactos")
@@ -616,7 +682,7 @@ def escritura_aprobada(vault: Path, h: Herramienta, argumentos: dict) -> str | N
         raiz = vault.resolve()
         candidatos = sorted((vault / "productos").glob(f"*/checkout/*/{APROBACION}"))
     except OSError:
-        return motivo
+        return motivo, None
     for aprobacion in candidatos:
         carpeta = aprobacion.parent
         plan_ruta = carpeta / PLAN_MCP
@@ -629,16 +695,84 @@ def escritura_aprobada(vault: Path, h: Herramienta, argumentos: dict) -> str | N
             plan = json.loads(plan_ruta.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        huella = meta.get("plan_huella", "")
-        if not _HUELLA.fullmatch(huella) or not meta.get("cita", "").strip():
+        if not isinstance(plan, dict) or not isinstance(plan.get("operaciones"), list) \
+                or not any(_casa(op, h, argumentos) for op in plan["operaciones"]):
             continue
-        if not isinstance(plan, dict) or not isinstance(plan.get("operaciones"), list):
-            continue
-        if plan.get("huella") != huella or huella_plan(plan["operaciones"]) != huella:
-            continue
-        if any(_casa(op, h, argumentos) for op in plan["operaciones"]):
-            return None
-    return motivo
+        problema = motivo_aprobacion(plan, meta, producto=carpeta.parent.parent.name, pais=carpeta.name)
+        if problema is None:
+            return None, plan
+        motivo = f"{motivo} ({problema})"
+    return motivo, None
+
+
+def escritura_aprobada(vault: Path, h: Herramienta, argumentos: dict) -> str | None:
+    """``None`` si un plan aprobado lista esta escritura (`plan_que_aprueba`); si no, el motivo para denegar."""
+    return plan_que_aprueba(vault, h, argumentos)[0]
+
+
+# --- M1: cada escritura aprobada, una vez por etapa ---------------------------------------------------------------
+
+ESCRITURAS = "escrituras-impultienda.json"
+MAX_ESCRITURAS = 500
+
+
+def ruta_escrituras() -> Path:
+    """El registro de escrituras de la guarda, en la carpeta de configuración de trovefy (Claude no la lee ni la
+    escribe: `apimart_gasto`)."""
+    from trovefy.checkout.mensajes import carpeta_config
+
+    return carpeta_config() / ESCRITURAS
+
+
+def _repetible(h: Herramienta, argumentos: dict) -> bool:
+    """El paso ``confirmar: true`` de una herramienta en dos pasos (lleva el token de su vista previa)."""
+    return _token_de_vista_previa(h.esquema) is not None and argumentos.get("confirmar") is True
+
+
+def anotar_escritura(huella: str, h: Herramienta, argumentos: dict, ahora: float | None = None) -> str | None:
+    """La guarda anota cada escritura que deja pasar (herramienta + huella de los argumentos, nunca los argumentos)
+    con la huella de su plan. Motivo para denegar si esa misma llamada ya pasó en la etapa (salvo el paso
+    ``confirmar: true`` de una herramienta en dos pasos) o el registro no se puede usar (falla cerrado)."""
+    import time
+
+    from trovefy.checkout.mensajes import (
+        bloqueo,
+        escribir_lista,
+        leer_lista,
+        preparar_carpeta,
+    )
+
+    ruta = ruta_escrituras()
+    no_puedo = "no puedo anotar la escritura en el registro de la guarda: no se escribe"
+    clave = _sha([h.nombre, argumentos])
+    if not preparar_carpeta(ruta.parent):
+        return no_puedo
+    with bloqueo(ruta) as ok:
+        if not ok:
+            return no_puedo
+        entradas = leer_lista(ruta)
+        if entradas is None:
+            return no_puedo
+        if not _repetible(h, argumentos) and any(e.get("p") == huella and e.get("k") == clave for e in entradas):
+            return (f"{h.nombre}: esa misma llamada ya se hizo en esta etapa; no se repite (si hace falta, se relee "
+                    "y va en la etapa siguiente, con su propia aprobación)")
+        entradas.append({"p": huella, "k": clave, "t": float(time.time() if ahora is None else ahora)})
+        if not escribir_lista(ruta, entradas[-MAX_ESCRITURAS:]):
+            return no_puedo
+    return None
+
+
+def olvidar_escrituras(huella: str) -> None:
+    """Al releer una etapa (`trovefy checkout releer`), fuera del registro las escrituras de su plan."""
+    from trovefy.checkout.mensajes import bloqueo, escribir_lista, leer_lista
+
+    ruta = ruta_escrituras()
+    if not ruta.parent.is_dir():
+        return
+    with bloqueo(ruta) as ok:
+        entradas = leer_lista(ruta) if ok else None
+        if entradas is not None and any(e.get("p") == huella for e in entradas):
+            escribir_lista(ruta, [e for e in entradas if e.get("p") != huella])
 
 
 # --- URLs firmadas (M-5) -----------------------------------------------------------------------------------------

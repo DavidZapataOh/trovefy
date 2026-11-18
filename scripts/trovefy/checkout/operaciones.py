@@ -32,7 +32,12 @@ from trovefy.checkout.etapas import (
 )
 from trovefy.checkout.receta import Ajuste, Llamada, _nombre, marcadores, rellenar
 from trovefy.embudo.contexto import Contexto
-from trovefy.tienda.mcp import Herramienta, huella_catalogo, huella_plan
+from trovefy.tienda.mcp import (
+    Herramienta,
+    frase_aprobacion,
+    huella_catalogo,
+    huella_plan,
+)
 
 # --- normalización ------------------------------------------------------------------------------------------------
 
@@ -455,16 +460,25 @@ def _r_entregable(a: dict, i: Info, r: object):
 
 
 def _r_aplicado(a: dict, i: Info, r: object):
-    """``configurar_checkout`` devuelve ``aplicado: [campos]``; ``disenar_checkout``, ``aplicado: {columna: valor}``
-    (columnas del panel, sin nombres fijos): solo la lista de campos se compara; un formato que no se conoce es
-    «no medido», nunca verde. Lo que se ve se comprueba además desde fuera (Tarea 12)."""
+    """``configurar_checkout`` devuelve ``aplicado: [campos]`` (el servidor confirma esos campos con lo enviado);
+    ``disenar_checkout``, ``aplicado: {columna: valor}``: se compara **valor a valor** con lo pedido (M2); si falta
+    alguna clave pedida (columnas del panel con otro nombre) o el formato no se conoce, «no medido», nunca verde. Lo
+    que se ve se comprueba además desde fuera (Tarea 12)."""
     pedidos = sorted(k for k in a if k != "store_id")
     aplicado = r.get("aplicado") if isinstance(r, dict) else None
-    if isinstance(aplicado, list) and all(isinstance(x, str) for x in aplicado):
+    if isinstance(aplicado, list) and aplicado and all(isinstance(x, str) for x in aplicado):
         return pedidos, sorted(aplicado), "ok" if set(pedidos) <= set(aplicado) else "distinto"
-    if isinstance(aplicado, dict) and aplicado and len(aplicado) == len(pedidos):
-        return pedidos, sorted(aplicado), "ok"
+    if isinstance(aplicado, dict) and pedidos and all(k in aplicado for k in pedidos):
+        leido = {k: aplicado[k] for k in pedidos}
+        iguales = all(_mismo_valor(a[k], aplicado[k]) for k in pedidos)
+        return {k: a[k] for k in pedidos}, leido, "ok" if iguales else "distinto"
     return pedidos, None, "no_medido"
+
+
+def _mismo_valor(pedido: object, leido: object) -> bool:
+    if isinstance(pedido, str) and isinstance(leido, str):
+        return _igual("texto", pedido, leido)
+    return type(pedido) is type(leido) and pedido == leido
 
 
 def _r_bloques(a: dict, i: Info, r: object):
@@ -777,6 +791,12 @@ def resumen_en_seco(plan: Plan, ctx: Contexto) -> str:
         lineas += ["", "## Avisos", ""]
         lineas += [f"- {x}" for x in plan.avisos]
     if plan.operaciones:
-        lineas += ["", "Si te parece bien, respóndeme con un «sí» (por ejemplo: «sí, dale»)."]
+        frase = frase_aprobacion(plan.etapa, plan.huella)
+        pide = (f"Si te parece bien, apruébalo tú con esta frase exacta: «{frase}». Está atada a este plan: si el "
+                "plan cambia, cambia la frase. Ejecuta tú, en tu terminal (fuera de Claude):")
+        orden = f'    trovefy checkout aprobar --producto {ctx.producto} --pais {ctx.pais} --cita "{frase}"'
+        nadie = ("Claude no puede aprobarlo por ti, y cualquier otra respuesta («sí», «ok», «dale») no aprueba "
+                 "nada.")
+        lineas += ["", "## Para aprobarlo", "", pide, "", orden, "", nadie]
     texto = "\n".join(lineas) + "\n"
     return LOCAL.sub("", texto)

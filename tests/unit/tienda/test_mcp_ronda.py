@@ -8,12 +8,14 @@ import json
 from pathlib import Path
 
 import pytest
+from plan_aprobado import plan_aprobado
 from trovefy.tienda import mcp
 from trovefy.tienda.mcp import (
     CatalogoInvalido,
     cargar_catalogo,
     escritura_aprobada,
     huella_catalogo,
+    huella_del_plan,
     huella_evidencia,
     huella_plan,
     redactar_urls_firmadas,
@@ -414,14 +416,19 @@ OPS = [{"herramienta": "impultienda_fijar_precio",
         "argumentos": {"store_id": "00000000-0000-4000-8000-000000000000", "item_id": "i-1", "precio": 13.9}}]
 
 
-def _plan(vault: Path, ops=OPS, *, huella=None, cita="sí, dale", pais="ZZ", plan_huella=None) -> Path:
-    d = vault / "productos" / P / "checkout" / pais
-    d.mkdir(parents=True, exist_ok=True)
-    h = huella_plan(ops) if huella is None else huella
-    (d / "PLAN-MCP.json").write_text(json.dumps({"operaciones": ops, "huella": h}), encoding="utf-8")
-    (d / "APROBACION.md").write_text(
-        f"---\nplan_huella: {plan_huella or h}\ncita: {json.dumps(cita, ensure_ascii=False)}\n"
-        "fecha: 2026-11-17\n---\nAprobado.\n", encoding="utf-8")
+def _plan(vault: Path, ops=OPS, *, huella=None, cita=None, pais="ZZ", plan_huella=None,
+          registrar=True) -> Path:
+    """Un plan aprobado como lo deja `trovefy checkout aprobar` (`plan_aprobado`), con lo que pida el test roto."""
+    d, plan = plan_aprobado(vault, ops, pais=pais, cita=cita, registrar=registrar and cita != "")
+    if huella is not None:
+        plan["huella"] = huella
+        (d / "PLAN-MCP.json").write_text(json.dumps(plan), encoding="utf-8")
+    if huella is not None or plan_huella is not None:
+        texto = (d / "APROBACION.md").read_text(encoding="utf-8")
+        nueva = plan_huella or huella
+        texto = texto.replace(f"plan_huella: {huella_del_plan(plan) if huella else plan['huella']}",
+                              f"plan_huella: {nueva}")
+        (d / "APROBACION.md").write_text(texto, encoding="utf-8")
     return d
 
 
@@ -442,7 +449,8 @@ def test_escritura_aprobada(tmp_path):
     assert escritura_aprobada(tmp_path, cat["impultienda_crear_embudo"], args) is not None
 
 
-@pytest.mark.parametrize("roto", ["huella_falsa", "aprobacion_otra", "sin_cita", "pais_raro"])
+@pytest.mark.parametrize("roto", ["huella_falsa", "aprobacion_otra", "sin_cita", "pais_raro", "sin_mensaje",
+                                  "otra_frase"])
 def test_aprobacion_rota_no_vale(tmp_path, roto):
     h = cargar_catalogo()["impultienda_fijar_precio"]
     if roto == "huella_falsa":
@@ -451,6 +459,10 @@ def test_aprobacion_rota_no_vale(tmp_path, roto):
         _plan(tmp_path, plan_huella="1" * 64)
     elif roto == "sin_cita":
         _plan(tmp_path, cita="")
+    elif roto == "sin_mensaje":  # C1: plan y aprobación íntegros, pero el usuario nunca escribió la frase
+        _plan(tmp_path, registrar=False)
+    elif roto == "otra_frase":  # H3: una cita que no es la frase de este plan
+        _plan(tmp_path, cita="sí, dale")
     else:
         _plan(tmp_path, pais="../ZZ")
     assert escritura_aprobada(tmp_path, h, OPS[0]["argumentos"]) is not None
