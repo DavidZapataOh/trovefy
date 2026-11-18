@@ -1,0 +1,3 @@
+{"producto": {"id": "00000000-0000-4000-8000-000000000002", "titulo": "Спокойно тяло"},
+ "antes": {"precio": 9.9, "precio_original": 19.9}, "ahora": {"precio": 13.9, "precio_original": null},
+ "moneda": "USD"}

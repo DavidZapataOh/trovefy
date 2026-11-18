@@ -95,6 +95,17 @@
           }
         ]
       }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/mensaje_usuario.py\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   }
 }

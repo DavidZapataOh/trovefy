@@ -40,7 +40,7 @@ VOCABULARIO: tuple[str, ...] = (
     rf"market\.{_P}\.(activo|moneda|paises|precio_front)",
     r"tracking\.pixel_id",
     r"producto\.front\.(titulo|precio|entregable)",
-    r"checkout\.(idioma|campos|temporizador|cupos|foto|plantilla|boton)",
+    r"checkout\.(idioma|campos|temporizador|cupos|foto|plantilla|boton|garantia|clarity)",
     r"bump\.(titulo|precio|entregable|activo)",
     r"postcompra\.u[123]\.(titulo|precio|entregable|pagina|activo)",
     r"downsell\.[a-z_]+",
@@ -442,6 +442,32 @@ class _Receta:
         self.poner("checkout.boton", "verde", f"botón de pagar verde ({VERDE}; R-f)", "V1 0:31:50", True,
                    Llamada("impultienda_configurar_checkout", {"store_id": "<store_id>", "color_boton_pagar": VERDE},
                            None))
+        self.garantia()
+        self.poner("checkout.clarity", "fuera del checkout",
+                   "quita Clarity del checkout (Configuraciones → Tracking de tu tienda): el checkout es una página de "
+                   "Impultienda sin aviso de cookies y Clarity solo carga en la landing tras el consentimiento; "
+                   "configurar_tracking es prohibida (R-d), así que lo haces tú", None, True)
+
+    def garantia(self) -> None:
+        """La garantía del checkout, la misma que promete la landing (``core.garantia_dias`` de OFERTA.md). El conector
+        solo deja mostrarla u ocultarla (``ocultar_garantia``), no fijar los días: va a mano."""
+        from trovefy.vault import frontmatter
+
+        dias = None
+        oferta = self.dir_producto / "OFERTA.md"
+        if oferta.is_file() and not oferta.is_symlink():
+            meta, _ = frontmatter.leer(oferta)
+            core = meta.get("core") if isinstance(meta, dict) else None
+            valor = core.get("garantia_dias") if isinstance(core, dict) else None
+            dias = valor if isinstance(valor, int) and not isinstance(valor, bool) and valor > 0 else None
+        if dias is None:
+            self.avisos.append("no medido: falta core.garantia_dias en OFERTA.md: pon en el checkout la misma garantía "
+                               "que dice la landing")
+        texto = f"{dias} días" if dias else "la misma que la landing"
+        self.poner("checkout.garantia", texto,
+                   f"garantía de {texto} en el checkout, la misma que promete la landing (una garantía distinta "
+                   "confunde al comprador); el conector no deja fijar los días: lo cambias tú en tu panel",
+                   None, True)
 
     def bump(self) -> None:
         if not self.o.bump_apagado:
@@ -586,6 +612,7 @@ def ajustes_de_checkout(ctx: Contexto, limites_plan: dict | None, emails: dict[s
 _PESTANAS: tuple[tuple[str, str], ...] = (
     (r"tienda\.", "General"),
     (r"checkout\.idioma", "General"),
+    (r"checkout\.clarity", "Meta / Tracking"),
     (r"market\.", "búscalo en tu panel: Markets"),
     (r"producto\.", "búscalo en tu panel: Productos (el principal)"),
     (r"checkout\.", "búscalo en tu panel: Diseño de checkout"),
@@ -599,7 +626,8 @@ _NOMBRES = {
     "producto.front.precio": "Precio", "producto.front.entregable": "Entregable (PDF)",
     "checkout.campos": "Datos que se piden", "checkout.temporizador": "Temporizador", "checkout.cupos": "Cupos",
     "checkout.foto": "Imagen arriba del checkout", "checkout.plantilla": "Plantilla",
-    "checkout.boton": "Color del botón de pagar",
+    "checkout.boton": "Color del botón de pagar", "checkout.garantia": "Garantía",
+    "checkout.clarity": "Microsoft Clarity en el checkout",
 }
 
 

@@ -29,6 +29,10 @@ las grafías del vault y los globs, expandidos y como patrón), al modo de ``raw
 - ``productos/*/entregable/**/QC.md``, ``.QC.md.lock`` y ``entregable/**/*.pdf`` (M3 de las Tareas 11–12):
   solo los escribe ``trovefy producto``; ni Write/Edit/MultiEdit ni Bash (``>``, ``cp``, ``mv``, ``rm``,
   ``sed -i``, intérpretes…), tampoco en bloque sobre una carpeta que los contenga. Leerlos sí.
+- El registro de los mensajes del usuario (``~/.config/trovefy/mensajes-usuario.json``, plan 19, Tarea 11), que
+  prueba que una aprobación de `trovefy checkout aprobar` es suya: solo lo escribe el hook ``UserPromptSubmit``. Se
+  deniega cualquier Bash que importe ``trovefy.checkout.mensajes``, llame a ``registrar_mensaje``, nombre el
+  archivo o lance ``hooks/mensaje_usuario.py`` (salvo un segmento de solo lectura/desarrollo, como arriba).
 - ``.trovefy/STOP``: crearlo sí; borrarlo o moverlo no (lo quita el usuario).
 - ``git checkout|restore|stash|reset|clean|switch…`` con el vault como directorio (cwd, ``cd``, ``-C``) o
   sobre una ruta del vault cuentan como escritura y se deniegan.
@@ -96,6 +100,8 @@ MOTIVO_PANTALLAS = ("las confirmaciones de pantalla las escribe solo `trovefy la
                     "usuario en su terminal con la pantalla delante: no se crean, editan, mueven ni borran a mano")
 MOTIVO_CAPTURAR = ("`trovefy landing capturar` (la confirmación de la pantalla) lo ejecuta el usuario en su "
                    "terminal, no Claude: dale la orden y espera a que te diga que terminó")
+MOTIVO_MENSAJES = ("el registro de tus mensajes (la prueba de que una aprobación es tuya) solo lo escribe el hook al "
+                   "enviar tú un mensaje: Claude no lo escribe ni lanza ese hook a mano")
 MOTIVO_OTRO_VAULT = ("`trovefy landing sonda|publicar` se lanza con el vault de siempre, sin cambiar TROVEFY_VAULT: "
                      "lo ejecuta el usuario en su terminal")
 MOTIVO_EVIDENCIA = ("config/evidencia/p05-* (la evidencia de la sonda y las capturas de las pantallas confirmadas) "
@@ -125,6 +131,9 @@ _INTERPRETE = re.compile(
 _GASTO = re.compile(r"costes\.csv|\.apimart-intentos\.jsonl|\.apimart\.lock", re.IGNORECASE)
 _CAPTURAR = re.compile(r"landing\w*\s+capturar|tienda\.confirmacion|tienda\s+import\s+confirmacion"
                        r"|confirmar_pantalla|capturar_pantalla")
+# El registro de los mensajes del usuario (plan 19, Tarea 11): solo lo escribe el hook UserPromptSubmit.
+_MENSAJES = re.compile(r"checkout\.mensajes|checkout\s+import\s+mensajes|registrar_mensaje|mensajes-usuario"
+                       r"|mensaje_usuario\.py")
 _OTRO_VAULT = re.compile(r"\bTROVEFY_VAULT\s*=|\benv\b[^;&|\n]*\bTROVEFY_VAULT\b")
 _SONDA_PUBLICAR = re.compile(r"landing\w*\s+(?:sonda|publicar)\b")
 _ARCHIVOS_GASTO = (".apimart-intentos.jsonl", ".apimart.lock")
@@ -549,14 +558,15 @@ def _sin_cuerpo_qc(comando: str) -> str:
     return primera  # sin línea de cierre, bash lee el cuerpo hasta el final
 
 
-def _capturar(c: str, segmentos: list[str]) -> bool:
-    """¿El comando lanza (o importa) la confirmación de pantallas? Solo la lanza el usuario (F1-1)."""
-    if not _CAPTURAR.search(c):
+def _capturar(c: str, segmentos: list[str], patron: re.Pattern[str] = _CAPTURAR) -> bool:
+    """¿El comando lanza (o importa) la confirmación de pantallas? Solo la lanza el usuario (F1-1). Con
+    ``patron=_MENSAJES``: ¿toca el registro de los mensajes del usuario? Solo lo escribe su hook (Tarea 11 del 19)."""
+    if not patron.search(c):
         return False
     if _SUBCOMANDO.search(c) or _fondo(c):
         return True
     for seg in segmentos:
-        if _INTERPRETE.match(seg) or _CAPTURAR.search(seg) and not (
+        if _INTERPRETE.match(seg) or patron.search(seg) and not (
                 _LECTURA.match(seg) and not _OPCION_PELIGROSA.search(seg) and not _escribe(seg)):
             return True
     return False
@@ -569,6 +579,8 @@ def _bash(comando: str, cwd: str | None = None) -> tuple[str, str]:
         segmentos = _segmentos(c)
         if _capturar(c, segmentos):
             return "deny", MOTIVO_CAPTURAR
+        if _capturar(c, segmentos, _MENSAJES):
+            return "deny", MOTIVO_MENSAJES
         if _OTRO_VAULT.search(c) and _SONDA_PUBLICAR.search(c):
             return "deny", MOTIVO_OTRO_VAULT
         motivo = _bash_rutas(variante, c, cwd)

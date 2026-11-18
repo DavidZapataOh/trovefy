@@ -1,7 +1,8 @@
 """Subcomando `trovefy checkout` (plan 19): el checkout se arma por el MCP o, de respaldo, a mano por el usuario.
 
-trovefy nunca entra al panel (resolución 38). Este módulo empieza con `evidencia` (Tarea 6): registrar lo que el
-usuario pega (una captura, un texto) o dice, como prueba de lo que hizo en su propio navegador.
+trovefy nunca entra al panel (resolución 38). `evidencia` (Tarea 6): registrar lo que el usuario pega (una captura, un
+texto) o dice, como prueba de lo que hizo en su propio navegador. `plan`, `aprobar` y `releer` (Tarea 11): el
+checkout por el MCP, etapa a etapa (`trovefy.checkout.mcp_cli`).
 
 Códigos de salida: 0 bien · 1 una puerta no pasa · 2 error de uso o de entrada. Nunca una traza.
 """
@@ -47,6 +48,9 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
     fuente.add_argument("--dicho", help="las palabras literales del usuario, entre comillas")
     ev.add_argument("--valor", action="append", default=[], metavar="NOMBRE=VALOR",
                     help="lo que se lee en la captura y el usuario confirmó (se puede repetir)")
+    from trovefy.checkout import mcp_cli
+
+    mcp_cli.configurar(sub, _comunes)
     _configurar_fuera(sub)
 
 
@@ -197,6 +201,10 @@ _ACCIONES_FUERA = {"comprobar": _comprobar, "manual": _manual, "demo": _demo}
 def _ejecutar(args: argparse.Namespace) -> int:
     if args.accion == "evidencia":
         return _evidencia(args)
+    if args.accion in ("plan", "aprobar", "releer"):
+        from trovefy.checkout import mcp_cli
+
+        return mcp_cli.ejecutar(args.accion, args, _reloj())
     if args.accion in _ACCIONES_FUERA:
         return _ACCIONES_FUERA[args.accion](args)
     return _error(f"acción desconocida: {args.accion}")

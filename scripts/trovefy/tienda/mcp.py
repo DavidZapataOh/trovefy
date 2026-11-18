@@ -22,9 +22,10 @@ rutas de parámetro del tipo ``a.b`` o ``bloques[].tipo``:
 - ``devuelve_url_firmada``: la respuesta trae URLs firmadas de corta vida (M-5): pásala por
   `redactar_urls_firmadas` antes de guardarla.
 
-Escrituras (contrato mínimo hasta la Tarea 11): solo las que lista un ``checkout/<PAIS>/PLAN-MCP.json``
-(``{"operaciones": [{herramienta, argumentos}], "huella": sha256}``) cuya huella está en el ``plan_huella`` de un
-``APROBACION.md`` al lado, con la cita literal del usuario en ``cita`` (ver `escritura_aprobada`).
+Escrituras: solo las que lista un ``checkout/<PAIS>/PLAN-MCP.json`` (``{"operaciones": [{herramienta, argumentos}],
+"huella": sha256}``) cuya huella está en el ``plan_huella`` de un ``APROBACION.md`` al lado, con la cita literal del
+usuario en ``cita`` (ver `escritura_aprobada`). Desde la Tarea 11 ese plan es el de una etapa
+(`trovefy.checkout.mcp_cli`): `trovefy checkout releer` retira la aprobación al releer la etapa.
 
 Solo biblioteca estándar: el hook lo importa con el python3 del sistema. La CLI nunca llama al MCP.
 """
@@ -596,6 +597,12 @@ def _casa(op: object, h: Herramienta, argumentos: dict) -> bool:
     elif argumentos.get("confirmar", False) is not False:
         return False
     return _canon(base) == esperado
+
+
+def casa_con_operacion(op: object, h: Herramienta, argumentos: dict) -> bool:
+    """¿``argumentos`` es la operación ``op`` (``{herramienta, argumentos}``) de un plan: exacta, o su vista previa o
+    su confirmación con el token de la vista previa? Lo mismo que mira la guarda (`escritura_aprobada`)."""
+    return _casa(op, h, argumentos)
 
 
 def escritura_aprobada(vault: Path, h: Herramienta, argumentos: dict) -> str | None:

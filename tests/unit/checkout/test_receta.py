@@ -483,12 +483,81 @@ def test_limites_del_plan_en_el_mapa():
 # --- M6 (revisión T6–10): ids en tiempo de ejecución → Tarea 11 -------------------------------------------------
 
 
-@pytest.mark.xfail(strict=True, raises=ImportError,
-                   reason="M6: los ids que solo se conocen al ejecutar (<store_id>, <item_id:…>, <oferta_id:…>, "
-                          "<bloques:abajo>…) hacen que el plan aprobado no pueda llevar su huella final de una vez. "
-                          "Se resuelve en la Tarea 11 con planes por etapas (cada etapa se aprueba con los ids ya "
-                          "leídos). Este test pasa a verde cuando exista trovefy.checkout.etapas.")
-def test_m6_plan_por_etapas_con_ids_de_la_lectura():
-    from trovefy.checkout.etapas import etapas_de  # noqa: F401 - Tarea 11
+def test_m6_plan_por_etapas_con_ids_de_la_lectura(zz):
+    """Los ids que solo se conocen al ejecutar (``<market_id>``, ``<item_id:u1>``, ``<ruta:…>``, ``<oferta_id:u1>``,
+    ``<bloques:abajo>``, ``<url:mockup>``) parten la receta en etapas: cada etapa solo lleva marcadores que ya se
+    conocen por las lecturas o por las escrituras de etapas anteriores, así que cada una se aprueba con sus ids ya
+    rellenos y su huella final."""
+    from trovefy.checkout.etapas import etapas_de, produce
 
-    raise AssertionError("Tarea 11: quita el xfail y prueba que cada etapa se aprueba con sus ids ya rellenos")
+    ctx, emails = zz
+    aj, _ = ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))
+    leidos = {"<store_id>", "<item_id:front>"}  # de listar_tiendas y listar_productos
+    etapas = etapas_de(aj, leidos)
+    assert len(etapas) >= 3
+    conocidos = set(leidos)
+    vistos: list[str] = []
+    for etapa in etapas:
+        assert etapa
+        for paso in etapa:
+            faltan = marcadores(paso.argumentos) - conocidos
+            assert {m for m in faltan if not m.startswith("<html:")} == set(), (paso.herramienta, faltan)
+        for paso in etapa:
+            conocidos |= produce(paso)
+            vistos.append(paso.herramienta)
+    # Todas las llamadas de la receta acaban en alguna etapa, en orden de dependencias.
+    claves = [p.clave for e in etapas for p in e]
+    assert len(claves) == len(set(claves))
+    assert len(claves) == len(operaciones(aj)) + 2  # + la vista previa de los bloques y el enlace de Recursos
+    assert {o["herramienta"] for o in operaciones(aj)} <= set(vistos)
+    primera = {p.herramienta for p in etapas[0]}
+    assert "impultienda_precio_por_pais" not in primera          # espera al <market_id> del mercado creado
+    assert "impultienda_guardar_html_postcompra" not in primera  # espera a la oferta del funnel
+    pos = {h: i for i, e in enumerate(etapas) for h in (p.herramienta for p in e)}
+    assert pos["impultienda_crear_funnel_postcompra"] > pos["impultienda_crear_producto"]
+    assert pos["impultienda_guardar_html_postcompra"] > pos["impultienda_crear_funnel_postcompra"]
+    # Con el mercado ya leído, el precio del front entra en la primera etapa.
+    etapas_con_mercado = etapas_de(aj, leidos | {"<market_id>"})
+    assert any(p.herramienta == "impultienda_precio_por_pais" and "item_id" not in p.argumentos
+               for p in etapas_con_mercado[0])
+
+
+# --- hallazgos en la tienda real (2026-11-17) ----------------------------------------------------------------------
+
+
+def test_hallazgos_de_la_tienda_real_quedan_cubiertos(zz):
+    """Precio 0, barra «5 души купуват в момента», campo apellido, botón azul sin foto, garantía de 7 días y Clarity
+    en el checkout: la receta fija cada uno por el conector o, si no hay herramienta, lo deja a mano."""
+    ctx, emails = zz
+    from trovefy.vault import frontmatter
+
+    frontmatter.escribir(ctx.vault / "productos" / P / "OFERTA.md", {"tipo": "oferta", "core": {"garantia_dias": 30}},
+                         "Ficticio.\n")
+    aj = _por_clave(ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))[0])
+    llamadas = [(a.clave, ll) for a in aj.values() for ll in a.llamadas]
+    args = [(c, ll.herramienta, ll.argumentos) for c, ll in llamadas]
+    # Precio de ZZ por Markets, 13,90 EUR, sin tachado.
+    assert ("producto.front.precio", "impultienda_precio_por_pais",
+            {"store_id": "<store_id>", "market_id": "<market_id>", "precio": 13.9, "precio_original": None}) in args
+    checkout = {k: v for _, h, a in args if h == "impultienda_configurar_checkout" for k, v in a.items()}
+    assert checkout["ocultar_barra_compradores"] is True
+    assert checkout["pedir_telefono"] is True and checkout["pedir_apellido"] is False
+    assert checkout["color_boton_pagar"] == "#16a34a" and checkout["resumen_posicion"] == "top"
+    assert any(h == "impultienda_bloques_checkout" and a["posicion"] == "arriba" and a["bloques"][0]["tipo"] == "image"
+               for _, h, a in args)
+    # Garantía: el catálogo solo tiene `ocultar_garantia` (sin días) → a mano, con los días de OFERTA.md.
+    con_garantia = [n for n, h in CATALOGO.items() if h.clase == "escritura"
+                    and any("garant" in k and k != "ocultar_garantia" for k in h.esquema.get("properties", {}))]
+    assert con_garantia == []
+    assert aj["checkout.garantia"].valor == "30 días" and aj["checkout.garantia"].llamadas == ()
+    # Clarity fuera del checkout: a mano (configurar_tracking es prohibida).
+    assert aj["checkout.clarity"].llamadas == () and CATALOGO["impultienda_configurar_tracking"].clase == "prohibida"
+    pasos = {p.ajustes[0]: p for p in receta_manual(aj.values())[1:]}
+    assert pasos["checkout.clarity"].pestana == "Meta / Tracking"
+
+
+def test_garantia_sin_oferta_no_medida(zz):
+    ctx, emails = zz
+    aj, avisos = ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))
+    assert _por_clave(aj)["checkout.garantia"].valor == "la misma que la landing"
+    assert any("garantia_dias" in a for a in avisos)
