@@ -342,3 +342,11 @@ def test_cli_sin_dataset(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("TROVEFY_VAULT", str(v))
     assert cli.main(["tracking", "preparar", "--producto", P, "--pais", PAIS]) == 0
     assert cli.main(_eventos("--antes", str(FIX / "stats-antes.json"), "--despues", str(FIX / "stats-despues.json"))) == 2
+
+
+def test_capi_en_meta_con_dataset_id():
+    """`ads_get_dataset_details` puede traer `dataset_id` en vez de `id` (forma real de ads_get_datasets)."""
+    from datetime import UTC, datetime
+
+    datos = {"dataset_id": DATASET, "server_last_fired_time": "2099-01-01T00:00:00+0000"}
+    assert capi_en_meta(datos, DATASET, datetime(2026, 1, 1, tzinfo=UTC)) is True

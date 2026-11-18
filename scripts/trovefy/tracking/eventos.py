@@ -171,7 +171,7 @@ def capi_en_meta(instantanea: object, dataset_id: str, desde: datetime) -> bool 
     ``server_last_fired_time``. ``True`` si esa hora es posterior a `desde`; ``False`` si está vacía o es anterior;
     ``None`` («no medido») si la respuesta es de otro dataset, no trae esas claves o la hora no se entiende."""
     datos = desenvolver(instantanea)
-    if not isinstance(datos, dict) or str(datos.get("id")) != dataset_id or "server_last_fired_time" not in datos:
+    if not isinstance(datos, dict) or str(datos.get("id", datos.get("dataset_id"))) != dataset_id or "server_last_fired_time" not in datos:
         return None
     valor = datos["server_last_fired_time"]
     if valor is None or (isinstance(valor, str) and not valor.strip()):

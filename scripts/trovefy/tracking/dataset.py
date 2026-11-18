@@ -53,7 +53,7 @@ def buscar_dataset(instantanea: object, nombre: str) -> tuple[str | None, str | 
     lista = _lista(instantanea)
     if lista is None or not all(isinstance(d, dict) for d in lista):
         return None, "no medido: la respuesta de ads_get_datasets no tiene la forma esperada"
-    iguales = [d for d in lista if d.get("name") == nombre]
+    iguales = [{**d, "id": d.get("id", d.get("dataset_id"))} for d in lista if d.get("name") == nombre]
     if any(not isinstance(d.get("id"), str) or not _ID.fullmatch(d["id"]) for d in iguales):
         return None, "no medido: un dataset con ese nombre trae un id que no es numérico"
     if not iguales:
