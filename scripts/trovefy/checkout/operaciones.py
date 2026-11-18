@@ -467,12 +467,28 @@ def _r_aplicado(a: dict, i: Info, r: object):
     pedidos = sorted(k for k in a if k != "store_id")
     aplicado = r.get("aplicado") if isinstance(r, dict) else None
     if isinstance(aplicado, list) and aplicado and all(isinstance(x, str) for x in aplicado):
-        return pedidos, sorted(aplicado), "ok" if set(pedidos) <= set(aplicado) else "distinto"
-    if isinstance(aplicado, dict) and pedidos and all(k in aplicado for k in pedidos):
-        leido = {k: aplicado[k] for k in pedidos}
-        iguales = all(_mismo_valor(a[k], aplicado[k]) for k in pedidos)
-        return {k: a[k] for k in pedidos}, leido, "ok" if iguales else "distinto"
+        confirmados = set(aplicado)
+        bien = all(k in confirmados or COLUMNAS_PANEL.get(k) in confirmados for k in pedidos)
+        return pedidos, sorted(aplicado), "ok" if bien else "distinto"
+    if isinstance(aplicado, dict) and pedidos:
+        claves = {k: k if k in aplicado else COLUMNAS_PANEL.get(k) for k in pedidos}
+        if all(c in aplicado for c in claves.values()):
+            leido = {k: aplicado[c] for k, c in claves.items()}
+            iguales = all(_mismo_valor(a[k], leido[k]) for k in pedidos)
+            return {k: a[k] for k in pedidos}, leido, "ok" if iguales else "distinto"
     return pedidos, None, "no_medido"
+
+
+# Nombre de columna del panel con que el conector confirma cada parámetro (respuestas reales, BG 2026-11-18).
+COLUMNAS_PANEL: dict[str, str] = {
+    "pedir_nombre": "checkout_fields",
+    "pedir_apellido": "checkout_fields",
+    "pedir_telefono": "checkout_fields",
+    "ocultar_barra_compradores": "checkout_hide_social_proof",
+    "resumen_posicion": "checkout_summary_position",
+    "color_boton_pagar": "checkout_pay_button_color",
+    "minutos_timer_bump": "checkout_bump_timer_minutes",
+}
 
 
 def _mismo_valor(pedido: object, leido: object) -> bool:

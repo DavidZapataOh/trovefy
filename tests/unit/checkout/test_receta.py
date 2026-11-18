@@ -562,3 +562,8 @@ def test_garantia_sin_oferta_no_medida(zz):
     aj, avisos = ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))
     assert _por_clave(aj)["checkout.garantia"].valor == "la misma que la landing"
     assert any("garantia_dias" in a for a in avisos)
+
+
+def test_limpiar_bloques_respuesta_real_sin_bloques():
+    """La vista previa real describe la posición vacía como ["(sin bloques)"] (BG, 2026-11-18)."""
+    assert limpiar_bloques(["(sin bloques)"]) == ([], [])

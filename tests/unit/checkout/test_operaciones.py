@@ -248,3 +248,24 @@ def test_pagina_html_escapa_y_pone_botones():
     assert '<button type="button" data-pp-accept>Да, искам го</button>' in html
     assert "data-pp-decline" in html and "<h2>Благодаря</h2>" in html and "guion" not in html
     assert pagina_html("## Solo texto\n\n[[aceptar: Sí]]\n") is None
+
+
+def test_aplicado_con_los_nombres_reales_del_conector():
+    """Respuestas reales del conector (BG, 2026-11-18): `configurar_checkout` confirma columnas del panel
+    (`checkout_fields`, …) y `disenar_checkout` devuelve `{checkout_bump_timer_minutes: 0}`."""
+    rcampos = REGLAS["impultienda_configurar_checkout"].releer
+    campos = {"store_id": STORE, "pedir_nombre": True, "pedir_apellido": False, "pedir_telefono": True}
+    assert rcampos(campos, None, {"aplicado": ["checkout_fields"]})[2] == "ok"
+    assert rcampos({"store_id": STORE, "ocultar_barra_compradores": True}, None,
+                   {"aplicado": ["checkout_hide_social_proof"]})[2] == "ok"
+    assert rcampos({"store_id": STORE, "resumen_posicion": "top"}, None,
+                   {"aplicado": ["checkout_summary_position"]})[2] == "ok"
+    assert rcampos({"store_id": STORE, "color_boton_pagar": "#16a34a"}, None,
+                   {"aplicado": ["checkout_pay_button_color"]})[2] == "ok"
+    # Una columna que no corresponde sigue siendo «distinto».
+    assert rcampos({"store_id": STORE, "color_boton_pagar": "#16a34a"}, None,
+                   {"aplicado": ["checkout_fields"]})[2] == "distinto"
+    rdis = REGLAS["impultienda_disenar_checkout"].releer
+    pedido = {"store_id": STORE, "minutos_timer_bump": 0}
+    assert rdis(pedido, None, {"aplicado": {"checkout_bump_timer_minutes": 0}})[2] == "ok"
+    assert rdis(pedido, None, {"aplicado": {"checkout_bump_timer_minutes": 5}})[2] == "distinto"

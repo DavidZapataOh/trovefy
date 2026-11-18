@@ -219,6 +219,8 @@ def limpiar_bloques(actuales: object) -> tuple[list[dict], list[str]]:
         raise ValueError("los bloques actuales no son una lista: no se reenvía nada (no medido)")  # noqa: TRY004 - dato del MCP
     limpios: list[dict] = []
     avisos: list[str] = []
+    # La vista previa real describe una posición vacía como ["(sin bloques)"].
+    actuales = [b for b in actuales if not (isinstance(b, str) and b.strip().casefold() == "(sin bloques)")]
     for n, b in enumerate(actuales, 1):
         tipo = b.get("tipo") if isinstance(b, dict) else None
         if tipo in ("countdown", "stock"):
