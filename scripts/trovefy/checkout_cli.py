@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import sys
 from datetime import datetime
+from pathlib import Path
 
 from trovefy.cli import registrar
 from trovefy.vault.escritura import ZONA_NEGOCIO
@@ -46,6 +47,7 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
     fuente.add_argument("--dicho", help="las palabras literales del usuario, entre comillas")
     ev.add_argument("--valor", action="append", default=[], metavar="NOMBRE=VALOR",
                     help="lo que se lee en la captura y el usuario confirmó (se puede repetir)")
+    _configurar_fuera(sub)
 
 
 def _parsear_valores(pares: list[str]) -> dict[str, str]:
@@ -80,9 +82,93 @@ def _evidencia(args: argparse.Namespace) -> int:
     return 0
 
 
+# --- comprobación desde fuera, respaldo manual y demo (Tareas 12–13) ------------------------------------------
+
+_RUTA_MAPA = Path(__file__).resolve().parents[2] / "templates" / "impultienda" / "mapa.yaml"
+_ESTADOS_FUERA = ("con_landing", "con_checkout")
+
+
+def _configurar_fuera(sub) -> None:
+    co = sub.add_parser("comprobar", help="mira el checkout público como un comprador (sin panel) y escribe "
+                                          "COMPROBACION.md")
+    ma = sub.add_parser("manual", help="imprime y guarda la receta de lo que haces tú en tu panel (no lo abre)")
+    for p in (co, ma):
+        _comunes(p)
+        p.add_argument("--plan", default="Max", help="plan de Impultienda con el que se calcula la receta (Max)")
+
+
+def _contexto_y_ajustes(args: argparse.Namespace):
+    from trovefy.checkout.emails import CLAVES_EMAIL, ruta_email
+    from trovefy.checkout.receta import OpcionesReceta, ajustes_de_checkout
+    from trovefy.embudo.contexto import cargar_contexto, exigir_estado, ruta_pais
+    from trovefy.mapa import cargar, limites_de_plan
+    from trovefy.vault.rutas import vault_root
+
+    vault = vault_root()
+    ctx = cargar_contexto(vault, args.producto, args.pais.strip().upper())
+    exigir_estado(ctx, _ESTADOS_FUERA)
+    emails = {c: r for c in CLAVES_EMAIL if (r := ruta_email(ruta_pais(ctx), c)).is_file()}
+    ajustes, avisos = ajustes_de_checkout(ctx, limites_de_plan(cargar(_RUTA_MAPA), args.plan), emails,
+                                          OpcionesReceta(args.plan))
+    return vault, ctx, ajustes, avisos
+
+
+def _comprobar(args: argparse.Namespace) -> int:
+    import importlib
+
+    from trovefy.checkout.manual import cerrar_manual
+    from trovefy.embudo.pegado import indice
+
+    fuera = importlib.import_module("trovefy.checkout.fuera")
+    try:
+        vault, ctx, ajustes, _ = _contexto_y_ajustes(args)
+        pagina = fuera.leer_checkout_publico(ctx)
+        ver_como = None
+        if not (fuera._es_checkout(pagina, ctx) and pagina.moneda_vista == ctx.moneda
+                and pagina.pais_visto in (None, ctx.pais)):
+            ver_como = fuera.leer_ver_como(ctx)
+        idx = indice(vault, ctx)
+        estados = fuera.comprobar_fuera(ctx, ajustes, pagina, idx, ver_como=ver_como)
+        manuales = [cerrar_manual(a, idx) for a in ajustes if not a.llamadas]
+        ruta = fuera.escribir_comprobacion(vault, ctx, estados, manuales, _reloj())
+    except (ValueError, OSError) as exc:
+        return _error(exc)
+    estado = fuera.estado_global([*estados, *manuales])
+    print(f"Checkout {ctx.pais} visto desde fuera: {estado} → productos/{args.producto}/"
+          f"{ruta.relative_to(ruta.parents[2]).as_posix()}")
+    for e in [*estados, *manuales]:
+        print(f"  [{e.estado}] {e.clave}: {e.detalle}")
+    return 0 if estado == "completo" else 1
+
+
+def _manual(args: argparse.Namespace) -> int:
+    from trovefy.checkout.manual import plan_manual
+    from trovefy.embudo.contexto import ruta_pais
+    from trovefy.vault.escritura import anadir_log, escribir_atomico
+
+    try:
+        vault, ctx, ajustes, avisos = _contexto_y_ajustes(args)
+        texto = plan_manual([a for a in ajustes if not a.llamadas], producto=ctx.producto, pais=ctx.pais)
+        ruta = ruta_pais(ctx) / "RECETA-manual.md"
+        escribir_atomico(ruta, texto)
+        anadir_log(vault, "checkout", f"{ctx.producto} {ctx.pais}: receta manual del checkout",
+                   [ruta.relative_to(vault).as_posix()], ahora=_reloj())
+    except (ValueError, OSError) as exc:
+        return _error(exc)
+    print(texto, end="")
+    for aviso in avisos:
+        print(f"Aviso: {aviso}")
+    return 0
+
+
+_ACCIONES_FUERA = {"comprobar": _comprobar, "manual": _manual}
+
+
 def _ejecutar(args: argparse.Namespace) -> int:
     if args.accion == "evidencia":
         return _evidencia(args)
+    if args.accion in _ACCIONES_FUERA:
+        return _ACCIONES_FUERA[args.accion](args)
     return _error(f"acción desconocida: {args.accion}")
 
 

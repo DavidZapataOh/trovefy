@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<!-- Checkout público ficticio (tienda de prueba) tal como queda tras pintarse en Chromium y marcar con
+     data-tf-oculto lo que no se ve. Imita la forma del checkout de Impultienda (2026-11-17) con datos inventados. -->
+<html lang="bg"><head><meta charset="utf-8"><title>Checkout - Somatix</title>
+<script>var reloj = "09:59"; /* un script no es texto visible */</script>
+<style>.x{content:"Остават само 3 места"}</style></head>
+<body>
+<header><span>Сигурно плащане</span></header>
+<section id="resumen">
+  <img src="https://prueba.impultienda.example/recursos/mockup.webp" alt="Спокойно тяло">
+  <h2>Спокойно тяло</h2>
+  <p class="precio">13,90 €</p>
+  <p>Получаваш ръководството веднага след плащането, на имейла си. Без абонамент и без скрити такси.</p>
+</section>
+<section id="datos">
+  <h3>Лични данни</h3>
+  <label>Имейл *</label>
+  <input type="email" id="checkout-email" name="email" autocomplete="email" placeholder="Имейл *">
+  <div id="field-first-name"><label>Име *</label>
+    <input type="text" id="checkout-first-name" name="given-name" autocomplete="given-name"></div>
+  <div id="field-last-name" data-tf-oculto="1"><label>Фамилия *</label>
+    <input type="text" id="checkout-last-name" name="family-name" autocomplete="family-name"></div>
+  <label>Телефон *</label>
+  <input type="tel" id="checkout-phone" name="phone" autocomplete="tel">
+  <select id="checkout-country" name="country" autocomplete="country" data-tf-oculto="1"><option>България</option></select>
+  <div data-tf-oculto="1"><input type="text" id="checkout-address" name="address-line1" autocomplete="address-line1"></div>
+  <input type="radio" name="payment_method" value="impulpay" checked>
+</section>
+<div id="order-bumps-mobile" class="lg:hidden"></div>
+<div id="order-bumps-desktop" data-tf-oculto="1"></div>
+<button type="button" id="pay-btn">Плати 13,90 €</button>
+<input type="hidden" id="store-name" value="Somatix">
+<input type="hidden" id="store-language" value="bg">
+<input type="hidden" id="ebook-title" value="Спокойно тяло">
+<input type="hidden" id="ebook-main-price" value="13.9">
+<input type="hidden" id="ebook-main-override-price" value>
+<input type="hidden" id="ebook-currency" value="EUR">
+<input type="hidden" id="ebook-seller-currency" value="USD">
+<input type="hidden" id="buyer-country" value="ZZ">
+<input type="hidden" id="pay-button-color" value="#16a34a">
+<input type="hidden" id="i18n-widget-countdown" value="Офертата изтича след">
+<input type="hidden" id="i18n-widget-stock" value="Остават само {count} места">
+<input type="hidden" id="i18n-people-buying" value="<strong>{n} души</strong> купуват в момента">
+<footer><p>Сигурно плащане. 30 дни гаранция: ако не ти хареса, ще ти върнем цялата сума.</p></footer>
+</body></html>

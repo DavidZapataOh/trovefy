@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<!-- El mismo checkout ficticio visto desde otro país (la tienda muestra la moneda y el idioma del comprador por su
+     IP): USD y español. -->
+<html lang="es"><head><meta charset="utf-8"><title>Checkout - Somatix</title></head>
+<body>
+<header><span>Pago seguro</span></header>
+<section id="resumen">
+  <img src="https://prueba.impultienda.example/recursos/mockup.webp" alt="Спокойно тяло">
+  <h2>Спокойно тяло</h2>
+  <p class="precio">US$ 15,29</p>
+  <p>Recibes la guía en tu correo apenas termine el pago. Sin suscripción y sin costos ocultos.</p>
+</section>
+<section id="datos">
+  <h3>Datos personales</h3>
+  <label>Correo electrónico *</label>
+  <input type="email" id="checkout-email" name="email" autocomplete="email">
+  <div id="field-first-name"><label>Tu nombre *</label>
+    <input type="text" id="checkout-first-name" name="given-name" autocomplete="given-name"></div>
+  <div id="field-last-name" data-tf-oculto="1"><label>Tu apellido *</label>
+    <input type="text" id="checkout-last-name" name="family-name" autocomplete="family-name"></div>
+  <label>Teléfono *</label>
+  <input type="tel" id="checkout-phone" name="phone" autocomplete="tel">
+</section>
+<div id="order-bumps-mobile" class="lg:hidden"></div>
+<button type="button" id="pay-btn">Pagar US$ 15,29</button>
+<input type="hidden" id="store-name" value="Somatix">
+<input type="hidden" id="store-language" value="es-419">
+<input type="hidden" id="ebook-title" value="Спокойно тяло">
+<input type="hidden" id="ebook-main-price" value="15.29">
+<input type="hidden" id="ebook-main-override-price" value>
+<input type="hidden" id="ebook-currency" value="USD">
+<input type="hidden" id="buyer-country" value="CO">
+<input type="hidden" id="pay-button-color" value="#16a34a">
+<footer><p>Pago seguro. 30 días de garantía: si no te gusta, te devolvemos todo tu dinero.</p></footer>
+</body></html>
