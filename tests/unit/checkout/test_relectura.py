@@ -181,3 +181,23 @@ def test_confirmar_pdf_sin_uploaded_no_medido(zz):
     plan = _plan(_op(1, "impultienda_cargar_entregable", args, "producto.front.entregable"))
     [r] = releer(plan, _inst(ctx)[0], {1: {"guardado": "r"}}, ctx=ctx)
     assert r.estado == "no_medido"  # «generated» no prueba que el PDF propio esté: nunca verde
+
+
+def test_tienda_con_dominio_propio_se_reconoce_por_su_subdominio(zz):
+    """Con dominio propio, el conector devuelve `url` = el dominio y `subdominio` aparte; `mercados.yaml` puede seguir
+    con `<subdominio>.impultienda.ar` (caso real de BG, 2026-11-17)."""
+    from dataclasses import replace
+
+    from trovefy.checkout.relectura import _tienda_de
+
+    ctx, _ = zz
+    resp = {"tiendas": [{"id": "x", "url": "https://www.mitienda.example", "dominio_propio": "www.mitienda.example",
+                         "subdominio": "mitienda"},
+                        {"id": "y", "url": "https://otra.impultienda.ar", "dominio_propio": None,
+                         "subdominio": "otra"}]}
+    t, motivo = _tienda_de(replace(ctx, tienda="https://mitienda.impultienda.ar"), resp)
+    assert motivo is None and t["id"] == "x"
+    t, _ = _tienda_de(replace(ctx, tienda="https://www.mitienda.example"), resp)
+    assert t["id"] == "x"
+    t, motivo = _tienda_de(replace(ctx, tienda="https://nadie.impultienda.ar"), resp)
+    assert t is None and "no encuentro" in motivo
