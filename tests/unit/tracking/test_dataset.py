@@ -135,3 +135,13 @@ def test_catalogo_real_no_tiene_escritura_de_pixel(ctx):
     # R-d: configurar_tracking es prohibida; el Pixel ID va en la receta.
     texto = imprimir_receta("T", receta_tracking(ctx, "SOMATIX ZZ", "1111111111111111", cargar_catalogo()))
     assert "Meta Pixel ID" in texto
+
+
+def test_buscar_dataset_con_la_forma_real_del_mcp():
+    """La respuesta real de ads_get_datasets trae `dataset_id`, no `id` (BG, 2026-11-18)."""
+    from trovefy.tracking.dataset import buscar_dataset
+
+    real = {"datasets": [{"dataset_id": "1111111111111111", "name": "TIHA VALNA BG"},
+                         {"dataset_id": "2222222222222222", "name": "OTRO"}],
+            "page_info": {"has_next_page": False}}
+    assert buscar_dataset(real, "TIHA VALNA BG") == ("1111111111111111", None)
