@@ -17,6 +17,7 @@ from trovefy.vault.escritura import anadir_log, escribir_atomico
 from trovefy.vault.producto import actualizar_producto, ruta_producto, secreto_en
 
 _DATASET_ID = re.compile(r"[0-9]{15,17}")
+_EJECUTOR = ("dataset_permitido", "pagina_permitida", "lectura_ok", "fecha")
 _OPCIONES = {
     "pixel_publico": ("ok", "otro", "no_visto"),
     "pixel_config": ("mcp", "captura", "dicho"),
@@ -43,6 +44,11 @@ def _validar(t: Tracking) -> None:
     problemas = validar_emisores(t.emisores)
     if problemas:
         raise ValueError("emisores: " + "; ".join(problemas))
+    if t.ejecutor is not None:
+        e = t.ejecutor
+        if (not isinstance(e, dict) or set(e) != set(_EJECUTOR)
+                or not all(isinstance(e[k], bool) for k in _EJECUTOR[:3]) or not isinstance(e["fecha"], str)):
+            raise ValueError(f"ejecutor: debe ser {{{', '.join(_EJECUTOR)}}} (tres sí/no y la fecha)")
     if t.eventos is not None:
         for evento, n in t.eventos.items():
             if evento not in EVENTOS or (n is not None and (isinstance(n, bool) or not isinstance(n, int) or n < 0)):
@@ -52,7 +58,13 @@ def _validar(t: Tracking) -> None:
 def _cuerpo(t: Tracking) -> str:
     lineas = [f"# Tracking {t.producto} · {t.pais}", "",
               f"- Dataset: {t.dataset_nombre} ({t.dataset_id or 'no medido: sin crear'})",
-              f"- Estado: {t.estado}", "", "| Evento | Emisor | Conteo |", "|---|---|---|"]
+              f"- Estado: {t.estado}"]
+    if t.ejecutor is not None:
+        si = {True: "sí", False: "no"}
+        e = t.ejecutor
+        lineas.append(f"- Ejecutor: dataset en límites {si[e['dataset_permitido']]}, página en límites "
+                      f"{si[e['pagina_permitida']]}, lo lee {si[e['lectura_ok']]} ({e['fecha']})")
+    lineas += ["", "| Evento | Emisor | Conteo |", "|---|---|---|"]
     for e in EVENTOS:
         n = (t.eventos or {}).get(e)
         lineas.append(f"| {e} | {t.emisores.get(e)} | {'no medido' if n is None else n} |")

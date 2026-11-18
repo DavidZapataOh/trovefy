@@ -52,6 +52,9 @@ class Tracking:
     estado: Literal["pendiente", "dataset", "configurado", "verificado", "no_verificado"]
     evidencia: list[str] = field(default_factory=list)
     motivos: list[str] = field(default_factory=list)
+    # Tarea 9: lo que dijo ``estado/dataset.json`` del ejecutor
+    # (``{dataset_permitido, pagina_permitida, lectura_ok, fecha}``); None = aún no medido.
+    ejecutor: dict | None = None
 
 
 def utm_de_prueba() -> dict[str, str]:
