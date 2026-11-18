@@ -9,7 +9,8 @@ clasificado:
   cualquier rincón del esquema, camelCase incluido) tiene que ser `prohibida`, salvo que ese parámetro esté en sus
   `parametros_prohibidos` (nunca se envía) o en `parametros_permitidos_por_ruling` (con el id del ruling);
 - una `lectura` necesita un verbo de consulta o «SOLO LECTURA» en la descripción, y no puede decir «escribe» ni
-  llevar `confirmar`, `token` o `modo`; una de consulta no puede ser `escritura`.
+  llevar `confirmar`, `token` o `modo` (``lectura_por_ruling: "R-x"`` dispensa solo del verbo/«SOLO LECTURA»);
+  una de consulta no puede ser `escritura`.
 
 Restricciones por herramienta (las aplica `violaciones`, y con ella el hook `hooks/impultienda_guard.py`), con
 rutas de parámetro del tipo ``a.b`` o ``bloques[].tipo``:
@@ -54,6 +55,7 @@ PROHIBIDAS_POR_TEMA = (
     # ronda de revisión (M-1)
     "fb", "ig", "instagram", "whatsapp", "ads", "ad_account", "dataset", "cobr", "pagar", "payment", "gateway",
     "devol", "reintegr", "bank", "card", "iban", "cbu", "cvu", "clave", "credencial", "key", "auth", "login",
+    "pixel", "metaads",
 )
 # Cortas que aparecen dentro de palabras corrientes («metas», «capital», «configurar»): solo como palabra entera
 # (o su plural).
@@ -84,7 +86,7 @@ _PATRON_HEX = re.compile(r"\^\[0-9a-f\]\{(\d+)\}\$")
 
 _CLAVES_HERRAMIENTA = frozenset({
     "nombre", "descripcion", "esquema", "clase", "motivo", "parametros_prohibidos", "valores_prohibidos",
-    "valores_obligatorios", "parametros_permitidos_por_ruling", "devuelve_url_firmada",
+    "valores_obligatorios", "parametros_permitidos_por_ruling", "devuelve_url_firmada", "lectura_por_ruling",
 })
 
 PLAN_MCP = "PLAN-MCP.json"
@@ -110,6 +112,7 @@ class Herramienta:
     valores_obligatorios: dict[str, object] = field(default_factory=dict)
     parametros_permitidos_por_ruling: dict[str, str] = field(default_factory=dict)
     devuelve_url_firmada: bool = False
+    lectura_por_ruling: str | None = None
 
 
 class Catalogo(dict[str, Herramienta]):
@@ -266,11 +269,17 @@ def _validar(h: Herramienta) -> None:
         raise CatalogoInvalido(f"{h.nombre}: falta el motivo de la clase")
     parametros = _parametros(h.esquema, h.nombre)
     _validar_restricciones(h, {ruta for ruta, _, _ in parametros})
+    if h.lectura_por_ruling is not None:
+        if not isinstance(h.lectura_por_ruling, str) or not _RULING.fullmatch(h.lectura_por_ruling):
+            raise CatalogoInvalido(f"{h.nombre}: «lectura_por_ruling» necesita el id del ruling (R-x)")
+        if h.clase != "lectura":
+            raise CatalogoInvalido(f"{h.nombre}: «lectura_por_ruling» solo va en una herramienta lectura")
     if h.clase != "prohibida":
         toques = _toques(h, parametros)
         # L-2: el Pixel ID como parámetro de configuración, solo en las herramientas nombradas.
         if h.nombre in EXCEPCION_PIXEL:
-            toques = [(d, t) for d, t in toques if not (t == "meta" and d != h.nombre and "pixel" in fichas(d))]
+            toques = [(d, t) for d, t in toques
+                      if not (t in ("meta", "pixel") and d != h.nombre and "pixel" in fichas(d, camel=True))]
         if toques:
             donde, tema = toques[0]
             raise CatalogoInvalido(f"{h.nombre}: toca «{tema}» (en {donde}) y no está en prohibida")
@@ -284,7 +293,8 @@ def _validar(h: Herramienta) -> None:
     if h.clase == "lectura":
         if escribe:
             raise CatalogoInvalido(f"{h.nombre}: su descripción dice que escribe y está en lectura")
-        if not (consulta or solo_lectura):
+        # R-g: la única dispensa es la del verbo/«SOLO LECTURA», por ruling explícito; lo demás se exige igual.
+        if not (consulta or solo_lectura or h.lectura_por_ruling):
             raise CatalogoInvalido(f"{h.nombre}: lectura sin verbo de consulta ni «SOLO LECTURA» en la descripción")
         de_escritura = sorted({n for _, n, _ in parametros} & _PARAMS_DE_ESCRITURA)
         if de_escritura:
@@ -366,6 +376,7 @@ def _herramienta(crudo: dict, nombre: str) -> Herramienta:
         parametros_permitidos_por_ruling=_mapa(crudo.get("parametros_permitidos_por_ruling"),
                                                "parametros_permitidos_por_ruling", nombre),
         devuelve_url_firmada=firmada,
+        lectura_por_ruling=crudo.get("lectura_por_ruling"),
     )
 
 

@@ -37,8 +37,25 @@ def test_lectura_pasa(correr_hook, vault_tmp):
     assert correr_hook("impultienda_guard", _entrada("listar_ventas", {"store_id": STORE}), vault_tmp)[0] == "allow"
 
 
+def test_faq_por_ruling_pasa(correr_hook, vault_tmp):
+    assert correr_hook("impultienda_guard", _entrada("faq", {"consulta": "entrega"}), vault_tmp)[0] == "allow"
+
+
+def test_configurar_checkout_por_ruling(correr_hook, vault_tmp):
+    args = {"store_id": STORE, "pedir_telefono": True, "texto_boton_pagar": "Купи", "color_boton_pagar": "#112233"}
+    # Sin aprobación, no; aprobada, sí; con otro texto o una clave fuera del esquema, no.
+    assert correr_hook("impultienda_guard", _entrada("configurar_checkout", args), vault_tmp)[0] == "deny"
+    _aprobar(vault_tmp, [{"herramienta": "impultienda_configurar_checkout", "argumentos": args}])
+    assert correr_hook("impultienda_guard", _entrada("configurar_checkout", args), vault_tmp)[0] == "allow"
+    otro = {**args, "texto_boton_pagar": "Pagar ya"}
+    assert correr_hook("impultienda_guard", _entrada("configurar_checkout", otro), vault_tmp)[0] == "deny"
+    decision, motivo = correr_hook("impultienda_guard",
+                                   _entrada("configurar_checkout", {**args, "metodo_pago": "x"}), vault_tmp)
+    assert decision == "deny" and "metodo_pago" in motivo
+
+
 @pytest.mark.parametrize("corto", ["conectar_pasarela", "configurar_tracking", "ver_pago", "no_existe",
-                                    "configurar_checkout"])
+                                    "ver_cobros_plan"])
 def test_prohibida_o_desconocida_se_deniega(correr_hook, vault_tmp, corto):
     decision, motivo = correr_hook("impultienda_guard", _entrada(corto, {"store_id": STORE}), vault_tmp)
     assert decision == "deny" and motivo

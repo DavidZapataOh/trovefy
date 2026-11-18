@@ -64,8 +64,8 @@ def test_catalogo_real_carga():
     # Las que deciden el 19.
     assert cat["impultienda_listar_ventas"].clase == "lectura"
     assert cat["impultienda_fijar_precio"].clase == "escritura"
-    # Ronda 3–5: «pagar» en color_boton_pagar/texto_boton_pagar la saca (pendiente de ruling).
-    assert cat["impultienda_configurar_checkout"].clase == "prohibida"
+    # R-f: «pagar» en color_boton_pagar/texto_boton_pagar es texto y color del botón (permitido por ruling).
+    assert cat["impultienda_configurar_checkout"].clase == "escritura"
     assert cat["impultienda_bloques_checkout"].clase == "escritura"  # el nombre engañaba: reemplaza bloques
     # Llevan token CAPI o de UTMify: prohibida; el Pixel ID y Clarity van al respaldo manual.
     assert cat["impultienda_configurar_tracking"].clase == "prohibida"
@@ -154,15 +154,15 @@ def test_lectura_no_escribe(tmp_path):
 
 def test_pixel_id_sin_token_puede_ser_escritura(tmp_path, monkeypatch):
     props = {"store_id": {"type": "string"}, "meta_pixel_id": {"type": "string"}}
-    h = _h("configurar_pixel", props=props, motivo="excepción: pixel como parámetro de la tienda, sin token")
+    h = _h("configurar_ficha", props=props, motivo="excepción: pixel como parámetro de la tienda, sin token")
     # L-2: solo en las herramientas nombradas en EXCEPCION_PIXEL (hoy ninguna).
-    with pytest.raises(CatalogoInvalido, match="configurar_pixel"):
+    with pytest.raises(CatalogoInvalido, match="configurar_ficha"):
         cargar_catalogo(_con(tmp_path, h))
-    monkeypatch.setattr(mcp, "EXCEPCION_PIXEL", frozenset({"configurar_pixel"}))
-    assert cargar_catalogo(_con(tmp_path, h))["configurar_pixel"].clase == "escritura"
+    monkeypatch.setattr(mcp, "EXCEPCION_PIXEL", frozenset({"configurar_ficha"}))
+    assert cargar_catalogo(_con(tmp_path, h))["configurar_ficha"].clase == "escritura"
     # Con un parámetro de token al lado, no.
     props_token = {**props, "capi_token": {"type": "string"}}
-    with pytest.raises(CatalogoInvalido, match="configurar_pixel"):
+    with pytest.raises(CatalogoInvalido, match="configurar_ficha"):
         cargar_catalogo(_con(tmp_path, {**h, "esquema": {"type": "object", "properties": props_token}}))
 
 

@@ -1410,8 +1410,12 @@
         ],
         "type": "object"
       },
-      "clase": "prohibida",
-      "motivo": "toca «pagar» (color_boton_pagar, texto_boton_pagar) por la regla de temas de la ronda 3–5; probable falso positivo (botón de pagar), pendiente de ruling: hasta entonces, a mano"
+      "clase": "escritura",
+      "motivo": "receta: datos del comprador (email, nombre y teléfono, V1 0:31:50) y textos del checkout; R-f: color_boton_pagar y texto_boton_pagar son texto y color del botón (falso positivo de «pagar»); no toca métodos de pago",
+      "parametros_permitidos_por_ruling": {
+        "color_boton_pagar": "R-f",
+        "texto_boton_pagar": "R-f"
+      }
     },
     {
       "nombre": "impultienda_configurar_disparo_postcompra",
@@ -1820,8 +1824,9 @@
         },
         "type": "object"
       },
-      "clase": "prohibida",
-      "motivo": "base de conocimiento de la plataforma; sin verbo de consulta ni «SOLO LECTURA» en la descripción, no puede ser lectura (regla H-2): fuera del 19"
+      "clase": "lectura",
+      "motivo": "R-g: base de conocimiento de la plataforma, sin datos de la cuenta",
+      "lectura_por_ruling": "R-g"
     },
     {
       "nombre": "impultienda_crear_embudo",
@@ -2735,8 +2740,9 @@
         },
         "type": "object"
       },
-      "clase": "prohibida",
-      "motivo": "base de conocimiento de la plataforma; sin verbo de consulta ni «SOLO LECTURA» en la descripción, no puede ser lectura (regla H-2): fuera del 19"
+      "clase": "lectura",
+      "motivo": "R-g: base de conocimiento de la plataforma, sin datos de la cuenta",
+      "lectura_por_ruling": "R-g"
     },
     {
       "nombre": "impultienda_fijar_precio",
@@ -4371,7 +4377,6 @@
     "Precio propio de un embudo de checkout: solo en la pestaña Embudos del panel (lo dice actualizar_embudo)",
     "Bloques arriba/abajo del checkout en tiendas tipo checkout: solo en el panel, por embudo (lo dice bloques_checkout)",
     "Reembolso de la compra de prueba: no hay herramienta; lo hace el usuario en su panel",
-    "Pago exprés arriba, pago al final y anuncio de bonos del checkout: nunca por el conector (R-e, M-4); si hicieran falta, los toca el usuario en su panel",
-    "Teléfono del comprador, textos y colores del botón de pagar, garantía y barra de compradores: configurar_checkout es prohibida (toca «pagar»), pendiente de ruling; hasta entonces, a mano en el panel"
+    "Pago exprés arriba, pago al final y anuncio de bonos del checkout: nunca por el conector (R-e, M-4); si hicieran falta, los toca el usuario en su panel"
   ]
 }

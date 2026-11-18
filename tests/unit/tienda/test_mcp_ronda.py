@@ -45,7 +45,8 @@ def _h(nombre, clase="escritura", props=None, descripcion="Hace algo.", motivo="
 # --- M-2: conjuntos exactos del catálogo real ------------------------------------------------------------------
 
 LECTURA = {
-    "campanas_utm", "carritos_abandonados", "estadisticas", "estado_generacion", "estado_onboarding", "leer_html",
+    "campanas_utm", "carritos_abandonados", "conocimiento", "estadisticas", "estado_generacion", "estado_onboarding",
+    "faq", "leer_html",
     "leer_html_postcompra", "listar_embudos", "listar_productos", "listar_tiendas", "listar_ventas",
     "listar_versiones_html", "resumen_cuenta", "snippet_upsells_externos", "ver_landing", "ver_markets", "ver_plan",
     "ver_postcompra", "ver_recursos", "version", "visitantes_en_vivo",
@@ -54,7 +55,7 @@ ESCRITURA = {
     "activar_markets", "actualizar_embudo", "agregar_item_embudo", "agregar_oferta_postcompra",
     "alternar_funnel_postcompra", "alternar_html_postcompra", "asignar_paises", "bloques_checkout", "cambiar_idioma",
     "cambiar_logo", "cambiar_producto_oferta_postcompra", "cambiar_titulo_pagina", "cargar_entregable",
-    "conectar_oferta_postcompra", "configurar_agradecimiento", "configurar_disparo_postcompra",
+    "conectar_oferta_postcompra", "configurar_agradecimiento", "configurar_checkout", "configurar_disparo_postcompra",
     "configurar_mercado", "configurar_tienda", "crear_embudo", "crear_funnel_postcompra", "crear_producto",
     "desactivar_producto", "disenar_checkout", "editar_producto", "fijar_precio", "guardar_html_postcompra",
     "link_subida_recursos", "modificar_oferta_postcompra", "precio_por_pais", "quitar_item_embudo",
@@ -66,13 +67,63 @@ def test_golden_lectura_y_escritura_exactas():
     cat = cargar_catalogo()
     assert {n.removeprefix("impultienda_") for n in mcp.permitidas(cat, "lectura")} == LECTURA
     assert {n.removeprefix("impultienda_") for n in mcp.permitidas(cat, "escritura")} == ESCRITURA
-    assert len(cat) - len(LECTURA) - len(ESCRITURA) == 41
+    assert len(cat) - len(LECTURA) - len(ESCRITURA) == 38
 
 
-@pytest.mark.parametrize("nombre", ["configurar_checkout", "ver_cobros_plan", "faq", "conocimiento"])
-def test_caidas_de_la_ronda_quedan_prohibidas(nombre):
-    # Las nuevas reglas las sacan de lectura/escritura; se listan en el informe (no se afloja la regla).
-    assert cargar_catalogo()["impultienda_" + nombre].clase == "prohibida"
+def test_ver_cobros_plan_sigue_prohibida():
+    assert cargar_catalogo()["impultienda_ver_cobros_plan"].clase == "prohibida"
+
+
+def test_r_f_configurar_checkout():
+    h = cargar_catalogo()["impultienda_configurar_checkout"]
+    assert h.clase == "escritura"
+    assert h.parametros_permitidos_por_ruling == {"color_boton_pagar": "R-f", "texto_boton_pagar": "R-f"}
+    bien = {"store_id": "x", "pedir_telefono": True, "texto_boton_pagar": "Купи", "color_boton_pagar": "#112233"}
+    assert violaciones(h, bien) == []
+    assert any("metodo_pago" in p for p in violaciones(h, {**bien, "metodo_pago": "x"}))
+
+
+def test_r_g_faq_y_conocimiento():
+    cat = cargar_catalogo()
+    for nombre in ("impultienda_faq", "impultienda_conocimiento"):
+        assert cat[nombre].clase == "lectura"
+        assert cat[nombre].lectura_por_ruling == "R-g"
+
+
+@pytest.mark.parametrize("caso", ["sin_ruling", "ruling_mal", "en_escritura", "confirmar", "modo", "token",
+                                  "tema", "escribe"])
+def test_lectura_por_ruling_estrecha(tmp_path, caso):
+    props = {"consulta": {"type": "string"}}
+    extra = {"lectura_por_ruling": "R-g"}
+    clase, descripcion = "lectura", "Busca en la base de conocimiento."
+    if caso == "sin_ruling":
+        extra = {}
+    elif caso == "ruling_mal":
+        extra = {"lectura_por_ruling": "porque sí"}
+    elif caso == "en_escritura":
+        clase = "escritura"
+    elif caso in ("confirmar", "modo"):
+        props[caso] = {"type": "boolean"}
+    elif caso == "token":
+        props.update({"confirmar": {"type": "boolean"}, "token": TOKEN_VP})
+    elif caso == "tema":
+        props["pasarela"] = {"type": "string"}
+    else:
+        descripcion = "Busca y escribe en la base."
+    h = _h("impultienda_base_conocimiento", clase=clase, props=props, descripcion=descripcion, **extra)
+    with pytest.raises(CatalogoInvalido, match="impultienda_base_conocimiento"):
+        cargar_catalogo(_con(tmp_path, h))
+    # La misma sin el defecto, con su ruling, vale.
+    bien = _h("impultienda_base_conocimiento", clase="lectura", props={"consulta": {"type": "string"}},
+              descripcion="Busca en la base de conocimiento.", lectura_por_ruling="R-g")
+    assert cargar_catalogo(_con(tmp_path, bien))["impultienda_base_conocimiento"].clase == "lectura"
+
+
+@pytest.mark.parametrize("param", ["pixel_id", "pixelId", "metaads", "MetaAds", "fbPixel"])
+def test_temas_pixel_y_metaads(tmp_path, param):
+    props = {"store_id": {"type": "string"}, param: {"type": "string"}}
+    with pytest.raises(CatalogoInvalido, match="toca"):
+        cargar_catalogo(_con(tmp_path, _h("impultienda_fijar_cosa_dos", props=props)))
 
 
 # --- H-2: una «lectura» no puede esconder escrituras -----------------------------------------------------------
@@ -205,12 +256,12 @@ def test_token_vista_previa_estrecho(tmp_path, caso):
 
 def test_excepcion_pixel_cerrada(tmp_path, monkeypatch):
     props = {"store_id": {"type": "string"}, "meta_pixel_id": {"type": "string"}}
-    h = _h("impultienda_configurar_pixel", props=props, motivo="excepción: pixel sin token")
+    h = _h("impultienda_configurar_ficha", props=props, motivo="excepción: pixel sin token")
     assert mcp.EXCEPCION_PIXEL == frozenset()
-    with pytest.raises(CatalogoInvalido, match="meta"):
+    with pytest.raises(CatalogoInvalido, match="toca «(meta|pixel)»"):
         cargar_catalogo(_con(tmp_path, h))
-    monkeypatch.setattr(mcp, "EXCEPCION_PIXEL", frozenset({"impultienda_configurar_pixel"}))
-    assert cargar_catalogo(_con(tmp_path, h))["impultienda_configurar_pixel"].clase == "escritura"
+    monkeypatch.setattr(mcp, "EXCEPCION_PIXEL", frozenset({"impultienda_configurar_ficha"}))
+    assert cargar_catalogo(_con(tmp_path, h))["impultienda_configurar_ficha"].clase == "escritura"
 
 
 # --- M-3 / M-4 / R-e: restricciones por herramienta ------------------------------------------------------------
@@ -230,7 +281,7 @@ def test_r_e_titulo_y_diseno_son_escritura():
     assert cat["impultienda_bloques_checkout"].valores_prohibidos == {"bloques[].tipo": ("countdown", "stock")}
     faltan = " ".join(cat.faltan)
     assert "disenar_checkout es prohibida" not in faltan and "cambiar_titulo_pagina es prohibida" not in faltan
-    assert "configurar_checkout" in faltan
+    assert "configurar_checkout" not in faltan  # R-f
 
 
 def _diseno(**args):
