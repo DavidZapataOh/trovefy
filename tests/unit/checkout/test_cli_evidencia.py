@@ -1,5 +1,6 @@
 """`trovefy checkout evidencia` (plan 19, Tarea 6): registrar lo que pega el usuario, sin abrir ningún panel."""
 
+import importlib
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -15,7 +16,7 @@ TOKEN_FALSO = "EAA" + "Bq7" * 10
 
 @pytest.fixture
 def vault(tmp_path, monkeypatch):
-    from trovefy import checkout_cli
+    checkout_cli = importlib.import_module("trovefy.checkout_cli")
 
     v = vault_embudo(tmp_path)
     monkeypatch.setenv("TROVEFY_VAULT", str(v))

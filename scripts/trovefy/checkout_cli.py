@@ -19,6 +19,11 @@ def _ahora() -> datetime:
     return datetime.now(ZONA_NEGOCIO)
 
 
+def _reloj() -> datetime:
+    """``_ahora`` del módulo que está en ``sys.modules`` (un test de registro de la CLI reimporta los ``*_cli``)."""
+    return getattr(sys.modules.get(__name__), "_ahora", _ahora)()
+
+
 def _error(msg: object, codigo: int = 2) -> int:
     print(f"Error: {msg}", file=sys.stderr)
     return codigo
@@ -64,9 +69,9 @@ def _evidencia(args: argparse.Namespace) -> int:
     try:
         ctx = cargar_contexto(vault, args.producto, args.pais.strip().upper())
         if args.dicho is not None:
-            p = dicho(vault, ctx, args.clave, args.dicho, _ahora())
+            p = dicho(vault, ctx, args.clave, args.dicho, _reloj())
         else:
-            p = guardar_pegado(vault, ctx, args.clave, args.desde, _parsear_valores(args.valor), _ahora())
+            p = guardar_pegado(vault, ctx, args.clave, args.desde, _parsear_valores(args.valor), _reloj())
     except (ValueError, OSError) as exc:
         return _error(exc)
     print(f"Evidencia {p.clave} ({p.tipo}) guardada: productos/{args.producto}/{p.ruta}")
