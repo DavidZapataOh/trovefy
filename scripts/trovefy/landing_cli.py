@@ -102,9 +102,13 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
                    help="el «Texto-sha256:» que imprimió trovefy landing texto; si se da, tiene que ser el actual")
     r = sub.add_parser("resena", help="añade una reseña real (con su pedido o email de origen)")
     _comunes(r)
-    r.add_argument("--texto", required=True, help="texto literal de la reseña")
-    r.add_argument("--fecha", required=True, help="fecha de la reseña (AAAA-MM-DD)")
-    r.add_argument("--fuente", required=True, help="pedido o email de origen")
+    r.add_argument("--texto", help="texto literal de la reseña (al añadirla)")
+    r.add_argument("--fecha", help="fecha de la reseña (AAAA-MM-DD, al añadirla)")
+    r.add_argument("--fuente", help="pedido o email de origen (al añadirla)")
+    r.add_argument("--id", dest="rid", help="completa una reseña ya guardada (nombre, estrellas, extracto)")
+    r.add_argument("--nombre", help="cómo autorizó que se le nombre, p. ej. «Мария К., София»")
+    r.add_argument("--estrellas", type=int, help="las estrellas que dio (1–5)")
+    r.add_argument("--extracto", help="trozos literales de su texto, separados por […]")
 
 
 # --- acciones ------------------------------------------------------------------------------------
@@ -429,14 +433,24 @@ def _nativo(args: argparse.Namespace, vault: Path) -> int:
 def _resena(args: argparse.Namespace, vault: Path) -> int:
     from datetime import date
 
-    from trovefy.landing.validar import anadir_resena
+    from trovefy.landing.validar import anadir_resena, completar_resena
 
-    try:
-        fecha = date.fromisoformat(args.fecha)
-    except ValueError:
-        raise ValueError(f"--fecha mal escrita: «{args.fecha}» (AAAA-MM-DD)") from None
-    rid = anadir_resena(vault, args.producto, args.pais, args.texto, fecha, args.fuente)
-    print(f"Reseña real añadida: {rid}")
+    rid = args.rid
+    if rid is None:
+        if not (args.texto and args.fecha and args.fuente):
+            raise ValueError("para añadir una reseña hacen falta --texto, --fecha y --fuente")
+        try:
+            fecha = date.fromisoformat(args.fecha)
+        except ValueError:
+            raise ValueError(f"--fecha mal escrita: «{args.fecha}» (AAAA-MM-DD)") from None
+        rid = anadir_resena(vault, args.producto, args.pais, args.texto, fecha, args.fuente)
+        print(f"Reseña real añadida: {rid}")
+    elif args.texto or args.fecha or args.fuente:
+        raise ValueError("con --id no se cambian el texto, la fecha ni la fuente de una reseña real")
+    if args.nombre is not None or args.estrellas is not None or args.extracto is not None:
+        completar_resena(vault, args.producto, args.pais, rid, nombre=args.nombre, estrellas=args.estrellas,
+                         extracto=args.extracto)
+        print(f"Reseña {rid} completada")
     return 0
 
 

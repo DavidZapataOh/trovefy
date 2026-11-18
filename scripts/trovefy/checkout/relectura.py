@@ -239,6 +239,10 @@ def instantanea(ctx: Contexto, lecturas: Mapping[str, object], previa: dict | No
         mockups = [x for x in r["recursos"] if isinstance(x, dict) and "mockup" in str(x.get("nombre", "")).casefold()
                    and isinstance(x.get("url"), str) and x["url"].startswith("https://") and "?" not in x["url"]]
         inst["recursos"] = {"mockup": mockups[0]["url"] if mockups else None}
+    r = lecturas.get("impultienda_leer_html")
+    if isinstance(r, dict) and "tiene_html_propio" in r:
+        m = re.search(r'data-tf-version="([0-9a-f]+)"', str(r.get("html") or ""))
+        inst["landing"] = {"version": m.group(1) if m else None, "propio": r.get("tiene_html_propio")}
     html = lecturas.get("impultienda_leer_html_postcompra")
     if isinstance(html, dict):
         for oferta, h in html.items():

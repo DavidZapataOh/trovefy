@@ -74,7 +74,7 @@ ETIQUETAS = frozenset({
 })
 ATRIBUTOS_GLOBALES = frozenset({
     "id", "class", "style", "role", "aria-label", "aria-hidden", "aria-labelledby", "aria-describedby",
-    "data-tf-hito", "data-tf-precio", "data-tf-formato", "data-tf-garantia", "data-tf-resena",
+    "data-tf-hito", "data-tf-precio", "data-tf-formato", "data-tf-garantia", "data-tf-resena", "data-tf-nota",
 })
 ATRIBUTOS: dict[str, frozenset[str]] = {k: frozenset(v) for k, v in {
     "html": {"lang"},
@@ -234,7 +234,7 @@ class _Lector(HTMLParser):
         self.versiones: list[str] = []
         self.secciones: list[_Seccion] = []
         self.botones: list[tuple[int | None, str]] = []  # (índice de sección, href)
-        self.capturas: dict[str, list[list[str]]] = {"precio": [], "formato": [], "garantia": [], "resena": []}
+        self.capturas: dict[str, list[list[str]]] = {"precio": [], "formato": [], "garantia": [], "resena": [], "nota": []}
         self.resenas: list[str] = []
         self.urls: list[tuple[str, str, bool]] = []  # (dónde, url, es recurso que se carga)
         self.vistas_urls: list[str] = []  # src y srcset de img[data-tf-vista]
@@ -285,7 +285,7 @@ class _Lector(HTMLParser):
                 self.fuera.append("<meta> sin charset, name ni http-equiv")
         if tag == "link" and a.get("rel", "").strip().lower() != "stylesheet":
             self.fuera.append(f'<link rel="{a.get("rel", "")}">: solo rel="stylesheet" (a assets/)')
-        if tag in _SOLO_EN_RESENA and not ("data-tf-resena" in a or self._en_resena()):
+        if tag in _SOLO_EN_RESENA and not ("data-tf-resena" in a or "data-tf-nota" in a or self._en_resena()):
             self.d01.append(f"<{tag}> fuera de data-tf-resena: testimonios y contadores solo de reseñas reales (D-01)")
 
     def handle_starttag(self, tag, attrs):
@@ -324,7 +324,7 @@ class _Lector(HTMLParser):
             self.botones.append((idx, href))
             if actual is not None:
                 actual.botones.append(href)
-        resena = "data-tf-resena" in a or self._en_resena()
+        resena = "data-tf-resena" in a or "data-tf-nota" in a or self._en_resena()
         if tag == "img" and "data-tf-vista" in a and actual is not None:
             actual.vistas += 1
         if tag == "img" and a.get("alt"):
@@ -342,12 +342,12 @@ class _Lector(HTMLParser):
         if "data-tf-resena" in a:
             self.resenas.append(a["data-tf-resena"])
         capturas = []
-        for clave in ("precio", "formato", "garantia", "resena"):
+        for clave in ("precio", "formato", "garantia", "resena", "nota"):
             if f"data-tf-{clave}" in a:
                 self.capturas[clave].append([a[f"data-tf-{clave}"]] if clave == "resena" else [])
                 capturas.append(clave)
         if tag not in _VACIOS:
-            self.pila.append(_Abierta(tag, capturas, seccion_nueva, "data-tf-resena" in a))
+            self.pila.append(_Abierta(tag, capturas, seccion_nueva, "data-tf-resena" in a or "data-tf-nota" in a))
 
     def handle_startendtag(self, tag, attrs):
         self.handle_starttag(tag, attrs)
@@ -644,8 +644,26 @@ def _r_prueba_social(lec: _Lector, datos: DatosLanding, vault: Path, contenidos_
             fallos.append(f"data-tf-resena=\"{rid}\" no está en resenas.yaml: solo reseñas reales (D-01)")
             continue
         real = " ".join(reales[rid]["texto"].split())
-        if any(real not in t for t in textos.get(rid, [])):
+        trozos = fragmentos(reales[rid]) or [real]
+        if any(any(f not in t for f in trozos) for t in textos.get(rid, [])):
             fallos.append(f"data-tf-resena=\"{rid}\": el texto no es el de resenas.yaml")
+        estrellas = reales[rid].get("estrellas")
+        for t in textos.get(rid, []):
+            llenas, vacias = t.count("★"), t.count("☆")
+            otras = bool(_ESTRELLAS.search(t.replace("★", "").replace("☆", "")))
+            if (llenas or vacias or otras) and (not _estrellas_validas(estrellas) or otras
+                                                or (llenas, vacias) != (estrellas, 5 - estrellas)):
+                fallos.append(f"data-tf-resena=\"{rid}\": las estrellas no son las {estrellas} que dio "
+                              "(★ llenas y ☆ vacías hasta 5) (D-01)")
+    for captura in lec.capturas["nota"]:
+        con = [r for r in reales.values() if _estrellas_validas(r.get("estrellas"))]
+        texto_nota = _limpio(captura)
+        if not con or len(con) != len(reales):
+            fallos.append("data-tf-nota: la nota media necesita las estrellas de todas las reseñas reales (D-01)")
+            continue
+        media = f"{Decimal(sum(r['estrellas'] for r in con)) / len(con):.1f}".replace(".", ",")
+        if media not in texto_nota or not re.search(rf"(?<!\d){len(con)}(?!\d)", texto_nota):
+            fallos.append(f"data-tf-nota: debe decir la media real {media} y cuántas reseñas ({len(con)}) (D-01)")
     fuentes = [("título", _limpio(lec.titulo or [])), ("descripción", lec.descripcion or ""),
                ("texto visible", _limpio(lec.visible_libre)), *(("aria-label", t) for t in lec.aria),
                *contenidos_css]
@@ -653,8 +671,6 @@ def _r_prueba_social(lec: _Lector, datos: DatosLanding, vault: Path, contenidos_
         for hallazgo in prueba_social_falsa(texto, datos.idioma, datos.precio):
             fallos.append(f"{donde}: {hallazgo}: sin estrellas, notas, cupos, compradores, cuentas atrás ni "
                           "precios de referencia inventados (D-01)")
-    if m := _ESTRELLAS.search(_limpio(lec.visible_resena)):
-        fallos.append(f"reseña: estrellas «{m.group(0)}»: resenas.yaml no guarda valoraciones (D-01)")
     fallos.extend(lec.d01)
     tipos = [s.tipo for s in lec.secciones]
     if not reales:
@@ -839,6 +855,59 @@ def validar(vault: Path, datos: DatosLanding) -> Resultado:
         avisos.append(f"la meta description tiene {len(lec.descripcion)} caracteres (más de {DESCRIPCION_MAX})")
     fallos = list(dict.fromkeys(fallos))
     return Resultado(not fallos, tuple(fallos), tuple(avisos))
+
+
+def _estrellas_validas(valor: object) -> bool:
+    return isinstance(valor, int) and not isinstance(valor, bool) and 1 <= valor <= 5
+
+
+SEPARADOR_EXTRACTO = "[…]"
+
+
+def fragmentos(r: dict) -> list[str]:
+    """Los trozos literales de ``extracto`` (separados por ``[…]``); ``[]`` sin extracto."""
+    extracto = r.get("extracto") if isinstance(r, dict) else None
+    if not isinstance(extracto, str) or not extracto.strip():
+        return []
+    return [" ".join(t.split()) for t in extracto.split(SEPARADOR_EXTRACTO) if t.strip()]
+
+
+def completar_resena(vault: Path, p_id: str, pais: str, rid: str, *, nombre: str | None = None,
+                     estrellas: int | None = None, extracto: str | None = None) -> None:
+    """Añade a una reseña ya guardada lo que el autor autorizó mostrar: ``nombre`` (como lo dio, p. ej.
+    «Мария К., София»), ``estrellas`` (1–5, las que dio) y ``extracto`` (trozos LITERALES de su texto, separados
+    por ``[…]``). ``ValueError`` si algo no cuadra con el texto original."""
+    vault = Path(vault)
+    pais = pais.strip().upper()
+    try:
+        previas = leer_resenas(vault, p_id, pais)
+    except EntradaInvalida as exc:
+        raise ValueError(str(exc)) from None
+    r = next((x for x in previas if isinstance(x, dict) and x.get("id") == rid), None)
+    if r is None:
+        raise ValueError(f"no hay ninguna reseña {rid} en landing/{pais}/resenas.yaml")
+    if estrellas is not None:
+        if not _estrellas_validas(estrellas):
+            raise ValueError("las estrellas van de 1 a 5")
+        r["estrellas"] = estrellas
+    if nombre is not None:
+        if not nombre.strip():
+            raise ValueError("el nombre no puede ir vacío")
+        r["nombre"] = " ".join(nombre.split())
+    if extracto is not None:
+        trozos = fragmentos({"extracto": extracto})
+        real = " ".join(str(r.get("texto", "")).split())
+        if not trozos or any(t not in real for t in trozos):
+            raise ValueError("el extracto tiene que ser trozos literales del texto de la reseña, separados por […]")
+        r["extracto"] = f" {SEPARADOR_EXTRACTO} ".join(trozos)
+    datos = {"resenas": previas}
+    contenido = yaml.safe_dump(datos, allow_unicode=True, sort_keys=False)
+    if secreto_en(datos) or buscar_secreto(contenido):
+        raise ValueError("la reseña trae algo con forma de secreto; no se guarda")
+    ruta = ruta_landing(vault, p_id, pais) / "resenas.yaml"
+    escribir_atomico(ruta, contenido)
+    anadir_log(vault, "landing", f"{p_id} {pais}: reseña {rid} completada (nombre, estrellas o extracto)",
+               [ruta.relative_to(vault).as_posix()])
 
 
 def anadir_resena(vault: Path, p_id: str, pais: str, texto: str, fecha: date, fuente: str) -> str:

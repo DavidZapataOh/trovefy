@@ -44,6 +44,7 @@ VOCABULARIO: tuple[str, ...] = (
     r"bump\.(titulo|precio|entregable|activo)",
     r"postcompra\.u[123]\.(titulo|precio|entregable|pagina|pagina_recuperacion|activo|descuento)",
     r"downsell\.[a-z_]+",
+    r"landing\.html",
     r"emails\.(entrega|seguimiento_72h)",
 )
 _VOCABULARIO = re.compile("|".join(f"(?:{v})" for v in VOCABULARIO))
@@ -290,6 +291,26 @@ def validar_pagina_upsell(texto_md: str) -> list[str]:
     if testimonios:
         problemas.append(f"testimonio o valoración inventados (D-01): {testimonios[0]}")
     return problemas
+
+
+_VERSION_LANDING = re.compile(r'data-tf-version="([0-9a-f]{6,64})"')
+
+
+def landing_lista(raiz: Path) -> str | None:
+    """La versión de ``publicar/impultienda.html`` si ``QA.md`` (frontmatter) dice ``ok: true`` para esa misma
+    versión; si no, None."""
+    try:
+        html = (raiz / "publicar" / "impultienda.html").read_text(encoding="utf-8")
+        qa = (raiz / "QA.md").read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    m = _VERSION_LANDING.search(html)
+    cab = qa.split("---")[1] if qa.startswith("---") and qa.count("---") >= 2 else ""
+    ok = re.search(r"^ok:\s*true\s*$", cab, re.MULTILINE)
+    ver = re.search(r"^version:\s*['\"]?([0-9a-f]+)['\"]?\s*$", cab, re.MULTILINE)
+    if m and ok and ver and ver.group(1) == m.group(1):
+        return m.group(1)
+    return None
 
 
 # --- la receta -----------------------------------------------------------------------------------------------------
@@ -617,6 +638,21 @@ class _Receta:
     def downsell(self) -> None:
         self.avisos.append(AVISO_DOWNSELL)
 
+    def landing(self) -> None:
+        """La landing ya lista del plan 18 (``landing/<PAIS>/publicar/impultienda.html`` con QA apta de esa
+        versión), publicada entera por el conector. Sin eso, nada: la landing sigue su flujo propio."""
+        raiz = ruta_pais(self.ctx).parents[1] / "landing" / self.ctx.pais
+        archivo = raiz / "publicar" / "impultienda.html"
+        if not archivo.is_file() or archivo.is_symlink():
+            return
+        version = landing_lista(raiz)
+        if version is None:
+            self.avisos.append("la landing preparada no tiene la QA apta de su versión: no se publica por el conector")
+            return
+        self.poner("landing.html", archivo, f"la landing versión {version}, entera (QA apta)", None, True,
+                   Llamada("impultienda_guardar_html", {"store_id": "<store_id>", "html": "<html:landing>"},
+                           "impultienda_leer_html"))
+
     def correos(self) -> None:
         from trovefy.checkout.emails import (
             validar_email,  # emails importa de este módulo
@@ -654,6 +690,7 @@ def ajustes_de_checkout(ctx: Contexto, limites_plan: dict | None, emails: dict[s
     r.upsells()
     r.downsell()
     r.correos()
+    r.landing()
     return r.ajustes, list(dict.fromkeys(r.avisos))
 
 

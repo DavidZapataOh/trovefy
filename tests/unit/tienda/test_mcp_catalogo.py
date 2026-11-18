@@ -70,8 +70,11 @@ def test_catalogo_real_carga():
     # Llevan token CAPI o de UTMify: prohibida; el Pixel ID y Clarity van al respaldo manual.
     assert cat["impultienda_configurar_tracking"].clase == "prohibida"
     for nombre in ("impultienda_conectar_pasarela", "impultienda_activar_whop", "impultienda_ver_pago",
-                   "impultienda_guardar_html", "impultienda_configurar_downsell", "impultienda_cambiar_email_comprador"):
+                   "impultienda_configurar_downsell", "impultienda_cambiar_email_comprador"):
         assert cat[nombre].clase == "prohibida", nombre
+    # La landing lista (QA apta) se publica entera por el plan aprobado; nunca por reemplazos (2026-11-18).
+    assert cat["impultienda_guardar_html"].clase == "escritura"
+    assert "reemplazos" in cat["impultienda_guardar_html"].parametros_prohibidos
     assert cat.faltan, "lo que el MCP no cubre debe quedar anotado"
     assert cat.servidor == "https://mcp.impultienda.ar/mcp"
 
