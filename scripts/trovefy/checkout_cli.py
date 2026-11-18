@@ -92,9 +92,12 @@ def _configurar_fuera(sub) -> None:
     co = sub.add_parser("comprobar", help="mira el checkout público como un comprador (sin panel) y escribe "
                                           "COMPROBACION.md")
     ma = sub.add_parser("manual", help="imprime y guarda la receta de lo que haces tú en tu panel (no lo abre)")
-    for p in (co, ma):
+    de = sub.add_parser("demo", help="recorrido de comprador con perfil vacío, sin pagar; escribe embudo.md")
+    for p in (co, ma, de):
         _comunes(p)
         p.add_argument("--plan", default="Max", help="plan de Impultienda con el que se calcula la receta (Max)")
+    de.add_argument("--upsell-demo", default=None, metavar="URL",
+                    help="enlace demo del post-compra (https://<tienda>/post-purchase/demo?t=…)")
 
 
 def _contexto_y_ajustes(args: argparse.Namespace):
@@ -161,7 +164,34 @@ def _manual(args: argparse.Namespace) -> int:
     return 0
 
 
-_ACCIONES_FUERA = {"comprobar": _comprobar, "manual": _manual}
+def _demo(args: argparse.Namespace) -> int:
+    import importlib
+
+    from trovefy.embudo.contexto import ruta_pais
+    from trovefy.embudo.pegado import indice
+
+    demo = importlib.import_module("trovefy.checkout.demo")
+    try:
+        vault, ctx, ajustes, _ = _contexto_y_ajustes(args)
+        if args.upsell_demo:
+            demo.validar_upsell_demo(args.upsell_demo, ctx)
+    except (ValueError, OSError) as exc:
+        return _error(exc)
+    try:
+        pasos = demo.ejecutar_demo(ctx, ruta_pais(ctx) / "demo", args.upsell_demo, ajustes=ajustes,
+                                   indice=indice(vault, ctx))
+        ruta = demo.escribir_embudo(vault, ctx, pasos, _reloj())
+    except (ValueError, OSError) as exc:
+        return _error(exc, 1)
+    estado = demo.estado_embudo(pasos)
+    print(f"Recorrido demo {ctx.pais}: {estado} → productos/{args.producto}/"
+          f"{ruta.relative_to(ruta.parents[2]).as_posix()}")
+    for p in pasos:
+        print(f"  [{p.estado}] {p.clave}: {p.detalle}")
+    return 0 if estado == "ok" else 1
+
+
+_ACCIONES_FUERA = {"comprobar": _comprobar, "manual": _manual, "demo": _demo}
 
 
 def _ejecutar(args: argparse.Namespace) -> int:
