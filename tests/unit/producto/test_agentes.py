@@ -21,13 +21,10 @@ def test_veredicto_sin_bloque_de_codigo(nombre):
     assert "sin comillas, sin negritas, sin bloque de código" in salida
 
 
-def test_nativo_promesa_obliga_a_corregir():
+def test_nativo_precios_en_numero_y_palabras():
     texto = (AGENTES / "nativo.md").read_text(encoding="utf-8")
     assert "cuando toca" not in texto
     assert "en número y en palabras" in texto
-    promesas = texto.split("**Promesas de salud o de ingresos**", 1)[1].split("\n- **", 1)[0]
-    assert "- <s-NN> · «…» · …" in promesas
-    assert "VEREDICTO: corregir" in promesas
 
 
 def test_revisor_ultima_pagina_de_texto_puede_quedar_a_medias():

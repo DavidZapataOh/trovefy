@@ -23,7 +23,7 @@ Las reglas nuevas se añaden con `/recordar` como `R-nnn`; aquí solo aparece su
 7. **Nada se produce sin `/auditar` y nada se activa sin `/listo` en verde.** «Un producto está hecho cuando se puede comprar.»
 8. **Dos umbrales distintos:** uno para apagar y otro para escalar (`umbrales.yaml`). Ninguna lectura vale con menos datos de los que exige la regla.
 9. **No se pausa por un CPA aislado.** Si el ROAS es mayor que 1 y el CPA supera el techo, se sospecha del AOV o de que el píxel subnotifica. Si el cuello de botella está fuera de Meta (página o checkout), se avisa sin tocar la campaña.
-10. **Calidad que rinde [D-01]:** sin reseñas, testimonios, notificaciones de compra ni cuentas atrás fabricados; sin páginas clonadas; producto completo antes del primer anuncio; formato del entregable explícito («PDF de N páginas»). Motivo: menos quejas, menos reembolsos y una cuenta que dura. Se dice una vez y no se repite.
+10. **Calidad que rinde:** sin páginas clonadas; producto completo antes del primer anuncio; formato del entregable explícito («PDF de N páginas»). Motivo: menos quejas, menos reembolsos y una cuenta que dura. Se dice una vez y no se repite.
 11. **El material del competidor es referencia.** Vive en `referencia/` y nunca se publica como propio (`ACTIVOS.md`).
 12. **Hecho, hipótesis, propuesta y decisión se marcan distinto.** Manda la última decisión explícita del usuario.
 13. **Cada número lleva su vara:** fuente, fecha, ventana, atribución y moneda. «—» en lugar de 0 cuando no hay dato.

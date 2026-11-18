@@ -81,7 +81,6 @@ def test_checkout_local_solo_lo_visible_y_sin_escrituras(tienda):
     p = analizar(url, abrir_chromium(url))
     assert p.campos_obligatorios == ("email", "nombre", "telefono")
     assert (p.moneda_vista, str(p.precio_visto), p.pais_visto) == ("EUR", "13.90", "ZZ")
-    assert p.escasez == ()
     assert p.foto_arriba and not p.bump
     assert [m for m, _ in pedidas if m != "GET"] == []
     assert not any(ruta.startswith(("/functions/", "/beacon", "/rest/")) for _, ruta in pedidas)

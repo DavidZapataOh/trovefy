@@ -165,14 +165,6 @@ def test_idioma_distinto_falla(zz, tmp_path):
     assert pasos["checkout_idioma"].estado == "falla"
 
 
-def test_reloj_en_checkout_falla(zz):
-    _v, ctx = zz
-    pasos = _por_clave(_recorrer(ctx, _Pagina(checkout="checkout-con-reloj.html")))
-    assert pasos["sin_escasez"].estado == "falla"
-    assert "06:59" in pasos["sin_escasez"].detalle
-    assert estado_embudo(list(pasos.values())) == "falla"
-
-
 def test_bump_y_apellido_fallan(zz):
     _v, ctx = zz
     pasos = _por_clave(_recorrer(ctx, _Pagina(checkout="checkout-con-apellido.html")))

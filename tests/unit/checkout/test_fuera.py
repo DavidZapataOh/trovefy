@@ -81,7 +81,6 @@ def test_analizar_solo_lo_visible():
     assert (p.moneda_vista, p.precio_visto, p.pais_visto) == ("EUR", Decimal("13.90"), "ZZ")
     assert p.foto_arriba and not p.bump
     assert "09:59" not in p.texto and "Остават" not in p.texto and "купуват" not in p.texto
-    assert p.escasez == ()
 
 
 def test_leer_precio():
@@ -106,7 +105,7 @@ def test_checkout_publico_ok(zz):
     malos = [e for e in estados if e.estado != "ok"]
     assert malos == []
     claves = {e.clave for e in estados}
-    assert {"producto.front.precio", "checkout.idioma", "checkout.campos", "checkout.escasez", "checkout.bump",
+    assert {"producto.front.precio", "checkout.idioma", "checkout.campos", "checkout.bump",
             "checkout.foto", "producto.front.titulo"} <= claves
     assert all(e.fuente == "fuera" for e in estados)
     assert estado_global(estados) == "completo"
@@ -206,16 +205,6 @@ def test_apellido_bump_titulo_y_boton_fallan(zz):
     assert e["checkout.bump"].estado == "falla"
     assert e["producto.front.titulo"].estado == "falla"
     assert e["checkout.boton"].estado == "falla"
-
-
-def test_escasez_para(zz):
-    _v, ctx = zz
-    estados = comprobar_fuera(ctx, _ajustes(ctx), _pagina("checkout-con-reloj.html"), {})
-    e = _por_clave(estados)
-    assert e["checkout.escasez"].estado == "parado"
-    assert "06:59" in e["checkout.escasez"].detalle
-    assert "души" in e["checkout.escasez"].detalle
-    assert estado_global(estados) == "parado"
 
 
 def test_redireccion_no_mide(zz):

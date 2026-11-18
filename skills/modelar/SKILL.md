@@ -15,7 +15,6 @@ Reglas de fondo:
 - **Se modela la estructura persuasiva, nunca el texto ni el diseño.** Del original tomas el orden de las secciones, su largo y las objeciones que responde. En `modelar.yaml` no entra HTML, ni CSS, ni enlaces a imágenes, ni frases copiadas. Todo va con tus palabras.
 - Lo que no se midió se dice «no medido: <motivo>». Nunca lo rellenes con un número ni con una estimación tuya.
 - **Nunca uses una cifra de memoria.** Comisiones, precios y cambios salen de una página oficial o de `config/economia.yaml`. Si no hay fuente, el valor queda en `null`.
-- Sin reseñas, testimonios ni cuentas atrás inventados (D-01).
 - **Claude nunca escribe en Meta** ni inicia sesión en ninguna cuenta.
 - Si una orden `trovefy` sale con `Error:` (salida 2), cuéntale el error tal cual. Si es un dato tuyo mal escrito (el YAML, una cita), corrígelo y repite. Si no, **para**.
 

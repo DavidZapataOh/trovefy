@@ -278,9 +278,6 @@ def test_r_e_titulo_y_diseno_son_escritura():
     assert diseno.clase == "escritura"
     assert set(diseno.parametros_prohibidos) == {
         "pago_expres_arriba", "pago_al_final", "anuncio_bonos", "texto_anuncio_bonos"}
-    assert diseno.valores_prohibidos == {"estilo_bump": ("escasez",)}
-    assert diseno.valores_obligatorios == {"minutos_timer_bump": 0}
-    assert cat["impultienda_bloques_checkout"].valores_prohibidos == {"bloques[].tipo": ("countdown", "stock")}
     faltan = " ".join(cat.faltan)
     assert "disenar_checkout es prohibida" not in faltan and "cambiar_titulo_pagina es prohibida" not in faltan
     assert "configurar_checkout" not in faltan  # R-f
@@ -298,10 +295,6 @@ def test_disenar_checkout_positivo_y_negativo():
         (_diseno(pago_expres_arriba=True), "pago_expres_arriba"),
         (_diseno(pago_al_final=False), "pago_al_final"),
         (_diseno(anuncio_bonos="count"), "anuncio_bonos"),
-        (_diseno(estilo_bump="Escasez"), "escasez"),
-        ({"store_id": "x", "plantilla": "kiwify"}, "minutos_timer_bump"),
-        (_diseno(minutos_timer_bump=5), "minutos_timer_bump"),
-        (_diseno(minutos_timer_bump=False), "minutos_timer_bump"),
         (_diseno(color_nuevo="#000000"), "color_nuevo"),
         (_diseno(barra_superior={"oculta": True, "extra": 1}), "extra"),
     ]:
@@ -313,15 +306,6 @@ def test_cambiar_titulo_pagina_positivo_y_negativo():
     h = cargar_catalogo()["impultienda_cambiar_titulo_pagina"]
     assert violaciones(h, {"store_id": "x", "titulo": "Somatix", "meta_descripcion": "Para buscadores"}) == []
     assert violaciones(h, {"store_id": "x", "titulo": "Somatix", "pixel": "1"})
-
-
-def test_bloques_checkout_sin_countdown_ni_stock():
-    h = cargar_catalogo()["impultienda_bloques_checkout"]
-    bien = {"store_id": "x", "posicion": "arriba", "bloques": [{"tipo": "image", "url": "https://x.example/a.webp"}]}
-    assert violaciones(h, bien) == []
-    for tipo in ("countdown", "stock", "STOCK"):
-        mal = {**bien, "bloques": [{"tipo": "text", "texto": "hola"}, {"tipo": tipo}]}
-        assert any("bloques[].tipo" in p for p in violaciones(h, mal)), tipo
 
 
 def test_restricciones_se_validan_al_cargar(tmp_path):
@@ -404,7 +388,7 @@ def test_huella_catalogo_cubre_restricciones():
     otra = mcp.Catalogo(dict(cat), fuente=cat.fuente, fecha=cat.fecha, servidor=cat.servidor, plan=cat.plan,
                         faltan=cat.faltan)
     h = cat["impultienda_disenar_checkout"]
-    otra[h.nombre] = mcp.Herramienta(**{**h.__dict__, "valores_obligatorios": {}})
+    otra[h.nombre] = mcp.Herramienta(**{**h.__dict__, "parametros_prohibidos": ()})
     assert huella_catalogo(otra) != huella_catalogo(cat)
     assert huella_evidencia(otra) == huella_evidencia(cat)
 

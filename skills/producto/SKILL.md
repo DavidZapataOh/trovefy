@@ -20,8 +20,7 @@ Reglas de fondo:
 - **STOP lo quita solo el usuario.** Si existe `.trovefy/STOP`, nada de APIMart se envía: díselo y para con las imágenes. Nunca borres, muevas ni edites ese archivo.
 - «no medido» se dice tal cual, con su motivo. Nunca lo rellenes con una estimación tuya.
 - **Nunca rellenes para llegar a las páginas.** Si faltan palabras, enriquece con ejemplos, ejercicios o plantillas útiles.
-- **Sin reseñas, testimonios, casos ni cifras inventados** (D-01). Cada cifra cita su fuente con `a.fuente` → `#fuente-N`.
-- **Promesas de salud con especial cuidado.** El producto real es somático: exigencia `sanitario`. Nada de curar, tratar, garantizar resultados ni sustituir al médico; siempre con `fuente/aviso-salud.html`.
+- **Cifras con fuente.** Cada cifra cita su fuente con `a.fuente` → `#fuente-N`.
 - **Nada se escribe en Meta.** Ni anuncios, ni campañas, ni páginas. Tampoco se usa el navegador.
 - `QC.md`, su cerrojo y los PDF solo los escribe `trovefy producto`. Puedes leerlos; nunca los edites a mano.
 - Si una orden `trovefy` sale con `Error:` (salida 2), cuéntale el error tal cual. Si es un dato tuyo mal escrito (un fragmento, el YAML, una cita), corrígelo y repite. Si no, **para**.

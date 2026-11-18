@@ -76,7 +76,7 @@ class DatosLanding:
     marca: str
     dominio: str | None
     tienda: str | None
-    resenas: int = 0  # reseñas reales completas del país en landing/<PAIS>/resenas.yaml (decide la sustitución)
+    resenas: int = 0  # reseñas completas del país en landing/<PAIS>/resenas.yaml (decide la sustitución)
 
 
 def ruta_landing(vault: Path, p_id: str, pais: str) -> Path:
@@ -302,7 +302,7 @@ def cargar_datos(vault: Path, p_id: str, pais: str, exigir_estado: tuple[str, ..
 
 
 def wireframe(datos: DatosLanding) -> list[dict]:
-    """Una entrada por sección con su posición relativa; sin reseñas reales, ``prueba_social`` → ``vista_previa``."""
+    """Una entrada por sección con su posición relativa; sin reseñas, ``prueba_social`` → ``vista_previa``."""
     total = sum(s.palabras for s in datos.secciones)
     salida, acumulado = [], 0
     for s in datos.secciones:

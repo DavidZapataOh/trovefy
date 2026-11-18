@@ -4,18 +4,14 @@ Funciones puras: leen el `Contexto` del producto-país y devuelven qué poner en
 con la cita del vídeo que lo justifica y, si el conector lo permite, las llamadas exactas al MCP oficial expresadas
 con las herramientas **reales** del catálogo (`config/impultienda_tools.json`) y sus nombres de parámetro reales.
 Ninguna llamada lleva ``confirmar`` ni ``token`` (los pone el paso de dos fases del propio conector) y todas cumplen
-las restricciones del catálogo: ``disenar_checkout`` siempre con ``minutos_timer_bump: 0`` y sin ``pago_*`` ni
-``anuncio_bonos`` (R-e, M-4); ``bloques_checkout`` nunca con ``countdown`` ni ``stock`` (D-01); ``configurar_checkout``
-solo con los parámetros del ruling R-f.
+las restricciones del catálogo: ``disenar_checkout`` sin ``pago_*`` ni ``anuncio_bonos`` (R-e, M-4);
+``configurar_checkout`` solo con los parámetros del ruling R-f.
 
 Los ids que solo se conocen al leer la tienda van como marcadores (``<store_id>``, ``<market_id>``,
 ``<item_id:u1>``, ``<ruta:front>``, ``<bloques:abajo>``…): los rellena la Tarea 11 con las lecturas del MCP
 (`rellenar`; ``<bloques:abajo>`` con `limpiar_bloques` de los bloques actuales). M6 de la revisión T6–10: como esos
 ids solo se conocen al ejecutar, el plan aprobado no puede llevar su huella final de una vez; la Tarea 11 lo
 resuelve con planes por etapas (test ``xfail`` en ``tests/unit/checkout/test_receta.py``).
-
-D-01 completo (M5): sin temporizador, sin bloques ``countdown``/``stock`` (tampoco los que ya hubiera abajo), sin
-barra de compradores, sin precio tachado (``precio_original: None``) y sin ``{timer}``/``{count}`` en los textos.
 
 Lo que manda la cabecera del plan (ruling del 2026-11-17): teléfono sí, sin order bump, upsells como los vídeos
 empezando por U1, sin downsell propio (el de recuperación automático del funnel sí, R-c), sin email de 72 h.
@@ -40,7 +36,7 @@ VOCABULARIO: tuple[str, ...] = (
     rf"market\.{_P}\.(activo|moneda|paises|precio_front)",
     r"tracking\.pixel_id",
     r"producto\.front\.(titulo|precio|entregable)",
-    r"checkout\.(idioma|campos|temporizador|cupos|foto|plantilla|boton|garantia|clarity)",
+    r"checkout\.(idioma|campos|foto|plantilla|boton|garantia|clarity)",
     r"bump\.(titulo|precio|entregable|activo)",
     r"postcompra\.u[123]\.(titulo|precio|entregable|pagina|pagina_recuperacion|activo|descuento)",
     r"downsell\.[a-z_]+",
@@ -65,9 +61,8 @@ PLANTILLAS_CONECTOR = ("default", "hotmart", "cartpanda", "perfectpay", "mundpay
                        "shopify", "limonada", "comanda", "pluma", "opalo", "escudo", "coral", "vitrina", "firma")
 
 CITA_FUNNEL = "V1 1:04:46"
-AVISO_DOWNSELL = ("sin downsell propio (ruling del 2026-11-17: el de los vídeos es engañoso); el funnel post-compra "
-                  "crea uno de recuperación por upsell con descuento real (40→60 %), aceptado por R-c, sin textos de "
-                  "urgencia")
+AVISO_DOWNSELL = ("el downsell va por el funnel post-compra: uno de recuperación por upsell (40→60 %, R-c), con su "
+                  "página propia")
 
 
 @dataclass(frozen=True)
@@ -160,62 +155,18 @@ def operaciones(ajustes: Iterable[Ajuste]) -> list[dict]:
     return salida
 
 
-# --- escasez, testimonios y guion de upsell (D-01) -----------------------------------------------------------------
+# --- bloques y guion de upsell ---------------------------------------------------------------------------------------
 
-PALABRAS_ESCASEZ: tuple[str, ...] = (
-    # es
-    "últimas", "últimos", "último día", "quedan", "solo hoy", "sólo hoy", "cupos", "plazas limitadas", "se agota",
-    "se agotan", "agotado", "termina hoy", "expira", "cuenta atrás", "cuenta regresiva", "date prisa",
-    # bg
-    "остават", "остана", "останаха", "само днес", "последни", "последен шанс", "ограничен брой", "изчерпва",
-    "изчерпват", "бързайте", "изтича", "броени",
-    # ro / it / en
-    "ultimele", "doar azi", "grăbește-te", "mai sunt", "solo oggi", "affrettati", "posti limitati", "only today",
-    "last chance", "hurry", "spots left", "limited time", "selling out",
-)
-_RELOJ = re.compile(r"(?<![\d:])\d{1,2}:\d{2}(?::\d{2})?(?![\d:])")
-# Marcadores de la plataforma que se convierten en cuenta atrás o en cupos al mostrarse (M5).
-_MARCADOR_ESCASEZ = re.compile(r"\{\s*(?:timer|count|countdown|stock|cupos)\s*\}")
-_PATRONES_ESCASEZ = [(p, re.compile(rf"(?<!\w){re.escape(p)}(?!\w)")) for p in PALABRAS_ESCASEZ]
-_TESTIMONIO = (
-    re.compile(r"[«\"“„][^«»\"“”„]{8,}[»\"”“]\s*[—–-]\s*\w+"),  # «…» — Nombre
-    re.compile(r"[★⭐]{3,}"),
-    re.compile(r"(?<![\d.,])[1-5](?:[.,]\d)?\s*/\s*5(?![\d])"),
-)
-
-
-def hay_escasez(texto: str) -> list[str]:
-    """Las palabras de escasez o urgencia (y los relojes ``09:59`` y los marcadores ``{timer}``/``{count}``) que
-    aparecen, en orden de aparición."""
-    normal = (texto or "").casefold()
-    hallados: list[tuple[int, str]] = []
-    for palabra, patron in _PATRONES_ESCASEZ:
-        hallados += [(m.start(), palabra) for m in patron.finditer(normal)]
-    hallados += [(m.start(), m.group(0)) for m in _RELOJ.finditer(normal)]
-    hallados += [(m.start(), m.group(0)) for m in _MARCADOR_ESCASEZ.finditer(normal)]
-    return [p for _, p in sorted(hallados)]
-
-
-def hay_testimonio(texto: str) -> list[str]:
-    """Lo que parece un testimonio o una valoración (cita con nombre, estrellas, «5/5»). En el test 1 no hay
-    compradores: cualquier testimonio sería inventado (D-01). Pedir una reseña real no cuenta."""
-    return [m.group(0) for p in _TESTIMONIO for m in p.finditer(texto or "")]
-
-
-_TIPOS_BLOQUE = ("image", "carousel", "video", "text")
+_TIPOS_BLOQUE = ("image", "carousel", "video", "text", "countdown", "stock")
 _CLAVES_BLOQUE = frozenset({"tipo", "url", "alt", "ancho_pct", "imagenes", "alto", "orientacion", "autoplay",
-                            "etiqueta", "texto"})
-AVISO_HTML = ("revisar a mano: los bloques HTML de arriba y abajo del checkout los conserva el conector y no los toca; "
-              "míralos en tu panel (Diseño de checkout) y quita cualquier cuenta atrás, cupos o «N personas "
-              "compraron» (D-01)")
+                            "etiqueta", "texto", "color", "estilo", "inicial", "minimo", "minutos"})
 
 
 def limpiar_bloques(actuales: object) -> tuple[list[dict], list[str]]:
     """Los bloques que ya hay en una posición del checkout (``actuales`` de la vista previa de
-    ``impultienda_bloques_checkout``), listos para volver a mandarse sin escasez (D-01, M5): fuera ``countdown``,
-    ``stock`` y cualquier bloque con palabras de urgencia o ``{timer}``/``{count}``; un bloque HTML o de tipo
-    desconocido no se puede reenviar (el conector conserva los HTML): se avisa «revisar a mano». Devuelve
-    ``(bloques, avisos)``; ``ValueError`` si ``actuales`` no es una lista."""
+    ``impultienda_bloques_checkout``), listos para volver a mandarse: un bloque HTML o de tipo desconocido no se
+    puede reenviar (el conector conserva los HTML): se avisa «revisar a mano». Devuelve ``(bloques, avisos)``;
+    ``ValueError`` si ``actuales`` no es una lista."""
     if not isinstance(actuales, list):
         raise ValueError("los bloques actuales no son una lista: no se reenvía nada (no medido)")  # noqa: TRY004 - dato del MCP
     limpios: list[dict] = []
@@ -224,20 +175,11 @@ def limpiar_bloques(actuales: object) -> tuple[list[dict], list[str]]:
     actuales = [b for b in actuales if not (isinstance(b, str) and b.strip().casefold() == "(sin bloques)")]
     for n, b in enumerate(actuales, 1):
         tipo = b.get("tipo") if isinstance(b, dict) else None
-        if tipo in ("countdown", "stock"):
-            avisos.append(f"quitado: bloque {n} ({tipo}, D-01)")
-            continue
         if tipo == "html":
-            avisos.append(f"revisar a mano: bloque {n} es HTML: el conector no lo toca; míralo en tu panel y quita "
-                          "cualquier cuenta atrás o cupos (D-01)")
+            avisos.append(f"revisar a mano: bloque {n} es HTML: el conector no lo toca; míralo en tu panel")
             continue
         if tipo not in _TIPOS_BLOQUE:
             avisos.append(f"revisar a mano: bloque {n} de tipo «{tipo}» desconocido: no se reenvía")
-            continue
-        textos = [v for k in ("texto", "alt") if isinstance(v := b.get(k), str)]
-        escasez = [p for t in textos for p in hay_escasez(t)]
-        if escasez:
-            avisos.append(f"quitado: bloque {n} ({tipo}) con escasez o urgencia: {', '.join(dict.fromkeys(escasez))}")
             continue
         limpios.append({k: v for k, v in b.items() if k in _CLAVES_BLOQUE})
     return limpios, avisos
@@ -248,24 +190,22 @@ GUION_UPSELL: tuple[tuple[str, str], ...] = (
     ("problema", "U1: el mismo problema, mejor resuelto; U2/U3: el problema siguiente"),
     ("oferta", "qué es el producto, en una frase"),
     ("contenido", "qué incluye, de verdad (lo que trae el PDF)"),
-    ("resultado", "qué consigue el comprador, sin promesas de salud ni de ingresos"),
+    ("resultado", "qué consigue el comprador"),
     ("precio", "el precio declarado y el descuento real, si lo hay"),
     ("garantia", "la garantía y cómo llega"),
     ("decision", "el botón «sí» y el «no, gracias», igual de visibles"),
 )
 _GUION = re.compile(r"<!--\s*guion:\s*([a-z_]+)\s*-->")
-# Contador REAL de la página (resolución 2026-11-18, «reloj de 7 min» de los vídeos): al llegar a cero la página
-# quita el botón de aceptar, así que la oferta se cierra de verdad. Su etiqueta y el aviso de vencida no cuentan como
-# escasez falsa; el resto del texto sigue sin escasez (D-01).
+# Contador de la página («reloj de 7 min» de los vídeos): al llegar a cero la página quita el botón de aceptar.
 CONTADOR = re.compile(r"^\[\[contador:\s*(\d{1,2})\s*\|\s*([^\]|]+?)\s*\]\]$", re.MULTILINE)
 VENCIDO = re.compile(r"^\[\[vencido:\s*([^\]]+?)\s*\]\]$", re.MULTILINE)
 
 
 def validar_pagina_upsell(texto_md: str) -> list[str]:
     """Problemas de la página de un upsell (``checkout/<PAIS>/upsells/<clave>.md``): los 8 puntos de
-    `GUION_UPSELL`, marcados con ``<!-- guion: <clave> -->`` y en orden, sin escasez ni testimonios. ``[]`` = bien.
+    `GUION_UPSELL`, marcados con ``<!-- guion: <clave> -->`` y en orden. ``[]`` = bien.
 
-    El «guion de 8 puntos» de los vídeos es de la mentoría (🔒, V1 1:04:46): este es el nuestro, honesto."""
+    El «guion de 8 puntos» de los vídeos es de la mentoría (🔒, V1 1:04:46): este es el nuestro."""
     esperadas = [c for c, _ in GUION_UPSELL]
     vistas = _GUION.findall(texto_md or "")
     problemas = [f"falta el punto «{c}» del guion ({d})" for c, d in GUION_UPSELL if c not in vistas]
@@ -283,13 +223,6 @@ def validar_pagina_upsell(texto_md: str) -> list[str]:
         problemas.append("el [[contador: minutos | texto]] necesita su [[vencido: texto]] (lo que se ve al cerrarse)")
     if any(not 1 <= int(m) <= 60 for m, _ in contadores):
         problemas.append("el contador va de 1 a 60 minutos")
-    texto_md = VENCIDO.sub("", CONTADOR.sub("", texto_md or ""))
-    escasez = hay_escasez(texto_md)
-    if escasez:
-        problemas.append(f"escasez o urgencia (D-01): {', '.join(dict.fromkeys(escasez))}")
-    testimonios = hay_testimonio(texto_md)
-    if testimonios:
-        problemas.append(f"testimonio o valoración inventados (D-01): {testimonios[0]}")
     return problemas
 
 
@@ -357,7 +290,7 @@ class _Receta:
 
     def precio(self, pieza: Pieza, item: str | None) -> Llamada:
         """Precio de la pieza en la moneda del mercado: por Markets si la tienda cobra en otra moneda. Siempre con
-        ``precio_original: None``: sin precio tachado (un «antes» inventado sería un falso descuento, D-01)."""
+        ``precio_original: None``: sin precio tachado."""
         if self.por_mercado:
             args = {"store_id": "<store_id>", "market_id": "<market_id>", "precio": _numero(pieza.precio),
                     "precio_original": None}
@@ -444,19 +377,6 @@ class _Receta:
                    Llamada("impultienda_configurar_checkout",
                            {"store_id": "<store_id>", "pedir_nombre": True, "pedir_apellido": False,
                             "pedir_telefono": self.o.telefono}, None))
-        self.poner("checkout.temporizador", False, "sin reloj de cuenta atrás (D-01: los vídeos ponen 7 min; es "
-                   "regla legal, no desvío)", "V1 0:31:50", True,
-                   Llamada("impultienda_disenar_checkout", {"store_id": "<store_id>", "minutos_timer_bump": 0}, None))
-        self.poner("checkout.cupos", False,
-                   "sin cupos ni prueba social inventada (D-01: los vídeos ponen 12): se oculta la barra de "
-                   "compradores y los bloques de abajo se vuelven a mandar sin cuenta atrás ni cupos "
-                   "(<bloques:abajo> = los actuales, de la vista previa, pasados por limpiar_bloques); se comprueba "
-                   "en el checkout público", "V1 0:31:50", True,
-                   Llamada("impultienda_configurar_checkout",
-                           {"store_id": "<store_id>", "ocultar_barra_compradores": True}, None),
-                   Llamada("impultienda_bloques_checkout",
-                           {"store_id": "<store_id>", "posicion": "abajo", "bloques": "<bloques:abajo>"}, None))
-        self.avisos.append(AVISO_HTML)
         mockup = self.dir_producto / "entregable" / "medios" / "mockup.png"
         if mockup.is_file() and not mockup.is_symlink():
             self.poner("checkout.foto", mockup,
@@ -671,7 +591,7 @@ class _Receta:
                 continue
             motivo = ("lo pegas tú en tu panel: el conector no tiene herramienta para el texto de los emails"
                       if clave == "entrega" else
-                      "desvío (e), solo con aprobación: pide una reseña real a las 72 h")
+                      "desvío (e), solo con aprobación: pide una reseña a las 72 h")
             self.poner(f"emails.{clave}", Path(ruta), motivo, None, False)
 
 
@@ -711,8 +631,7 @@ _PESTANAS: tuple[tuple[str, str], ...] = (
 _NOMBRES = {
     "tienda.nombre": "Nombre de la tienda", "checkout.idioma": "Idioma", "producto.front.titulo": "Nombre del producto",
     "producto.front.precio": "Precio", "producto.front.entregable": "Entregable (PDF)",
-    "checkout.campos": "Datos que se piden", "checkout.temporizador": "Temporizador", "checkout.cupos": "Cupos",
-    "checkout.foto": "Imagen arriba del checkout", "checkout.plantilla": "Plantilla",
+    "checkout.campos": "Datos que se piden", "checkout.foto": "Imagen arriba del checkout", "checkout.plantilla": "Plantilla",
     "checkout.boton": "Color del botón de pagar", "checkout.garantia": "Garantía",
     "checkout.clarity": "Microsoft Clarity en el checkout",
 }

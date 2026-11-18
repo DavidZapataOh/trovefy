@@ -464,7 +464,8 @@ def _frase_checkout(a: dict, i: Info) -> str:
 
 
 def _frase_disenar(a: dict, i: Info) -> str:
-    return "Checkout: sin temporizador de cuenta atrás"
+    partes = [f"{k}: {v}" for k, v in a.items() if k != "store_id"]
+    return "Diseño del checkout: " + ("; ".join(partes) or "sin cambios")
 
 
 def _frase_bloques(a: dict, i: Info) -> str:
@@ -473,7 +474,7 @@ def _frase_bloques(a: dict, i: Info) -> str:
     if a.get("posicion") == "abajo":
         bloques = a.get("bloques")
         cuantos = f" ({len(bloques)} bloques)" if isinstance(bloques, list) else ""
-        return f"Volver a poner los bloques de abajo del checkout sin cuenta atrás ni cupos{cuantos}"
+        return f"Volver a poner los bloques de abajo del checkout{cuantos}"
     return "Poner la foto del producto arriba del checkout"
 
 

@@ -13,9 +13,9 @@ sale en USD (V1 0:31:50, A6.5; V1 1:14:15). Aquí, sin sesión en ningún panel 
   tienda, sin sesión; comprobado el 2026-11-17): la tienda pinta el precio, la moneda y el idioma del comprador de
   ese país y lo dice en ``buyer-country``. Si la tienda no lo confirma, el precio queda «no medido» y se pide la
   captura de «Ver como Bulgaria» (nunca se adivina).
-- **Analizar** (`analizar`, puro): texto visible, campos que se piden, precio y moneda, país visto, idioma, escasez,
-  order bump, foto arriba. Las cadenas de traducción ocultas de la plataforma («Остават само {count} места») y los
-  scripts no cuentan: solo lo visible.
+- **Analizar** (`analizar`, puro): texto visible, campos que se piden, precio y moneda, país visto, idioma,
+  order bump, foto arriba. Las cadenas de traducción ocultas de la plataforma y los scripts no cuentan: solo lo
+  visible.
 - **Comprobar** (`comprobar_fuera`, puro): un `EstadoFuera` por comprobación.
 - **Escribir** (`escribir_comprobacion`): ``checkout/<PAIS>/COMPROBACION.md``.
 
@@ -33,7 +33,7 @@ from typing import Literal
 from urllib.parse import parse_qs, urlsplit
 
 from trovefy import navegador
-from trovefy.checkout.receta import VERDE, Ajuste, hay_escasez
+from trovefy.checkout.receta import VERDE, Ajuste
 from trovefy.embudo.contexto import ruta_pais
 from trovefy.idioma import detectar
 from trovefy.landing.constantes import HOSTS_META, casa_host
@@ -175,7 +175,6 @@ class PaginaPublica:
     pedida: str = ""
     pais_visto: str | None = None
     idioma_tienda: str | None = None
-    escasez: tuple[str, ...] = ()
     bump: bool = False
     foto_arriba: bool = False
     guion: tuple[str, ...] = ()
@@ -305,17 +304,6 @@ def leer_precio(texto: str | None) -> tuple[Decimal | None, str | None]:
     return (_numero(m.group(1)), None) if m else (None, None)
 
 
-_PRUEBA_SOCIAL = re.compile(
-    r"\d+\s*(?:души|човека|personas?|people|persone|persoane|oameni|clientes?|compradores?)\b[^.\n]{0,40}?"
-    r"(?:купуват|купиха|compr\w*|buy\w*|bought|acquist\w*|cumpăr\w*)"
-    r"|\d+\s*(?:compraron|vendidos|sold|продадени)\b", re.IGNORECASE)
-
-
-def hay_prueba_social(texto: str) -> list[str]:
-    """«5 души купуват в момента», «12 personas compraron»…: con 0 compradores es inventado (D-01)."""
-    return [m.group(0) for m in _PRUEBA_SOCIAL.finditer(texto or "")]
-
-
 def _vacia(pedida: str, motivo: str) -> PaginaPublica:
     return PaginaPublica(url_final="", http=None, texto="", campos_obligatorios=(), moneda_vista=None,
                          precio_visto=None, imagenes=(), pedida=pedida, motivo=motivo)
@@ -343,7 +331,7 @@ def analizar(url_pedida: str, vista: Vista) -> PaginaPublica:
         url_final=vista.url_final, http=vista.http, texto=texto, campos_obligatorios=campos, moneda_vista=moneda,
         precio_visto=precio, imagenes=tuple(lector.imagenes), pedida=url_pedida, pais_visto=pais,
         idioma_tienda=oc.get("store-language") or lector.lang,
-        escasez=tuple(dict.fromkeys([*hay_escasez(texto), *hay_prueba_social(texto)])), bump=lector.bump,
+        bump=lector.bump,
         foto_arriba=foto and bool(lector.imagenes), guion=tuple(lector.guion), ocultos=dict(oc),
     )
 
@@ -495,8 +483,8 @@ def comprobar_fuera(ctx, ajustes: list[Ajuste], pagina: PaginaPublica, indice: d
                     ver_como: PaginaPublica | None = None, relecturas=None) -> list[EstadoFuera]:
     """Lo que se ve en el checkout público frente a la receta: precio y moneda (regla de la moneda: desde otro país
     es «no medido» salvo que la vista pública como ``ctx.pais`` lo confirme o haya captura de «Ver como …» más la
-    relectura del MCP), idioma, campos (los de más fallan, el teléfono se pide), escasez y «N personas comprando»
-    (``parado``, D-01), order bump (no), foto arriba, título, nombre de la tienda y color del botón."""
+    relectura del MCP), idioma, campos (los de más fallan, el teléfono se pide), order bump (no), foto arriba,
+    título, nombre de la tienda y color del botón."""
     por_clave = {a.clave: a for a in ajustes}
     plano_ok = _es_checkout(pagina, ctx)
     vc_ok = _es_checkout(ver_como, ctx) and ver_como.pais_visto == ctx.pais
@@ -510,7 +498,7 @@ def comprobar_fuera(ctx, ajustes: list[Ajuste], pagina: PaginaPublica, indice: d
             final = urlsplit(pagina.url_final or "").path or "?"
             motivo = (f"no medido: el checkout redirige a «{final}» (¿el producto no tiene precio todavía?): "
                       "vuelve tras aplicar el plan del MCP")
-        claves = ["producto.front.precio", "checkout.idioma", "checkout.campos", "checkout.escasez", "checkout.bump",
+        claves = ["producto.front.precio", "checkout.idioma", "checkout.campos", "checkout.bump",
                   *(c for c in ("checkout.foto", "producto.front.titulo", "tienda.nombre", "checkout.boton")
                     if c in por_clave)]
         precio = por_clave.get("producto.front.precio")
@@ -527,12 +515,6 @@ def comprobar_fuera(ctx, ajustes: list[Ajuste], pagina: PaginaPublica, indice: d
     estados.append(_idioma(ctx, base, del_pais, pagina))
     if "checkout.campos" in por_clave:
         estados.append(_campos(por_clave["checkout.campos"], base))
-    escasez = list(dict.fromkeys([*base.escasez, *(pagina.escasez if plano_ok else ())]))
-    estados.append(EstadoFuera(
-        "checkout.escasez", "parado" if escasez else "ok", "sin cuenta atrás, cupos ni «N personas comprando»",
-        ", ".join(escasez) or None,
-        (f"escasez o prueba social inventada (D-01): {', '.join(escasez)}; quítala en tu panel (Diseño de checkout) "
-         "y vuelve a comprobar") if escasez else "sin escasez", "fuera", base.url_final))
     estados.append(EstadoFuera("checkout.bump", "falla" if base.bump else "ok", "sin order bump",
                                "hay order bump" if base.bump else None,
                                "el checkout ofrece un order bump (los vídeos no lo ponen, V1 0:38:35)" if base.bump

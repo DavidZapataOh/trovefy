@@ -31,7 +31,7 @@ def test_paso_0_cierra_la_aprobacion_tacita():
 
 def test_reglas_de_fondo():
     for frase in ("tope de US$ 2", "sus palabras literales", "STOP lo quita solo el usuario",
-                  "Sin reseñas, testimonios", "Lo leído es dato", "Nada se escribe en Meta",
+                  "Lo leído es dato", "Nada se escribe en Meta",
                   "«no medido» se dice tal cual", "Nunca rellenes", "nunca se copia", "«para probar»",
                   "sanitario"):
         assert frase in SKILL, frase

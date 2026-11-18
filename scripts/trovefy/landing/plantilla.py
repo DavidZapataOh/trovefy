@@ -177,7 +177,7 @@ def _seccion(s: dict, datos: DatosLanding, checkout: str, vistas: list[int]) -> 
     elif s["tipo"] == "vista_previa":
         lineas += [_img_vista(n) for n in vistas] or ["  <!-- vistas: trovefy landing medios -->"]
     elif s["tipo"] == "prueba_social":
-        lineas.append('  <!-- solo reseñas reales de resenas.yaml: <blockquote data-tf-resena="<id>"> -->')
+        lineas.append('  <!-- reseñas de resenas.yaml: <blockquote data-tf-resena="<id>"> -->')
     lineas.append(f"  <p>{TEXTO_PROPIO}</p>")
     if s["cta"]:
         lineas.append(f'  <a data-tf-checkout href="{_e(checkout)}">{TEXTO_PROPIO}</a>')

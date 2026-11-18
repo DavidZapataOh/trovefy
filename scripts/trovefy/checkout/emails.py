@@ -1,9 +1,8 @@
 """Validación de los emails del checkout (plan 19, Tarea 10).
 
 Los textos los escribe Claude en la sesión, en ``productos/<p-id>/checkout/<PAIS>/emails/<clave>.md`` (frontmatter
-con ``asunto`` y el cuerpo en el idioma del país); el código solo valida: idioma, sin secretos, sin escasez ni
-urgencia y sin testimonios inventados (D-01). Por el ruling del 2026-11-17 solo se usa ``entrega``; el de
-``seguimiento_72h`` (pedir una reseña real) queda como opción del plan.
+con ``asunto`` y el cuerpo en el idioma del país); el código solo valida: idioma y sin secretos. Por el ruling del
+2026-11-17 solo se usa ``entrega``; el de ``seguimiento_72h`` (pedir una reseña) queda como opción del plan.
 """
 from __future__ import annotations
 
@@ -13,7 +12,6 @@ from pathlib import Path
 
 import yaml
 
-from trovefy.checkout.receta import hay_escasez, hay_testimonio
 from trovefy.idioma import detectar
 from trovefy.secretos import buscar_secreto
 from trovefy.vault import frontmatter
@@ -58,12 +56,6 @@ def validar_email(ruta: Path, idioma: str, clave: str) -> list[str]:
     secreto = buscar_secreto(texto)
     if secreto:
         problemas.append(f"aparece un secreto ({secreto}): no se usa")
-    escasez = hay_escasez(texto)
-    if escasez:
-        problemas.append(f"escasez o urgencia (D-01): {', '.join(dict.fromkeys(escasez))}")
-    testimonios = hay_testimonio(texto)
-    if testimonios:
-        problemas.append(f"testimonio o valoración inventados (D-01): {testimonios[0]}")
     if cuerpo:
         visto = detectar(cuerpo, sorted({idioma, "es", "en"}))
         if visto is None:

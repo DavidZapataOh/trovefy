@@ -21,8 +21,6 @@ from trovefy.checkout.receta import (
     Llamada,
     OpcionesReceta,
     ajustes_de_checkout,
-    hay_escasez,
-    hay_testimonio,
     limpiar_bloques,
     marcadores,
     operaciones,
@@ -219,43 +217,11 @@ def test_limites_desconocidos_no_meten_upsells(zz):
     assert any(a.startswith("no medido") and "ver_plan" in a for a in av)
 
 
-def test_sin_temporizador_ni_cupos(zz):
-    ctx, emails = zz
-    aj = _por_clave(ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))[0])
-    assert aj["checkout.temporizador"].valor is False and aj["checkout.cupos"].valor is False
-    disenos = [ll for a in aj.values() for ll in a.llamadas if ll.herramienta == "impultienda_disenar_checkout"]
-    assert disenos and all(ll.argumentos["minutos_timer_bump"] == 0 for ll in disenos)
-    bloques = [b for a in aj.values() for ll in a.llamadas if ll.herramienta == "impultienda_bloques_checkout"
-               for b in rellenar(ll, _relleno([ll]))["bloques"]]
-    assert bloques and not any(b["tipo"] in ("countdown", "stock") for b in bloques)
-
-
-def test_barra_de_compradores_oculta(zz):
-    """M5: la barra «N personas compraron» es prueba social sin compradores reales (D-01): se oculta."""
-    ctx, emails = zz
-    aj = _por_clave(ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))[0])
-    configs = [ll.argumentos for a in aj.values() for ll in a.llamadas
-               if ll.herramienta == "impultienda_configurar_checkout"]
-    assert any(c.get("ocultar_barra_compradores") is True for c in configs)
-    assert not any("texto_barra_compradores" in c or "posicion_barra_compradores" in c for c in configs)
-
-
-def test_bloques_de_abajo_se_reenvian_sin_escasez(zz):
-    """M5: los bloques que ya hay abajo del checkout se releen y se vuelven a mandar sin cuenta atrás ni cupos."""
-    ctx, emails = zz
-    aj, av = ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))
-    abajo = [ll for a in aj for ll in a.llamadas
-             if ll.herramienta == "impultienda_bloques_checkout" and ll.argumentos["posicion"] == "abajo"]
-    assert len(abajo) == 1 and abajo[0].argumentos["bloques"] == "<bloques:abajo>"
-    assert any("HTML" in a and "a mano" in a for a in av)  # los bloques HTML no los toca el conector
-
-
 def test_limpiar_bloques():
     limpios, avisos = limpiar_bloques(ACTUALES_ABAJO)
     assert [b["tipo"] for b in limpios] == ["text", "image"]
     assert limpios[0]["texto"].startswith("Pago seguro")
-    assert any("countdown" in a for a in avisos) and any("stock" in a for a in avisos)
-    assert any("остават" in a for a in avisos)
+    assert avisos == []
     limpios, avisos = limpiar_bloques([{"tipo": "html", "html": "<div id=t></div>"}, {"tipo": "raro"}])
     assert limpios == []
     assert any("revisar a mano" in a and "HTML" in a for a in avisos)
@@ -272,7 +238,7 @@ def test_bloques_limpios_pasan_el_catalogo():
 
 
 def test_sin_precio_tachado(zz):
-    """M5: precio_original: None, para que no salga un precio tachado (falso descuento)."""
+    """M5: precio_original: None, para que no salga un precio tachado."""
     ctx, emails = zz
     for opciones in (OpcionesReceta("Max"), OpcionesReceta("Max", moneda_tienda="EUR")):
         aj, _ = ajustes_de_checkout(ctx, MAX, emails, opciones)
@@ -357,9 +323,6 @@ def test_opciones_por_defecto():
 
 ACTUALES_ABAJO = [
     {"tipo": "text", "etiqueta": "p", "texto": "Pago seguro y entrega inmediata por email."},
-    {"tipo": "countdown", "minutos": 7, "texto": "La oferta termina en"},
-    {"tipo": "stock", "inicial": 12, "minimo": 3, "texto": "Quedan {count} cupos"},
-    {"tipo": "text", "etiqueta": "p", "texto": "Остават само 3 места!"},
     {"tipo": "image", "url": "https://cdn.ejemplo.test/sello.png", "alt": "Sello", "ancho_pct": 40},
 ]
 
@@ -426,26 +389,9 @@ def test_la_guarda_del_hook_deja_pasar_el_plan_aprobado(zz, monkeypatch):
     guarda = importlib.import_module("impultienda_guard")
     for o in ops:
         assert guarda.clasificar("mcp__impultienda__" + o["herramienta"], o["argumentos"]) == ("allow", ""), o
-    # Una llamada con temporizador o con bloques de cupos no pasaría nunca.
-    malo = {"store_id": UUID.format(1), "minutos_timer_bump": 7}
-    assert guarda.clasificar("mcp__impultienda__impultienda_disenar_checkout", malo)[0] == "deny"
 
 
-# --- escasez, testimonios, guion -----------------------------------------------------------------------------------
-
-
-def test_hay_escasez():
-    assert hay_escasez("Остават 2 места · 09:59") == ["остават", "09:59"]
-    assert hay_escasez("La oferta acaba en {timer}") == ["{timer}"]
-    assert hay_escasez("Solo { count } libres") == ["{ count }"]
-    assert hay_escasez("¡Solo hoy! Quedan pocas plazas") == ["solo hoy", "quedan"]
-    assert hay_escasez("Ръководство за спокойно тяло, 13,90 €") == []
-
-
-def test_hay_testimonio():
-    assert hay_testimonio("«Това ръководство промени живота ми!» — Мария, София")
-    assert hay_testimonio("★★★★★ 5/5")
-    assert not hay_testimonio("Ще се радваме да ни оставите честен отзив, ако искате.")
+# --- guion -----------------------------------------------------------------------------------------------------
 
 
 def test_guion_upsell_completo():
@@ -459,17 +405,12 @@ def test_guion_upsell_incompleto():
     assert any(GUION_UPSELL[3][0] in p for p in problemas)
 
 
-def test_guion_upsell_con_timer():
-    texto = _pagina_u1() + "\nОферта до {timer}\n"
-    assert any("escasez" in p and "{timer}" in p for p in validar_pagina_upsell(texto))
-
-
-def test_guion_upsell_desordenado_y_con_escasez():
+def test_guion_upsell_desordenado():
     claves = [c for c, _ in GUION_UPSELL]
     orden = claves[1:2] + claves[:1] + claves[2:]
-    texto = "\n".join(f"<!-- guion: {c} -->\nТекст." for c in orden) + "\nОстават 3 места!"
+    texto = "\n".join(f"<!-- guion: {c} -->\nТекст." for c in orden)
     problemas = validar_pagina_upsell(texto)
-    assert any("orden" in p for p in problemas) and any("escasez" in p for p in problemas)
+    assert any("orden" in p for p in problemas)
 
 
 # --- receta manual (respaldo) ------------------------------------------------------------------------------------
@@ -504,7 +445,7 @@ def test_limites_del_plan_en_el_mapa():
 
 def test_m6_plan_por_etapas_con_ids_de_la_lectura(zz):
     """Los ids que solo se conocen al ejecutar (``<market_id>``, ``<item_id:u1>``, ``<ruta:…>``, ``<oferta_id:u1>``,
-    ``<bloques:abajo>``, ``<url:mockup>``) parten la receta en etapas: cada etapa solo lleva marcadores que ya se
+    ``<url:mockup>``) parten la receta en etapas: cada etapa solo lleva marcadores que ya se
     conocen por las lecturas o por las escrituras de etapas anteriores, así que cada una se aprueba con sus ids ya
     rellenos y su huella final."""
     from trovefy.checkout.etapas import etapas_de, produce
@@ -527,7 +468,7 @@ def test_m6_plan_por_etapas_con_ids_de_la_lectura(zz):
     # Todas las llamadas de la receta acaban en alguna etapa, en orden de dependencias.
     claves = [p.clave for e in etapas for p in e]
     assert len(claves) == len(set(claves))
-    assert len(claves) == len(operaciones(aj)) + 2  # + la vista previa de los bloques y el enlace de Recursos
+    assert len(claves) == len(operaciones(aj)) + 1  # + el enlace de Recursos
     assert {o["herramienta"] for o in operaciones(aj)} <= set(vistos)
     primera = {p.herramienta for p in etapas[0]}
     assert "impultienda_precio_por_pais" not in primera          # espera al <market_id> del mercado creado
@@ -570,8 +511,8 @@ def test_descuento_de_u1_va_despues_del_funnel(zz):
 
 
 def test_hallazgos_de_la_tienda_real_quedan_cubiertos(zz):
-    """Precio 0, barra «5 души купуват в момента», campo apellido, botón azul sin foto, garantía de 7 días y Clarity
-    en el checkout: la receta fija cada uno por el conector o, si no hay herramienta, lo deja a mano."""
+    """Precio 0, campo apellido, botón azul sin foto, garantía de 7 días y Clarity en el checkout: la receta fija
+    cada uno por el conector o, si no hay herramienta, lo deja a mano."""
     ctx, emails = zz
     from trovefy.vault import frontmatter
 
@@ -584,7 +525,6 @@ def test_hallazgos_de_la_tienda_real_quedan_cubiertos(zz):
     assert ("producto.front.precio", "impultienda_precio_por_pais",
             {"store_id": "<store_id>", "market_id": "<market_id>", "precio": 13.9, "precio_original": None}) in args
     checkout = {k: v for _, h, a in args if h == "impultienda_configurar_checkout" for k, v in a.items()}
-    assert checkout["ocultar_barra_compradores"] is True
     assert checkout["pedir_telefono"] is True and checkout["pedir_apellido"] is False
     assert checkout["color_boton_pagar"] == "#16a34a" and checkout["resumen_posicion"] == "top"
     assert any(h == "impultienda_bloques_checkout" and a["posicion"] == "arriba" and a["bloques"][0]["tipo"] == "image"
@@ -613,14 +553,12 @@ def test_limpiar_bloques_respuesta_real_sin_bloques():
 
 
 def test_guion_upsell_con_contador_real():
-    """El contador real (se cierra de verdad) y su aviso de vencida no cuentan como escasez; sin su aviso, no vale."""
+    """El contador necesita su aviso de vencida y va de 1 a 60 minutos."""
     real = _pagina_u1() + "\n[[contador: 7 | Отстъпката е активна още]]\n[[vencido: Времето изтече.]]\n"
     assert validar_pagina_upsell(real) == []
     assert any("[[vencido" in p for p in validar_pagina_upsell(_pagina_u1() + "\n[[contador: 7 | Още]]\n"))
     assert any("1 a 60" in p for p in validar_pagina_upsell(
         _pagina_u1() + "\n[[contador: 90 | Още]]\n[[vencido: Край.]]\n"))
-    # Fuera de su marcador, la urgencia sigue sin pasar.
-    assert any("escasez" in p for p in validar_pagina_upsell(real + "\nИзтича скоро!\n"))
 
 
 def test_pagina_de_recuperacion_va_a_su_oferta(tmp_path):

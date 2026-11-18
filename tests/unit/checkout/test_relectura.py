@@ -64,7 +64,7 @@ def test_precio_distinto_es_discrepancia(zz):
     [r] = releer(plan, inst, {1: mal}, ctx=ctx)
     assert r.estado == "distinto" and r.igual is False and r.leido == 14.0
     tachado = {"modo": "aplicado", "precio_fijo": {"precio": 13.9, "precio_original": 29.9}}
-    assert releer(plan, inst, {1: tachado}, ctx=ctx)[0].estado == "distinto"  # sin precio tachado (D-01)
+    assert releer(plan, inst, {1: tachado}, ctx=ctx)[0].estado == "distinto"  # sin precio tachado
 
 
 def test_relectura_por_lectura(zz):
@@ -129,7 +129,7 @@ def test_formato_desconocido_no_medido(zz):
     plan = _plan(_op(1, "impultienda_configurar_checkout", {"store_id": STORE, "pedir_telefono": True},
                      "checkout.campos"),
                  _op(2, "impultienda_disenar_checkout", {"store_id": STORE, "minutos_timer_bump": 0},
-                     "checkout.temporizador"))
+                     "checkout.boton"))
     rs = releer(plan, _inst(ctx)[0], {1: {"raro": 1}, 2: {"aplicado": "sí"}}, ctx=ctx)
     assert [r.estado for r in rs] == ["no_medido", "no_medido"]
     # M2: otra columna con el mismo número de claves ya no es «ok»: no se sabe (no medido).

@@ -507,13 +507,7 @@
         "type": "object"
       },
       "clase": "escritura",
-      "motivo": "receta: precio y foto arriba del checkout (S1 5:40) en tienda clásica; nunca bloques countdown ni stock (D-01)",
-      "valores_prohibidos": {
-        "bloques[].tipo": [
-          "countdown",
-          "stock"
-        ]
-      }
+      "motivo": "receta: precio y foto arriba del checkout (S1 5:40) en tienda clásica"
     },
     {
       "nombre": "impultienda_cambiar_email_comprador",
@@ -1553,7 +1547,7 @@
         "type": "object"
       },
       "clase": "prohibida",
-      "motivo": "sin downsell: el de los vídeos es engañoso (DESVÍOS RESUELTOS)"
+      "motivo": "la receta no lo usa: el downsell va por el funnel post-compra (página de recuperación propia)"
     },
     {
       "nombre": "impultienda_configurar_mercado",
@@ -2358,21 +2352,13 @@
         "type": "object"
       },
       "clase": "escritura",
-      "motivo": "R-e: diseño del checkout permitido solo sin pago_* ni anuncio_bonos/texto_anuncio_bonos (M-4); nunca estilo_bump «escasez» y siempre minutos_timer_bump 0 (sin urgencia falsa, D-01)",
+      "motivo": "R-e: diseño del checkout permitido solo sin pago_* ni anuncio_bonos/texto_anuncio_bonos (M-4)",
       "parametros_prohibidos": [
         "pago_expres_arriba",
         "pago_al_final",
         "anuncio_bonos",
         "texto_anuncio_bonos"
-      ],
-      "valores_prohibidos": {
-        "estilo_bump": [
-          "escasez"
-        ]
-      },
-      "valores_obligatorios": {
-        "minutos_timer_bump": 0
-      }
+      ]
     },
     {
       "nombre": "impultienda_editar_producto",
