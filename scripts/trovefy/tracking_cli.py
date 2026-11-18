@@ -1,5 +1,5 @@
-"""Subcomando `trovefy tracking` (plan 19, Tareas 7 y 9): dataset guiado, píxel visto desde fuera, CAPI y límites del
-ejecutor.
+"""Subcomando `trovefy tracking` (plan 19, Tareas 7–9): dataset guiado, píxel visto desde fuera, CAPI, Test Events y
+límites del ejecutor.
 
 trovefy nunca entra en un panel (resolución 38) ni escribe en Meta: el usuario crea el dataset y pega el Pixel ID y
 el token CAPI en su panel (R-d); Claude lee Meta por su MCP de solo lectura y guarda la respuesta cruda en
@@ -22,6 +22,7 @@ from trovefy.vault.escritura import ZONA_NEGOCIO
 
 _abrir = None  # punto de inyección de los tests (urllib falso); None → el GET seguro de la landing
 _PREFIJO_PIXEL = "píxel: "
+_PREFIJO_EVENTOS = "eventos: "
 
 
 def _ahora() -> datetime:
@@ -61,6 +62,15 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
     c = sub.add_parser("capi", help="registra tus palabras: ya pegaste el token CAPI en tu panel")
     _comunes(c)
     c.add_argument("--dicho", required=True, help="tus palabras literales, entre comillas (nunca el token)")
+    e = sub.add_parser("eventos", help="Test Events: los cuatro eventos y Purchase una sola vez (MCP de Meta)")
+    _comunes(e)
+    e.add_argument("--antes", help="JSON de ads_get_dataset_stats antes de la prueba")
+    e.add_argument("--despues", help="JSON de ads_get_dataset_stats después de la prueba")
+    e.add_argument("--detalles", help="JSON de ads_get_dataset_details o ads_get_dataset_quality (¿llega la CAPI?)")
+    e.add_argument("--manual", help="respaldo: PageView=N,ViewContent=N,InitiateCheckout=N,Purchase=N leídos en tu "
+                                    "captura de «Probar eventos»")
+    e.add_argument("--captura", help="con --manual: la clave de la captura registrada (test-events)")
+    e.add_argument("--pedidos", type=int, default=1, help="pedidos de prueba hechos entre «antes» y «después»")
     sub.add_parser("utm", help="la plantilla de parámetros UTM para cada anuncio")
     from trovefy.tracking import ejecutor
 
@@ -211,13 +221,115 @@ def _utm(_args: argparse.Namespace) -> int:
     return 0
 
 
+def _manual(texto: str) -> dict[str, int]:
+    from trovefy.tracking.modelo import EVENTOS
+
+    conteo: dict[str, int] = {}
+    for par in texto.split(","):
+        nombre, igual, valor = par.strip().partition("=")
+        if not igual or nombre not in EVENTOS or nombre in conteo or not valor.strip().isdigit():
+            raise ValueError(f"--manual «{texto}»: escribe {','.join(e + '=N' for e in EVENTOS)}")
+        conteo[nombre] = int(valor)
+    if set(conteo) != set(EVENTOS):
+        raise ValueError(f"--manual: faltan {', '.join(e for e in EVENTOS if e not in conteo)}")
+    return conteo
+
+
+def _captura_test_events(ctx, clave: str | None) -> str:
+    from trovefy.embudo.pegado import indice
+
+    if clave != "test-events":
+        raise ValueError("--manual va con --captura test-events: registra antes tu captura de «Probar eventos» con "
+                         "trovefy checkout evidencia --clave test-events --desde <captura>")
+    capturas = [p for p in indice(ctx.vault, ctx).get(clave, []) if p.tipo == "captura"]
+    if not capturas:
+        raise ValueError("no hay captura de «Probar eventos» registrada: trovefy checkout evidencia --clave "
+                         "test-events --desde <captura>")
+    return capturas[-1].ruta
+
+
+def _resumen_eventos(ctx, datos: dict) -> str:
+    from trovefy.embudo.contexto import ruta_pais
+    from trovefy.secretos import buscar_secreto
+    from trovefy.vault.escritura import escribir_atomico
+
+    ruta = ruta_pais(ctx) / "compra" / "events-manager.json"
+    texto = json.dumps(datos, ensure_ascii=False, indent=2) + "\n"
+    patron = buscar_secreto(texto)
+    if patron:
+        raise ValueError(f"el resumen de eventos lleva algo con forma de secreto ({patron}): no lo guardo")
+    escribir_atomico(ruta, texto)
+    return ruta.relative_to(ruta_pais(ctx).parent.parent).as_posix()
+
+
+def _eventos(args: argparse.Namespace) -> int:
+    from trovefy.tracking.eventos import (
+        capi_en_meta,
+        contar_eventos,
+        diferencia,
+        evaluar_eventos,
+    )
+
+    mcp = args.antes is not None or args.despues is not None or args.detalles is not None
+    if mcp and (args.manual is not None or args.captura is not None):
+        raise ValueError("o --antes/--despues (MCP de Meta) o --manual con --captura, no las dos")
+    if not mcp and args.manual is None:
+        raise ValueError("falta la fuente: --antes y --despues (MCP de Meta) o --manual con --captura")
+    if mcp and (args.antes is None or args.despues is None):
+        raise ValueError("--antes y --despues van juntos (dos lecturas de ads_get_dataset_stats)")
+    ctx = _contexto(args)
+    t = _tracking(ctx)
+    if t.dataset_id is None:
+        raise ValueError("aún no hay dataset_id: trovefy tracking dataset primero")
+    capi = None
+    evidencia = list(t.evidencia)
+    if mcp:
+        conteo = diferencia(contar_eventos(_leer_json(args.antes)), contar_eventos(_leer_json(args.despues)))
+        capi = capi_en_meta(_leer_json(args.detalles)) if args.detalles else None
+        fuente = "mcp"
+    else:
+        conteo = _manual(args.manual)
+        evidencia.append(_captura_test_events(ctx, args.captura))
+        fuente = "captura"
+    veredicto, motivos = evaluar_eventos(conteo, args.pedidos)
+    if capi is False:
+        motivos.append("no verificado: Meta no ve eventos del servidor (API de conversiones): revisa el token en "
+                       "«Meta / Tracking» de tu panel")
+    elif capi is None:
+        motivos.append("no medido: CAPI (pide a Claude ads_get_dataset_details y pásalo con --detalles)")
+    if conteo is None:
+        estado = t.estado
+    elif veredicto == "verificado" and capi is not False:
+        estado = "verificado"
+    elif veredicto == "no_medido":
+        estado = t.estado
+    else:
+        estado = "no_verificado"
+    if conteo is not None:
+        evidencia.append(_resumen_eventos(ctx, {
+            "fuente": fuente, "fecha": _reloj().isoformat(timespec="seconds"), "pedidos": args.pedidos,
+            "conteo": conteo, "veredicto": veredicto, "capi": capi, "motivos": motivos}))
+    t = replace(t, estado=estado, eventos=conteo if conteo is not None else t.eventos,
+                fuente_eventos=fuente if conteo is not None else t.fuente_eventos,
+                capi="visto_en_meta" if capi is True else t.capi,
+                evidencia=list(dict.fromkeys(evidencia)),
+                motivos=[m for m in t.motivos if not m.startswith(_PREFIJO_EVENTOS)]
+                + [_PREFIJO_EVENTOS + m for m in motivos])
+    _guardar(ctx, t)
+    if conteo is not None:
+        print("Eventos (" + fuente + "): " + ", ".join(f"{e}={n}" for e, n in conteo.items()))
+    print("\n".join([f"Tracking: {estado}", *motivos]))
+    return 0 if estado == "verificado" else 1
+
+
 def _ejecutor(args: argparse.Namespace) -> int:
     from trovefy.tracking import ejecutor
 
     return ejecutor.ejecutar(args)
 
 
-_ACCIONES = {"preparar": _preparar, "dataset": _dataset, "tienda": _tienda, "capi": _capi, "utm": _utm, "ejecutor": _ejecutor}
+_ACCIONES = {"preparar": _preparar, "dataset": _dataset, "tienda": _tienda, "capi": _capi, "utm": _utm, "ejecutor": _ejecutor,
+             "eventos": _eventos}
 
 
 def _ejecutar(args: argparse.Namespace) -> int:
