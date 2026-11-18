@@ -245,9 +245,22 @@ def test_pagina_html_escapa_y_pone_botones():
           "[[aceptar: Да, искам го]]\n[[rechazar: Не, благодаря]]\n")
     html = pagina_html(md)
     assert "<script>" not in html and "&lt;script&gt;" in html and "&amp;" in html
-    assert '<button type="button" data-pp-accept>Да, искам го</button>' in html
+    assert '<button type="button" class="tv-si" data-pp-accept>Да, искам го</button>' in html
     assert "data-pp-decline" in html and "<h2>Благодаря</h2>" in html and "guion" not in html
     assert pagina_html("## Solo texto\n\n[[aceptar: Sí]]\n") is None
+
+
+def test_pagina_html_con_diseno_y_colores_del_brandbook():
+    md = ("# Gracias\nTu plan va al correo.\n\n## Qué recibes\n- PDF\n- Fichas\n\nTexto.\n\n"
+          "[[aceptar: Sí]]\n[[rechazar: No, gracias]]\n")
+    html = pagina_html(md, {"--color-primario": "#123456", "--color-texto": "red;}<x"})
+    assert html.startswith("<style>") and "--color-primario:#123456;" in html
+    assert "red;}<x" not in html and "--color-texto:#1E2A2B;" in html  # valor peligroso: queda el de defecto
+    assert '<div class="tv-ok">\n<h1>Gracias</h1>' in html
+    assert "<ul>\n<li>PDF</li>\n<li>Fichas</li>\n</ul>\n<p>Texto.</p>" in html
+    assert html.index("data-pp-accept") < html.index("data-pp-decline")
+    assert '<div class="tv-cta">' in html and html.rstrip().endswith("</div>")
+    assert html.count("<div") == html.count("</div>")
 
 
 def test_aplicado_con_los_nombres_reales_del_conector():

@@ -134,31 +134,118 @@ def _escapar(texto: str) -> str:
     return texto.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
-def pagina_html(texto_md: str) -> str | None:
-    """El HTML de la página de un upsell (``checkout/<PAIS>/upsells/<clave>.md``): títulos ``#``/``##``, párrafos y
-    los dos botones ``[[aceptar: …]]`` (``data-pp-accept``) y ``[[rechazar: …]]`` (``data-pp-decline``). Todo el
-    texto va escapado: nada de HTML del archivo pasa tal cual. None si falta alguno de los dos botones."""
+# Paleta por defecto (sin brandbook). Con brandbook van sus ``tokens_css``.
+_TOKENS_DEFECTO = {"--color-primario": "#2F5D62", "--color-acento": "#D98E73", "--color-fondo": "#F7F4EF",
+                   "--color-texto": "#1E2A2B", "--fuente-titulos": "sans-serif", "--fuente-texto": "sans-serif"}
+_SISTEMA = 'system-ui,-apple-system,"Segoe UI",Roboto,sans-serif'
+_CSS_PAGINA = f"""
+body{{margin:0;background:var(--color-fondo)}}
+.tv-up{{box-sizing:border-box;max-width:640px;margin:0 auto;padding:28px 18px 56px;background:var(--color-fondo);
+color:var(--color-texto);font-family:var(--fuente-texto),{_SISTEMA};font-size:17px;line-height:1.6;
+-webkit-text-size-adjust:100%}}
+.tv-up *{{box-sizing:border-box}}
+.tv-up h1,.tv-up h2{{font-family:var(--fuente-titulos),{_SISTEMA};color:var(--color-primario);line-height:1.25;
+margin:0 0 12px}}
+.tv-up h1{{font-size:24px}}
+.tv-up h2{{font-size:21px}}
+.tv-up p{{margin:0 0 12px}}
+.tv-ok,.tv-sec{{background:#fff;border-radius:16px;padding:22px 20px;margin-bottom:14px;
+box-shadow:0 2px 14px rgba(0,0,0,.06)}}
+.tv-ok{{text-align:center;border-top:5px solid var(--color-primario);margin-bottom:18px}}
+.tv-ok h1:before{{content:"\\2713";display:block;width:44px;height:44px;line-height:44px;margin:0 auto 12px;
+border-radius:50%;background:var(--color-primario);color:#fff;font-size:24px}}
+.tv-up ul{{list-style:none;margin:0 0 12px;padding:0}}
+.tv-up li{{position:relative;padding-left:30px;margin-bottom:10px}}
+.tv-up li:before{{content:"\\2713";position:absolute;left:0;top:2px;width:21px;height:21px;line-height:21px;
+text-align:center;border-radius:50%;background:var(--color-acento);color:#fff;font-size:13px;font-weight:700}}
+.tv-cta{{margin-top:20px;display:flex;flex-direction:column;gap:12px}}
+.tv-cta button{{width:100%;font:inherit;font-weight:700;border-radius:12px;padding:17px 18px;cursor:pointer;
+line-height:1.3}}
+.tv-si{{background:var(--color-primario);color:#fff;border:0;font-size:19px;box-shadow:0 4px 14px rgba(0,0,0,.18)}}
+.tv-si:hover{{filter:brightness(1.1)}}
+.tv-no{{background:transparent;color:var(--color-texto);border:2px solid currentColor;font-size:16px;opacity:.8}}
+@media (min-width:700px){{.tv-up{{padding-top:48px}}.tv-up h1{{font-size:28px}}}}
+"""
+_CLAVE_VAR = re.compile(r"--[a-z0-9-]+")
+_VALOR_MALO = re.compile(r"[{};<>]")
+
+
+def _estilo(tokens: dict[str, str] | None) -> str:
+    buenos = {k: v for k, v in (tokens or {}).items()
+              if _CLAVE_VAR.fullmatch(str(k)) and not _VALOR_MALO.search(str(v))}
+    variables = "".join(f"{k}:{v};" for k, v in {**_TOKENS_DEFECTO, **buenos}.items())
+    return f"<style>\n.tv-up{{{variables}}}{_CSS_PAGINA}</style>"
+
+
+def pagina_html(texto_md: str, tokens: dict[str, str] | None = None) -> str | None:
+    """El HTML de la página de un upsell (``checkout/<PAIS>/upsells/<clave>.md``), con diseño: el ``#`` y su texto
+    van en una tarjeta de confirmación, cada ``##`` abre una tarjeta, las líneas ``- …`` son una lista con marcas y
+    los dos botones ``[[aceptar: …]]`` (``data-pp-accept``) y ``[[rechazar: …]]`` (``data-pp-decline``) van al
+    final, a todo el ancho y los dos visibles. Colores y letras: ``tokens`` (los ``tokens_css`` del brandbook).
+    Todo el texto va escapado: nada de HTML del archivo pasa tal cual. None si falta alguno de los dos botones."""
     texto = _GUION_COMENTARIO.sub("", texto_md or "")
     tipos = {m.group(1) for m in _BOTON.finditer(texto)}
     if tipos != {"aceptar", "rechazar"}:
         return None
-    bloques: list[str] = []
-    for parrafo in re.split(r"\n\s*\n", texto):
-        lineas = [x.strip() for x in parrafo.strip().splitlines() if x.strip()]
-        if not lineas:
+    cuerpo: list[str] = []
+    botones: list[str] = []
+    estado = {"caja": False, "lista": False}
+
+    def cerrar_lista() -> None:
+        if estado["lista"]:
+            cuerpo.append("</ul>")
+            estado["lista"] = False
+
+    def abrir(clase: str) -> None:
+        cerrar_lista()
+        if estado["caja"]:
+            cuerpo.append("</div>")
+        cuerpo.append(f'<div class="{clase}">')
+        estado["caja"] = True
+
+    for linea in (x.strip() for x in texto.splitlines()):
+        if not linea:
             continue
-        for linea in lineas:
-            boton = _BOTON.fullmatch(linea)
-            if boton:
-                atributo = "data-pp-accept" if boton.group(1) == "aceptar" else "data-pp-decline"
-                bloques.append(f"<p><button type=\"button\" {atributo}>{_escapar(boton.group(2))}</button></p>")
-            elif linea.startswith("## "):
-                bloques.append(f"<h2>{_escapar(linea[3:].strip())}</h2>")
-            elif linea.startswith("# "):
-                bloques.append(f"<h1>{_escapar(linea[2:].strip())}</h1>")
-            else:
-                bloques.append(f"<p>{_escapar(linea)}</p>")
-    return "\n".join(bloques) + "\n"
+        boton = _BOTON.fullmatch(linea)
+        if boton:
+            si = boton.group(1) == "aceptar"
+            clase, atributo = ("tv-si", "data-pp-accept") if si else ("tv-no", "data-pp-decline")
+            botones.append(f'<button type="button" class="{clase}" {atributo}>{_escapar(boton.group(2))}</button>')
+        elif linea.startswith("# "):
+            abrir("tv-ok")
+            cuerpo.append(f"<h1>{_escapar(linea[2:].strip())}</h1>")
+        elif linea.startswith("## "):
+            abrir("tv-sec")
+            cuerpo.append(f"<h2>{_escapar(linea[3:].strip())}</h2>")
+        elif linea.startswith(("- ", "* ")):
+            if not estado["caja"]:
+                abrir("tv-sec")
+            if not estado["lista"]:
+                cuerpo.append("<ul>")
+                estado["lista"] = True
+            cuerpo.append(f"<li>{_escapar(linea[2:].strip())}</li>")
+        else:
+            if not estado["caja"]:
+                abrir("tv-sec")
+            cerrar_lista()
+            cuerpo.append(f"<p>{_escapar(linea)}</p>")
+    cerrar_lista()
+    cta = '<div class="tv-cta">\n' + "\n".join(botones) + "\n</div>"
+    if not estado["caja"]:
+        cuerpo.append('<div class="tv-sec">')
+    cuerpo.extend([cta, "</div>"])
+    return _estilo(tokens) + '\n<div class="tv-up">\n' + "\n".join(cuerpo) + "\n</div>\n"
+
+
+def _tokens_de(ruta: Path) -> dict[str, str] | None:
+    """Los ``tokens_css`` del ``BRANDBOOK.md`` del producto de una página de upsell
+    (``productos/<p>/checkout/<PAIS>/upsells/<clave>.md``); None si no hay o no se leen."""
+    from trovefy.pdf.maqueta import tokens_brandbook
+
+    try:
+        return tokens_brandbook((ruta.parents[3] / "BRANDBOOK.md").read_text(encoding="utf-8"))
+    except (IndexError, OSError, UnicodeDecodeError, ValueError):
+        return None
 
 
 def valores_locales(ajustes: list[Ajuste]) -> tuple[dict[str, str], dict[str, str]]:
@@ -172,7 +259,8 @@ def valores_locales(ajustes: list[Ajuste]) -> tuple[dict[str, str], dict[str, st
         pieza = a.clave.split(".")[1]
         ruta = Path(a.valor) if isinstance(a.valor, Path) else None
         try:
-            html = pagina_html(ruta.read_text(encoding="utf-8")) if ruta and ruta.is_file() else None
+            html = (pagina_html(ruta.read_text(encoding="utf-8"), _tokens_de(ruta))
+                    if ruta and ruta.is_file() else None)
         except (OSError, UnicodeDecodeError):
             html = None
         if html is None:
