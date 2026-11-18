@@ -42,7 +42,7 @@ VOCABULARIO: tuple[str, ...] = (
     r"producto\.front\.(titulo|precio|entregable)",
     r"checkout\.(idioma|campos|temporizador|cupos|foto|plantilla|boton|garantia|clarity)",
     r"bump\.(titulo|precio|entregable|activo)",
-    r"postcompra\.u[123]\.(titulo|precio|entregable|pagina|activo|descuento)",
+    r"postcompra\.u[123]\.(titulo|precio|entregable|pagina|pagina_recuperacion|activo|descuento)",
     r"downsell\.[a-z_]+",
     r"emails\.(entrega|seguimiento_72h)",
 )
@@ -253,6 +253,11 @@ GUION_UPSELL: tuple[tuple[str, str], ...] = (
     ("decision", "el botón «sí» y el «no, gracias», igual de visibles"),
 )
 _GUION = re.compile(r"<!--\s*guion:\s*([a-z_]+)\s*-->")
+# Contador REAL de la página (resolución 2026-11-18, «reloj de 7 min» de los vídeos): al llegar a cero la página
+# quita el botón de aceptar, así que la oferta se cierra de verdad. Su etiqueta y el aviso de vencida no cuentan como
+# escasez falsa; el resto del texto sigue sin escasez (D-01).
+CONTADOR = re.compile(r"^\[\[contador:\s*(\d{1,2})\s*\|\s*([^\]|]+?)\s*\]\]$", re.MULTILINE)
+VENCIDO = re.compile(r"^\[\[vencido:\s*([^\]]+?)\s*\]\]$", re.MULTILINE)
 
 
 def validar_pagina_upsell(texto_md: str) -> list[str]:
@@ -269,6 +274,15 @@ def validar_pagina_upsell(texto_md: str) -> list[str]:
         problemas.append("los puntos del guion no van en orden")
     if len(vistas) != len(set(vistas)):
         problemas.append("un punto del guion aparece dos veces")
+    contadores = CONTADOR.findall(texto_md or "")
+    vencidos = VENCIDO.findall(texto_md or "")
+    if len(contadores) > 1 or len(vencidos) > 1:
+        problemas.append("como mucho un [[contador: …]] y un [[vencido: …]]")
+    if bool(contadores) != bool(vencidos):
+        problemas.append("el [[contador: minutos | texto]] necesita su [[vencido: texto]] (lo que se ve al cerrarse)")
+    if any(not 1 <= int(m) <= 60 for m, _ in contadores):
+        problemas.append("el contador va de 1 a 60 minutos")
+    texto_md = VENCIDO.sub("", CONTADOR.sub("", texto_md or ""))
     escasez = hay_escasez(texto_md)
     if escasez:
         problemas.append(f"escasez o urgencia (D-01): {', '.join(dict.fromkeys(escasez))}")
@@ -516,6 +530,7 @@ class _Receta:
             problemas = (validar_pagina_upsell(pagina.read_text(encoding="utf-8"))
                          if pagina.is_file() and not pagina.is_symlink() else None)
             self._upsell(clave, pieza, pagina if problemas == [] else None, primero=usados == 0)
+            self._recuperacion(clave)
             if problemas is None:
                 self.avisos.append(f"no medido: falta la página de {clave} (checkout/{self.ctx.pais}/upsells/"
                                    f"{clave}.md, la escribe Claude con el guion de 8 puntos)")
@@ -575,6 +590,29 @@ class _Receta:
                        Llamada("impultienda_modificar_oferta_postcompra",
                                {"store_id": "<store_id>", "item_id": item, "descuento_pct": 0, "aplicar_a": "upsell"},
                                "impultienda_ver_postcompra"))
+
+    def _recuperacion(self, clave: str) -> None:
+        """La página propia del downsell de recuperación que el funnel crea para ``clave`` (descuento real, R-c):
+        ``upsells/<clave>-recuperacion.md``, con el mismo guion. Sin archivo, esa oferta sigue con la plantilla."""
+        if self.sin_funnel:
+            return
+        pagina = ruta_pais(self.ctx) / "upsells" / f"{clave}-recuperacion.md"
+        if not pagina.is_file() or pagina.is_symlink():
+            return
+        problemas = validar_pagina_upsell(pagina.read_text(encoding="utf-8"))
+        if problemas:
+            self.avisos.append(f"la página de recuperación de {clave} no vale: {'; '.join(problemas)}")
+            return
+        oferta = f"<oferta_id:{clave}r>"
+        self.poner(f"postcompra.{clave}.pagina_recuperacion", pagina,
+                   "la página del downsell de recuperación, con el guion y el diseño de la marca, en HTML propio",
+                   "V1 1:05:30", True,
+                   Llamada("impultienda_guardar_html_postcompra",
+                           {"store_id": "<store_id>", "oferta_id": oferta, "html": f"<html:{clave}r>"},
+                           "impultienda_leer_html_postcompra"),
+                   Llamada("impultienda_alternar_html_postcompra",
+                           {"store_id": "<store_id>", "oferta_id": oferta, "activo": True},
+                           "impultienda_leer_html_postcompra"))
 
     def downsell(self) -> None:
         self.avisos.append(AVISO_DOWNSELL)

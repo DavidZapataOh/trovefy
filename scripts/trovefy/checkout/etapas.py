@@ -115,7 +115,8 @@ def produce(paso: Paso) -> set[str]:
     if h == "impultienda_cargar_entregable" and a.get("modo") == "subir":
         return {f"<ruta:{p}>" for p in piezas}
     if h in ("impultienda_crear_funnel_postcompra", "impultienda_agregar_oferta_postcompra"):
-        return {f"<oferta_id:{p}>" for p in piezas}
+        # cada oferta del funnel trae su downsell de recuperación (``<oferta_id:uNr>``)
+        return {f"<oferta_id:{p}{r}>" for p in piezas for r in ("", "r")}
     return set()
 
 

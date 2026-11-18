@@ -249,3 +249,10 @@ def test_descuento_del_upsell_se_lee_de_ver_postcompra(zz):
     assert releer(plan, inst, {1: {**respuesta, "descuento": "15%"}}, ctx=ctx)[0].estado == "distinto"
     for raro in ({"ok": True}, {"descuento": "mucho"}, {"descuento": True}, []):
         assert releer(plan, inst, {1: raro}, ctx=ctx)[0].estado == "no_medido", raro
+
+
+def test_oferta_de_recuperacion_se_lee_del_downsell(zz):
+    ctx, _ = zz
+    inst, _ = _inst(ctx, impultienda_ver_postcompra=_postcompra("0%"))
+    valores = valores_de(ctx, inst, {"<item_id:u1>": U1})
+    assert valores["<oferta_id:u1r>"] == "00000000-0000-4000-8000-0000000000a2"

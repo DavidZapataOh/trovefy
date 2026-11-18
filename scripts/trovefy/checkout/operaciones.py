@@ -32,7 +32,15 @@ from trovefy.checkout.etapas import (
     produce,
     requiere,
 )
-from trovefy.checkout.receta import Ajuste, Llamada, _nombre, marcadores, rellenar
+from trovefy.checkout.receta import (
+    CONTADOR,
+    VENCIDO,
+    Ajuste,
+    Llamada,
+    _nombre,
+    marcadores,
+    rellenar,
+)
 from trovefy.embudo.contexto import Contexto
 from trovefy.tienda.mcp import (
     Herramienta,
@@ -141,7 +149,7 @@ _TOKENS_DEFECTO = {"--color-primario": "#2F5D62", "--color-acento": "#D98E73", "
                    "--color-texto": "#1E2A2B", "--fuente-titulos": "sans-serif", "--fuente-texto": "sans-serif"}
 _SISTEMA = 'system-ui,-apple-system,"Segoe UI",Roboto,sans-serif'
 _CSS_PAGINA = f"""
-body{{margin:0;background:var(--color-fondo)}}
+html,body{{margin:0!important;background:var(--color-fondo)!important}}
 .tv-up{{box-sizing:border-box;max-width:640px;margin:0 auto;padding:28px 18px 56px;background:var(--color-fondo);
 color:var(--color-texto);font-family:var(--fuente-texto),{_SISTEMA};font-size:17px;line-height:1.6;
 -webkit-text-size-adjust:100%}}
@@ -167,7 +175,25 @@ line-height:1.3}}
 .tv-si:hover{{filter:brightness(1.1)}}
 .tv-no{{background:transparent;color:var(--color-texto);border:2px solid currentColor;font-size:16px;opacity:.8}}
 @media (min-width:700px){{.tv-up{{padding-top:48px}}.tv-up h1{{font-size:28px}}}}
+.tv-reloj{{position:sticky;top:0;z-index:5;padding:12px 18px;background:var(--color-primario);color:#fff;
+text-align:center;font-family:var(--fuente-texto),{_SISTEMA};font-weight:700;font-size:16px;line-height:1.4}}
+.tv-reloj b{{display:inline-block;margin-left:8px;padding:2px 10px;border-radius:6px;background:rgba(255,255,255,.2);
+font-variant-numeric:tabular-nums}}
+.tv-reloj.tv-fin{{background:#6b7280}}
+.tv-vencido{{margin:0;padding:14px;border-radius:12px;background:#eef0f1;text-align:center;font-weight:600}}
 """
+# El contador cuenta desde la primera vez que el comprador abre ESTA página (se guarda en su navegador: recargar no
+# lo reinicia) y, al llegar a cero, quita el botón de aceptar: la oferta se cierra de verdad.
+_JS_CONTADOR = ("<script>(function(){var r=document.querySelector('[data-tv-reloj]');if(!r)return;"
+                "var k='tv-reloj:'+location.pathname+':'+r.getAttribute('data-tv-id'),f=0;"
+                "try{f=+localStorage.getItem(k)}catch(e){}"
+                "if(!f){f=Date.now()+1000*r.getAttribute('data-tv-reloj');try{localStorage.setItem(k,f)}catch(e){}}"
+                "var o=r.querySelector('b'),i;function t(){var q=Math.max(0,Math.ceil((f-Date.now())/1000));"
+                "o.textContent=('0'+Math.floor(q/60)).slice(-2)+':'+('0'+q%60).slice(-2);"
+                "if(q<=0){clearInterval(i);r.classList.add('tv-fin');"
+                "document.querySelectorAll('[data-pp-accept]').forEach(function(b){b.remove()});"
+                "var v=document.querySelector('.tv-vencido');if(v)v.hidden=false}}"
+                "i=setInterval(t,1000);t()})();</script>")
 _CLAVE_VAR = re.compile(r"--[a-z0-9-]+")
 _VALOR_MALO = re.compile(r"[{};<>]")
 
@@ -176,7 +202,7 @@ def _estilo(tokens: dict[str, str] | None) -> str:
     buenos = {k: v for k, v in (tokens or {}).items()
               if _CLAVE_VAR.fullmatch(str(k)) and not _VALOR_MALO.search(str(v))}
     variables = "".join(f"{k}:{v};" for k, v in {**_TOKENS_DEFECTO, **buenos}.items())
-    return f"<style>\n.tv-up{{{variables}}}{_CSS_PAGINA}</style>"
+    return f"<style>\n:root{{{variables}}}{_CSS_PAGINA}</style>"
 
 
 def pagina_html(texto_md: str, tokens: dict[str, str] | None = None) -> str | None:
@@ -191,6 +217,16 @@ def pagina_html(texto_md: str, tokens: dict[str, str] | None = None) -> str | No
         return None
     cuerpo: list[str] = []
     botones: list[str] = []
+    reloj = ""
+    contador = CONTADOR.search(texto)
+    vencido = VENCIDO.search(texto)
+    if contador and vencido:
+        minutos = int(contador.group(1))
+        pagina_id = hashlib.sha256(texto.encode("utf-8")).hexdigest()[:10]
+        reloj = (f'<div class="tv-reloj" data-tv-reloj="{minutos * 60}" data-tv-id="{pagina_id}">'
+                 f"{_escapar(contador.group(2))} <b>{minutos:02d}:00</b></div>\n")
+        botones.append(f'<p class="tv-vencido" hidden>{_escapar(vencido.group(1))}</p>')
+    texto = VENCIDO.sub("", CONTADOR.sub("", texto))
     estado = {"caja": False, "lista": False}
 
     def cerrar_lista() -> None:
@@ -236,7 +272,8 @@ def pagina_html(texto_md: str, tokens: dict[str, str] | None = None) -> str | No
     if not estado["caja"]:
         cuerpo.append('<div class="tv-sec">')
     cuerpo.extend([cta, "</div>"])
-    return _estilo(tokens) + '\n<div class="tv-up">\n' + "\n".join(cuerpo) + "\n</div>\n"
+    html = _estilo(tokens) + "\n" + reloj + '<div class="tv-up">\n' + "\n".join(cuerpo) + "\n</div>\n"
+    return html + (_JS_CONTADOR + "\n" if reloj else "")
 
 
 def _tokens_de(ruta: Path) -> dict[str, str] | None:
@@ -256,9 +293,9 @@ def valores_locales(ajustes: list[Ajuste]) -> tuple[dict[str, str], dict[str, st
     valores: dict[str, str] = {}
     manuales: dict[str, str] = {}
     for a in ajustes:
-        if not re.fullmatch(r"postcompra\.u[123]\.pagina", a.clave):
+        if not re.fullmatch(r"postcompra\.u[123]\.pagina(?:_recuperacion)?", a.clave):
             continue
-        pieza = a.clave.split(".")[1]
+        pieza = a.clave.split(".")[1] + ("r" if a.clave.endswith("_recuperacion") else "")
         ruta = Path(a.valor) if isinstance(a.valor, Path) else None
         try:
             html = (pagina_html(ruta.read_text(encoding="utf-8"), _tokens_de(ruta))

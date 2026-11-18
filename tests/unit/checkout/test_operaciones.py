@@ -315,3 +315,13 @@ def test_descuento_de_u1_se_corrige_si_el_funnel_lo_puso(zz):
     _, _, plan = _plan(zz, estado=est)
     assert all(o.herramienta != "impultienda_modificar_oferta_postcompra" for o in plan.operaciones)
     assert "postcompra.u1.descuento" in {a.clave for a in plan.ya_estan}
+
+
+def test_pagina_html_con_contador_real():
+    md = ("# Gracias\n[[contador: 7 | Активно още]]\n[[vencido: Изтече.]]\n\n## Цена\nТекст.\n\n"
+          "[[aceptar: Да]]\n[[rechazar: Не]]\n")
+    html = pagina_html(md)
+    assert 'data-tv-reloj="420"' in html and "Активно още <b>07:00</b>" in html
+    assert '<p class="tv-vencido" hidden>Изтече.</p>' in html and "[[" not in html
+    assert html.rstrip().endswith("</script>") and "data-pp-accept" in html
+    assert "<script>" not in pagina_html("# Gracias\n\n[[aceptar: Да]]\n[[rechazar: Не]]\n")
