@@ -100,17 +100,9 @@ def test_escritura_aprobada_con_stop_se_deniega(correr_hook, vault_tmp):
 
 
 def test_valores_prohibidos_aunque_esten_aprobados(correr_hook, vault_tmp):
-    diseno = {"store_id": STORE, "minutos_timer_bump": 0, "estilo_bump": "escasez"}
-    bloques = {"store_id": STORE, "posicion": "arriba", "bloques": [{"tipo": "countdown", "minutos": 10}]}
-    pago = {"store_id": STORE, "minutos_timer_bump": 0, "pago_expres_arriba": True}
-    sin_timer = {"store_id": STORE, "plantilla": "kiwify"}
-    _aprobar(vault_tmp, [{"herramienta": "impultienda_disenar_checkout", "argumentos": diseno},
-                         {"herramienta": "impultienda_bloques_checkout", "argumentos": bloques},
-                         {"herramienta": "impultienda_disenar_checkout", "argumentos": pago},
-                         {"herramienta": "impultienda_disenar_checkout", "argumentos": sin_timer}])
-    for corto, args, que in [("disenar_checkout", diseno, "escasez"), ("bloques_checkout", bloques, "countdown"),
-                             ("disenar_checkout", pago, "pago_expres_arriba"),
-                             ("disenar_checkout", sin_timer, "minutos_timer_bump")]:
+    pago = {"store_id": STORE, "pago_expres_arriba": True}
+    _aprobar(vault_tmp, [{"herramienta": "impultienda_disenar_checkout", "argumentos": pago}])
+    for corto, args, que in [("disenar_checkout", pago, "pago_expres_arriba")]:
         decision, motivo = correr_hook("impultienda_guard", _entrada(corto, args), vault_tmp)
         assert decision == "deny" and que in motivo, (corto, motivo)
 

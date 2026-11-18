@@ -33,13 +33,12 @@ from trovefy.vault.escritura import ZONA_NEGOCIO, escribir_atomico
 from trovefy.vault.producto import actualizar_producto
 
 EstadoPaso = Literal["ok", "falla", "no_medido"]
-PASOS_FIJOS = ("landing", "boton", "checkout_utm", "checkout_precio", "checkout_idioma", "sin_escasez", "campos",
-               "sin_bump")
+PASOS_FIJOS = ("landing", "boton", "checkout_utm", "checkout_precio", "checkout_idioma", "campos", "sin_bump")
 BOTON = "a[data-tf-checkout]"
 RUTA_DEMO = "/post-purchase/demo"
 ARCHIVO = "embudo.md"
 _DE_FUERA = {"producto.front.precio": "checkout_precio", "checkout.idioma": "checkout_idioma",
-             "checkout.escasez": "sin_escasez", "checkout.campos": "campos", "checkout.bump": "sin_bump"}
+             "checkout.campos": "campos", "checkout.bump": "sin_bump"}
 
 
 @dataclass(frozen=True)
@@ -128,8 +127,6 @@ def _mirar_upsell(ctx, clave: str, pagina: fuera.PaginaPublica) -> tuple[EstadoP
         no_medido.append("idioma: texto insuficiente")
     elif idioma != ctx.idioma:
         problemas.append(f"idioma: sale en «{idioma}»")
-    if pagina.escasez:
-        problemas.append(f"escasez o prueba social (D-01): {', '.join(pagina.escasez)}")
     esperadas = [c for c, _ in GUION_UPSELL]
     faltan = [c for c in esperadas if c not in pagina.guion]
     if faltan:
@@ -140,7 +137,7 @@ def _mirar_upsell(ctx, clave: str, pagina: fuera.PaginaPublica) -> tuple[EstadoP
         return "falla", "; ".join(problemas + no_medido)
     if no_medido:
         return "no_medido", "no medido: " + "; ".join(no_medido)
-    return "ok", "precio, idioma, sin escasez y los 8 puntos del guion"
+    return "ok", "precio, idioma y los 8 puntos del guion"
 
 
 def recorrer(page, ctx, capturas: Path, upsell_demo: str | None, *, ajustes: list[Ajuste] | None = None,

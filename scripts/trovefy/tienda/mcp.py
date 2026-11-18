@@ -16,8 +16,8 @@ Restricciones por herramienta (las aplica `violaciones`, y con ella el hook `hoo
 rutas de parámetro del tipo ``a.b`` o ``bloques[].tipo``:
 
 - ``parametros_prohibidos``: nunca se envían;
-- ``valores_prohibidos``: ``{ruta: [valores]}`` que no se envían nunca (``escasez``, ``countdown``…);
-- ``valores_obligatorios``: ``{ruta: valor}`` que toda llamada lleva, exacto (``minutos_timer_bump: 0``);
+- ``valores_prohibidos``: ``{ruta: [valores]}`` que no se envían nunca;
+- ``valores_obligatorios``: ``{ruta: valor}`` que toda llamada lleva, exacto;
 - ``parametros_permitidos_por_ruling``: ``{ruta: "R-x"}``, excepción explícita del tema;
 - ``devuelve_url_firmada``: la respuesta trae URLs firmadas de corta vida (M-5): pásala por
   `redactar_urls_firmadas` antes de guardarla.

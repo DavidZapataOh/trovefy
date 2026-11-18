@@ -3,8 +3,7 @@ name: nativo
 description: >-
   Revisión de lengua, con contexto limpio, de un texto ya ensamblado (el HTML del PDF o de la landing) como
   lo leería un nativo del país; solo lectura. Revisa diacríticos y alfabeto, registro, precios y moneda
-  locales, restos de español, calcos y promesas de salud o ingresos, y termina con VEREDICTO: ok o
-  VEREDICTO: corregir.
+  locales, restos de español y calcos, y termina con VEREDICTO: ok o VEREDICTO: corregir.
 tools: Read, Glob, Grep
 ---
 
@@ -43,11 +42,6 @@ Separa dos cosas: **errores**, que bloquean, y **preferencias de estilo**, que n
 - **Precios.** Siempre en número y en palabras, con la moneda y el formato del país. En Bulgaria:
   «14,90 €», en euros (EUR), con coma decimal. Un precio solo en cifras, o sin el formato local, es un
   error.
-- **Promesas de salud o de ingresos** que se colaron (curar, sustituir al médico, ganar dinero seguro…).
-  Cada una que encuentres es un problema: escríbela como línea `- <s-NN> · «…» · …` (la sección, la cita
-  y cómo decirlo sin prometer) y obliga a `VEREDICTO: corregir`, aunque sea una sola y parezca leve. Si
-  además el léxico no la detectó, propónla como patrón nuevo para `config/promesas/<idioma>.yaml`, en una
-  línea aparte: `patrón nuevo (<salud|ingresos>): <expresión>`.
 
 ### Sugerencias (línea `~ `; nunca obligan a corregir)
 

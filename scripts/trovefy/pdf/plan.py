@@ -39,7 +39,7 @@ _SEPARADOR = re.compile(r"\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)*\|?")
 def normalizar(texto: str) -> str:
     """Texto listo para contar y buscar: NFC, sin caracteres de formato (Cf: guion blando, espacios de
     anchura cero, unión de palabras, BOM), el espacio duro como espacio y cada racha de blancos en uno solo.
-    Así una promesa partida por un salto de línea, un ``&nbsp;``, un ``<br>`` o un ``&shy;`` sigue casando,
+    Así una frase partida por un salto de línea, un ``&nbsp;``, un ``<br>`` o un ``&shy;`` sigue casando,
     y una palabra en NFD cuenta como una."""
     texto = unicodedata.normalize("NFC", texto)
     texto = "".join(c for c in texto if unicodedata.category(c) != "Cf")

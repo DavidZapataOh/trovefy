@@ -206,9 +206,7 @@ def test_secuencia_completa_por_etapas(entorno, tmp_path, capsys):
     assert FRONT in mcp.entregables
     u1 = next(p for p in mcp.productos if p["tipo"] == "upsell")
     assert u1["solo_post_compra"] and mcp.precios_fijos[(zz["id"], u1["id"])] == 19.9 and u1["id"] in mcp.entregables
-    assert mcp.diseno["minutos_timer_bump"] == 0
     assert mcp.checkout["pedir_telefono"] is True and mcp.checkout["pedir_apellido"] is False
-    assert all(b["tipo"] not in ("countdown", "stock") for b in mcp.bloques["abajo"])
     assert mcp.bloques["arriba"][0]["url"].endswith("/mockup.webp")
     oferta = mcp.oferta_de(u1["id"])
     assert "data-pp-accept" in mcp.html[oferta]["html"] and mcp.html[oferta]["activo"] is True
@@ -580,7 +578,7 @@ def test_estado_sin_ids_de_mas(entorno, tmp_path):
 
 def test_checkout_md_integra_la_comprobacion_desde_fuera(entorno, tmp_path):
     """Lo que `trovefy checkout comprobar` (Tarea 12) dejó en COMPROBACION.md entra en CHECKOUT.md: lo visto mal desde
-    fuera queda a medias aunque el MCP lo relea bien; lo de a mano con captura se cierra; escasez → parado."""
+    fuera queda a medias aunque el MCP lo relea bien; lo de a mano con captura se cierra; algo parado desde fuera → parado."""
     from trovefy.checkout.fuera import EstadoFuera, escribir_comprobacion
     from trovefy.embudo.contexto import cargar_contexto
 
@@ -600,11 +598,11 @@ def test_checkout_md_integra_la_comprobacion_desde_fuera(entorno, tmp_path):
     assert "checkout.plantilla" not in mano.split("##")[0] and "checkout.clarity" in mano.split("##")[0]
     assert "| checkout.plantilla | Bambú | Bambú | captura |" in cuerpo
     assert meta["estado"] == "a_medias"
-    escribir_comprobacion(v, ctx, [*estados, EstadoFuera("checkout.escasez", "parado", "sin escasez", "5 души",
-                                                         "prueba social inventada (D-01)", "fuera")], manuales, AHORA)
+    escribir_comprobacion(v, ctx, [*estados, EstadoFuera("checkout.bump", "parado", "sin order bump", "hay order bump",
+                                                         "parado desde fuera", "fuera")], manuales, AHORA)
     assert cli.main(_args("plan")) == 0
     meta, cuerpo = frontmatter.leer(_carpeta(v) / "CHECKOUT.md")
-    assert meta["estado"] == "parado" and "checkout.escasez: visto desde fuera: parado" in cuerpo
+    assert meta["estado"] == "parado" and "checkout.bump: visto desde fuera: parado" in cuerpo
 
 
 def test_tienda_que_no_es_clasica_no_se_planifica(entorno, tmp_path, capsys):

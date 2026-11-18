@@ -11,7 +11,7 @@ Crear la página «madre» de tu negocio, con la marca de tu primer producto, de
 **Pasos**
 1. Abre el navegador de Trovefy con el perfil de Meta:
    `trovefy navegador abrir meta https://business.facebook.com/`
-2. Crea la página desde tu portfolio (Cuentas → Páginas → Añadir → Crear una página nueva): nombre = la marca del primer producto, una categoría que encaje y una descripción breve y verdadera. Sin reseñas ni testimonios inventados.
+2. Crea la página desde tu portfolio (Cuentas → Páginas → Añadir → Crear una página nueva): nombre = la marca del primer producto, una categoría que encaje y una descripción breve y verdadera.
 3. Abre la página y copia su dirección (empieza por `https://www.facebook.com/`). Si Facebook la muestra con un ID numérico, vale igual.
 4. Cierra la ventana del navegador y guarda la dirección en el paso:
    `trovefy arranque hecho 05 --dato url=https://www.facebook.com/<tu-página>`

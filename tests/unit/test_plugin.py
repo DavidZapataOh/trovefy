@@ -151,7 +151,7 @@ def test_skill_landing_cloudflare_sube_solo_la_carpeta_limpia():
 def test_skill_landing_sigue_el_cli_real():
     _, cuerpo = _skill_landing()
     for x in ("--version", "--texto-sha256", "Texto-sha256:", "`ok` o `corregir`", "trovefy landing resena",
-              "pixel: pendiente", "no toques `assets/`", "D-01", "Claude nunca escribe en Meta"):
+              "pixel: pendiente", "no toques `assets/`", "Claude nunca escribe en Meta"):
         assert x in cuerpo, x
     assert "/trovefy/*.env" in cuerpo
     assert "aprobado" not in cuerpo  # el veredicto del nativo es ok|corregir (resolución 17)
@@ -163,5 +163,5 @@ def test_secciones_de_landing_cubren_todos_los_tipos():
     texto = (RAIZ / "skills/landing/references/secciones.md").read_text()
     for tipo in TIPOS_SECCION:
         assert f"**`{tipo}`**" in texto, tipo
-    for x in ("D-01", "páginas", "Garantía explícita", "data-tf-formato", "data-tf-garantia"):
+    for x in ("páginas", "Garantía explícita", "data-tf-formato", "data-tf-garantia"):
         assert x in texto, x

@@ -26,7 +26,6 @@ Lo que comprueban los gates (`trovefy producto gates`):
 - **Palabras**: al menos las de `plan.seccion_palabras_min` (`config/producto.yaml`). Si faltan, enriquece con un ejemplo, un caso o un ejercicio; nunca repitas párrafos ni metas relleno.
 - **Práctica**: nunca dos secciones seguidas sin una `div.plantilla`, `div.ejercicio` o una ficha.
 - **Cifras**: cada número con `%`, «por ciento» o similar cita su fuente: `<a class="fuente" href="#fuente-1">[1]</a>`, y `fuente/fuentes.html` trae `<h2>Fuentes</h2><ol><li id="fuente-1">…</li></ol>` (el título, en el idioma del país). Sin fuente, no hay cifra.
-- **Promesas**: nada de «cura», «garantizado», «sin esfuerzo», «gana X al mes». Con exigencia `sanitario`, `fuente/aviso-salud.html` explica en el idioma del país que no es un tratamiento y cuándo ir al médico (mínimo 8 palabras).
 - **Sin recursos de fuera**: `img` solo con `src="medios/<archivo>"` del manifiesto de esa pieza, `a` solo con `href="#id"`. Nada de `http`, `style`, `script` ni `<link>`.
 
 Etiquetas admitidas: `h2 h3 h4 p ul ol li strong em blockquote table thead tbody tr th td figure figcaption img a aside div span br sup`. Atributos: `class id href src alt`.
@@ -56,4 +55,4 @@ Las secciones van seguidas, sin salto de página entre una y otra (un `h2` nunca
 
 ## Tono
 
-El de `BRANDBOOK.md` (tú o usted, cercano o formal), en el idioma del país y con sus precios y su moneda. Frases cortas. Ejemplos de la vida del avatar de `FICHA.md`. Ninguna reseña ni testimonio inventado.
+El de `BRANDBOOK.md` (tú o usted, cercano o formal), en el idioma del país y con sus precios y su moneda. Frases cortas. Ejemplos de la vida del avatar de `FICHA.md`.

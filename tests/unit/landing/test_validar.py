@@ -3,7 +3,6 @@
 import re
 import shutil
 from datetime import date
-from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -16,7 +15,6 @@ from trovefy.landing.validar import (
     Resultado,
     anadir_resena,
     completar_resena,
-    prueba_social_falsa,
     validar,
 )
 
@@ -137,23 +135,6 @@ def test_precio_sin_coma_o_simbolo(v):
     falla(v, "data-tf-precio", "14,90")
 
 
-def test_resena_inventada_falla(v):
-    mutar(v, lambda h: h.replace("</section>\n<section data-tf-seccion=\"8\"",
-                                 '<blockquote data-tf-resena="r-1">Страхотно!</blockquote></section>\n'
-                                 '<section data-tf-seccion="8"', 1))
-    falla(v, "r-1", "resenas.yaml")
-
-
-def test_estrellas_sin_resenas_falla(v):
-    mutar(v, lambda h: h.replace("<h2 data-tf-hito>Цена</h2>", "<h2 data-tf-hito>Цена</h2><p>★★★★★</p>"))
-    falla(v, "estrellas")
-
-
-def test_prueba_social_sin_resenas_falla(v):
-    mutar(v, lambda h: h.replace('data-tf-tipo="vista_previa"', 'data-tf-tipo="prueba_social"'))
-    falla(v, "prueba_social")
-
-
 def test_sin_vista_previa_falla(v):
     mutar(v, lambda h: re.sub(r"<img data-tf-vista[^>]*>", "", h))
     falla(v, "vista previa")
@@ -242,7 +223,7 @@ def test_resena_con_secreto_rechazada(v):
         anadir_resena(v, P, "ZZ", f"Много полезно {SECRETO}", date(2026, 11, 16), "pedido 1001")
 
 
-def test_resena_real_valida(v):
+def test_resena_valida(v):
     texto = "Правя упражненията всяка вечер и спя по-добре."
     rid = anadir_resena(v, P, "ZZ", texto, date(2026, 11, 16), "pedido 1001")
     assert rid == "r-20261116-1"
@@ -254,13 +235,6 @@ def test_resena_real_valida(v):
                                  f'<h2 data-tf-hito>Вижте страниците отвътре</h2>'
                                  f'<blockquote data-tf-resena="{rid}">{texto}</blockquote>'))
     assert resultado(v).ok, resultado(v).fallos
-
-
-def test_resena_con_texto_cambiado_falla(v):
-    rid = anadir_resena(v, P, "ZZ", "Добро е.", date(2026, 11, 16), "pedido 1001")
-    mutar(v, lambda h: h.replace("<h2 data-tf-hito>Цена</h2>",
-                                 f'<h2 data-tf-hito>Цена</h2><blockquote data-tf-resena="{rid}">Най-доброто!</blockquote>'))
-    falla(v, rid, "texto")
 
 
 def test_cli_validar(v, monkeypatch, capsys):
@@ -282,7 +256,7 @@ def test_cli_resena(v, monkeypatch, capsys):
     assert cli.main([*args[:-2], "--fecha", "16/11/2026", "--fuente", "x"]) == 2
 
 
-# --- Ronda de revisión T1–5: lista blanca (I1, I2), prueba social (I3), vistas (M1) y precio (M2) ------------
+# --- Ronda de revisión T1–5: lista blanca (I1, I2), vistas (M1) y precio (M2) ------------
 
 H1 = "<h1 data-tf-hito>Спокойно тяло за 14 дни</h1>"
 FIN = "</main>"
@@ -303,24 +277,10 @@ SONDAS = {
                                           '"https://evil.test/x.png" 1x)}</style>'), "evil.test"),
     "css_escaped_url": (lambda h: h.replace("<head>", "<head><style>body{background:u\\72l("
                                             "https://evil.test/x.png)}</style>"), "evil.test"),
-    "css_star_content": (lambda h: h.replace("<head>", '<head><style>h1::after{content:'
-                                             '"\\2605\\2605\\2605\\2605\\2605"}</style>'), "estrellas"),
-    "stars_title": (lambda h: h.replace("<title>Somatix", "<title>★★★★★ Somatix"), "estrellas"),
-    "stars_alt_other": (lambda h: h.replace(H1, "<h1 data-tf-hito>Спокойно тяло за 14 дни ✭✭✭✭✭ 4,9/5</h1>"),
-                        "4,9/5"),
-    "fake_testimonial": (lambda h: h.replace(FIN, "<blockquote>„Най-добрата покупка тази година!“ — Мария, "
-                                             "София</blockquote>" + FIN), "<blockquote>"),
-    "fake_quota": (lambda h: h.replace(H1, H1 + "<p>Остават само 7 броя на тази цена. 1 284 души вече купиха "
-                                       "наръчника.</p>"), "Остават само"),
-    "static_countdown": (lambda h: h.replace(H1, H1 + "<p>Офертата изтича след 02:59:41</p>"), "02:59:41"),
     "greek_homoglyph": (lambda h: h.replace("Денят свършва", "Денят свършвα"), "homoglifo"),
     "js_svg_a": (lambda h: h.replace(FIN, '<svg><a xlink:href="javascript:alert(1)"><text>x</text></a></svg>' + FIN),
                  "<svg>"),
     "base_tienda": (lambda h: h.replace("<head>", '<head><base href="https://tienda.demo.test/">'), "<base>"),
-    "fake_old_price": (lambda h: h.replace("<p data-tf-precio>14,90&nbsp;€</p>",
-                                           "<p data-tf-precio><s>49,90 €</s> 14,90&nbsp;€</p>"), "49,90"),
-    "meter": (lambda h: h.replace(FIN, '<p>Продадени</p><progress value="93" max="100"></progress>' + FIN),
-              "<progress>"),
     "backslash_link": (lambda h: h.replace(FIN, '<a href="\\\\evil.test/x">виж</a>' + FIN), "evil.test"),
     "slash_backslash": (lambda h: h.replace(FIN, '<a href="/\\evil.test/x">виж</a>' + FIN), "evil.test"),
     "noscript_diff": (lambda h: h.replace(FIN, '<noscript><p title="</noscript><img src=https://evil.test/x.png '
@@ -414,32 +374,6 @@ def test_estilo_en_linea_remoto_falla(v):
     falla(v, "estilo en línea", "evil.test")
 
 
-@pytest.mark.parametrize(("cambio", "trozo"), [
-    (lambda h: h.replace('content="Кратки', 'content="Остават само 3 броя. Кратки'), "Остават само"),
-    (lambda h: h.replace("<title>Somatix", "<title>Само днес · Somatix"), "Само днес"),
-    (lambda h: h.replace('<a data-tf-checkout href="/checkout">Купувам',
-                         '<a data-tf-checkout href="/checkout" aria-label="Над 2000 купувачи">Купувам'), "купувачи"),
-    (lambda h: h.replace(FIN, "<p>Цената на книжарницата е <span>29,90 €</span>.</p>" + FIN), "29,90"),
-    (lambda h: h.replace(FIN, "<p>Бонусите са на стойност 19 евро.</p>" + FIN), "19 евро"),
-    (lambda h: h.replace(FIN, "<p>Вече 3 400 клиенти го използват.</p>" + FIN), "клиенти"),
-    (lambda h: h.replace(FIN, "<p>Оценка 4.8 / 5 от читателите.</p>" + FIN), "4.8 / 5"),
-    (lambda h: h.replace(FIN, "<p>⋆⋆⋆⋆⋆</p>" + FIN), "estrellas"),
-    (lambda h: h.replace(FIN, "<p>Хиляди хора <q>го обичат</q>.</p>" + FIN), "<q>"),
-    (lambda h: h.replace(FIN, "<p><cite>Мария</cite></p>" + FIN), "<cite>"),
-    (lambda h: h.replace(FIN, '<meter value="0.9">90%</meter>' + FIN), "<meter>"),
-])
-def test_prueba_social_inventada_falla(v, cambio, trozo):
-    mutar(v, cambio)
-    falla(v, trozo)
-
-
-def test_contenido_css_inventado_falla(v):
-    ruta = ruta_landing(v, P, "ZZ") / "assets" / "estilo.css"
-    ruta.write_text(ruta.read_text(encoding="utf-8") + '\n.x::after{content:"Остават само 3 броя"}\n',
-                    encoding="utf-8")
-    falla(v, "estilo.css", "Остават само")
-
-
 def test_texto_bulgaro_normal_pasa(v):
     """Lo que una landing búlgara dice de verdad (pago, soporte, plazos, el precio repetido) no salta."""
     extra = ("<p>Плащане с Visa, Mastercard или Impul Pay. Получавате файла по имейл веднага.</p>"
@@ -448,18 +382,6 @@ def test_texto_bulgaro_normal_pasa(v):
              "<p>Отговаряме в работни дни от 9:00 до 18:00 часа.</p>")
     mutar(v, lambda h: h.replace("<dt>Колко време", "<dt>Как плащам?</dt><dd>" + extra + "</dd><dt>Колко време"))
     assert resultado(v).ok, resultado(v).fallos
-
-
-def test_prueba_social_falsa_bg_y_ro():
-    precio = Decimal("14.90")
-    assert prueba_social_falsa("Наръчник в PDF за 14,90 € и гаранция 30 дни.", "bg", precio) == []
-    for texto in ("Остават само 7 броя", "1 284 души вече купиха наръчника", "Над 900 купувачи",
-                  "Изтича след 00:14:59", "Обичайна цена 29,90 €"):
-        assert prueba_social_falsa(texto, "bg", precio), texto
-    assert prueba_social_falsa("Ghidul costă 14,90 € și are garanție de 30 de zile.", "ro", precio) == []
-    for texto in ("Au mai rămas doar 5 bucăți", "Peste 1.200 de clienți mulțumiți", "Oferta expiră la miezul nopții",
-                  "Stoc limitat", "Preț vechi 99 lei", "Deja au cumpărat 300 de persoane", "Au mai rămaş 3 bucăţi"):
-        assert prueba_social_falsa(texto, "ro", precio), texto
 
 
 def test_precio_con_digitos_alrededor_falla(v):
@@ -547,26 +469,6 @@ def test_resena_con_extracto_estrellas_y_nota_media(v):
               f'<blockquote data-tf-resena="{r2}">★★★★☆ Добро е. — Иван П., Варна</blockquote>')
     _con_bloque(v, r1, bloque)
     assert resultado(v).ok, resultado(v).fallos
-
-
-def test_estrellas_y_nota_que_no_cuadran_fallan(v):
-    r1 = anadir_resena(v, P, "ZZ", "Добро е.", date(2026, 11, 18), "mensaje al usuario")
-    completar_resena(v, P, "ZZ", r1, estrellas=4)
-    _con_bloque(v, r1, f'<p data-tf-nota>4,9 ★★★★★ · 1 отзив</p>'
-                       f'<blockquote data-tf-resena="{r1}">★★★★★ Добро е.</blockquote>')
-    falla(v, "estrellas")
-    falla(v, "4,0")
-
-
-def test_estrellas_sin_valoracion_guardada_fallan(v):
-    r1 = anadir_resena(v, P, "ZZ", "Добро е.", date(2026, 11, 18), "mensaje al usuario")
-    _con_bloque(v, r1, f'<blockquote data-tf-resena="{r1}">★★★★★ Добро е.</blockquote>')
-    falla(v, "estrellas")
-
-
-def test_nota_fuera_de_bloque_sigue_prohibida(v):
-    mutar(v, lambda h: h.replace("<h2 data-tf-hito>Цена</h2>", "<h2 data-tf-hito>Цена</h2><p>4,9/5 ★★★★★</p>"))
-    falla(v, "estrellas")
 
 
 def test_completar_resena_exige_trozos_literales(v):

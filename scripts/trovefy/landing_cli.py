@@ -100,7 +100,7 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
                    help="la «Versión:» que imprimió trovefy landing texto (la que leyó el agente)")
     n.add_argument("--texto-sha256", default=None,
                    help="el «Texto-sha256:» que imprimió trovefy landing texto; si se da, tiene que ser el actual")
-    r = sub.add_parser("resena", help="añade una reseña real (con su pedido o email de origen)")
+    r = sub.add_parser("resena", help="añade una reseña (con su pedido o email de origen)")
     _comunes(r)
     r.add_argument("--texto", help="texto literal de la reseña (al añadirla)")
     r.add_argument("--fecha", help="fecha de la reseña (AAAA-MM-DD, al añadirla)")
@@ -444,9 +444,9 @@ def _resena(args: argparse.Namespace, vault: Path) -> int:
         except ValueError:
             raise ValueError(f"--fecha mal escrita: «{args.fecha}» (AAAA-MM-DD)") from None
         rid = anadir_resena(vault, args.producto, args.pais, args.texto, fecha, args.fuente)
-        print(f"Reseña real añadida: {rid}")
+        print(f"Reseña añadida: {rid}")
     elif args.texto or args.fecha or args.fuente:
-        raise ValueError("con --id no se cambian el texto, la fecha ni la fuente de una reseña real")
+        raise ValueError("con --id no se cambian el texto, la fecha ni la fuente de una reseña")
     if args.nombre is not None or args.estrellas is not None or args.extracto is not None:
         completar_resena(vault, args.producto, args.pais, rid, nombre=args.nombre, estrellas=args.estrellas,
                          extracto=args.extracto)

@@ -122,9 +122,6 @@ def test_primera_etapa_con_ids_de_las_lecturas(zz):
     # Lo que espera a un id que da una escritura de esta etapa va después.
     esperan = {e.herramienta for e in plan.pendientes}
     assert {"impultienda_precio_por_pais", "impultienda_crear_funnel_postcompra"} <= esperan
-    vista = next(o for o in plan.operaciones if o.solo_vista_previa)
-    assert vista.argumentos == {"store_id": STORE, "posicion": "abajo", "bloques": [], "confirmar": False}
-    assert not vista.dos_pasos
 
 
 def test_ajuste_sin_herramienta_va_a_mano(zz):

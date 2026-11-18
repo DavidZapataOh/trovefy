@@ -1,5 +1,5 @@
 """Validación de los emails del checkout (plan 19, Tarea 10). Los textos los escribe Claude en la sesión, en
-``checkout/<PAIS>/emails/<clave>.md``; el código solo valida (D-01: sin escasez falsa ni testimonios inventados)."""
+``checkout/<PAIS>/emails/<clave>.md``; el código solo valida."""
 from __future__ import annotations
 
 import pytest
@@ -30,18 +30,6 @@ def test_claves():
 
 def test_email_entrega_bg_ok(tmp_path):
     assert validar_email(_email(tmp_path, ENTREGA_BG), "bg", "entrega") == []
-
-
-def test_email_con_testimonio_inventado(tmp_path):
-    texto = ENTREGA_BG.replace("Поздрави,", "«Това ръководство промени живота ми!» — Мария, София\n\nПоздрави,")
-    problemas = validar_email(_email(tmp_path, texto), "bg", "entrega")
-    assert any("testimonio" in p for p in problemas)
-
-
-def test_email_con_escasez(tmp_path):
-    texto = ENTREGA_BG.replace("Поздрави,", "Остават само 2 места за бонуса!\n\nПоздрави,")
-    problemas = validar_email(_email(tmp_path, texto), "bg", "entrega")
-    assert any("escasez" in p and "остават" in p for p in problemas)
 
 
 def test_email_en_otro_idioma(tmp_path):

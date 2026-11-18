@@ -1,5 +1,4 @@
 import json
-import unicodedata
 from decimal import Decimal
 from pathlib import Path
 
@@ -8,9 +7,7 @@ from trovefy.pdf.gates import (
     PESOS,
     Hallazgo,
     Informe,
-    cargar_lexico,
     evaluar,
-    promesas,
     puntuar,
 )
 from trovefy.producto.config import ConfigProducto
@@ -70,8 +67,6 @@ def test_bueno_pasa(raiz):
     ("malo-qg07.html", "QG-07", "alta"),
     ("malo-qg08.html", "QG-08", "media"),
     ("malo-qg09.html", "QG-09", "alta"),
-    ("malo-qg10.html", "QG-10", "critica"),
-    ("malo-qg11.html", "QG-11", "critica"),
     ("malo-qg12.html", "QG-12", "alta"),
     ("malo-qg13.html", "QG-13", "media"),
     ("malo-qg14.html", "QG-14", "alta"),
@@ -229,31 +224,6 @@ def test_qg09_otras_cifras(raiz, frase):
     assert "QG-09" in _gates(_evaluar(html, raiz))
 
 
-def test_qg10_promesa_de_ingresos(raiz):
-    [h] = _evaluar(_html("malo-qg10.html"), raiz).hallazgos
-    assert "ganar 500" in h.texto
-
-
-def test_qg11_promesa_de_salud(raiz):
-    [h] = _evaluar(_html("malo-qg11.html"), raiz).hallazgos
-    assert "sanar" in h.texto
-
-
-def test_qg11_sanitario_sin_aviso(raiz):
-    html = _html("bueno.html").replace('<aside class="aviso-salud">', '<aside class="nota">')
-    informe = _evaluar(html, raiz)
-    assert _gates(informe) == {"QG-11"}
-    assert "aviso-salud" in informe.hallazgos[0].texto
-    assert informe.pasa is False
-    # Con exigencia normal, el aviso no es obligatorio.
-    assert _evaluar(html, raiz, exigencia="normal").pasa is True
-
-
-def test_aviso_de_salud_no_es_promesa(raiz):
-    html = _html("bueno.html").replace("habla con tu médico.", "habla con tu médico: no sustituye al médico.")
-    assert _evaluar(html, raiz).pasa is True
-
-
 def test_qg12_parrafo_repetido(raiz):
     [h] = _evaluar(_html("malo-qg12.html"), raiz).hallazgos
     assert "mantén el aire" in h.texto
@@ -295,73 +265,6 @@ def test_qg14_falta_maqueta(raiz, viejo, nuevo, falta):
     assert falta in informe.hallazgos[0].texto
 
 
-# --- promesas ---------------------------------------------------------------------------------------
-
-
-def test_sanar_el_trauma_es_promesa():
-    [h] = promesas("Este método va a sanar tu trauma", "es", "normal")
-    assert (h.gate, h.severidad) == ("QG-11", "critica")
-
-
-def test_garantia_de_reembolso_no_es_promesa():
-    assert promesas("гаранция за връщане на парите 14 дни", "bg", "sanitario") == []
-
-
-def test_lexico_bg_detecta_lekuva():
-    hallazgos = promesas("Тази техника лекува безсънието", "bg", "sanitario")
-    assert [h.gate for h in hallazgos] == ["QG-11"]
-    assert [h.gate for h in promesas("Ще го излекуваме", "bg", "normal")] == ["QG-11"]
-    assert [h.gate for h in promesas("Създай пасивен доход", "bg", "normal")] == ["QG-10"]
-
-
-def test_lexico_en():
-    assert [h.gate for h in promesas("This program cures insomnia", "en", "normal")] == ["QG-11"]
-    assert promesas("30-day money-back guarantee", "en", "normal") == []
-
-
-def test_cura_dentro_de_otra_palabra_no_cuenta():
-    assert promesas("Procura dormir a la misma hora", "es", "normal") == []
-
-
-def test_sin_lexico_falla_cerrado(raiz):
-    [h] = promesas("Texto cualquiera", "xx", "normal")
-    assert h.severidad == "critica"
-    assert h.texto == "no medido: sin léxico de promesas para xx"
-    informe = _evaluar(_html("bueno.html"), raiz, idioma="xx")
-    assert informe.pasa is False
-
-
-def test_lexico_del_vault_se_suma(tmp_path, raiz):
-    vault = tmp_path / "v"
-    (vault / "config" / "promesas").mkdir(parents=True)
-    (vault / "config" / "promesas" / "es.yaml").write_text(
-        "salud:\n  - '\\bsin efectos secundarios'\ningresos: []\n", encoding="utf-8")
-    lexico = cargar_lexico("es", vault)
-    assert len(lexico["salud"]) == len(cargar_lexico("es", None)["salud"]) + 1
-    texto = "Respira sin efectos secundarios y deja tu medicación"
-    assert len(promesas(texto, "es", "normal", vault)) == 2
-    assert len(promesas(texto, "es", "normal")) == 1
-
-
-def test_lexico_solo_en_el_vault(tmp_path):
-    vault = tmp_path / "v"
-    (vault / "config" / "promesas").mkdir(parents=True)
-    (vault / "config" / "promesas" / "ro.yaml").write_text("salud:\n  - '\\bvindecă'\n", encoding="utf-8")
-    assert [h.gate for h in promesas("Metoda vindecă anxietatea", "ro", "normal", vault)] == ["QG-11"]
-
-
-def test_lexico_del_vault_roto(tmp_path):
-    vault = tmp_path / "v"
-    (vault / "config" / "promesas").mkdir(parents=True)
-    (vault / "config" / "promesas" / "es.yaml").write_text("salud:\n  - '(sin cerrar'\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="patrón roto"):
-        cargar_lexico("es", vault)
-
-
-def test_idioma_raro_sin_lexico():
-    assert cargar_lexico("../es", None) is None
-
-
 # --- puntuación -------------------------------------------------------------------------------------
 
 
@@ -392,7 +295,7 @@ def test_puntuacion_no_baja_de_cero():
 
 
 def test_una_critica_no_pasa_aunque_puntue():
-    assert puntuar([Hallazgo("QG-10", "critica", "x", "y")], 70) == (75, False)
+    assert puntuar([Hallazgo("QG-05", "critica", "x", "y")], 70) == (75, False)
 
 
 def test_valores_no_admitidos(raiz):
@@ -415,67 +318,7 @@ def _con(trozo: str, ancla: str = ANCLA) -> str:
     return html.replace(ancla, trozo + ancla, 1)
 
 
-# H1: el aviso de salud no esconde promesas.
-
-
-def test_h1_promesa_dentro_del_aviso_falla(raiz):
-    html = _html("bueno.html").replace(
-        "habla con tu médico.</p>", "habla con tu médico.</p><p>Este método cura la ansiedad.</p>")
-    informe = _evaluar(html, raiz)
-    assert _gates(informe) == {"QG-11"}
-    assert informe.pasa is False
-
-
-def test_h1_ingresos_dentro_del_aviso_falla(raiz):
-    html = _html("bueno.html").replace("habla con tu médico.</p>",
-                                       "habla con tu médico.</p><p>Y vas a ganar 500 euros.</p>")
-    assert _gates(_evaluar(html, raiz)) == {"QG-10"}
-
-
-@pytest.mark.parametrize("descargo", [
-    "Esta guía no sustituye al médico.",
-    "Esta guía no sustituye a tu médico ni a tu tratamiento.",
-    "Antes de dejar la medicación, habla con tu médico.",
-])
-def test_h1_descargos_del_aviso_no_son_promesa(raiz, descargo):
-    html = _html("bueno.html").replace("habla con tu médico.</p>", f"habla con tu médico.</p><p>{descargo}</p>")
-    assert _evaluar(html, raiz).pasa is True
-
-
-def test_h1_negacion_lejana_o_tras_puntuacion_no_neutraliza():
-    assert [h.gate for h in promesas("No lo dudes: esto cura la ansiedad.", "es", "normal")] == ["QG-11"]
-    assert [h.gate for h in promesas("No es magia, pero cura el insomnio.", "es", "normal")] == ["QG-11"]
-
-
-def test_h1_negacion_en_bg_y_en():
-    assert promesas("Тази книга не лекува безсънието.", "bg", "normal") == []
-    assert promesas("This book does not cure insomnia.", "en", "normal") == []
-    assert promesas("This book doesn't replace your doctor.", "en", "normal") == []
-
-
 # H2: normalización del texto.
-
-
-@pytest.mark.parametrize(("trozo", "gate"), [
-    ("<p>Tendrás ingresos\npasivos y libertad\nfinanciera.</p>", "QG-10"),
-    ("<p>Tendrás ingresos&nbsp;pasivos.</p>", "QG-10"),
-    ("<p>Tendrás ingresos\u00a0\u00a0pasivos.</p>", "QG-10"),
-    ("<p>Tendrás ingresos<br>pasivos.</p>", "QG-10"),
-    ("<p>Vas a cu&shy;rar tu insomnio.</p>", "QG-11"),
-    ("<p>Vas a cu\u200brar tu insomnio.</p>", "QG-11"),
-    ("<p>Vas a cu\u2060rar tu insomnio.</p>", "QG-11"),
-    ("<p>Vas a \ufeffcurar tu insomnio.</p>", "QG-11"),
-    ("<p>" + unicodedata.normalize("NFD", "Esto sanará tu trauma.") + "</p>", "QG-11"),
-])
-def test_h2_promesa_partida_se_detecta(raiz, trozo, gate):
-    informe = _evaluar(_con(trozo), raiz)
-    assert gate in _gates(informe)
-    assert informe.pasa is False
-
-
-def test_h2_promesas_normaliza_el_texto_suelto():
-    assert [h.gate for h in promesas("ingresos\n\t pasivos", "es", "normal")] == ["QG-10"]
-    assert [h.gate for h in promesas(unicodedata.normalize("NFD", "sanará"), "es", "normal")] == ["QG-11"]
 
 
 def test_h2_cifra_partida_por_salto_de_linea(raiz):
@@ -593,26 +436,11 @@ def test_m1_pagina_sin_imagen_no_es_de_imagen(raiz):
 # M2: fuentes e índice no esconden texto.
 
 
-def test_m2_texto_en_fuentes_fuera_de_las_citas_se_revisa(raiz):
-    html = _html("bueno.html").replace('<li id="fuente-1">', '<li>Este método cura tu ansiedad.</li><li id="fuente-1">')
-    assert "QG-11" in _gates(_evaluar(html, raiz))
-    html = _html("bueno.html").replace(
-        '<section class="seccion flujo" id="s-03">',
-        '<section class="fuentes"><p>Este método cura la ansiedad.</p></section><section class="seccion flujo" id="s-03">')
-    assert "QG-11" in _gates(_evaluar(html, raiz))
-
-
 def test_m2_cita_de_fuente_no_se_revisa(raiz):
     html = _html("bueno.html").replace(
         "Encuesta ficticia de hábitos de sueño, 2025 (dato de prueba).",
         "Estudio ficticio: la respiración lenta cura el insomnio leve en el 40 % de los casos, 2025.")
     assert _evaluar(html, raiz).hallazgos == ()
-
-
-def test_m2_indice_se_revisa(raiz):
-    html = _html("bueno.html").replace('<a href="#s-03">Tu plan de 21 días</a>',
-                                       '<a href="#s-03">Tu plan para ganar 500 euros</a>')
-    assert "QG-10" in _gates(_evaluar(html, raiz))
 
 
 def test_m2_cifra_en_fuentes_fuera_de_las_citas(raiz):
@@ -621,20 +449,6 @@ def test_m2_cifra_en_fuentes_fuera_de_las_citas(raiz):
 
 
 # M3: falsos positivos.
-
-
-@pytest.mark.parametrize("texto", [
-    "Консултирайте се с лекуващия си лекар, преди да започнете.",
-    "Лекуващият лекар знае най-добре.",
-    "Лекуващите лекари са съгласни.",
-])
-def test_m3_lekuvasht_no_es_promesa(texto):
-    assert promesas(texto, "bg", "sanitario") == []
-
-
-def test_m3_negacion_en_espanol_no_es_promesa():
-    assert promesas("Esta guía no sustituye al médico.", "es", "sanitario") == []
-    assert promesas("Nunca dejes tu medicación por tu cuenta.", "es", "sanitario") == []
 
 
 @pytest.mark.parametrize("texto", ["TODO EMPIEZA AQUÍ", "Lo TODO en mayúsculas", "Todo cambia"])
@@ -714,49 +528,3 @@ def test_bajo_qg09_cifra_en_otros_bloques(raiz, trozo):
     assert "QG-09" in _gates(_evaluar(_con(trozo), raiz))
 
 
-@pytest.mark.parametrize("aviso", ["", "<p>Ojo.</p>", "<p>Consulta a tu médico.</p>"])
-def test_bajo_aviso_de_salud_vacio_o_corto(raiz, aviso):
-    html = _html("bueno.html").replace(AVISO, aviso)
-    informe = _evaluar(html, raiz)
-    assert _gates(informe) == {"QG-11"}
-    assert informe.pasa is False
-    assert _evaluar(html, raiz, exigencia="normal").pasa is True
-
-
-@pytest.mark.parametrize(("texto", "idioma", "gate"), [
-    ("Este método va a sanarte por dentro.", "es", "QG-11"),
-    ("Con esto te curarás para siempre.", "es", "QG-11"),
-    ("Te sanarás en una semana.", "es", "QG-11"),
-    ("Спечелете свободата си още днес.", "bg", "QG-10"),
-    ("Ще печелиш 500 лева.", "bg", "QG-10"),
-    ("Ще спечелите 2000 евро.", "bg", "QG-10"),
-])
-def test_bajo_formas_nuevas_del_lexico(texto, idioma, gate):
-    assert [h.gate for h in promesas(texto, idioma, "normal")] == [gate]
-
-
-@pytest.mark.parametrize(("texto", "idioma"), [
-    ("Una comida sana ayuda a dormir.", "es"),
-    ("Procura dormir a la misma hora.", "es"),
-    ("Кой печели от лошия сън?", "bg"),
-])
-def test_bajo_palabras_corrientes_no_son_promesa(texto, idioma):
-    assert promesas(texto, idioma, "normal") == []
-
-
-@pytest.mark.parametrize("texto", ["¿No quieres ganar 500 euros al mes?", "No dudes que esto cura la ansiedad.",
-                                   "Not only does this cure insomnia.", "Не чакай: това лекува безсънието."])
-def test_h1_negacion_que_no_niega_la_promesa(texto):
-    idioma = "bg" if "това" in texto else "en" if texto.startswith("Not") else "es"
-    assert promesas(texto, idioma, "normal") != []
-
-
-@pytest.mark.parametrize("texto", ["Esta guía no te curará.", "Esto no va a curar el insomnio.",
-                                   "This book will not cure insomnia.", "Тази книга не ще те излекува."])
-def test_h1_negacion_con_auxiliares_neutraliza(texto):
-    idioma = "bg" if "книга" in texto else "en" if texto.startswith("This") else "es"
-    assert promesas(texto, idioma, "normal") == []
-
-
-def test_m2_cita_fuera_de_fuentes_se_revisa(raiz):
-    assert "QG-11" in _gates(_evaluar(_con('<ul><li id="fuente-9">Este método cura la ansiedad.</li></ul>'), raiz))

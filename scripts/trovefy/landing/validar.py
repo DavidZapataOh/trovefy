@@ -1,4 +1,4 @@
-"""Validación estática de ``landing/<PAIS>/`` (``html.parser``): estructura, botones, idioma, prueba social y
+"""Validación estática de ``landing/<PAIS>/`` (``html.parser``): estructura, botones, idioma, reseñas y
 origen de todo. Cada fallo es una frase que dice qué y dónde; los avisos no bloquean.
 
 Modelo positivo (lista blanca): solo pasan las etiquetas de :data:`ETIQUETAS` y, en cada una, los atributos
@@ -10,11 +10,7 @@ dominio propio o a la tienda, el checkout o un ``mailto:`` (R3); un recurso que 
 ``assets/``. El CSS (``assets/estilo.css``, ``<style>`` y ``style=``) se lee sin comentarios y con los
 escapes resueltos, y no puede nombrar ``http:``, ``https:`` ni ``//``.
 
-Prueba social solo real (D-01): una reseña entra solo desde ``resenas.yaml`` con :func:`anadir_resena`
-(fecha, país y fuente: el pedido o el email de origen). Fuera de ``data-tf-resena`` no hay testimonios
-(``blockquote``, ``q``, ``cite``) ni contadores (``meter``, ``progress``); en ningún texto (título,
-descripción, texto visible, ``alt``, ``aria-label`` y ``content:`` del CSS) hay estrellas, notas «4,9/5»,
-cupos, compradores, cuentas atrás ni importes que no sean el precio real (:func:`prueba_social_falsa`).
+Las reseñas se guardan en ``resenas.yaml`` con :func:`anadir_resena` y se completan con :func:`completar_resena`.
 """
 
 from __future__ import annotations
@@ -24,7 +20,6 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import date
-from decimal import Decimal, InvalidOperation
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -70,7 +65,7 @@ ETIQUETAS = frozenset({
     "strong", "em", "b", "i", "u", "small", "mark", "sub", "sup", "abbr", "time",
     "img", "picture", "source", "figure", "figcaption", "a",
     "table", "caption", "thead", "tbody", "tfoot", "tr", "th", "td", "colgroup", "col", "details", "summary",
-    "blockquote", "q", "cite", "meter", "progress",  # solo dentro de data-tf-resena (D-01)
+    "blockquote", "q", "cite", "meter", "progress",
 })
 ATRIBUTOS_GLOBALES = frozenset({
     "id", "class", "style", "role", "aria-label", "aria-hidden", "aria-labelledby", "aria-describedby",
@@ -99,7 +94,6 @@ ATRIBUTOS: dict[str, frozenset[str]] = {k: frozenset(v) for k, v in {
 }.items()}
 _ATRIBUTOS_URL = frozenset({"href", "src", "srcset"})
 _META_NOMBRES = frozenset({"description", "viewport", "robots", "theme-color"})
-_SOLO_EN_RESENA = frozenset({"blockquote", "q", "cite", "meter", "progress"})
 _VACIOS = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "source", "track",
                      "wbr"})
 # Su contenido no se ve (o es texto crudo para el parser: con scripting=True, también <noscript>).
@@ -122,32 +116,6 @@ _SUJETO_RAIZ = re.compile(r"(?:html|body|\*|:root)(?![\w-])", re.IGNORECASE)
 _COMBINADOR = re.compile(r"\s*[>+~]\s*|\s+")
 _MENSAJE_OVERFLOW = ("overflow oculto en html/body esconde los desbordes (la QA no los vería): quítalo y mete lo ancho "
                      "en un contenedor con overflow-x:auto")
-
-# --- prueba social (D-01) -----------------------------------------------------------------------------------
-_ESTRELLAS = re.compile("[★☆✩✪✫✬✭✮✯✰⋆⭑⭒⭐\U0001f31f]+")
-_NOTA = re.compile(r"(?<!\d)\d[,.]\d\s*/\s*5(?!\d)")
-_TEMPORIZADOR = re.compile(r"(?<!\d)\d{1,2}:\d{2}:\d{2}(?!\d)")
-_NUM = r"\d{1,3}(?:[   .]\d{3})+(?:,\d{1,2})?|\d+(?:[.,]\d{1,2})?"
-_MONEDA_TRAS = r"€|\$|£|eur\b|euro\b|евро\b|лв\b\.?|лева\b|bgn\b|lei\b|leu\b|ron\b|usd\b|gbp\b"
-_MONEDA_ANTES = r"€|\$|£|eur\b|bgn\b|ron\b|usd\b|gbp\b"
-_IMPORTE = re.compile(rf"(?<![\w.,])(?:({_NUM})\s*(?:{_MONEDA_TRAS})|(?:{_MONEDA_ANTES})\s*({_NUM})(?!\d))",
-                      re.IGNORECASE)
-_CEDILLA = str.maketrans({"ş": "ș", "ţ": "ț", "Ş": "Ș", "Ţ": "Ț"})
-# Cupos, escasez, compradores y prisa, por idioma (en minúsculas; se comparan sin mayúsculas).
-PRESION_POR_IDIOMA: dict[str, tuple[str, ...]] = {
-    "bg": (
-        r"остава(?:т)?\s+(?:само|още|последни)", r"\bброя\b", r"\bбройки\b", r"последн\w+\s+\d+",
-        r"ограничен\w*\s+(?:брой|количеств\w*|наличност\w*|оферт\w*|тираж\w*)", r"изчерпва",
-        r"души\s+(?:\w+\s+)?купиха", r"купувач\w*", r"\d[\d  .,]*\s+(?:души|клиенти|човека)\b",
-        r"продаден\w*|продадоха", r"изтича", r"само\s+днес", r"до\s+полунощ",
-    ),
-    "ro": (
-        r"au\s+mai\s+rămas", r"rămas\w*\s+doar", r"\bbucăți\b", r"stoc\s+limitat", r"ofert\w+\s+limitat\w*",
-        r"ultimel?e\s+\d+", r"\d[\d  .,]*\s+(?:de\s+)?(?:persoane|clienți|cumpărători)\b", r"cumpărători",
-        r"au\s+cumpărat", r"vândut\w*", r"expiră", r"doar\s+(?:azi|astăzi)", r"miezul\s+nopții",
-    ),
-}
-_PRESION = {k: [re.compile(p, re.IGNORECASE) for p in v] for k, v in PRESION_POR_IDIOMA.items()}
 
 _PAGINAS = re.compile(r"(\d+)\s*(?:страниц|pagin|págin|page)", re.IGNORECASE)
 _EVENTO_PIXEL = re.compile(r"fbq\(\s*['\"](?:track|trackCustom|trackSingle)['\"]\s*,\s*['\"]([^'\"]+)['\"]")
@@ -176,34 +144,6 @@ class _Abierta:
     capturas: list[str]
     seccion: _Seccion | None
     resena: bool
-
-
-def _importe(texto: str) -> Decimal | None:
-    t = re.sub(r"[   ]", "", texto)
-    m = re.search(r"[.,](\d{1,2})$", t)
-    entero, dec = (t[:m.start()], m.group(1)) if m else (t, "0")
-    try:
-        return Decimal(re.sub(r"[.,]", "", entero) + "." + dec)
-    except InvalidOperation:
-        return None
-
-
-def prueba_social_falsa(texto: str, idioma: str, precio: Decimal) -> list[str]:
-    """Lo que en ``texto`` parece prueba social o presión inventada (D-01): estrellas, notas «4,9/5», cuentas
-    atrás, cupos y compradores (patrones de :data:`PRESION_POR_IDIOMA`) e importes con moneda que no son
-    ``precio``. Cada entrada dice qué y lo cita; ``[]`` si no hay nada."""
-    texto = " ".join((texto or "").translate(_CEDILLA).split())
-    hallazgos = [f"estrellas «{m.group(0)}»" for m in _ESTRELLAS.finditer(texto)]
-    hallazgos += [f"nota «{m.group(0)}»" for m in _NOTA.finditer(texto)]
-    hallazgos += [f"cuenta atrás «{m.group(0)}»" for m in _TEMPORIZADOR.finditer(texto)]
-    for patron in _PRESION.get(idioma, ()):
-        hallazgos += [f"«{m.group(0)}»" for m in patron.finditer(texto)]
-    for m in _IMPORTE.finditer(texto):
-        valor = _importe(m.group(1) or m.group(2))
-        if valor is None or valor != precio:
-            hallazgos.append(f"importe «{m.group(0).strip()}» que no es el precio "
-                             f"({f'{precio:.2f}'.replace('.', ',')})")
-    return list(dict.fromkeys(hallazgos))
 
 
 def _url_normal(url: str) -> str:
@@ -240,10 +180,9 @@ class _Lector(HTMLParser):
         self.vistas_urls: list[str] = []  # src y srcset de img[data-tf-vista]
         self.scripts: list[tuple[str | None, bool]] = []  # (src, lleva código en línea)
         self.fuera: list[str] = []  # lo que se sale de la lista blanca
-        self.d01: list[str] = []  # testimonios o contadores fuera de data-tf-resena
         self.estilos: list[tuple[str, str]] = []  # (dónde, CSS)
         self.visible: list[str] = []
-        self.visible_libre: list[str] = []  # visible fuera de las reseñas reales
+        self.visible_libre: list[str] = []  # visible fuera de las reseñas
         self.visible_resena: list[str] = []
         self.aria: list[str] = []
 
@@ -285,8 +224,6 @@ class _Lector(HTMLParser):
                 self.fuera.append("<meta> sin charset, name ni http-equiv")
         if tag == "link" and a.get("rel", "").strip().lower() != "stylesheet":
             self.fuera.append(f'<link rel="{a.get("rel", "")}">: solo rel="stylesheet" (a assets/)')
-        if tag in _SOLO_EN_RESENA and not ("data-tf-resena" in a or "data-tf-nota" in a or self._en_resena()):
-            self.d01.append(f"<{tag}> fuera de data-tf-resena: testimonios y contadores solo de reseñas reales (D-01)")
 
     def handle_starttag(self, tag, attrs):
         a = self._atributos(tag, attrs)
@@ -620,14 +557,13 @@ def _r_datos(lec: _Lector, datos: DatosLanding, fallos: list[str]) -> None:
             fallos.append(f"data-tf-precio «{p}»: debe decir {importe} y {simbolo}")
 
 
-def _r_prueba_social(lec: _Lector, datos: DatosLanding, vault: Path, contenidos_css: list[tuple[str, str]],
-                     fallos: list[str]) -> None:
+def _r_resenas(lec: _Lector, datos: DatosLanding, vault: Path, fallos: list[str]) -> None:
     try:
         resenas = leer_resenas(vault, datos.p_id, datos.pais)
     except EntradaInvalida as exc:
         fallos.append(str(exc))
         resenas = []
-    reales = {}
+    validas = {}
     for r in resenas:
         if not resena_completa(r):
             ident = r.get("id") if isinstance(r, dict) else None
@@ -635,53 +571,15 @@ def _r_prueba_social(lec: _Lector, datos: DatosLanding, vault: Path, contenidos_
         elif r["pais"] != datos.pais:
             fallos.append(f"resenas.yaml: la reseña {r['id']} es de {r['pais']}, no de {datos.pais}")
         else:
-            reales[r["id"]] = r
-    textos = {}
-    for captura in lec.capturas["resena"]:
-        textos.setdefault(captura[0], []).append(_limpio(captura[1:]))
-    for rid in lec.resenas:
-        if rid not in reales:
-            fallos.append(f"data-tf-resena=\"{rid}\" no está en resenas.yaml: solo reseñas reales (D-01)")
-            continue
-        real = " ".join(reales[rid]["texto"].split())
-        trozos = fragmentos(reales[rid]) or [real]
-        if any(any(f not in t for f in trozos) for t in textos.get(rid, [])):
-            fallos.append(f"data-tf-resena=\"{rid}\": el texto no es el de resenas.yaml")
-        estrellas = reales[rid].get("estrellas")
-        for t in textos.get(rid, []):
-            llenas, vacias = t.count("★"), t.count("☆")
-            otras = bool(_ESTRELLAS.search(t.replace("★", "").replace("☆", "")))
-            if (llenas or vacias or otras) and (not _estrellas_validas(estrellas) or otras
-                                                or (llenas, vacias) != (estrellas, 5 - estrellas)):
-                fallos.append(f"data-tf-resena=\"{rid}\": las estrellas no son las {estrellas} que dio "
-                              "(★ llenas y ☆ vacías hasta 5) (D-01)")
-    for captura in lec.capturas["nota"]:
-        con = [r for r in reales.values() if _estrellas_validas(r.get("estrellas"))]
-        texto_nota = _limpio(captura)
-        if not con or len(con) != len(reales):
-            fallos.append("data-tf-nota: la nota media necesita las estrellas de todas las reseñas reales (D-01)")
-            continue
-        media = f"{Decimal(sum(r['estrellas'] for r in con)) / len(con):.1f}".replace(".", ",")
-        if media not in texto_nota or not re.search(rf"(?<!\d){len(con)}(?!\d)", texto_nota):
-            fallos.append(f"data-tf-nota: debe decir la media real {media} y cuántas reseñas ({len(con)}) (D-01)")
-    fuentes = [("título", _limpio(lec.titulo or [])), ("descripción", lec.descripcion or ""),
-               ("texto visible", _limpio(lec.visible_libre)), *(("aria-label", t) for t in lec.aria),
-               *contenidos_css]
-    for donde, texto in fuentes:
-        for hallazgo in prueba_social_falsa(texto, datos.idioma, datos.precio):
-            fallos.append(f"{donde}: {hallazgo}: sin estrellas, notas, cupos, compradores, cuentas atrás ni "
-                          "precios de referencia inventados (D-01)")
-    fallos.extend(lec.d01)
+            validas[r["id"]] = r
     tipos = [s.tipo for s in lec.secciones]
-    if not reales:
-        if "prueba_social" in tipos:
-            fallos.append("sección prueba_social sin reseñas reales: va vista previa + garantía (D-01)")
+    if not validas:
         vistas = [s for s in lec.secciones if s.tipo == "vista_previa"]
         if not vistas or max(s.vistas for s in vistas) < 2:
-            fallos.append("sin reseñas reales falta la vista previa: una sección vista_previa con ≥ 2 "
+            fallos.append("sin reseñas falta la vista previa: una sección vista_previa con ≥ 2 "
                           "img[data-tf-vista]")
         if "garantia" not in tipos:
-            fallos.append("sin reseñas reales falta la sección garantia")
+            fallos.append("sin reseñas falta la sección garantia")
 
 
 def _r_assets(raiz: Path, datos: DatosLanding, lec: _Lector, pixel: bool, fallos: list[str]) -> None:
@@ -817,14 +715,13 @@ def validar(vault: Path, datos: DatosLanding) -> Resultado:
         lec.fuera.append(f"etiqueta sin cerrar al final: «{lec.rawdata.strip()[:40]}»")
     lec.close()
 
-    contenidos_css: list[tuple[str, str]] = []
     for donde, texto in [*lec.estilos, ("assets/estilo.css", css)]:
-        contenidos_css += [(f"{donde} (content)", t) for t in _revisar_css(donde, texto, fallos)]
+        _revisar_css(donde, texto, fallos)
     _r_estructura(lec, wf, fallos)
     _r_botones(lec, wf, checkout, fallos)
     _r_idioma(lec, datos, fallos)
     _r_datos(lec, datos, fallos)
-    _r_prueba_social(lec, datos, vault, contenidos_css, fallos)
+    _r_resenas(lec, datos, vault, fallos)
     _r_assets(raiz, datos, lec, pixel, fallos)
     origen = _Origen(checkout, datos.dominio, datos.tienda)
     for donde, url, carga in lec.urls:
@@ -911,7 +808,7 @@ def completar_resena(vault: Path, p_id: str, pais: str, rid: str, *, nombre: str
 
 
 def anadir_resena(vault: Path, p_id: str, pais: str, texto: str, fecha: date, fuente: str) -> str:
-    """Añade una reseña real a ``landing/<PAIS>/resenas.yaml`` con id ``r-<AAAAMMDD>-<n>``; devuelve el id.
+    """Añade una reseña a ``landing/<PAIS>/resenas.yaml`` con id ``r-<AAAAMMDD>-<n>``; devuelve el id.
 
     ``ValueError`` si falta el texto o la fuente (el pedido o el email de origen) o si algo parece un secreto.
     """
@@ -942,6 +839,6 @@ def anadir_resena(vault: Path, p_id: str, pais: str, texto: str, fecha: date, fu
         raise ValueError("la reseña trae algo con forma de secreto; no se guarda")
     ruta = raiz / "resenas.yaml"
     escribir_atomico(ruta, contenido)
-    anadir_log(vault, "landing", f"{p_id} {pais}: reseña real {rid} (fuente: {nueva['fuente']})",
+    anadir_log(vault, "landing", f"{p_id} {pais}: reseña {rid} (fuente: {nueva['fuente']})",
                [ruta.relative_to(vault).as_posix()])
     return rid

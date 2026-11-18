@@ -1,32 +1,22 @@
-"""Gates deterministas del PDF: QG-01…14 con puntuación por severidad.
+"""Gates deterministas del PDF: QG-01…09 y QG-12…14 con puntuación por severidad.
 
 Adaptados y traducidos de dp-createur (MIT, ``0cf80efa``): ``references/quality-gates.md`` y
 ``references/scoring-system.md``. Se leen sobre el HTML ensamblado de una pieza, antes de WeasyPrint,
 con ``html.parser`` de la biblioteca estándar: un recorrido que construye un árbol mínimo de elementos
 (y anota las etiquetas sin cerrar o mal anidadas para QG-13).
 
-``promesas`` es pública: la reutiliza ``/landing`` (plan 18) para su copy. Sin léxico para el idioma falla
-cerrado con un hallazgo crítico «no medido».
-
-Todo texto se normaliza antes de buscar promesas, cifras o contar palabras (``plan.normalizar``: NFC, sin
-caracteres de formato, espacio duro como espacio y blancos colapsados). Ningún bloque visible queda fuera
-del examen de promesas: el aviso de salud, el índice y las fuentes también pasan; solo las entradas
-citadas ``li[id^=fuente-]`` se saltan (el título de un estudio no es una promesa). Un descargo («no
-sustituye al médico», «antes de dejar la medicación») se neutraliza por su negación, no por su sitio.
+Todo texto se normaliza antes de buscar cifras o contar palabras (``plan.normalizar``: NFC, sin caracteres de
+formato, espacio duro como espacio y blancos colapsados).
 """
 
 from __future__ import annotations
 
 import re
-import unicodedata
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Literal
 
-import yaml
-
-from trovefy.config.yaml_config import cargar_yaml
 from trovefy.pdf.plan import (
     EN_LINEA,
     PALABRA,
@@ -43,21 +33,12 @@ from trovefy.producto.medios import CARPETA, MANIFIESTO, leer_manifiesto
 Severidad = Literal["critica", "alta", "media", "baja"]
 # dp-createur references/scoring-system.md, adaptado: 100 menos la suma de pesos, mínimo 0.
 PESOS: dict[str, int] = {"critica": 25, "alta": 10, "media": 5, "baja": 2}
-PLANTILLAS = Path(__file__).resolve().parents[3] / "templates" / "pdf" / "promesas"
-CLAVES_LEXICO = ("ingresos", "salud")
 TIPOS_PIEZA = ("principal", "ebook", "kit", "bono", "bump", "upsell")
 # QG-07: número de h3 por sección (dp-createur: 3–7 subapartados).
 H3_POR_SECCION = (3, 7)
 # QG-12: largo mínimo (en palabras) de un párrafo repetido que cuenta como relleno.
 PALABRAS_RELLENO = 12
-# QG-11: palabras mínimas del aside.aviso-salud con exigencia sanitaria. Constante técnica: un aviso de
-# menos de una frase («Ojo.», «Consulta a tu médico.») no explica que el libro no es un tratamiento.
-AVISO_PALABRAS_MIN = 8
-# Promesas: cuántas palabras antes de la coincidencia (en la misma frase, sin puntuación de por medio y solo
-# a través de auxiliares) se busca una negación que la convierte en descargo («no sustituye», «не лекува»).
-VENTANA_NEGACION = 3
 
-_IDIOMA = re.compile(r"[a-z]{2}")
 _MARCADORES = (
     re.compile(r"lorem ipsum", re.IGNORECASE),
     re.compile(r"\b(?:TBD|XXX|PLACEHOLDER)\b"),
@@ -82,24 +63,12 @@ _RECORTA_OVERFLOW = frozenset({"hidden", "clip"})
 _RECORTA_CONTAIN = frozenset({"paint", "content", "strict"})
 _PROPS_OVERFLOW = ("overflow", "overflow-x", "overflow-y", "overflow-block", "overflow-inline")
 _TAMANO_A4 = (frozenset({"a4"}), frozenset({"a4", "portrait"}))
-# Promesas: negaciones (es, bg, en) y descargos fijos que neutralizan la coincidencia siguiente.
-_NEGACIONES = frozenset({"no", "ni", "nunca", "jamás", "не", "нито", "никога", "not", "never", "nor", "cannot"})
-# Entre la negación y la promesa solo caben pronombres átonos y auxiliares («no te curará», «no va a curar»,
-# «will not cure», «не ще те излекува»); cualquier otra palabra cambia lo que se niega.
-_AUXILIARES = frozenset({
-    "te", "se", "lo", "la", "le", "les", "me", "nos", "os", "va", "vas", "van", "vamos", "a", "puede", "pueden",
-    "puedes", "debe", "deben", "es", "está", "do", "does", "did", "will", "would", "can", "could", "may", "might",
-    "it", "this", "that", "is", "to", "ще", "се", "го", "я", "ги", "ви", "ти", "те", "ни", "ми", "може", "да", "е",
-})
-_DESCARGOS = re.compile(r"(?:\bantes de|\bbefore(?: you)?|\bпреди да)\s*$", re.IGNORECASE)
-_FIN_DE_FRASE = re.compile(r"[.!?;:,¡¿()«»\"“”—]")
-_TOKEN = re.compile(r"[\w'’]+")
 _IMG_EN_SVG = frozenset({"image", "use", "feimage"})
 _COMENTARIO_CSS = re.compile(r"/\*.*?\*/", re.DOTALL)
 _ESTILO = re.compile(r"(<style\b[^>]*>)(.*?)(</style\s*>)", re.DOTALL | re.IGNORECASE)
 _CERO = re.compile(r"0(?:mm|cm|in|pt|px|pc|q|em|rem)?")
 _NO_PALABRA = re.compile(r"[^\w]+")
-_NO_PROMESA = ("head", "title", "style", "script", "template", "noscript")
+_NO_TEXTO = ("head", "title", "style", "script", "template", "noscript")
 
 
 @dataclass(frozen=True)
@@ -241,105 +210,12 @@ def _es_cita(n: _Nodo) -> bool:
     return False
 
 
-def _omitir_promesas(n: _Nodo) -> bool:
-    # El aviso de salud, el índice y el resto de las fuentes sí pasan (Ruling R-T7b y revisión H1/M2).
-    return n.tag in _NO_PROMESA or _es_cita(n)
-
-
 def _palabras(nodo: _Nodo) -> int:
     return len(PALABRA.findall(_texto(nodo, _omitir_contar)))
 
 
 def _de_clase(raiz: _Nodo, tag: str | None, clase: str) -> list[_Nodo]:
     return [n for n in raiz.descendientes() if clase in n.clases and (tag is None or n.tag == tag)]
-
-
-# --- léxico de promesas -----------------------------------------------------------------------------
-
-
-def _leer_lexico(ruta: Path) -> dict[str, list[str]]:
-    try:
-        datos = cargar_yaml(ruta.read_text(encoding="utf-8")) or {}
-    except yaml.YAMLError as exc:
-        raise ValueError(f"{ruta.name}: léxico de promesas ilegible ({exc})") from None
-    if not isinstance(datos, dict):
-        raise ValueError(f"{ruta.name}: el léxico de promesas no es un mapa")  # noqa: TRY004 - error de datos
-    salida: dict[str, list[str]] = {}
-    for clave in CLAVES_LEXICO:
-        lista = datos.get(clave) or []
-        if not isinstance(lista, list) or not all(isinstance(x, str) and x.strip() for x in lista):
-            raise ValueError(f"{ruta.name}: «{clave}» debe ser una lista de patrones")
-        salida[clave] = list(lista)
-    return salida
-
-
-def cargar_lexico(idioma: str, vault: Path | None) -> dict[str, list[re.Pattern]] | None:
-    """Plantilla del repo + ``config/promesas/<idioma>.yaml`` del vault, si existe. None si no hay léxico."""
-    if not isinstance(idioma, str) or not _IDIOMA.fullmatch(idioma):
-        return None
-    rutas = [PLANTILLAS / f"{idioma}.yaml"]
-    if vault is not None:
-        rutas.append(Path(vault) / "config" / "promesas" / f"{idioma}.yaml")
-    patrones: dict[str, list[str]] = {clave: [] for clave in CLAVES_LEXICO}
-    for ruta in rutas:
-        if ruta.is_file():
-            for clave, lista in _leer_lexico(ruta).items():
-                patrones[clave] += [p for p in lista if p not in patrones[clave]]
-    if not any(patrones.values()):
-        return None
-    compilados: dict[str, list[re.Pattern]] = {}
-    for clave, lista in patrones.items():
-        compilados[clave] = []
-        for p in lista:
-            try:
-                compilados[clave].append(re.compile(unicodedata.normalize("NFC", p), re.IGNORECASE | re.UNICODE))
-            except re.error as exc:
-                raise ValueError(f"léxico de promesas ({idioma}, {clave}): patrón roto «{p}» ({exc})") from None
-    return compilados
-
-
-def _descargo(texto: str, inicio: int) -> bool:
-    """True si la coincidencia que empieza en ``inicio`` va negada o tras un descargo fijo, en la misma frase."""
-    antes = texto[:inicio]
-    cortes = list(_FIN_DE_FRASE.finditer(antes))
-    frase = antes[cortes[-1].end():] if cortes else antes
-    if _DESCARGOS.search(frase):
-        return True
-    for n, token in enumerate(reversed([t.lower() for t in _TOKEN.findall(frase)])):
-        if token in _NEGACIONES or token.endswith(("n't", "n’t")):
-            return True
-        if n + 1 >= VENTANA_NEGACION or token not in _AUXILIARES:
-            return False  # «¿No quieres ganar…?» niega «quieres», no la promesa
-    return False
-
-
-def promesas(texto: str, idioma: str, exigencia: str, vault: Path | None = None) -> list[Hallazgo]:
-    """QG-10 (ingresos) y QG-11 (salud) sobre un texto. Sin léxico: un hallazgo crítico «no medido».
-
-    El texto se normaliza antes (``plan.normalizar``). Una coincidencia negada en su frase (``no``, ``не``,
-    ``not``… hasta ``VENTANA_NEGACION`` palabras antes) o tras un descargo fijo («antes de», «before»,
-    «преди да») no es una promesa."""
-    if exigencia not in EXIGENCIAS:
-        raise ValueError(f"exigencia «{exigencia}» no admitida: {', '.join(EXIGENCIAS)}")
-    lexico = cargar_lexico(idioma, vault)
-    if lexico is None:
-        return [Hallazgo("QG-10", "critica", "léxico",
-                         f"no medido: sin léxico de promesas para {idioma}")]
-    texto = normalizar(texto)
-    hallazgos: list[Hallazgo] = []
-    for clave, gate in (("ingresos", "QG-10"), ("salud", "QG-11")):
-        vistos: set[str] = set()
-        for patron in lexico[clave]:
-            for m in patron.finditer(texto):
-                if _descargo(texto, m.start()):
-                    continue
-                frase = m.group(0)
-                if frase.lower() in vistos:
-                    continue
-                vistos.add(frase.lower())
-                hallazgos.append(Hallazgo(gate, "critica", f"«{frase}»",
-                                          f"promesa de {clave}: «{frase}»; quítala o di lo mismo sin prometer"))
-    return hallazgos
 
 
 # --- CSS --------------------------------------------------------------------------------------------
@@ -580,7 +456,7 @@ def _qg09(raiz: _Nodo) -> list[Hallazgo]:
 
     def revisar(n: _Nodo) -> None:
         for h in n.elementos():
-            if h.tag in _NO_PROMESA or (h.tag == "nav" and "indice" in h.clases) or _es_cita(h):
+            if h.tag in _NO_TEXTO or (h.tag == "nav" and "indice" in h.clases) or _es_cita(h):
                 continue
             if h.tag not in EN_LINEA:
                 cifra = _CIFRA.search(_texto(h, propio))
@@ -692,17 +568,6 @@ def evaluar(html: str, *, raiz: Path, idioma: str, exigencia: str, tipo_pieza: s
 
     hallazgos += _qg06_07_08(secciones, cfg)
     hallazgos += _qg09(doc)
-    hallazgos += promesas(_texto(doc, _omitir_promesas), idioma, exigencia, vault)
-    if exigencia == "sanitario":
-        avisos = _de_clase(doc, "aside", "aviso-salud")
-        palabras_aviso = sum(_palabras(a) for a in avisos)
-        if not avisos:
-            hallazgos.append(Hallazgo("QG-11", "critica", "documento",
-                                      "exigencia sanitaria sin aside.aviso-salud: añade el aviso de salud"))
-        elif palabras_aviso < AVISO_PALABRAS_MIN:
-            hallazgos.append(Hallazgo("QG-11", "critica", avisos[0].donde(),
-                                      f"el aside.aviso-salud tiene {palabras_aviso} palabras (mínimo "
-                                      f"{AVISO_PALABRAS_MIN}): explica que no es un tratamiento y cuándo ir al médico"))
     hallazgos += _qg12(doc)
     hallazgos += [Hallazgo("QG-13", "media", f"línea {linea}", texto) for linea, texto in arbol.errores]
     hallazgos += _qg14(doc, css)

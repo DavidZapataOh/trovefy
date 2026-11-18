@@ -447,8 +447,8 @@ def escribir_checkout(vault: Path, ctx: Contexto, plan: Plan, relecturas: list[R
     EstadoFuera}`` de la comprobación desde fuera y del respaldo manual (Tarea 12; `comprobacion` los lee de
     ``COMPROBACION.md``). Lo visto desde fuera manda sobre la relectura: un precio releído «ok» que fuera se ve mal
     queda a medias. Un ajuste a mano queda cerrado con su evidencia ``captura``/``dicho``/``ok``. ``parados``: ajustes
-    que siguieron distintos tras la corrección. Estado: ``parado`` con alguno de esos o con algo ``parado`` desde fuera
-    (escasez, D-01); ``completo`` si no queda nada por aplicar ni a medias y lo de a mano tiene evidencia; si no,
+    que siguieron distintos tras la corrección. Estado: ``parado`` con alguno de esos o con algo ``parado`` desde
+    fuera; ``completo`` si no queda nada por aplicar ni a medias y lo de a mano tiene evidencia; si no,
     ``a_medias``. ``ValueError`` sin escribir nada si el texto lleva un secreto."""
     fuera = {k: _visto(v) for k, v in (fuera or {}).items()}
     manual = {k: _visto(v) for k, v in (manual or {}).items()}
@@ -506,7 +506,7 @@ def escribir_checkout(vault: Path, ctx: Contexto, plan: Plan, relecturas: list[R
         filas.append(f"| {a.clave} | {pedido} | — | — | pendiente |")
         cuando = "en una etapa siguiente" if a.clave in pendientes else "sin aplicar"
         a_medias.append(f"- {a.clave}: pendiente ({cuando})")
-    for clave, v in fuera.items():  # lo que fuera mira sin ajuste propio (escasez, prueba social…)
+    for clave, v in fuera.items():  # lo que fuera mira sin ajuste propio
         if clave not in claves and v.estado not in CERRADOS:
             a_medias.append(f"- {clave}: visto desde fuera: {v.estado}: {v.detalle}")
     parado_fuera = any(v.estado == "parado" for v in fuera.values())
