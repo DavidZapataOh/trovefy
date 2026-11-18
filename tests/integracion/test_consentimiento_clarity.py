@@ -62,7 +62,7 @@ def pagina():
         def ruta(route):
             pedidas.append(route.request.url)
             if es_peticion_clarity(route.request.url):
-                route.fulfill(status=200, content_type="text/javascript", body="")
+                route.fulfill(status=200, content_type="text/javascript", body=CLARITY_FALSO)
             elif route.request.url.startswith("http://127.0.0.1"):
                 route.continue_()
             else:
@@ -73,6 +73,19 @@ def pagina():
         page.pedidas = pedidas
         yield page
         b.close()
+
+
+# La etiqueta de Clarity simulada: apunta cada llamada a ``clarity(...)`` en sessionStorage (sobrevive a la recarga)
+# y pone sus cookies como lo haría Clarity.
+CLARITY_FALSO = """
+window.clarity = function () {
+  var l = JSON.parse(sessionStorage.getItem("tf-llamadas") || "[]");
+  l.push(Array.prototype.slice.call(arguments));
+  sessionStorage.setItem("tf-llamadas", JSON.stringify(l));
+};
+document.cookie = "_clck=abc; path=/";
+document.cookie = "_clsk=def; path=/";
+"""
 
 
 def _clarity(page) -> list[str]:
@@ -115,3 +128,26 @@ def test_retirar_el_consentimiento(pagina, servidor):
         pagina.click('[data-tf-consentimiento="no"]')
     pagina.wait_for_timeout(300)
     assert len(_clarity(pagina)) == 1  # solo la de antes de retirarlo
+
+
+def test_retirar_avisa_a_clarity_y_borra_sus_cookies(pagina, servidor):
+    """L2: clarity('consent', false) antes de borrar _clck/_clsk; tras la recarga no quedan."""
+    pagina.goto(servidor, wait_until="load")
+    pagina.click('[data-tf-consentimiento="si"]')
+    pagina.wait_for_function("document.cookie.indexOf('_clck=') >= 0")
+    pagina.evaluate("""() => {
+        const orig = window.clarity;
+        window.clarity = function () {
+            sessionStorage.setItem("tf-cookies-al-avisar", document.cookie);
+            return orig.apply(this, arguments);
+        };
+    }""")
+    pagina.click("[data-tf-consentimiento-cambiar]")
+    with pagina.expect_navigation():
+        pagina.click('[data-tf-consentimiento="no"]')
+    pagina.wait_for_timeout(300)
+    llamadas = pagina.evaluate('JSON.parse(sessionStorage.getItem("tf-llamadas") || "[]")')
+    assert ["consent", False] in llamadas
+    assert "_clck=" in pagina.evaluate('sessionStorage.getItem("tf-cookies-al-avisar") || ""')  # aún no borradas
+    cookies = {c["name"] for c in pagina.context.cookies()}
+    assert "_clck" not in cookies and "_clsk" not in cookies

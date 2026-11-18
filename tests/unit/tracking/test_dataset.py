@@ -12,6 +12,7 @@ from trovefy.tienda.mcp import Catalogo, Herramienta, cargar_catalogo
 from trovefy.tracking.dataset import (
     buscar_dataset,
     pixel_en_lectura_mcp,
+    pixeles_de_tienda,
     receta_tracking,
 )
 
@@ -55,12 +56,41 @@ def test_forma_rara_no_medido():
         assert ident is None and motivo.startswith("no medido")
 
 
+TIENDA_ID = "00000000-0000-4000-8000-000000000000"
+OTRA_TIENDA = "00000000-0000-4000-8000-000000000001"
+
+
+def _dos_tiendas(nuestros: list[str], ajenos: list[str]) -> dict:
+    return {"structuredContent": {"tiendas": [
+        {"id": OTRA_TIENDA, "tracking": {"pixels": [{"pixel_id": p} for p in ajenos]}},
+        {"id": TIENDA_ID, "tracking": {"pixels": [{"pixel_id": p} for p in nuestros]}},
+    ]}}
+
+
 def test_pixel_en_lectura_mcp():
     leido = _json("mcp-tracking-leido.json")
-    assert pixel_en_lectura_mcp(leido, "1111111111111111") is True
-    assert pixel_en_lectura_mcp(leido, "7777777777777777") is False
-    assert pixel_en_lectura_mcp({"tiendas": [{"id": "x", "nombre": "y"}]}, "1111111111111111") is None
-    assert pixel_en_lectura_mcp("nada", "1111111111111111") is None
+    assert pixel_en_lectura_mcp(leido, "1111111111111111", TIENDA_ID) is True
+    assert pixel_en_lectura_mcp(leido, "7777777777777777", TIENDA_ID) is False
+    assert pixel_en_lectura_mcp({"tiendas": [{"id": TIENDA_ID, "nombre": "y"}]}, "1111111111111111", TIENDA_ID) is None
+    assert pixel_en_lectura_mcp("nada", "1111111111111111", TIENDA_ID) is None
+
+
+def test_pixel_solo_de_nuestra_tienda():
+    # El píxel del dataset en OTRA tienda de la cuenta no prueba nada de la nuestra.
+    assert pixel_en_lectura_mcp(_dos_tiendas(["9999999999999999"], ["1111111111111111"]), "1111111111111111",
+                                TIENDA_ID) is False
+    assert pixel_en_lectura_mcp(_dos_tiendas(["1111111111111111"], ["9999999999999999"]), "1111111111111111",
+                                TIENDA_ID) is True
+    # Tienda que no está en la lectura: no medido.
+    assert pixel_en_lectura_mcp(_json("mcp-tracking-leido.json"), "1111111111111111", OTRA_TIENDA) is None
+
+
+def test_otro_pixel_en_nuestra_tienda_no_vale():
+    doble = _dos_tiendas(["1111111111111111", "5555555555555555"], [])
+    assert pixel_en_lectura_mcp(doble, "1111111111111111", TIENDA_ID) is False
+    assert pixeles_de_tienda(doble, TIENDA_ID) == {"1111111111111111", "5555555555555555"}
+    assert pixeles_de_tienda(doble, OTRA_TIENDA) == set()
+    assert pixeles_de_tienda({"tiendas": []}, TIENDA_ID) is None
 
 
 @pytest.fixture

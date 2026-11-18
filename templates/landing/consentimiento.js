@@ -19,17 +19,34 @@
     s.src = "https://www.clarity.ms/tag/" + proyecto;
     document.head.appendChild(s);
   }
+  function dominios() {
+    // Clarity pone sus cookies en el dominio raíz: se borran en el host y en cada dominio padre.
+    var partes = window.location.hostname.split(".");
+    var lista = [""];
+    if (/^[0-9.]+$/.test(window.location.hostname) || partes.length < 2) return lista;
+    for (var i = 0; i < partes.length - 1; i++) lista.push("; domain=." + partes.slice(i).join("."));
+    return lista;
+  }
   function borrarCookies() {
+    var ds = dominios();
     ["_clck", "_clsk", "CLID", "ANONCHK", "MR", "MUID", "SM"].forEach(function (n) {
-      document.cookie = n + "=; Max-Age=0; path=/";
+      ds.forEach(function (d) {
+        document.cookie = n + "=; Max-Age=0; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/" + d;
+      });
     });
+  }
+  function retirar() {
+    // Primero se le dice a Clarity que ya no hay consentimiento (deja de escribir cookies), después se borran.
+    try { if (typeof window.clarity === "function") window.clarity("consent", false); } catch (e) { /* sigue */ }
+    borrarCookies();
+    window.location.reload();
   }
   function elegir(valor) {
     var antes = leer();
     guardar(valor);
     aviso.hidden = true;
     if (valor === "si") cargar();
-    else if (antes === "si") { borrarCookies(); window.location.reload(); }
+    else if (antes === "si") retirar();
   }
   aviso.querySelectorAll("[data-tf-consentimiento]").forEach(function (b) {
     b.addEventListener("click", function () { elegir(b.getAttribute("data-tf-consentimiento")); });

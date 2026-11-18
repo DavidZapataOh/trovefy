@@ -2,6 +2,7 @@
 
 import urllib.error
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 from embudo.ejemplos_embudo import PAIS, TIENDA, P, vault_embudo
@@ -93,11 +94,43 @@ def test_sin_red_no_medido(ctx):
     assert estado is None and motivo.startswith("no medido")
 
 
-def test_una_pagina_falla_la_otra_cuenta(ctx):
+def test_checkout_sin_leer_no_medido(ctx):
+    # L3: sin el checkout leído no hay «ok» (el píxel tiene que estar donde se compra).
     abrir = _abrir({TIENDA + "/": _html("tienda-con-pixel.html"),
                     TIENDA + "/checkout": urllib.error.HTTPError(TIENDA + "/checkout", 302, "x", {}, None)})
     estado, _, motivo = leer_pixel_publico(ctx, DATASET, abrir=abrir)
-    assert estado == "ok" and "checkout" in motivo
+    assert estado is None and motivo.startswith("no medido") and "checkout" in motivo
+    abrir = _abrir({TIENDA + "/": _html("tienda-sin-pixel.html")})
+    assert leer_pixel_publico(ctx, DATASET, abrir=abrir)[0] is None
+
+
+def test_otro_pixel_cuenta_aunque_falle_el_checkout(ctx):
+    abrir = _abrir({TIENDA + "/": _html("tienda-dos-pixeles.html")})
+    estado, ids, _ = leer_pixel_publico(ctx, DATASET, abrir=abrir)
+    assert estado == "otro" and "5555555555555555" in ids
+
+
+def test_espera_entre_paginas_del_mismo_dominio(ctx):
+    abrir = _abrir({TIENDA + "/": _html("tienda-con-pixel.html"), TIENDA + "/checkout": _html("tienda-con-pixel.html")})
+    hosts: list[str] = []
+    leer_pixel_publico(ctx, DATASET, abrir=abrir, esperar=hosts.append)
+    assert hosts == [urlsplit(TIENDA).hostname] * 2
+
+
+def test_por_defecto_espera_5_a_8_segundos(ctx, monkeypatch):
+    from trovefy import navegador
+    from trovefy.tracking import publico
+
+    monkeypatch.undo()  # sin el atajo del conftest: la espera real, con el reloj y el sueño falsos
+    dormido: list[float] = []
+    reloj = iter([100.0, 101.0, 107.0])
+    monkeypatch.setattr(navegador, "_ULTIMA_NAVEGACION", {})
+    monkeypatch.setattr(navegador, "esperar_entre_navegaciones",
+                        lambda host, _f=navegador.esperar_entre_navegaciones: _f(
+                            host, ahora=lambda: next(reloj), dormir=dormido.append, azar=lambda a, b: 6.0))
+    abrir = _abrir({TIENDA + "/": _html("tienda-con-pixel.html"), TIENDA + "/checkout": _html("tienda-con-pixel.html")})
+    assert publico.leer_pixel_publico(ctx, DATASET, abrir=abrir)[0] == "ok"
+    assert dormido == [5.0]  # 6 s al azar menos 1 s que ya pasó
 
 
 def test_pagina_enorme_no_cuenta(ctx):

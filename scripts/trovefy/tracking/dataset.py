@@ -86,13 +86,31 @@ def _pixeles(nodo: object, bajo_pixel: bool = False) -> set[str]:
     return encontrados
 
 
-def pixel_en_lectura_mcp(instantanea: object, dataset_id: str) -> bool | None:
-    """``True``/``False`` si la lectura del MCP de Impultienda trae Pixel IDs (¿está el del dataset?); ``None`` si
-    no trae ninguno (forma desconocida o no lo dice)."""
-    vistos = _pixeles(desenvolver(instantanea))
+def _tiendas_con_id(nodo: object, store_id: str) -> list[dict]:
+    if isinstance(nodo, dict):
+        propias = [nodo] if nodo.get("id") == store_id else []
+        return propias + [t for v in nodo.values() for t in _tiendas_con_id(v, store_id)]
+    if isinstance(nodo, list):
+        return [t for x in nodo for t in _tiendas_con_id(x, store_id)]
+    return []
+
+
+def pixeles_de_tienda(instantanea: object, store_id: str) -> set[str] | None:
+    """Los Pixel IDs de **esa** tienda (el objeto con ``id == store_id``) en la lectura del MCP de Impultienda;
+    ``None`` si la tienda no aparece exactamente una vez. Los píxeles de otras tiendas de la cuenta no cuentan."""
+    tiendas = _tiendas_con_id(desenvolver(instantanea), store_id)
+    if len(tiendas) != 1:
+        return None
+    return _pixeles({k: v for k, v in tiendas[0].items() if k != "id"})
+
+
+def pixel_en_lectura_mcp(instantanea: object, dataset_id: str, store_id: str) -> bool | None:
+    """``True`` si la tienda `store_id` carga exactamente el píxel del dataset; ``False`` si carga otro (o
+    además otro, M3); ``None`` si la lectura no trae la tienda o sus píxeles (forma desconocida o no lo dice)."""
+    vistos = pixeles_de_tienda(instantanea, store_id)
     if not vistos:
         return None
-    return dataset_id in vistos
+    return vistos == {dataset_id}
 
 
 def _hay_escritura_de_pixel(catalogo) -> bool:

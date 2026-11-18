@@ -22,6 +22,7 @@ from trovefy.checkout.receta import (
     ajustes_de_checkout,
     hay_escasez,
     hay_testimonio,
+    limpiar_bloques,
     marcadores,
     operaciones,
     receta_manual,
@@ -206,8 +207,72 @@ def test_sin_temporizador_ni_cupos(zz):
     disenos = [ll for a in aj.values() for ll in a.llamadas if ll.herramienta == "impultienda_disenar_checkout"]
     assert disenos and all(ll.argumentos["minutos_timer_bump"] == 0 for ll in disenos)
     bloques = [b for a in aj.values() for ll in a.llamadas if ll.herramienta == "impultienda_bloques_checkout"
-               for b in ll.argumentos["bloques"]]
+               for b in rellenar(ll, _relleno([ll]))["bloques"]]
     assert bloques and not any(b["tipo"] in ("countdown", "stock") for b in bloques)
+
+
+def test_barra_de_compradores_oculta(zz):
+    """M5: la barra «N personas compraron» es prueba social sin compradores reales (D-01): se oculta."""
+    ctx, emails = zz
+    aj = _por_clave(ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))[0])
+    configs = [ll.argumentos for a in aj.values() for ll in a.llamadas
+               if ll.herramienta == "impultienda_configurar_checkout"]
+    assert any(c.get("ocultar_barra_compradores") is True for c in configs)
+    assert not any("texto_barra_compradores" in c or "posicion_barra_compradores" in c for c in configs)
+
+
+def test_bloques_de_abajo_se_reenvian_sin_escasez(zz):
+    """M5: los bloques que ya hay abajo del checkout se releen y se vuelven a mandar sin cuenta atrás ni cupos."""
+    ctx, emails = zz
+    aj, av = ajustes_de_checkout(ctx, MAX, emails, OpcionesReceta("Max"))
+    abajo = [ll for a in aj for ll in a.llamadas
+             if ll.herramienta == "impultienda_bloques_checkout" and ll.argumentos["posicion"] == "abajo"]
+    assert len(abajo) == 1 and abajo[0].argumentos["bloques"] == "<bloques:abajo>"
+    assert any("HTML" in a and "a mano" in a for a in av)  # los bloques HTML no los toca el conector
+
+
+def test_limpiar_bloques():
+    limpios, avisos = limpiar_bloques(ACTUALES_ABAJO)
+    assert [b["tipo"] for b in limpios] == ["text", "image"]
+    assert limpios[0]["texto"].startswith("Pago seguro")
+    assert any("countdown" in a for a in avisos) and any("stock" in a for a in avisos)
+    assert any("остават" in a for a in avisos)
+    limpios, avisos = limpiar_bloques([{"tipo": "html", "html": "<div id=t></div>"}, {"tipo": "raro"}])
+    assert limpios == []
+    assert any("revisar a mano" in a and "HTML" in a for a in avisos)
+    assert any("revisar a mano" in a and "raro" in a for a in avisos)
+    assert limpiar_bloques([]) == ([], [])
+    with pytest.raises(ValueError):
+        limpiar_bloques("no es una lista")
+
+
+def test_bloques_limpios_pasan_el_catalogo():
+    limpios, _ = limpiar_bloques(ACTUALES_ABAJO)
+    args = {"store_id": UUID.format(1), "posicion": "abajo", "bloques": limpios}
+    assert violaciones(CATALOGO["impultienda_bloques_checkout"], args) == []
+
+
+def test_sin_precio_tachado(zz):
+    """M5: precio_original: None, para que no salga un precio tachado (falso descuento)."""
+    ctx, emails = zz
+    for opciones in (OpcionesReceta("Max"), OpcionesReceta("Max", moneda_tienda="EUR")):
+        aj, _ = ajustes_de_checkout(ctx, MAX, emails, opciones)
+        precios = [ll for a in aj for ll in a.llamadas
+                   if ll.herramienta in ("impultienda_precio_por_pais", "impultienda_fijar_precio")]
+        assert precios
+        for ll in precios:
+            assert "precio_original" in CATALOGO[ll.herramienta].esquema["properties"]
+            assert ll.argumentos["precio_original"] is None, ll
+
+
+def test_free_sin_funnel_postcompra(zz):
+    """L6: el plan Free no tiene funnel post-compra: la receta no lo crea y lo avisa."""
+    ctx, emails = zz
+    aj, av = ajustes_de_checkout(ctx, limites_de_plan(MAPA, "Free"), emails, OpcionesReceta("Free"))
+    nombres = {ll.herramienta for a in aj for ll in a.llamadas}
+    assert "impultienda_crear_funnel_postcompra" not in nombres
+    assert "impultienda_agregar_oferta_postcompra" not in nombres
+    assert any("Free" in a and "funnel" in a for a in av)
 
 
 def test_foto_y_plantilla(zz):
@@ -271,9 +336,19 @@ def test_opciones_por_defecto():
 # --- las llamadas pasan el catálogo y la guarda del hook ----------------------------------------------------------
 
 
-def _relleno(llamadas: list[Llamada]) -> dict[str, str]:
+ACTUALES_ABAJO = [
+    {"tipo": "text", "etiqueta": "p", "texto": "Pago seguro y entrega inmediata por email."},
+    {"tipo": "countdown", "minutos": 7, "texto": "La oferta termina en"},
+    {"tipo": "stock", "inicial": 12, "minimo": 3, "texto": "Quedan {count} cupos"},
+    {"tipo": "text", "etiqueta": "p", "texto": "Остават само 3 места!"},
+    {"tipo": "image", "url": "https://cdn.ejemplo.test/sello.png", "alt": "Sello", "ancho_pct": 40},
+]
+
+
+def _relleno(llamadas: list[Llamada]) -> dict[str, object]:
     todos = sorted({m for ll in llamadas for m in marcadores(ll.argumentos)})
-    return {m: UUID.format(i % 10) for i, m in enumerate(todos)}
+    return {m: (limpiar_bloques(ACTUALES_ABAJO)[0] if m.startswith("<bloques:") else UUID.format(i % 10))
+            for i, m in enumerate(todos)}
 
 
 def test_cada_llamada_pasa_violaciones(zz_tres_activos):
@@ -342,6 +417,8 @@ def test_la_guarda_del_hook_deja_pasar_el_plan_aprobado(zz, monkeypatch):
 
 def test_hay_escasez():
     assert hay_escasez("Остават 2 места · 09:59") == ["остават", "09:59"]
+    assert hay_escasez("La oferta acaba en {timer}") == ["{timer}"]
+    assert hay_escasez("Solo { count } libres") == ["{ count }"]
     assert hay_escasez("¡Solo hoy! Quedan pocas plazas") == ["solo hoy", "quedan"]
     assert hay_escasez("Ръководство за спокойно тяло, 13,90 €") == []
 
@@ -361,6 +438,11 @@ def test_guion_upsell_incompleto():
     texto = _pagina_u1().replace(f"<!-- guion: {GUION_UPSELL[3][0]} -->", "")
     problemas = validar_pagina_upsell(texto)
     assert any(GUION_UPSELL[3][0] in p for p in problemas)
+
+
+def test_guion_upsell_con_timer():
+    texto = _pagina_u1() + "\nОферта до {timer}\n"
+    assert any("escasez" in p and "{timer}" in p for p in validar_pagina_upsell(texto))
 
 
 def test_guion_upsell_desordenado_y_con_escasez():
@@ -396,3 +478,17 @@ def test_limites_del_plan_en_el_mapa():
     assert limites_de_plan(MAPA, "Starter")["upsells"] == 1 and limites_de_plan(MAPA, "Pro")["upsells"] == 2
     assert MAX["bumps"] is None and MAX["downsell"] is None  # no publicado: se lee con impultienda_ver_plan
     assert "ver_plan" in MAPA["fuente_limites"]
+
+
+# --- M6 (revisión T6–10): ids en tiempo de ejecución → Tarea 11 -------------------------------------------------
+
+
+@pytest.mark.xfail(strict=True, raises=ImportError,
+                   reason="M6: los ids que solo se conocen al ejecutar (<store_id>, <item_id:…>, <oferta_id:…>, "
+                          "<bloques:abajo>…) hacen que el plan aprobado no pueda llevar su huella final de una vez. "
+                          "Se resuelve en la Tarea 11 con planes por etapas (cada etapa se aprueba con los ids ya "
+                          "leídos). Este test pasa a verde cuando exista trovefy.checkout.etapas.")
+def test_m6_plan_por_etapas_con_ids_de_la_lectura():
+    from trovefy.checkout.etapas import etapas_de  # noqa: F401 - Tarea 11
+
+    raise AssertionError("Tarea 11: quita el xfail y prueba que cada etapa se aprueba con sus ids ya rellenos")

@@ -5,12 +5,18 @@ píxel y checkout verificados (V2 0:19:45). Contar los cuatro eventos y exigir P
 pedido es más que los vídeos (desvío aprobado: solo lectura, coste cero, no cambia lo que ve el comprador).
 
 Claude llama ``ads_get_dataset_stats`` (``aggregation: event``) antes y después de la demo y la compra de prueba, y
-``ads_get_dataset_details`` o ``ads_get_dataset_quality`` después; guarda las respuestas crudas fuera del vault y
-esta parte solo cuenta. Nunca se escribe en Meta (``ads_pixel_event_read`` está clasificada como escritura y no se
-usa). Respaldo: una captura de «Probar eventos» que pega el usuario (clave ``test-events``).
+``ads_get_dataset_details`` después; guarda las respuestas crudas fuera del vault y esta parte solo cuenta. Nunca se
+escribe en Meta (``ads_pixel_event_read`` está clasificada como escritura y no se usa). Respaldo: una captura de
+«Probar eventos» que pega el usuario (clave ``test-events``), registrada después de la lectura «antes».
+
+Revisión T6–10: la diferencia se hace por cubo (``start_time``), porque la ventana de las estadísticas se desliza
+(M1); una respuesta con más páginas (``paging.next``) es «no medido»; la CAPI se da por vista solo con
+``server_last_fired_time`` del mismo dataset y posterior a la lectura «antes» (M2), y sin ella no hay
+``verificado`` (H1, ruling: la CAPI es obligatoria).
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from trovefy.tracking.dataset import desenvolver
@@ -39,34 +45,104 @@ def _entrada(d: dict) -> tuple[str, int] | None | bool:
     return False if n is None else (nombre, n)
 
 
-def contar_eventos(instantanea: object) -> dict[str, int] | None:
-    """Suma por evento (solo los cuatro de §4.9) de una respuesta de ``ads_get_dataset_stats``; ``None`` si la
-    forma no es la esperada o algún conteo no es un entero ≥ 0."""
+def hora(valor: object) -> datetime | None:
+    """Una hora ISO 8601 con zona (``2026-11-17T10:00:00+0000`` o ``…+00:00``); ``None`` si no lo es."""
+    if not isinstance(valor, str):
+        return None
+    texto = valor.strip()
+    for formato in (None, "%Y-%m-%dT%H:%M:%S%z"):
+        try:
+            h = datetime.fromisoformat(texto) if formato is None else datetime.strptime(texto, formato)
+        except ValueError:
+            continue
+        return h if h.utcoffset() is not None else None
+    return None
+
+
+def _datos(instantanea: object) -> list | None:
+    """La lista ``data`` de la respuesta; ``None`` si la forma no es la esperada o hay más páginas (``paging.next``):
+    una respuesta a medias contaría de menos."""
     datos = desenvolver(instantanea)
     if isinstance(datos, dict):
+        paging = datos.get("paging")
+        if isinstance(paging, dict) and paging.get("next"):
+            return None
         datos = datos.get("data")
-    if not isinstance(datos, list):
+    return datos if isinstance(datos, list) else None
+
+
+def _sumar(filas: object, total: dict[str, int]) -> bool:
+    if not isinstance(filas, list):
+        return False
+    for fila in filas:
+        e = _entrada(fila) if isinstance(fila, dict) else False
+        if not e:
+            return False
+        if e[0] in total:
+            total[e[0]] += e[1]
+    return True
+
+
+def cubos_de_eventos(instantanea: object) -> dict[datetime, dict[str, int]] | None:
+    """Conteo por cubo (``start_time``) y evento (solo los cuatro de §4.9) de ``ads_get_dataset_stats``;
+    ``None`` si la forma no es la esperada, hay más páginas, un cubo no trae su hora o un conteo no es un entero
+    ≥ 0."""
+    datos = _datos(instantanea)
+    if datos is None:
+        return None
+    cubos: dict[datetime, dict[str, int]] = {}
+    for cubo in datos:
+        if not isinstance(cubo, dict):
+            return None
+        inicio = hora(cubo.get("start_time"))
+        if inicio is None or inicio in cubos:
+            return None
+        cubos[inicio] = dict.fromkeys(EVENTOS, 0)
+        if not _sumar(cubo.get("data"), cubos[inicio]):
+            return None
+    return cubos
+
+
+def contar_eventos(instantanea: object) -> dict[str, int] | None:
+    """Suma por evento (solo los cuatro de §4.9) de una respuesta de ``ads_get_dataset_stats``; ``None`` si la
+    forma no es la esperada, hay más páginas o algún conteo no es un entero ≥ 0."""
+    datos = _datos(instantanea)
+    if datos is None:
         return None
     total = dict.fromkeys(EVENTOS, 0)
     for cubo in datos:
         if not isinstance(cubo, dict):
             return None
-        filas = cubo.get("data") if isinstance(cubo.get("data"), list) else [cubo]
-        for fila in filas:
-            e = _entrada(fila) if isinstance(fila, dict) else False
-            if not e:
-                return None
-            if e[0] in total:
-                total[e[0]] += e[1]
+        if not _sumar(cubo.get("data") if isinstance(cubo.get("data"), list) else [cubo], total):
+            return None
     return total
 
 
-def diferencia(antes: dict[str, int] | None, despues: dict[str, int] | None) -> dict[str, int] | None:
-    """Lo que llegó entre dos instantáneas; ``None`` si falta una o algún conteo baja (ventanas distintas)."""
+def diferencia(antes: dict[datetime, dict[str, int]] | None,
+               despues: dict[datetime, dict[str, int]] | None) -> dict[str, int] | None:
+    """Lo que llegó entre dos lecturas por cubo (`cubos_de_eventos`).
+
+    La ventana de ``ads_get_dataset_stats`` se desliza: los cubos viejos salen y entran otros nuevos. Solo cuentan
+    los cubos de «después» desde el más nuevo de «antes» (ese, restando lo que ya tenía); los anteriores son de
+    antes de la prueba. ``None`` si falta una lectura, si «después» perdió el cubo más nuevo de «antes» o si algún
+    conteo baja."""
     if antes is None or despues is None:
         return None
-    resta = {e: despues.get(e, 0) - antes.get(e, 0) for e in EVENTOS}
-    return None if any(n < 0 for n in resta.values()) else resta
+    resta = dict.fromkeys(EVENTOS, 0)
+    if antes:
+        ultimo = max(antes)
+        if ultimo not in despues:
+            return None
+        cubos = [c for c in despues if c >= ultimo]
+    else:
+        cubos = list(despues)
+    for c in cubos:
+        for e in EVENTOS:
+            n = despues[c].get(e, 0) - antes.get(c, {}).get(e, 0)
+            if n < 0:
+                return None
+            resta[e] += n
+    return resta
 
 
 def evaluar_eventos(conteo: dict[str, int] | None, pedidos_de_prueba: int = 1) -> tuple[Veredicto, list[str]]:
@@ -88,29 +164,19 @@ def evaluar_eventos(conteo: dict[str, int] | None, pedidos_de_prueba: int = 1) -
     return "verificado", []
 
 
-def _servidor(nodo: object, vistos: list[bool]) -> None:
-    if isinstance(nodo, dict):
-        for k, v in nodo.items():
-            if "server" in str(k).lower() and not isinstance(v, (dict, list)):
-                if isinstance(v, bool):
-                    vistos.append(v)
-                elif isinstance(v, (int, float)):
-                    vistos.append(v > 0)
-                elif v is None or isinstance(v, str):
-                    vistos.append(bool(v and v.strip()))
-            else:
-                _servidor(v, vistos)
-    elif isinstance(nodo, list):
-        for x in nodo:
-            _servidor(x, vistos)
+def capi_en_meta(instantanea: object, dataset_id: str, desde: datetime) -> bool | None:
+    """¿Llegan eventos del servidor (API de conversiones) a ese dataset después de `desde` (la lectura «antes»)?
 
-
-def capi_en_meta(instantanea: object) -> bool | None:
-    """``True`` si la respuesta de ``ads_get_dataset_details``/``ads_get_dataset_quality`` muestra eventos del
-    servidor (API de conversiones: ``server_last_fired_time``, conteos ``server_*``); ``False`` si los campos están
-    y van vacíos; ``None`` si no los trae."""
-    vistos: list[bool] = []
-    _servidor(desenvolver(instantanea), vistos)
-    if not vistos:
+    Solo se miran dos claves de la respuesta de ``ads_get_dataset_details``: ``id`` (tiene que ser `dataset_id`) y
+    ``server_last_fired_time``. ``True`` si esa hora es posterior a `desde`; ``False`` si está vacía o es anterior;
+    ``None`` («no medido») si la respuesta es de otro dataset, no trae esas claves o la hora no se entiende."""
+    datos = desenvolver(instantanea)
+    if not isinstance(datos, dict) or str(datos.get("id")) != dataset_id or "server_last_fired_time" not in datos:
         return None
-    return any(vistos)
+    valor = datos["server_last_fired_time"]
+    if valor is None or (isinstance(valor, str) and not valor.strip()):
+        return False
+    h = hora(valor)
+    if h is None:
+        return None
+    return h > desde

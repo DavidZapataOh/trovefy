@@ -8,9 +8,13 @@ ejecuta. ``comprobar_dataset`` deja en ``estado/dataset.json`` la evidencia que 
 """
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import json
 import os
 import re
+import time
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import Literal
@@ -99,46 +103,85 @@ def anadir_permitido(texto: str, act_id: str, clave: Clave, id_: str) -> tuple[s
     return nuevo_texto, True
 
 
-def permitir_en_archivo(ruta: Path, act_id: str, clave: Clave, id_: str) -> bool:
+@contextlib.contextmanager
+def _candado(ruta: Path, espera_s: float) -> Iterator[None]:
+    """``limites.yaml.lock`` (flock exclusivo), el mismo patrón que ``secretos.env.lock``: dos ``permitir`` a la
+    vez se esperan. No es el candado de instancia (``.lock`` de la base) que tiene ``servir``: ``permitir``
+    funciona con el servicio en marcha."""
+    fd = os.open(ruta.with_name(ruta.name + ".lock"), os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+        limite = time.monotonic() + espera_s
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= limite:
+                    raise ValueError("limites.yaml: otro proceso lo está cambiando; vuelve a intentarlo") from None
+                time.sleep(0.1)
+        yield
+    finally:
+        os.close(fd)  # cerrar el fd suelta el flock
+
+
+def _fsync_directorio(carpeta: Path) -> None:
+    dfd = os.open(carpeta, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(dfd)
+    finally:
+        os.close(dfd)
+
+
+def permitir_en_archivo(ruta: Path, act_id: str, clave: Clave, id_: str, *, espera_s: float = 10.0) -> bool:
     """Añade el id en ``limites.yaml`` con reemplazo atómico. ``True`` si cambió, ``False`` si ya estaba.
 
-    Lee sin seguir enlaces (``O_NOFOLLOW``), escribe un temporal 0600 en el mismo directorio, lo valida con
-    ``cargar_limites`` y solo entonces lo pone en su sitio con ``os.replace``: nunca deja un archivo inválido
+    Bajo ``limites.yaml.lock`` (L5): lee sin seguir enlaces (``O_NOFOLLOW``), escribe un temporal 0600 en el mismo
+    directorio, lo valida con ``cargar_limites`` y, si el archivo sigue igual que al leerlo, lo pone en su sitio con
+    ``os.replace`` y hace ``fsync`` del directorio. El servicio (plan 12) reescribe el archivo sin candado y con
+    ``os.replace``: si lo cambió mientras tanto, no se pisa (``ValueError``). Nunca deja un archivo inválido
     (``LimitesInvalidos`` o ``ValueError`` dejan el original intacto)."""
     ruta = Path(ruta)
-    texto = _leer_regular(ruta)
-    nuevo, cambiado = anadir_permitido(texto, act_id, clave, id_)
-    if not cambiado:
-        return False
-    tmp = ruta.with_name(f".{ruta.name}.{os.getpid()}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(nuevo)
-            f.flush()
-            os.fsync(f.fileno())
-        lim = cargar_limites(tmp)
-        cuenta = lim.cuentas.get(act_id)
-        if cuenta is None or id_ not in getattr(cuenta, clave):
-            raise LimitesInvalidos(f"{clave}: el id escrito no se lee de vuelta")
-        os.replace(tmp, ruta)
-    except BaseException:
+    with _candado(ruta, espera_s):
+        texto = _leer_regular(ruta)
+        nuevo, cambiado = anadir_permitido(texto, act_id, clave, id_)
+        if not cambiado:
+            return False
+        tmp = ruta.with_name(f".{ruta.name}.{os.getpid()}.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         try:
-            os.unlink(tmp)
-        except FileNotFoundError:
-            pass
-        raise
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(nuevo)
+                f.flush()
+                os.fsync(f.fileno())
+            lim = cargar_limites(tmp)
+            cuenta = lim.cuentas.get(act_id)
+            if cuenta is None or id_ not in getattr(cuenta, clave):
+                raise LimitesInvalidos(f"{clave}: el id escrito no se lee de vuelta")
+            if _leer_regular(ruta) != texto:
+                raise ValueError("limites.yaml cambió mientras tanto (¿el servicio aplicó un /limites?): vuelve a "
+                                 "ejecutar permitir")
+            os.replace(tmp, ruta)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except FileNotFoundError:
+                pass
+            raise
+        _fsync_directorio(ruta.parent)
     return True
 
 
-def comprobar_dataset(graph, dataset_id: str, lim: Limites, act_id: str, ahora: datetime) -> dict:
+def comprobar_dataset(graph, dataset_id: str, lim: Limites, act_id: str, ahora: datetime, pagina_id: str) -> dict:
     """Lo que ``trovefy-ejecutor comprobar-dataset`` deja en ``estado/dataset.json``.
 
     ``lectura_ok``: Graph devolvió el dataset al pedir ``id`` y ``name`` (el usuario del sistema lo tiene asignado).
     Un error de Graph o de red da ``lectura_ok=False`` con un motivo que nunca lleva el mensaje de Meta (ni, por
-    tanto, el token). ``pagina_en_limites``: la cuenta tiene al menos una página permitida."""
+    tanto, el token). ``pagina_en_limites``: **esa** página (`pagina_id`, la del producto) está en los límites de la
+    cuenta (L1)."""
     if not isinstance(dataset_id, str) or not re.fullmatch(ENTIDAD_ID_RE, dataset_id):
         raise ValueError(f"id de dataset no válido: {dataset_id!r}")
+    if not isinstance(pagina_id, str) or not re.fullmatch(ENTIDAD_ID_RE, pagina_id):
+        raise ValueError(f"id de página no válido: {pagina_id!r}")
     nombre: str | None = None
     motivo: str | None = None
     lectura_ok = False
@@ -160,9 +203,10 @@ def comprobar_dataset(graph, dataset_id: str, lim: Limites, act_id: str, ahora: 
     return {
         "fecha": ahora.isoformat(),
         "dataset_id": dataset_id,
+        "pagina_id": pagina_id,
         "nombre": nombre,
         "lectura_ok": lectura_ok,
         "motivo": motivo,
         "en_limites": lc is not None and dataset_id in lc.datasets_permitidos,
-        "pagina_en_limites": lc is not None and bool(lc.paginas_permitidas),
+        "pagina_en_limites": lc is not None and pagina_id in lc.paginas_permitidas,
     }

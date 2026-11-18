@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from dataclasses import replace
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from trovefy.cli import registrar
@@ -21,8 +22,12 @@ from trovefy.tracking.publico import leer_pixel_publico
 from trovefy.vault.escritura import ZONA_NEGOCIO
 
 _abrir = None  # punto de inyección de los tests (urllib falso); None → el GET seguro de la landing
+_esperar = None  # punto de inyección de los tests; None → 5–8 s entre GETs al mismo dominio (contrato 8)
 _PREFIJO_PIXEL = "píxel: "
 _PREFIJO_EVENTOS = "eventos: "
+_MAX_PEDIDOS = 5
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+_DESFASE = timedelta(minutes=5)
 
 
 def _ahora() -> datetime:
@@ -59,6 +64,8 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
     _comunes(t)
     t.add_argument("--instantanea-mcp", default=None,
                    help="JSON con la respuesta de impultienda_estado_onboarding (lectura) para cruzar el Pixel ID")
+    t.add_argument("--tienda-id", default=None,
+                   help="con --instantanea-mcp: el id (uuid) de la tienda de este país (impultienda_listar_tiendas)")
     c = sub.add_parser("capi", help="registra tus palabras: ya pegaste el token CAPI en tu panel")
     _comunes(c)
     c.add_argument("--dicho", required=True, help="tus palabras literales, entre comillas (nunca el token)")
@@ -66,11 +73,14 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
     _comunes(e)
     e.add_argument("--antes", help="JSON de ads_get_dataset_stats antes de la prueba")
     e.add_argument("--despues", help="JSON de ads_get_dataset_stats después de la prueba")
-    e.add_argument("--detalles", help="JSON de ads_get_dataset_details o ads_get_dataset_quality (¿llega la CAPI?)")
+    e.add_argument("--detalles", help="JSON de ads_get_dataset_details del dataset (¿llega la CAPI después de «antes»?)")
+    e.add_argument("--antes-hora", help="hora ISO 8601 con zona de la lectura «antes» (por defecto, la del archivo de "
+                                        "--antes); obligatoria con --manual")
     e.add_argument("--manual", help="respaldo: PageView=N,ViewContent=N,InitiateCheckout=N,Purchase=N leídos en tu "
                                     "captura de «Probar eventos»")
     e.add_argument("--captura", help="con --manual: la clave de la captura registrada (test-events)")
-    e.add_argument("--pedidos", type=int, default=1, help="pedidos de prueba hechos entre «antes» y «después»")
+    e.add_argument("--pedidos", type=int, default=1,
+                   help=f"pedidos de prueba hechos entre «antes» y «después» (1 a {_MAX_PEDIDOS})")
     sub.add_parser("utm", help="la plantilla de parámetros UTM para cada anuncio")
     from trovefy.tracking import ejecutor
 
@@ -164,18 +174,30 @@ def _dataset(args: argparse.Namespace) -> int:
 
 def _tienda(args: argparse.Namespace) -> int:
     from trovefy.landing.publicar import _abrir_seguro
-    from trovefy.tracking.dataset import pixel_en_lectura_mcp
+    from trovefy.tracking.dataset import pixel_en_lectura_mcp, pixeles_de_tienda
 
+    if args.instantanea_mcp is not None and (args.tienda_id is None or not _UUID.fullmatch(args.tienda_id)):
+        raise ValueError("--instantanea-mcp va con --tienda-id <uuid de la tienda de este país> (los píxeles de "
+                         "otras tiendas de la cuenta no cuentan)")
     ctx = _contexto(args)
     t = _tracking(ctx)
     if t.dataset_id is None:
         raise ValueError("aún no hay dataset_id: trovefy tracking dataset primero")
-    mcp = pixel_en_lectura_mcp(_leer_json(args.instantanea_mcp), t.dataset_id) if args.instantanea_mcp else None
-    estado, _ids, motivo = leer_pixel_publico(ctx, t.dataset_id, abrir=_inyectado("_abrir") or _abrir_seguro)
+    mcp = None
+    ajenos_mcp: list[str] = []
+    if args.instantanea_mcp:
+        leido = _leer_json(args.instantanea_mcp)
+        mcp = pixel_en_lectura_mcp(leido, t.dataset_id, args.tienda_id)
+        ajenos_mcp = sorted((pixeles_de_tienda(leido, args.tienda_id) or set()) - {t.dataset_id})
+    estado, _ids, motivo = leer_pixel_publico(ctx, t.dataset_id, abrir=_inyectado("_abrir") or _abrir_seguro,
+                                              esperar=_inyectado("_esperar"))
     problemas: list[str] = []
     if estado == "otro":
         problemas.append(motivo)
-    if mcp is False:
+    if mcp is False and ajenos_mcp:
+        problemas.append(f"según el MCP de Impultienda tu tienda carga otro píxel ({', '.join(ajenos_mcp)}): quítalo "
+                         f"en «Meta / Tracking» de tu panel y deja solo el {t.dataset_id}")
+    elif mcp is False:
         problemas.append(f"la lectura del MCP de Impultienda no muestra el píxel {t.dataset_id}: pégalo en «Meta / "
                          "Tracking» de tu panel")
     nuevo = t.estado
@@ -235,8 +257,10 @@ def _manual(texto: str) -> dict[str, int]:
     return conteo
 
 
-def _captura_test_events(ctx, clave: str | None) -> str:
+def _captura_test_events(ctx, clave: str | None, desde: datetime) -> str:
+    """La captura de «Probar eventos» registrada después de la lectura «antes» (una vieja no prueba esta compra)."""
     from trovefy.embudo.pegado import indice
+    from trovefy.tracking.eventos import hora
 
     if clave != "test-events":
         raise ValueError("--manual va con --captura test-events: registra antes tu captura de «Probar eventos» con "
@@ -245,7 +269,32 @@ def _captura_test_events(ctx, clave: str | None) -> str:
     if not capturas:
         raise ValueError("no hay captura de «Probar eventos» registrada: trovefy checkout evidencia --clave "
                          "test-events --desde <captura>")
-    return capturas[-1].ruta
+    nuevas = [p for p in capturas if (h := hora(p.fecha)) is not None and h > desde]
+    if not nuevas:
+        raise ValueError(f"la última captura de «Probar eventos» es de antes de la lectura «antes» ({desde.isoformat()}"
+                         "): haz la prueba, captura «Probar eventos» y regístrala de nuevo")
+    return nuevas[-1].ruta
+
+
+def _antes_hora(args: argparse.Namespace) -> datetime:
+    """La hora de la lectura «antes»: ``--antes-hora`` o, con ``--antes``, la del archivo que guardó Claude."""
+    from trovefy.tracking.eventos import hora
+
+    if args.antes_hora is not None:
+        h = hora(args.antes_hora)
+        if h is None:
+            raise ValueError(f"--antes-hora «{args.antes_hora}»: escribe una hora ISO 8601 con zona "
+                             "(2026-11-17T11:30:00+00:00)")
+    elif args.antes is not None:
+        try:
+            h = datetime.fromtimestamp(Path(args.antes).stat().st_mtime, UTC)
+        except FileNotFoundError:
+            raise ValueError(f"no existe {args.antes}") from None
+    else:
+        raise ValueError("--manual va con --antes-hora: la hora en que leíste los eventos antes de la prueba")
+    if h > _reloj() + _DESFASE:
+        raise ValueError(f"--antes-hora {h.isoformat()} es del futuro")
+    return h
 
 
 def _resumen_eventos(ctx, datos: dict) -> str:
@@ -265,50 +314,54 @@ def _resumen_eventos(ctx, datos: dict) -> str:
 def _eventos(args: argparse.Namespace) -> int:
     from trovefy.tracking.eventos import (
         capi_en_meta,
-        contar_eventos,
+        cubos_de_eventos,
         diferencia,
         evaluar_eventos,
     )
 
-    mcp = args.antes is not None or args.despues is not None or args.detalles is not None
+    mcp = args.antes is not None or args.despues is not None
     if mcp and (args.manual is not None or args.captura is not None):
         raise ValueError("o --antes/--despues (MCP de Meta) o --manual con --captura, no las dos")
     if not mcp and args.manual is None:
         raise ValueError("falta la fuente: --antes y --despues (MCP de Meta) o --manual con --captura")
     if mcp and (args.antes is None or args.despues is None):
         raise ValueError("--antes y --despues van juntos (dos lecturas de ads_get_dataset_stats)")
+    if isinstance(args.pedidos, bool) or not 1 <= args.pedidos <= _MAX_PEDIDOS:
+        raise ValueError(f"--pedidos: de 1 a {_MAX_PEDIDOS} pedidos de prueba")
+    desde = _antes_hora(args)
     ctx = _contexto(args)
     t = _tracking(ctx)
     if t.dataset_id is None:
         raise ValueError("aún no hay dataset_id: trovefy tracking dataset primero")
-    capi = None
     evidencia = list(t.evidencia)
     if mcp:
-        conteo = diferencia(contar_eventos(_leer_json(args.antes)), contar_eventos(_leer_json(args.despues)))
-        capi = capi_en_meta(_leer_json(args.detalles)) if args.detalles else None
+        conteo = diferencia(cubos_de_eventos(_leer_json(args.antes)), cubos_de_eventos(_leer_json(args.despues)))
         fuente = "mcp"
     else:
         conteo = _manual(args.manual)
-        evidencia.append(_captura_test_events(ctx, args.captura))
+        evidencia.append(_captura_test_events(ctx, args.captura, desde))
         fuente = "captura"
+    capi = capi_en_meta(_leer_json(args.detalles), t.dataset_id, desde) if args.detalles else None
+    capi_vista = capi is True or (capi is None and t.capi == "visto_en_meta")
     veredicto, motivos = evaluar_eventos(conteo, args.pedidos)
     if capi is False:
-        motivos.append("no verificado: Meta no ve eventos del servidor (API de conversiones): revisa el token en "
-                       "«Meta / Tracking» de tu panel")
-    elif capi is None:
-        motivos.append("no medido: CAPI (pide a Claude ads_get_dataset_details y pásalo con --detalles)")
-    if conteo is None:
+        motivos.append("no verificado: Meta no ve eventos del servidor (API de conversiones) desde la lectura «antes»: "
+                       "revisa el token en «Meta / Tracking» de tu panel")
+    elif not capi_vista:
+        motivos.append("no verificado: falta CAPI (pide a Claude ads_get_dataset_details del dataset y pásalo con "
+                       "--detalles)")
+    if conteo is None or veredicto == "no_medido":
         estado = t.estado
-    elif veredicto == "verificado" and capi is not False:
-        estado = "verificado"
-    elif veredicto == "no_medido":
-        estado = t.estado
-    else:
+    elif veredicto == "no_verificado" or capi is False:
         estado = "no_verificado"
+    elif capi_vista:
+        estado = "verificado"
+    else:
+        estado = t.estado  # los eventos cuadran, pero sin la CAPI vista no hay verde (ruling)
     if conteo is not None:
         evidencia.append(_resumen_eventos(ctx, {
-            "fuente": fuente, "fecha": _reloj().isoformat(timespec="seconds"), "pedidos": args.pedidos,
-            "conteo": conteo, "veredicto": veredicto, "capi": capi, "motivos": motivos}))
+            "fuente": fuente, "fecha": _reloj().isoformat(timespec="seconds"), "antes": desde.isoformat(),
+            "pedidos": args.pedidos, "conteo": conteo, "veredicto": veredicto, "capi": capi, "motivos": motivos}))
     t = replace(t, estado=estado, eventos=conteo if conteo is not None else t.eventos,
                 fuente_eventos=fuente if conteo is not None else t.fuente_eventos,
                 capi="visto_en_meta" if capi is True else t.capi,

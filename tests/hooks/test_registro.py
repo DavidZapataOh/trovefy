@@ -8,7 +8,7 @@ def test_hooks_json_registra_los_hooks():
     reg = json.loads((RAIZ / "hooks/hooks.json").read_text())
     comandos = json.dumps(reg)
     for h in ["meta_guard.py", "secretos.py", "raw_inmutable.py", "stop.py", "buzon_guard.py", "apimart_gasto.py",
-              "impultienda_guard.py"]:
+              "impultienda_guard.py", "ejecutor_guard.py"]:
         assert h in comandos
         assert (RAIZ / "hooks" / h).exists()
     assert "${CLAUDE_PLUGIN_ROOT}" in comandos
@@ -24,6 +24,7 @@ def test_matchers_exactos():
         "buzon_guard.py": "Write|Edit|MultiEdit|NotebookEdit|Bash",
         "apimart_gasto.py": "Bash|WebFetch|Write|Edit|MultiEdit|NotebookEdit|Read|Grep",
         "impultienda_guard.py": "mcp__impultienda__.*",
+        "ejecutor_guard.py": "Bash",
     }
     obtenido = {}
     for grupo in reg["hooks"]["PreToolUse"]:

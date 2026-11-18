@@ -100,9 +100,9 @@ def test_comprobar_dataset_graph_falso(mundo, monkeypatch, capsys):
     main(["permitir", "--pagina", PAGINA])
     g = GraphFalso({"id": DATASET, "name": "PRUEBA ZZ"})
     monkeypatch.setattr(cli, "ClienteGraph", lambda token: g)
-    assert main(["comprobar-dataset", DATASET]) == 0
+    assert main(["comprobar-dataset", DATASET, "--pagina", PAGINA]) == 0
     d = json.loads((mundo.spool / "estado" / "dataset.json").read_text())
-    assert d["dataset_id"] == DATASET and d["nombre"] == "PRUEBA ZZ"
+    assert d["dataset_id"] == DATASET and d["nombre"] == "PRUEBA ZZ" and d["pagina_id"] == PAGINA
     assert d["lectura_ok"] is True and d["en_limites"] is True and d["pagina_en_limites"] is True
     assert d["motivo"] is None and d["fecha"]
     assert g.leidos == [(DATASET, ["id", "name"])]
@@ -111,15 +111,33 @@ def test_comprobar_dataset_graph_falso(mundo, monkeypatch, capsys):
 
 def test_comprobar_dataset_fuera_de_limites_sale_1(mundo, monkeypatch):
     monkeypatch.setattr(cli, "ClienteGraph", lambda token: GraphFalso({"id": DATASET, "name": "PRUEBA ZZ"}))
-    assert main(["comprobar-dataset", DATASET]) == 1
+    assert main(["comprobar-dataset", DATASET, "--pagina", PAGINA]) == 1
     d = json.loads((mundo.spool / "estado" / "dataset.json").read_text())
     assert d["lectura_ok"] is True and d["en_limites"] is False and d["pagina_en_limites"] is False
+
+
+def test_comprobar_dataset_mira_esa_pagina(mundo, monkeypatch):
+    """L1: otra página permitida no vale: tiene que estar la de este producto."""
+    main(["permitir", "--dataset", DATASET])
+    main(["permitir", "--pagina", "3333333333333333"])
+    monkeypatch.setattr(cli, "ClienteGraph", lambda token: GraphFalso({"id": DATASET, "name": "PRUEBA ZZ"}))
+    assert main(["comprobar-dataset", DATASET, "--pagina", PAGINA]) == 1
+    d = json.loads((mundo.spool / "estado" / "dataset.json").read_text())
+    assert d["pagina_en_limites"] is False and d["pagina_id"] == PAGINA
+
+
+def test_comprobar_dataset_exige_pagina(mundo, monkeypatch):
+    monkeypatch.setattr(cli, "ClienteGraph", lambda token: GraphFalso({"id": DATASET}))
+    with pytest.raises(SystemExit):
+        main(["comprobar-dataset", DATASET])
+    assert main(["comprobar-dataset", DATASET, "--pagina", "12ab"]) == 2
+    assert not (mundo.spool / "estado" / "dataset.json").exists()
 
 
 def test_comprobar_dataset_sin_acceso(mundo, monkeypatch, capsys):
     error = ErrorGraph(100, 33, f"Unsupported get request. token {TOKEN_META}")
     monkeypatch.setattr(cli, "ClienteGraph", lambda token: GraphFalso(error=error))
-    assert main(["comprobar-dataset", DATASET]) == 1
+    assert main(["comprobar-dataset", DATASET, "--pagina", PAGINA]) == 1
     d = json.loads((mundo.spool / "estado" / "dataset.json").read_text())
     assert d["lectura_ok"] is False and d["nombre"] is None
     assert d["motivo"] and "100" in d["motivo"] and TOKEN_META not in d["motivo"]
@@ -129,17 +147,19 @@ def test_comprobar_dataset_sin_acceso(mundo, monkeypatch, capsys):
 
 def test_comprobar_dataset_funcion():
     lim = cargar_limites(PLANTILLA, exigir_0600=False)
-    d = comprobar_dataset(GraphFalso(error=ErrorRed("timeout")), DATASET, lim, CUENTA, AHORA)
-    assert d == {"fecha": AHORA.isoformat(), "dataset_id": DATASET, "nombre": None, "lectura_ok": False,
-                 "motivo": d["motivo"], "en_limites": False, "pagina_en_limites": False}
+    d = comprobar_dataset(GraphFalso(error=ErrorRed("timeout")), DATASET, lim, CUENTA, AHORA, PAGINA)
+    assert d == {"fecha": AHORA.isoformat(), "dataset_id": DATASET, "pagina_id": PAGINA, "nombre": None,
+                 "lectura_ok": False, "motivo": d["motivo"], "en_limites": False, "pagina_en_limites": False}
     assert "conexión" in d["motivo"]
-    otro = comprobar_dataset(GraphFalso({"id": "9999", "name": "X"}), DATASET, lim, CUENTA, AHORA)
+    otro = comprobar_dataset(GraphFalso({"id": "9999", "name": "X"}), DATASET, lim, CUENTA, AHORA, PAGINA)
     assert otro["lectura_ok"] is False
     with pytest.raises(ValueError):
-        comprobar_dataset(GraphFalso({}), "act_1", lim, CUENTA, AHORA)
+        comprobar_dataset(GraphFalso({}), "act_1", lim, CUENTA, AHORA, PAGINA)
+    with pytest.raises(ValueError):
+        comprobar_dataset(GraphFalso({}), DATASET, lim, CUENTA, AHORA, "12ab")
 
 
 def test_comprobar_dataset_id_invalido(mundo, monkeypatch):
     monkeypatch.setattr(cli, "ClienteGraph", lambda token: GraphFalso({"id": DATASET}))
-    assert main(["comprobar-dataset", "12ab"]) == 2
+    assert main(["comprobar-dataset", "12ab", "--pagina", PAGINA]) == 2
     assert not (mundo.spool / "estado" / "dataset.json").exists()

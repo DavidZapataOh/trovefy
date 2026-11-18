@@ -157,3 +157,22 @@ def test_valores_se_guardan(tmp_path, ctx):
 
 def test_indice_vacio(ctx):
     assert indice(ctx.vault, ctx) == {}
+
+
+def test_texto_con_token_de_utmify_no_se_guarda(tmp_path, ctx):
+    token = "3f9a2c1e" + "-" + "7b4d-4e2a-9c1f-" + "0a1b2c3d4e5f"
+    origen = _origen(tmp_path, "utmify.txt", f"Tu token de UTMify: {token}\n".encode())
+    with pytest.raises(ValueError, match="UTMify"):
+        guardar_pegado(ctx.vault, ctx, "tracking-pixel", origen, None, AHORA)
+    assert not _evidencia(ctx).exists()
+
+
+def test_eml_con_url_firmada_se_redacta(tmp_path, ctx):
+    """L7 (M-5 de la ronda anterior): las URLs firmadas de un email pegado no llegan al vault."""
+    firmada = "https://cdn.ejemplo.test/descarga/guia.pdf?X-Amz-Signature=" + "ab12" * 8 + "&X-Amz-Expires=3600"
+    origen = _origen(tmp_path, "pdf.eml",
+                     f"Subject: Tu PDF\n\nDescárgalo: {firmada}\nMás info: https://ejemplo.test/ayuda\n".encode())
+    p = guardar_pegado(ctx.vault, ctx, "email-entrega", origen, None, AHORA)
+    guardado = (ctx.vault / "productos" / P / p.ruta).read_text(encoding="utf-8")
+    assert "X-Amz-Signature" not in guardado and "[url firmada redactada]" in guardado
+    assert "https://ejemplo.test/ayuda" in guardado

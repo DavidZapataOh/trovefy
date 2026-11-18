@@ -43,7 +43,7 @@ def comandos_para_usuario(dataset_id: str, pagina_id: str) -> list[str]:
     """Los tres comandos que el usuario ejecuta en una terminal aparte (Claude no los ejecuta)."""
     d, p = _id(dataset_id, "dataset"), _id(pagina_id, "página")
     return [f"{EJECUTOR} permitir --dataset {d}", f"{EJECUTOR} permitir --pagina {p}",
-            f"{EJECUTOR} comprobar-dataset {d}"]
+            f"{EJECUTOR} comprobar-dataset {d} --pagina {p}"]
 
 
 def evaluar_dataset_json(lectura: Lectura, dataset_id: str, *, ahora: datetime | None = None,
@@ -56,6 +56,9 @@ def evaluar_dataset_json(lectura: Lectura, dataset_id: str, *, ahora: datetime |
         return None, lectura.motivo or "no medido: el ejecutor no ha escrito dataset.json"
     if str(d.get("dataset_id")) != dataset_id:
         return None, "no medido: dataset.json es de otro dataset; ejecuta comprobar-dataset con el de este producto"
+    if pagina_id is not None and str(d.get("pagina_id")) != pagina_id:
+        return None, (f"no medido: dataset.json comprobó otra página (o ninguna); ejecuta comprobar-dataset "
+                      f"{dataset_id} --pagina {pagina_id}")
     try:
         fecha = datetime.fromisoformat(str(d.get("fecha")))
         if fecha.utcoffset() is None:

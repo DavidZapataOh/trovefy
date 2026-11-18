@@ -96,6 +96,20 @@ def test_plantilla_js_solo_carga_clarity_al_aceptar():
         assert prohibido not in js
 
 
+def test_retirar_avisa_a_clarity_antes_de_borrar_cookies():
+    """L2: al retirar el consentimiento, primero ``clarity('consent', false)`` y después se borran ``_clck`` y
+    ``_clsk`` en el host y en cada dominio padre (Clarity las pone en el dominio raíz)."""
+    js = CONSENTIMIENTO_JS.read_text(encoding="utf-8")
+    retirar = js[js.index("function retirar"):js.index("function elegir")]
+    assert retirar.index('window.clarity("consent", false)') < retirar.index("borrarCookies()")
+    borrar = js[js.index("function borrarCookies"):js.index("function retirar")]
+    for nombre in ("_clck", "_clsk"):
+        assert f'"{nombre}"' in borrar
+    assert "dominios()" in borrar and "domain=" in js and "hostname" in js
+    elegir = js[js.index("function elegir"):]
+    assert "retirar()" in elegir and "borrarCookies()" not in elegir
+
+
 def test_es_peticion_clarity():
     assert es_peticion_clarity("https://www.clarity.ms/tag/abcde12345")
     assert es_peticion_clarity("https://k.clarity.ms/collect")

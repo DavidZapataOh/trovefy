@@ -16,6 +16,7 @@ from tracking.test_publico import _abrir, _html
 
 FIX = Path(__file__).resolve().parents[2] / "fixtures" / "tracking"
 TOKEN_FALSO = "EAA" + "Bq7" * 10
+TIENDA_ID = "00000000-0000-4000-8000-000000000000"
 
 
 @pytest.fixture
@@ -107,9 +108,34 @@ def test_pixel_no_visto_y_mcp_coincide_configurado(vault, monkeypatch, capsys):
     _preparar_y_dataset(vault)
     monkeypatch.setattr(tracking_cli, "_abrir", _abrir({TIENDA + "/": _html("tienda-sin-pixel.html"),
                                                         TIENDA + "/checkout": _html("tienda-sin-pixel.html")}))
-    assert cli.main([*_cmd("tienda"), "--instantanea-mcp", str(FIX / "mcp-tracking-leido.json")]) == 0
+    assert cli.main([*_cmd("tienda"), "--instantanea-mcp", str(FIX / "mcp-tracking-leido.json"),
+                     "--tienda-id", TIENDA_ID]) == 0
     t = leer_tracking(vault, P, PAIS)
     assert (t.estado, t.pixel_publico, t.pixel_config) == ("configurado", "no_visto", "mcp")
+
+
+def test_tienda_mcp_exige_tienda_id(vault, monkeypatch, capsys):
+    _preparar_y_dataset(vault)
+    assert cli.main([*_cmd("tienda"), "--instantanea-mcp", str(FIX / "mcp-tracking-leido.json")]) == 2
+    assert "--tienda-id" in capsys.readouterr().err
+    assert cli.main([*_cmd("tienda"), "--instantanea-mcp", str(FIX / "mcp-tracking-leido.json"),
+                     "--tienda-id", "no-es-un-uuid"]) == 2
+
+
+def test_tienda_mcp_otro_pixel_en_la_tienda(vault, monkeypatch, capsys):
+    tracking_cli = importlib.import_module("trovefy.tracking_cli")
+
+    _preparar_y_dataset(vault)
+    datos = json.loads((FIX / "mcp-tracking-leido.json").read_text(encoding="utf-8"))
+    datos["structuredContent"]["tiendas"][0]["tracking"]["pixels"].append({"pixel_id": "5555555555555555"})
+    ruta = vault.parent / "mcp.json"
+    ruta.write_text(json.dumps(datos), encoding="utf-8")
+    monkeypatch.setattr(tracking_cli, "_abrir", _abrir({TIENDA + "/": _html("tienda-sin-pixel.html"),
+                                                        TIENDA + "/checkout": _html("tienda-sin-pixel.html")}))
+    assert cli.main([*_cmd("tienda"), "--instantanea-mcp", str(ruta), "--tienda-id", TIENDA_ID]) == 1
+    assert "5555555555555555" in capsys.readouterr().out
+    t = leer_tracking(vault, P, PAIS)
+    assert t.estado == "dataset" and t.pixel_config != "mcp"
 
 
 def test_tienda_otro_pixel_es_problema(vault, monkeypatch, capsys):
@@ -142,7 +168,7 @@ def test_tienda_mcp_contradice(vault, monkeypatch, capsys):
     ruta.write_text(json.dumps(datos), encoding="utf-8")
     monkeypatch.setattr(tracking_cli, "_abrir", _abrir({TIENDA + "/": _html("tienda-con-pixel.html"),
                                                         TIENDA + "/checkout": _html("tienda-con-pixel.html")}))
-    assert cli.main([*_cmd("tienda"), "--instantanea-mcp", str(ruta)]) == 1
+    assert cli.main([*_cmd("tienda"), "--instantanea-mcp", str(ruta), "--tienda-id", TIENDA_ID]) == 1
     assert "1111111111111111" in capsys.readouterr().out
     assert leer_tracking(vault, P, PAIS).estado == "dataset"
 

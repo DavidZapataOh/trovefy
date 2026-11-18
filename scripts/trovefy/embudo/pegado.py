@@ -6,7 +6,9 @@ que solo crece. Fuerza de la evidencia: ``captura`` > ``dicho``.
 
 Regla de la skill (Tarea 16): antes de registrar una captura, Claude la mira con Read; si ve un token, una
 contraseña o datos de tarjeta, no la registra y pide otra. Aquí se comprueba lo que se puede comprobar sin ojos:
-que la imagen es una imagen, el tamaño, y que los textos y valores no llevan nada con forma de secreto.
+que la imagen es una imagen, el tamaño, y que los textos y valores no llevan nada con forma de secreto (también el
+token de UTMify, M4). Las URLs firmadas de un texto pegado (un email con enlace de descarga) se guardan redactadas
+(L7, ruling M-5).
 """
 from __future__ import annotations
 
@@ -24,6 +26,7 @@ import yaml
 
 from trovefy.embudo.contexto import ruta_pais
 from trovefy.secretos import buscar_secreto
+from trovefy.tienda.mcp import redactar_urls_firmadas
 from trovefy.vault import frontmatter
 from trovefy.vault.escritura import anadir_log, escribir_atomico
 
@@ -179,6 +182,8 @@ def guardar_pegado(vault: Path, ctx, clave: str, origen: str | Path, valores: di
         except UnicodeDecodeError:
             raise ValueError(f"{ruta.name} no es texto UTF-8: cópialo en un .txt") from None
         _secreto(texto)
+        # L7 (ruling M-5): un email pegado puede traer enlaces de descarga firmados: se guardan redactados.
+        datos = redactar_urls_firmadas(texto).encode("utf-8")
     destino = _carpeta(ctx) / _nombre(clave, ahora, ext_final)
     _escribir_nuevo(destino, datos)
     p = Pegado(clave=clave, ruta=_rel(ctx, destino), tipo=tipo, sha256=hashlib.sha256(datos).hexdigest(),

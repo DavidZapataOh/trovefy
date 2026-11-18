@@ -29,15 +29,15 @@ BIN = "sudo -u trovefy-exec /home/trovefy-exec/.local/bin/trovefy-ejecutor"
 
 
 def _dataset_json(**kw) -> dict:
-    return {"fecha": AHORA.isoformat(), "dataset_id": DATASET, "nombre": "PRUEBA ZZ", "lectura_ok": True,
-            "motivo": None, "en_limites": True, "pagina_en_limites": True, **kw}
+    return {"fecha": AHORA.isoformat(), "dataset_id": DATASET, "pagina_id": PAGINA, "nombre": "PRUEBA ZZ",
+            "lectura_ok": True, "motivo": None, "en_limites": True, "pagina_en_limites": True, **kw}
 
 
 def test_comandos_exactos():
     assert comandos_para_usuario(DATASET, PAGINA) == [
         f"{BIN} permitir --dataset {DATASET}",
         f"{BIN} permitir --pagina {PAGINA}",
-        f"{BIN} comprobar-dataset {DATASET}",
+        f"{BIN} comprobar-dataset {DATASET} --pagina {PAGINA}",
     ]
 
 
@@ -85,8 +85,16 @@ def test_dataset_json_fuera_de_limites():
 
 
 def test_dataset_json_bien():
-    ok, _ = evaluar_dataset_json(Lectura(_dataset_json(), None), DATASET, ahora=AHORA)
+    ok, _ = evaluar_dataset_json(Lectura(_dataset_json(), None), DATASET, ahora=AHORA, pagina_id=PAGINA)
     assert ok is True
+
+
+def test_dataset_json_de_otra_pagina_no_medido():
+    """L1: pagina_en_limites vale solo para la página que se comprobó."""
+    for d in (_dataset_json(pagina_id="3333333333333333"), {k: v for k, v in _dataset_json().items()
+                                                            if k != "pagina_id"}):
+        ok, texto = evaluar_dataset_json(Lectura(d, None), DATASET, ahora=AHORA, pagina_id=PAGINA)
+        assert ok is None and "otra página" in texto
 
 
 def _vault_con_tracking(tmp_path: Path, monkeypatch) -> Path:

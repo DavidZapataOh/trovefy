@@ -9,7 +9,13 @@ las restricciones del catálogo: ``disenar_checkout`` siempre con ``minutos_time
 solo con los parámetros del ruling R-f.
 
 Los ids que solo se conocen al leer la tienda van como marcadores (``<store_id>``, ``<market_id>``,
-``<item_id:u1>``, ``<ruta:front>``…): los rellena la Tarea 11 con las lecturas del MCP (`rellenar`).
+``<item_id:u1>``, ``<ruta:front>``, ``<bloques:abajo>``…): los rellena la Tarea 11 con las lecturas del MCP
+(`rellenar`; ``<bloques:abajo>`` con `limpiar_bloques` de los bloques actuales). M6 de la revisión T6–10: como esos
+ids solo se conocen al ejecutar, el plan aprobado no puede llevar su huella final de una vez; la Tarea 11 lo
+resuelve con planes por etapas (test ``xfail`` en ``tests/unit/checkout/test_receta.py``).
+
+D-01 completo (M5): sin temporizador, sin bloques ``countdown``/``stock`` (tampoco los que ya hubiera abajo), sin
+barra de compradores, sin precio tachado (``precio_original: None``) y sin ``{timer}``/``{count}`` en los textos.
 
 Lo que manda la cabecera del plan (ruling del 2026-11-17): teléfono sí, sin order bump, upsells como los vídeos
 empezando por U1, sin downsell propio (el de recuperación automático del funnel sí, R-c), sin email de 72 h.
@@ -167,6 +173,8 @@ PALABRAS_ESCASEZ: tuple[str, ...] = (
     "last chance", "hurry", "spots left", "limited time", "selling out",
 )
 _RELOJ = re.compile(r"(?<![\d:])\d{1,2}:\d{2}(?::\d{2})?(?![\d:])")
+# Marcadores de la plataforma que se convierten en cuenta atrás o en cupos al mostrarse (M5).
+_MARCADOR_ESCASEZ = re.compile(r"\{\s*(?:timer|count|countdown|stock|cupos)\s*\}")
 _PATRONES_ESCASEZ = [(p, re.compile(rf"(?<!\w){re.escape(p)}(?!\w)")) for p in PALABRAS_ESCASEZ]
 _TESTIMONIO = (
     re.compile(r"[«\"“„][^«»\"“”„]{8,}[»\"”“]\s*[—–-]\s*\w+"),  # «…» — Nombre
@@ -176,12 +184,14 @@ _TESTIMONIO = (
 
 
 def hay_escasez(texto: str) -> list[str]:
-    """Las palabras de escasez o urgencia (y los relojes ``09:59``) que aparecen, en orden de aparición."""
+    """Las palabras de escasez o urgencia (y los relojes ``09:59`` y los marcadores ``{timer}``/``{count}``) que
+    aparecen, en orden de aparición."""
     normal = (texto or "").casefold()
     hallados: list[tuple[int, str]] = []
     for palabra, patron in _PATRONES_ESCASEZ:
         hallados += [(m.start(), palabra) for m in patron.finditer(normal)]
     hallados += [(m.start(), m.group(0)) for m in _RELOJ.finditer(normal)]
+    hallados += [(m.start(), m.group(0)) for m in _MARCADOR_ESCASEZ.finditer(normal)]
     return [p for _, p in sorted(hallados)]
 
 
@@ -189,6 +199,45 @@ def hay_testimonio(texto: str) -> list[str]:
     """Lo que parece un testimonio o una valoración (cita con nombre, estrellas, «5/5»). En el test 1 no hay
     compradores: cualquier testimonio sería inventado (D-01). Pedir una reseña real no cuenta."""
     return [m.group(0) for p in _TESTIMONIO for m in p.finditer(texto or "")]
+
+
+_TIPOS_BLOQUE = ("image", "carousel", "video", "text")
+_CLAVES_BLOQUE = frozenset({"tipo", "url", "alt", "ancho_pct", "imagenes", "alto", "orientacion", "autoplay",
+                            "etiqueta", "texto"})
+AVISO_HTML = ("revisar a mano: los bloques HTML de arriba y abajo del checkout los conserva el conector y no los toca; "
+              "míralos en tu panel (Diseño de checkout) y quita cualquier cuenta atrás, cupos o «N personas "
+              "compraron» (D-01)")
+
+
+def limpiar_bloques(actuales: object) -> tuple[list[dict], list[str]]:
+    """Los bloques que ya hay en una posición del checkout (``actuales`` de la vista previa de
+    ``impultienda_bloques_checkout``), listos para volver a mandarse sin escasez (D-01, M5): fuera ``countdown``,
+    ``stock`` y cualquier bloque con palabras de urgencia o ``{timer}``/``{count}``; un bloque HTML o de tipo
+    desconocido no se puede reenviar (el conector conserva los HTML): se avisa «revisar a mano». Devuelve
+    ``(bloques, avisos)``; ``ValueError`` si ``actuales`` no es una lista."""
+    if not isinstance(actuales, list):
+        raise ValueError("los bloques actuales no son una lista: no se reenvía nada (no medido)")  # noqa: TRY004 - dato del MCP
+    limpios: list[dict] = []
+    avisos: list[str] = []
+    for n, b in enumerate(actuales, 1):
+        tipo = b.get("tipo") if isinstance(b, dict) else None
+        if tipo in ("countdown", "stock"):
+            avisos.append(f"quitado: bloque {n} ({tipo}, D-01)")
+            continue
+        if tipo == "html":
+            avisos.append(f"revisar a mano: bloque {n} es HTML: el conector no lo toca; míralo en tu panel y quita "
+                          "cualquier cuenta atrás o cupos (D-01)")
+            continue
+        if tipo not in _TIPOS_BLOQUE:
+            avisos.append(f"revisar a mano: bloque {n} de tipo «{tipo}» desconocido: no se reenvía")
+            continue
+        textos = [v for k in ("texto", "alt") if isinstance(v := b.get(k), str)]
+        escasez = [p for t in textos for p in hay_escasez(t)]
+        if escasez:
+            avisos.append(f"quitado: bloque {n} ({tipo}) con escasez o urgencia: {', '.join(dict.fromkeys(escasez))}")
+            continue
+        limpios.append({k: v for k, v in b.items() if k in _CLAVES_BLOQUE})
+    return limpios, avisos
 
 
 GUION_UPSELL: tuple[tuple[str, str], ...] = (
@@ -262,19 +311,23 @@ class _Receta:
         self.ajustes: list[Ajuste] = []
         self.avisos: list[str] = []
         self.por_mercado = ctx.moneda != opciones.moneda_tienda
+        # «No disponible en el plan Free» (descripción de impultienda_crear_funnel_postcompra).
+        self.sin_funnel = opciones.plan.strip().casefold() == "free"
         self.dir_producto = ruta_producto(ctx.vault, ctx.producto).parent
 
     def poner(self, clave: str, valor, motivo: str, cita: str | None, fuera: bool, *llamadas: Llamada) -> None:
         self.ajustes.append(Ajuste(clave, valor, motivo, cita, fuera, tuple(llamadas)))
 
     def precio(self, pieza: Pieza, item: str | None) -> Llamada:
-        """Precio de la pieza en la moneda del mercado: por Markets si la tienda cobra en otra moneda."""
+        """Precio de la pieza en la moneda del mercado: por Markets si la tienda cobra en otra moneda. Siempre con
+        ``precio_original: None``: sin precio tachado (un «antes» inventado sería un falso descuento, D-01)."""
         if self.por_mercado:
-            args = {"store_id": "<store_id>", "market_id": "<market_id>", "precio": _numero(pieza.precio)}
+            args = {"store_id": "<store_id>", "market_id": "<market_id>", "precio": _numero(pieza.precio),
+                    "precio_original": None}
             if item:
                 args["item_id"] = item
             return Llamada("impultienda_precio_por_pais", args, "impultienda_ver_markets")
-        args = {"store_id": "<store_id>", "precio": _numero(pieza.precio)}
+        args = {"store_id": "<store_id>", "precio": _numero(pieza.precio), "precio_original": None}
         if item:
             args["item_id"] = item
         return Llamada("impultienda_fijar_precio", args, "impultienda_listar_productos")
@@ -357,8 +410,16 @@ class _Receta:
         self.poner("checkout.temporizador", False, "sin reloj de cuenta atrás (D-01: los vídeos ponen 7 min; es "
                    "regla legal, no desvío)", "V1 0:31:50", True,
                    Llamada("impultienda_disenar_checkout", {"store_id": "<store_id>", "minutos_timer_bump": 0}, None))
-        self.poner("checkout.cupos", False, "sin cupos (D-01: los vídeos ponen 12); la receta no pone bloques de "
-                   "stock ni de cuenta atrás y se comprueba en el checkout público", "V1 0:31:50", True)
+        self.poner("checkout.cupos", False,
+                   "sin cupos ni prueba social inventada (D-01: los vídeos ponen 12): se oculta la barra de "
+                   "compradores y los bloques de abajo se vuelven a mandar sin cuenta atrás ni cupos "
+                   "(<bloques:abajo> = los actuales, de la vista previa, pasados por limpiar_bloques); se comprueba "
+                   "en el checkout público", "V1 0:31:50", True,
+                   Llamada("impultienda_configurar_checkout",
+                           {"store_id": "<store_id>", "ocultar_barra_compradores": True}, None),
+                   Llamada("impultienda_bloques_checkout",
+                           {"store_id": "<store_id>", "posicion": "abajo", "bloques": "<bloques:abajo>"}, None))
+        self.avisos.append(AVISO_HTML)
         mockup = self.dir_producto / "entregable" / "medios" / "mockup.png"
         if mockup.is_file() and not mockup.is_symlink():
             self.poner("checkout.foto", mockup,
@@ -462,6 +523,11 @@ class _Receta:
                        Llamada("impultienda_alternar_html_postcompra",
                                {"store_id": "<store_id>", "oferta_id": oferta, "activo": True},
                                "impultienda_leer_html_postcompra"))
+        if self.sin_funnel:
+            self.avisos.append(f"no disponible: el plan {self.o.plan} no tiene funnel post-compra "
+                               "(crear_funnel_postcompra): el upsell queda creado pero no se ofrece hasta que cambies "
+                               "de plan")
+            return
         if primero:
             activo = Llamada("impultienda_crear_funnel_postcompra",
                              {"store_id": "<store_id>", "nombre": f"{self.ctx.marca or self.ctx.producto} "

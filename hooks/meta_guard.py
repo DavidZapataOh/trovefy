@@ -5,6 +5,7 @@ vía «allow con ticket». Solo biblioteca estándar; falla cerrado.
 """
 from __future__ import annotations
 
+import itertools
 import json
 import re
 from urllib.parse import unquote, urlsplit
@@ -43,6 +44,25 @@ def _es_meta_mcp(nombre: str) -> tuple[bool, str]:
     return meta, corto
 
 
+_FICHAS_META = ("facebook", "instagram", "metaads")
+_SUFIJOS_LECTURA_NOMBRE = ("_read", "_tools")
+
+
+def _nombre_es_meta(nombre: str) -> bool:
+    """H2: una herramienta de Meta en cualquier servidor (``mcp__higgsfield__meta_ads_write``): por fichas del
+    nombre (``meta`` seguida de ``ads``, ``metaads…``, ``facebook…``, ``instagram…``), no por subcadena."""
+    fichas = [f for f in re.split(r"[^a-z0-9]+", nombre.lower()) if f]
+    if any(f.startswith(_FICHAS_META) for f in fichas):
+        return True
+    return any(a == "meta" and b.startswith("ads") for a, b in itertools.pairwise(fichas))
+
+
+def _lectura_clara(corto: str) -> bool:
+    """Lo único que pasa de una herramienta de Meta fuera de su servidor: ``ads_get_*``, ``*_read`` y el listado
+    ``*_tools``. Todo lo demás (``*_write``, ``*_connect``, nombres nuevos) se deniega: falla cerrado."""
+    return corto.startswith("ads_get_") or corto.endswith(_SUFIJOS_LECTURA_NOMBRE)
+
+
 def _menciona_graph(texto: str) -> bool:
     return bool(_HOST_GRAPH.search(texto))
 
@@ -61,6 +81,9 @@ def clasificar(tool_name: str, tool_input: dict) -> tuple[str, str]:
         if corto.startswith(_PREFIJOS_LECTURA) or corto in _LECTURA_EXACTA:
             return "allow", ""
         return "deny", MOTIVO
+    if _nombre_es_meta(tool_name):
+        corto = tool_name.split("__")[-1]
+        return ("allow", "") if _lectura_clara(corto) else ("deny", MOTIVO)
     if tool_name.startswith("mcp__"):
         # Navegador/scrape por MCP hacia Graph: Claude lee Meta solo por el MCP oficial.
         try:

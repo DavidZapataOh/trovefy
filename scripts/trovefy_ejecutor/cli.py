@@ -236,7 +236,7 @@ def _cmd_comprobar_dataset(a: argparse.Namespace, rutas: RutasEjecutor) -> int:
         return 2
     try:
         d = comprobar_dataset(GraphConStop(ClienteGraph(secretos.meta_token), rutas), a.dataset_id, lim, act,
-                              _ahora())
+                              _ahora(), a.pagina)
     except ValueError as e:
         _salida(str(e), secretos, err=True)
         return 2
@@ -417,6 +417,7 @@ def _parser() -> argparse.ArgumentParser:
     pe.add_argument("--cuenta", help="act_… (por defecto, la única de cuentas_permitidas)")
     cd = sub.add_parser("comprobar-dataset", help="comprueba que el ejecutor ve el dataset y lo tiene en sus límites")
     cd.add_argument("dataset_id", help="id del dataset")
+    cd.add_argument("--pagina", required=True, help="id de la página de Facebook del producto (solo dígitos)")
     cd.add_argument("--cuenta", help="act_… (por defecto, la única de cuentas_permitidas)")
     st = sub.add_parser("stop", help="STOP inmediato sin Telegram (no pausa campañas)")
     st.add_argument("motivo", nargs="*", help="motivo (queda en la auditoría)")

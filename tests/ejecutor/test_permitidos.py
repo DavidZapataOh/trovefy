@@ -89,7 +89,7 @@ def test_permitir_en_archivo(tmp_path):
     assert DATASET in cargar_limites(ruta).cuentas[CUENTA].datasets_permitidos
     assert ruta.stat().st_mode & 0o777 == 0o600
     assert permitir_en_archivo(ruta, CUENTA, "datasets_permitidos", DATASET) is False
-    assert not [p for p in tmp_path.iterdir() if p.name != "limites.yaml"]  # sin temporales
+    assert not [p for p in tmp_path.iterdir() if p.name not in ("limites.yaml", "limites.yaml.lock")]  # sin tmp
 
 
 def test_archivo_invalido_no_se_reemplaza(tmp_path):
@@ -98,7 +98,7 @@ def test_archivo_invalido_no_se_reemplaza(tmp_path):
     with pytest.raises(LimitesInvalidos):
         permitir_en_archivo(ruta, CUENTA, "datasets_permitidos", DATASET)
     assert ruta.read_bytes() == antes
-    assert [p.name for p in tmp_path.iterdir()] == ["limites.yaml"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["limites.yaml", "limites.yaml.lock"]
 
 
 def test_no_sigue_enlaces(tmp_path):
@@ -109,3 +109,62 @@ def test_no_sigue_enlaces(tmp_path):
     with pytest.raises(ValueError):
         permitir_en_archivo(enlace, CUENTA, "datasets_permitidos", DATASET)
     assert real.read_bytes() == antes
+
+
+# --- L5 (revisión T6–10): candado, cambio concurrente y fsync del directorio --------------------------------
+
+
+def test_candado_ocupado_no_escribe(tmp_path):
+    import fcntl
+
+    ruta = _archivo(tmp_path)
+    antes = ruta.read_bytes()
+    fd = os.open(tmp_path / "limites.yaml.lock", os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        with pytest.raises(ValueError, match="otro proceso"):
+            permitir_en_archivo(ruta, CUENTA, "datasets_permitidos", DATASET, espera_s=0)
+    finally:
+        os.close(fd)
+    assert ruta.read_bytes() == antes
+    assert permitir_en_archivo(ruta, CUENTA, "datasets_permitidos", DATASET, espera_s=0) is True
+    assert (tmp_path / "limites.yaml.lock").stat().st_mode & 0o777 == 0o600
+
+
+def test_cambio_del_servicio_a_la_vez_no_se_pisa(tmp_path, monkeypatch):
+    """El servicio (plan 12) reescribe limites.yaml con os.replace y sin candado: si cambia mientras permitir
+    valida su temporal, permitir no lo pisa."""
+    from trovefy_ejecutor import permitidos
+
+    ruta = _archivo(tmp_path)
+    del_servicio = ruta.read_text(encoding="utf-8").replace("# ", "#  ", 1)
+    real = permitidos.cargar_limites
+
+    def cargar_y_cambiar(tmp, *a, **kw):
+        lim = real(tmp, *a, **kw)
+        ruta.write_text(del_servicio, encoding="utf-8")
+        return lim
+
+    monkeypatch.setattr(permitidos, "cargar_limites", cargar_y_cambiar)
+    with pytest.raises(ValueError, match="cambió"):
+        permitir_en_archivo(ruta, CUENTA, "datasets_permitidos", DATASET, espera_s=0)
+    assert ruta.read_text(encoding="utf-8") == del_servicio
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".tmp")]
+
+
+def test_fsync_del_directorio(tmp_path, monkeypatch):
+    import stat
+
+    from trovefy_ejecutor import permitidos
+
+    ruta = _archivo(tmp_path)
+    directorios: list[bool] = []
+    real = os.fsync
+
+    def fsync(fd):
+        directorios.append(stat.S_ISDIR(os.fstat(fd).st_mode))
+        real(fd)
+
+    monkeypatch.setattr(permitidos.os, "fsync", fsync)
+    assert permitir_en_archivo(ruta, CUENTA, "datasets_permitidos", DATASET, espera_s=0) is True
+    assert directorios[-1] is True and False in directorios
