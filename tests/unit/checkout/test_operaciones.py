@@ -10,6 +10,7 @@ import pytest
 from embudo.ejemplos_embudo import PAIS, P, vault_embudo
 from trovefy.checkout.operaciones import (
     REGLAS,
+    huella_contenido,
     normalizar,
     pagina_html,
     planificar,
@@ -155,14 +156,22 @@ def test_reaplicar_no_reescribe_lo_igual(zz):
                           "impultienda_editar_producto"}
     # Lo ya aplicado y releído «ok» tampoco se repite: con todo hecho, cero operaciones.
     hechas = {}
+    valores = {**est["valores"], "<item_id:u1>": "u1", "<ruta:front>": "r", "<ruta:u1>": "r",
+               "<bloques:abajo>": [], "<url:mockup>": "https://cdn.ejemplo.test/m.webp", "<oferta_id:u1>": "o"}
     for _ in range(6):
         if not plan.operaciones:
             break
-        hechas |= {o.clave: {"estado": "ok", "etapa": 1} for o in plan.operaciones}
-        _, _, plan = _plan(zz, estado={**est, "hechas": hechas, "valores": {
-            **est["valores"], "<item_id:u1>": "u1", "<ruta:front>": "r", "<ruta:u1>": "r",
-            "<bloques:abajo>": [], "<url:mockup>": "https://cdn.ejemplo.test/m.webp", "<oferta_id:u1>": "o"}})
+        hechas |= {o.clave: {"estado": "ok", "etapa": 1, "huella": huella_contenido(o.herramienta, o.argumentos)}
+                   for o in plan.operaciones}
+        _, _, plan = _plan(zz, estado={**est, "hechas": hechas, "valores": valores})
     assert plan.operaciones == []
+
+
+def test_huella_contenido_solo_para_la_pagina_del_upsell():
+    a = huella_contenido("impultienda_guardar_html_postcompra", {"oferta_id": "o", "html": "<p>a</p>"})
+    b = huella_contenido("impultienda_guardar_html_postcompra", {"oferta_id": "o", "html": "<p>b</p>"})
+    assert a and b and a != b and len(a) == 16
+    assert huella_contenido("impultienda_editar_producto", {"x": 1}) is None
 
 
 def test_mercado_existente_sin_el_pais_usa_asignar(zz):
@@ -245,9 +254,22 @@ def test_pagina_html_escapa_y_pone_botones():
           "[[aceptar: Да, искам го]]\n[[rechazar: Не, благодаря]]\n")
     html = pagina_html(md)
     assert "<script>" not in html and "&lt;script&gt;" in html and "&amp;" in html
-    assert '<button type="button" data-pp-accept>Да, искам го</button>' in html
+    assert '<button type="button" class="tv-si" data-pp-accept>Да, искам го</button>' in html
     assert "data-pp-decline" in html and "<h2>Благодаря</h2>" in html and "guion" not in html
     assert pagina_html("## Solo texto\n\n[[aceptar: Sí]]\n") is None
+
+
+def test_pagina_html_con_diseno_y_colores_del_brandbook():
+    md = ("# Gracias\nTu plan va al correo.\n\n## Qué recibes\n- PDF\n- Fichas\n\nTexto.\n\n"
+          "[[aceptar: Sí]]\n[[rechazar: No, gracias]]\n")
+    html = pagina_html(md, {"--color-primario": "#123456", "--color-texto": "red;}<x"})
+    assert html.startswith("<style>") and "--color-primario:#123456;" in html
+    assert "red;}<x" not in html and "--color-texto:#1E2A2B;" in html  # valor peligroso: queda el de defecto
+    assert '<div class="tv-ok">\n<h1>Gracias</h1>' in html
+    assert "<ul>\n<li>PDF</li>\n<li>Fichas</li>\n</ul>\n<p>Texto.</p>" in html
+    assert html.index("data-pp-accept") < html.index("data-pp-decline")
+    assert '<div class="tv-cta">' in html and html.rstrip().endswith("</div>")
+    assert html.count("<div") == html.count("</div>")
 
 
 def test_aplicado_con_los_nombres_reales_del_conector():

@@ -619,6 +619,30 @@ def test_tienda_que_no_es_clasica_no_se_planifica(entorno, tmp_path, capsys):
     assert not (_carpeta(v) / "PLAN-MCP.json").exists()
 
 
+def test_pagina_del_upsell_con_otra_plantilla_se_vuelve_a_subir(entorno, tmp_path, capsys):
+    """La tienda real: la página de U1 se subió sin diseño (sin huella entre lo hecho). El siguiente `plan` solo
+    vuelve a guardar esa página; con la huella al día, no hay nada que hacer."""
+    v, _, _ = entorno
+    claude, _ = _todo(entorno, tmp_path)
+    ruta = _carpeta(v) / "MCP-ESTADO.json"
+    estado = json.loads(ruta.read_text(encoding="utf-8"))
+    html = [k for k, h in estado["hechas"].items() if h.get("huella")]
+    assert len(html) == 1
+    claude.lecturas_base()
+    claude.releer()
+    capsys.readouterr()
+    assert claude.plan() is None  # nada que aplicar
+    estado = json.loads(ruta.read_text(encoding="utf-8"))
+    del estado["hechas"][html[0]]["huella"]
+    ruta.write_text(json.dumps(estado, ensure_ascii=False), encoding="utf-8")
+    claude.lecturas_base()
+    claude.releer()
+    capsys.readouterr()
+    plan = claude.plan()
+    assert [o["herramienta"] for o in plan["operaciones"]] == ["impultienda_guardar_html_postcompra"]
+    assert 'class="tv-si" data-pp-accept' in plan["operaciones"][0]["argumentos"]["html"]
+
+
 def test_tienda_con_funnel_activo_solo_corrige_el_descuento_de_u1(entorno, tmp_path, capsys):
     """La tienda real: el funnel ya existe y está activo (``postcompra.u1.activo`` ok), pero se montó antes de esta
     corrección y U1 sale con el 15 % por defecto (16,92 en vez de 19,90). El siguiente `plan` es una etapa con solo
