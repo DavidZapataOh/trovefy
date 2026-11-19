@@ -205,7 +205,13 @@ def validar_pagina_upsell(texto_md: str) -> list[str]:
     """Problemas de la página de un upsell (``checkout/<PAIS>/upsells/<clave>.md``): los 8 puntos de
     `GUION_UPSELL`, marcados con ``<!-- guion: <clave> -->`` y en orden. ``[]`` = bien.
 
-    El «guion de 8 puntos» de los vídeos es de la mentoría (🔒, V1 1:04:46): este es el nuestro."""
+    El «guion de 8 puntos» de los vídeos es de la mentoría (🔒, V1 1:04:46): este es el nuestro. Una página con
+    frontmatter ``plantilla: tragamonedas`` (el downsell calcado del vídeo) se valida con su propia plantilla."""
+    from trovefy.checkout import tragamonedas
+
+    datos = tragamonedas.datos_de(texto_md or "")
+    if datos is not None:
+        return tragamonedas.validar(datos)
     esperadas = [c for c, _ in GUION_UPSELL]
     vistas = _GUION.findall(texto_md or "")
     problemas = [f"falta el punto «{c}» del guion ({d})" for c, d in GUION_UPSELL if c not in vistas]
