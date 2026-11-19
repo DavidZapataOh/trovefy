@@ -2,7 +2,7 @@
 
 import importlib
 import json
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -350,3 +350,19 @@ def test_capi_en_meta_con_dataset_id():
 
     datos = {"dataset_id": DATASET, "server_last_fired_time": "2099-01-01T00:00:00+0000"}
     assert capi_en_meta(datos, DATASET, datetime(2026, 1, 1, tzinfo=UTC)) is True
+
+
+def test_forma_del_mcp_oficial_stats_y_metadata():
+    """El MCP oficial de Meta devuelve ``stats`` con ``timestamp`` y los detalles dentro de ``metadata``."""
+    from datetime import datetime
+
+    from trovefy.tracking.eventos import capi_en_meta
+
+    antes = {"dataset_id": "1", "aggregation": "event", "stats": []}
+    despues = {"dataset_id": "1", "aggregation": "event", "stats": [
+        {"aggregation": "event", "timestamp": "2026-11-18T00:00:00-0800",
+         "data": [{"value": "PageView", "count": 5}, {"value": "Purchase", "count": 1}]}]}
+    resta = diferencia(cubos_de_eventos(antes), cubos_de_eventos(despues))
+    assert resta == {"PageView": 5, "ViewContent": 0, "InitiateCheckout": 0, "Purchase": 1}
+    detalles = {"metadata": {"dataset_id": "1", "server_last_fired_time": "2026-11-18T08:30:16-0800"}}
+    assert capi_en_meta(detalles, "1", datetime(2026, 11, 18, tzinfo=UTC)) is True

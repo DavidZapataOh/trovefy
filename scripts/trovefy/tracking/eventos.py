@@ -67,7 +67,8 @@ def _datos(instantanea: object) -> list | None:
         paging = datos.get("paging")
         if isinstance(paging, dict) and paging.get("next"):
             return None
-        datos = datos.get("data")
+        # Forma de la API de Graph (``data``) o la del MCP oficial de Meta (``stats``, 2026-11-18).
+        datos = datos.get("data") if "data" in datos else datos.get("stats")
     return datos if isinstance(datos, list) else None
 
 
@@ -94,7 +95,7 @@ def cubos_de_eventos(instantanea: object) -> dict[datetime, dict[str, int]] | No
     for cubo in datos:
         if not isinstance(cubo, dict):
             return None
-        inicio = hora(cubo.get("start_time"))
+        inicio = hora(cubo.get("start_time", cubo.get("timestamp")))
         if inicio is None or inicio in cubos:
             return None
         cubos[inicio] = dict.fromkeys(EVENTOS, 0)
@@ -171,6 +172,8 @@ def capi_en_meta(instantanea: object, dataset_id: str, desde: datetime) -> bool 
     ``server_last_fired_time``. ``True`` si esa hora es posterior a `desde`; ``False`` si está vacía o es anterior;
     ``None`` («no medido») si la respuesta es de otro dataset, no trae esas claves o la hora no se entiende."""
     datos = desenvolver(instantanea)
+    if isinstance(datos, dict) and isinstance(datos.get("metadata"), dict):
+        datos = datos["metadata"]  # forma del MCP oficial de Meta (2026-11-18)
     if not isinstance(datos, dict) or str(datos.get("id", datos.get("dataset_id"))) != dataset_id or "server_last_fired_time" not in datos:
         return None
     valor = datos["server_last_fired_time"]
