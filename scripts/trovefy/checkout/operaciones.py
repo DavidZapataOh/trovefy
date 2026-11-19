@@ -256,6 +256,13 @@ def pagina_html(texto_md: str, tokens: dict[str, str] | None = None) -> str | No
     los dos botones ``[[aceptar: …]]`` (``data-pp-accept``) y ``[[rechazar: …]]`` (``data-pp-decline``) van al
     final, a todo el ancho y los dos visibles. Colores y letras: ``tokens`` (los ``tokens_css`` del brandbook).
     Todo el texto va escapado: nada de HTML del archivo pasa tal cual. None si falta alguno de los dos botones."""
+    from trovefy.checkout import tragamonedas
+
+    datos = tragamonedas.datos_de(texto_md or "")
+    if datos is not None:
+        if tragamonedas.validar(datos):
+            return None
+        return tragamonedas.html(datos, hashlib.sha256((texto_md or "").encode("utf-8")).hexdigest()[:10])
     texto = _GUION_COMENTARIO.sub("", texto_md or "")
     tipos = {m.group(1) for m in _BOTON.finditer(texto)}
     if tipos != {"aceptar", "rechazar"}:
