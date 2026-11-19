@@ -22,7 +22,7 @@ _FRONT = re.compile(r"\A---\n(.*?)\n---\n?", re.DOTALL)
 _NEGRITA = re.compile(r"\*\*(.+?)\*\*")
 _TEXTOS = ("etiqueta", "saludo", "titular", "posibles", "producto", "ahorro", "rechazar")
 _MAQUINA = ("rotulo", "titulo", "subtitulo", "premio", "boton", "girando", "pie")
-_RESULTADO = ("sufijo", "texto")
+_RESULTADO = ("texto",)  # «sufijo» («OFF») es opcional: sin él se ve «−40 %»
 _ACEPTAR = ("titulo", "subtitulo")
 _CONTADOR = ("texto", "vencido")
 
@@ -173,6 +173,8 @@ rod=[].slice.call(s.querySelectorAll('.ts-rod')),b=s.querySelector('.ts-tirar'),
 q=function(x){return document.querySelector(x)},res=q('[data-ts-res]');
 var im=q('.ts-img');if(im){var ch=function(){if(!im.naturalWidth)im.remove()};
 if(im.complete)ch();else{im.addEventListener('error',ch);im.addEventListener('load',ch)}}
+document.querySelectorAll('[data-ts-importe]').forEach(function(e){var t=e.textContent.trim(),
+x=t.match(/^€\s?([\d.,]+)$/);if(x)e.textContent=x[1]+' €'});
 var nom=q('[data-ts-nombre]');if(nom){var v=(nom.getAttribute('data-ts-nombre')||'').trim();
 if(!v||v.indexOf('{')>=0)nom.remove()}
 function reloj(){var r=q('[data-ts-reloj]');if(!r)return;var f=0;try{f=+localStorage.getItem(kr)}catch(e){}
@@ -202,6 +204,7 @@ def html(datos: dict, pagina_id: str) -> str:
     maq, res, si, cont = datos["maquina"], datos["resultado"], datos["aceptar"], datos["contador"]
     premios = ",".join(str(p) for p in datos["premios"])
     luces = "<i></i>" * 11
+    sufijo = f" {_t(res['sufijo'])}" if _texto_ok(res.get("sufijo")) else ""
     saludo = _t(datos["saludo"])
     # «Чакай, Иван.»: el nombre sale del token {first-name}; sin nombre queda «Чакай.».
     saludo = saludo.replace("{nombre}", '<span data-ts-nombre="{first-name}">, {first-name}</span>')
@@ -228,12 +231,12 @@ def html(datos: dict, pagina_id: str) -> str:
 </div>
 <p class="ts-pos" data-ts-pos>{_t(datos["posibles"])}</p>
 <div class="ts-res" data-ts-res hidden>
-<div data-ts-solo-premio><div class="ts-off"><span data-ts-n></span>% {_t(res["sufijo"])}</div>
+<div data-ts-solo-premio><div class="ts-off">&minus;<span data-ts-n></span>&nbsp;%{sufijo}</div>
 <p>{_t(res["texto"])}</p></div>
 <img class="ts-img" src="{{product-image}}" alt="{escape(datos["producto"])}">
 <p class="ts-prod">{_t(datos["producto"])}</p>
-<div class="ts-precio"><s>{{compare}}</s><b>{{price}}</b></div>
-<div class="ts-ahorro">{_t(datos["ahorro"])} {{savings}}</div>
+<div class="ts-precio"><s data-ts-importe>{{compare}}</s><b data-ts-importe>{{price}}</b></div>
+<div class="ts-ahorro">{_t(datos["ahorro"])} <span data-ts-importe>{{savings}}</span></div>
 <button type="button" class="ts-si" data-pp-accept><b>{_t(si["titulo"])}</b><small data-ts-solo-premio>\
 {_t(si["subtitulo"]).replace("{n}", "<span data-ts-n></span>")}</small></button>
 <ul class="ts-lista">{lista}</ul>
