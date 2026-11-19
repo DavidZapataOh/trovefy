@@ -24,6 +24,7 @@ from trovefy.arranque.verificadores import (  # noqa: F401  (registran los verif
     cerebro,
     checklist,
     cuenta,
+    dataset,
     dominio,
     ejecutor,
     ensayo,

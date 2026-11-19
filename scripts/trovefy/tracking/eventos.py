@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Literal
 
 from trovefy.tracking.dataset import desenvolver
-from trovefy.tracking.modelo import EVENTOS
+from trovefy.tracking.modelo import EVENTOS, eventos_exigidos
 
 Veredicto = Literal["verificado", "no_verificado", "no_medido"]
 _NOMBRE = ("value", "event", "event_name", "name")
@@ -146,14 +146,18 @@ def diferencia(antes: dict[datetime, dict[str, int]] | None,
     return resta
 
 
-def evaluar_eventos(conteo: dict[str, int] | None, pedidos_de_prueba: int = 1) -> tuple[Veredicto, list[str]]:
-    """``verificado`` si llegaron los cuatro y Purchase == pedidos; Purchase de más o de menos (sin ser 0) es
-    ``no_verificado``; un evento que no llegó es ``no_medido``."""
+def evaluar_eventos(conteo: dict[str, int] | None, pedidos_de_prueba: int = 1,
+                    emisores: dict | None = None) -> tuple[Veredicto, list[str]]:
+    """``verificado`` si llegaron los eventos exigidos y Purchase == pedidos; Purchase de más o de menos (sin ser 0)
+    es ``no_verificado``; un evento exigido que no llegó es ``no_medido``.
+
+    Con `emisores` (la tabla evento → emisor de ``TRACKING.md``) no se exige lo que su emisor no envía nunca
+    (`trovefy.tracking.modelo.eventos_exigidos`: ViewContent con la tienda de Impultienda)."""
     if isinstance(pedidos_de_prueba, bool) or not isinstance(pedidos_de_prueba, int) or pedidos_de_prueba < 1:
         raise ValueError("pedidos de prueba: un entero de 1 o más")
     if conteo is None:
         return "no_medido", ["no medido: la respuesta de Meta no tiene la forma esperada (o las ventanas no casan)"]
-    faltan = [e for e in EVENTOS if not conteo.get(e)]
+    faltan = [e for e in eventos_exigidos(emisores) if not conteo.get(e)]
     purchase = conteo.get("Purchase") or 0
     if purchase > pedidos_de_prueba:
         return "no_verificado", [(f"no verificado: Purchase duplicado ({purchase} para {pedidos_de_prueba} "

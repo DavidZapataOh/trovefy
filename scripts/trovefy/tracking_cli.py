@@ -343,7 +343,7 @@ def _eventos(args: argparse.Namespace) -> int:
         fuente = "captura"
     capi = capi_en_meta(_leer_json(args.detalles), t.dataset_id, desde) if args.detalles else None
     capi_vista = capi is True or (capi is None and t.capi == "visto_en_meta")
-    veredicto, motivos = evaluar_eventos(conteo, args.pedidos)
+    veredicto, motivos = evaluar_eventos(conteo, args.pedidos, t.emisores)
     if capi is False:
         motivos.append("no verificado: Meta no ve eventos del servidor (API de conversiones) desde la lectura «antes»: "
                        "revisa el token en «Meta / Tracking» de tu panel")

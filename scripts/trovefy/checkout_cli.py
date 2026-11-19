@@ -2,7 +2,8 @@
 
 trovefy nunca entra al panel (resolución 38). `evidencia` (Tarea 6): registrar lo que el usuario pega (una captura, un
 texto) o dice, como prueba de lo que hizo en su propio navegador. `plan`, `aprobar` y `releer` (Tarea 11): el
-checkout por el MCP, etapa a etapa (`trovefy.checkout.mcp_cli`).
+checkout por el MCP, etapa a etapa (`trovefy.checkout.mcp_cli`). `cerrar` y `excepcion` (Tarea 16): el paso a
+``con_checkout`` con los siete requisitos de `trovefy.checkout.cierre` y las excepciones que aprueba el usuario.
 
 Códigos de salida: 0 bien · 1 una puerta no pasa · 2 error de uso o de entrada. Nunca una traza.
 """
@@ -52,6 +53,7 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
 
     mcp_cli.configurar(sub, _comunes)
     _configurar_fuera(sub)
+    _configurar_cierre(sub)
 
 
 def _parsear_valores(pares: list[str]) -> dict[str, str]:
@@ -195,7 +197,78 @@ def _demo(args: argparse.Namespace) -> int:
     return 0 if estado == "ok" else 1
 
 
-_ACCIONES_FUERA = {"comprobar": _comprobar, "manual": _manual, "demo": _demo}
+# --- cierre a con_checkout y excepciones aprobadas por el usuario (Tarea 16) -----------------------------------
+
+_VENTANA_MENSAJE = 24 * 3600  # las palabras de una excepción: un mensaje del usuario de las últimas 24 h
+
+
+def _hay_terminal() -> bool:
+    from trovefy.checkout.mcp_cli import hay_terminal
+
+    return hay_terminal()
+
+
+def _configurar_cierre(sub) -> None:
+    ce = sub.add_parser("cerrar", help="los 7 requisitos del checkout; con todo en verde (o con tu excepción), el "
+                                       "país pasa a con_checkout")
+    _comunes(ce)
+    ex = sub.add_parser("excepcion", help="registra tu aprobación de cerrar sin un requisito en verde, con tus "
+                                          "palabras literales (nunca cuenta como verde)")
+    _comunes(ex)
+    ex.add_argument("--requisito", required=True,
+                    help="el requisito, por su nombre («tracking verificado») o su clave (tracking-verificado)")
+    ex.add_argument("--dicho", required=True,
+                    help="las palabras literales del usuario, entre comillas: un mensaje suyo entero")
+    ex.add_argument("--motivo", required=True, help="por qué no está en verde, en una frase")
+
+
+def _cerrar(args: argparse.Namespace) -> int:
+    from trovefy.checkout.cierre import cerrar, etiqueta, requisitos_checkout
+    from trovefy.embudo.contexto import EstadoIncorrecto
+    from trovefy.vault.rutas import vault_root
+
+    vault = vault_root()
+    pais = args.pais.strip().upper()
+    try:
+        texto = cerrar(vault, args.producto, pais, _reloj())
+    except (EstadoIncorrecto, OSError) as exc:
+        return _error(exc)
+    except ValueError as exc:
+        try:
+            reqs = requisitos_checkout(vault, args.producto, pais)
+        except (ValueError, OSError):
+            return _error(exc)
+        print(f"{args.producto} {pais}: el checkout no se cierra (sigue en con_landing).")
+        for nombre, estado, detalle in reqs:
+            print(f"  [{etiqueta(nombre, estado)}] {nombre}: {detalle}")
+        return 1
+    print(texto)
+    return 0
+
+
+def _excepcion(args: argparse.Namespace) -> int:
+    from trovefy.checkout.cierre import registrar_excepcion
+    from trovefy.checkout.mensajes import es_mensaje_del_usuario
+    from trovefy.vault.rutas import vault_root
+
+    ahora = _reloj()
+    terminal = getattr(sys.modules.get(__name__), "_hay_terminal", _hay_terminal)()
+    if not terminal and not es_mensaje_del_usuario(args.dicho or "", desde=ahora.timestamp() - _VENTANA_MENSAJE):
+        return _error("esas palabras no son un mensaje tuyo de las últimas 24 h: la excepción la aprueba el usuario, "
+                      "no Claude. Escribe tu aprobación en un mensaje aparte (solo eso) y pásalo entero con --dicho, o "
+                      "lanza tú la orden en tu terminal")
+    vault = vault_root()
+    try:
+        ruta = registrar_excepcion(vault, args.producto, args.pais, args.requisito, args.dicho, args.motivo, ahora)
+    except (ValueError, OSError) as exc:
+        return _error(exc)
+    print(f"Excepción registrada con tus palabras: {ruta.relative_to(vault).as_posix()} (no cuenta como verde: "
+          "el cierre la lista como excepción).")
+    return 0
+
+
+_ACCIONES_FUERA = {"comprobar": _comprobar, "manual": _manual, "demo": _demo, "cerrar": _cerrar,
+                   "excepcion": _excepcion}
 
 
 def _ejecutar(args: argparse.Namespace) -> int:

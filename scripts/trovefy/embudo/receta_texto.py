@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from trovefy.secretos import buscar_secreto
 
 LOGIN = "https://impultienda.ar/login"
-_NO_PANEL = "app.impultienda.ar"
+_NO_PANEL = "app.impultienda.ar"  # no es el panel: solo para rechazarlo
 
 
 @dataclass(frozen=True)

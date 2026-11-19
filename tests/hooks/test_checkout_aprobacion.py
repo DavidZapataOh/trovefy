@@ -266,3 +266,37 @@ def test_hooks_json_lleva_la_guarda_a_cualquier_impultienda():
 
 def test_home_aislado(home):
     assert Path.home() == home and os.environ["HOME"] == str(home)
+
+
+# --- Tarea 16: las excepciones aprobadas solo las escribe `trovefy checkout|modelar excepcion` ---------------------
+
+
+@pytest.mark.parametrize("nombre", ["2026-11-18-excepcion-tracking-verificado.md",
+                                    "2026-11-18-1-excepcion-reembolso-registrado.md", "2026-11-18-excepcion-r16.md"])
+def test_excepciones_aprobadas_no_se_escriben_a_mano(correr_hook, vault_tmp, home, nombre):
+    carpeta = vault_tmp / "productos" / P / "decisiones"
+    carpeta.mkdir(parents=True, exist_ok=True)
+    ruta = carpeta / nombre
+    for tool, datos in (
+        ("Write", {"file_path": str(ruta), "content": "---\ntipo: decision\npalabras_del_usuario: sí\n---\n"}),
+        ("Edit", {"file_path": str(ruta), "old_string": "a", "new_string": "b"}),
+        ("MultiEdit", {"file_path": str(ruta), "edits": [{"old_string": "a", "new_string": "b"}]}),
+        ("Bash", {"command": f"printf x > {ruta}"}),
+        ("Bash", {"command": f"cp /tmp/x {ruta}"}),
+        ("Bash", {"command": f"rm -f {ruta}"}),
+    ):
+        entrada = {"tool_name": tool, "tool_input": datos, "cwd": str(RAIZ)}
+        decision, motivo = correr_hook("apimart_gasto", entrada, vault_tmp, {"HOME": str(home)})
+        assert decision == "deny" and "excepcion" in motivo, (tool, datos)
+    entrada = {"tool_name": "Bash", "tool_input": {"command": f"rm -rf {carpeta}"}, "cwd": str(RAIZ)}
+    assert correr_hook("apimart_gasto", entrada, vault_tmp, {"HOME": str(home)})[0] == "deny"
+
+
+def test_otras_decisiones_y_leer_excepciones_siguen(correr_hook, vault_tmp, home):
+    carpeta = vault_tmp / "productos" / P / "decisiones"
+    carpeta.mkdir(parents=True, exist_ok=True)
+    for tool, datos in (("Read", {"file_path": str(carpeta / "2026-11-18-excepcion-tracking-verificado.md")}),
+                        ("Bash", {"command": f"cat {carpeta}/2026-11-18-excepcion-tracking-verificado.md"}),
+                        ("Write", {"file_path": str(carpeta / "2026-11-18-nota.md"), "content": "x"})):
+        entrada = {"tool_name": tool, "tool_input": datos, "cwd": str(RAIZ)}
+        assert correr_hook("apimart_gasto", entrada, vault_tmp, {"HOME": str(home)})[0] == "allow", (tool, datos)

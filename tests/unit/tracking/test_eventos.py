@@ -366,3 +366,47 @@ def test_forma_del_mcp_oficial_stats_y_metadata():
     assert resta == {"PageView": 5, "ViewContent": 0, "InitiateCheckout": 0, "Purchase": 1}
     detalles = {"metadata": {"dataset_id": "1", "server_last_fired_time": "2026-11-18T08:30:16-0800"}}
     assert capi_en_meta(detalles, "1", datetime(2026, 11, 18, tzinfo=UTC)) is True
+
+
+# --- ViewContent con la tienda de Impultienda (Tarea 16): la plataforma no lo tiene y nunca lo envía ----------
+
+TODO_IMPULTIENDA = {e: "impultienda" for e in ("PageView", "ViewContent", "InitiateCheckout", "Purchase")}
+LANDING_CLOUDFLARE = {"PageView": "landing", "ViewContent": "landing", "InitiateCheckout": "impultienda",
+                      "Purchase": "impultienda"}
+
+
+def test_viewcontent_no_se_exige_si_lo_emite_impultienda():
+    assert evaluar_eventos({**BIEN, "ViewContent": 0}, emisores=TODO_IMPULTIENDA) == ("verificado", [])
+
+
+def test_viewcontent_se_exige_si_lo_emite_la_landing():
+    estado, motivos = evaluar_eventos({**BIEN, "ViewContent": 0}, emisores=LANDING_CLOUDFLARE)
+    assert estado == "no_medido" and motivos == ["no medido: ViewContent no llegó"]
+
+
+def test_initiatecheckout_se_sigue_exigiendo_con_impultienda():
+    estado, motivos = evaluar_eventos({**BIEN, "ViewContent": 0, "InitiateCheckout": 0}, emisores=TODO_IMPULTIENDA)
+    assert estado == "no_medido" and motivos == ["no medido: InitiateCheckout no llegó"]
+
+
+def test_sin_emisores_se_exigen_los_cuatro():
+    assert evaluar_eventos({**BIEN, "ViewContent": 0})[0] == "no_medido"
+
+
+def test_cli_impultienda_sin_viewcontent_verifica(vault, tmp_path, capsys):
+    """El caso real: la tienda de Impultienda nunca envía ViewContent; con los otros tres y la CAPI, verificado."""
+    _captura(vault, tmp_path)
+    assert cli.main(_eventos("--manual", "PageView=3,ViewContent=0,InitiateCheckout=2,Purchase=1",
+                             "--captura", "test-events", "--detalles", str(FIX / "detalles-con-servidor.json"))) == 0
+    t = leer_tracking(vault, P, PAIS)
+    assert t.estado == "verificado" and not any("ViewContent" in m for m in t.motivos)
+
+
+def test_cli_impultienda_sin_initiatecheckout_no_verifica(vault, tmp_path, capsys):
+    _captura(vault, tmp_path)
+    assert cli.main(_eventos("--manual", "PageView=3,ViewContent=0,InitiateCheckout=0,Purchase=1",
+                             "--captura", "test-events", "--detalles", str(FIX / "detalles-con-servidor.json"))) == 1
+    t = leer_tracking(vault, P, PAIS)
+    assert t.estado != "verificado"
+    assert "eventos: no medido: InitiateCheckout no llegó" in t.motivos
+    assert not any("ViewContent" in m for m in t.motivos)
