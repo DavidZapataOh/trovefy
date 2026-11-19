@@ -322,3 +322,21 @@ def test_pagina_html_con_contador_real():
     assert '<p class="tv-vencido" hidden>Изтече.</p>' in html and "[[" not in html
     assert html.rstrip().endswith("</script>") and "data-pp-accept" in html
     assert "<script>" not in pagina_html("# Gracias\n\n[[aceptar: Да]]\n[[rechazar: Не]]\n")
+
+
+SLOT_MD = ("# Чакай\n[[tragamonedas: 40, 60 | ЕДИН ОПИТ | Завърти]]\nВъзможни награди: 40 % или 60 %.\n\n## Цена\n"
+           "[[antes-de-girar: Завърти горе.]]\n[[premio: 40]]\n11,94 €\n[[/premio]]\n[[premio: 60]]\n7,96 €\n"
+           "[[/premio]]\n\n[[aceptar: Да]]\n[[rechazar: Не]]\n")
+
+
+def test_pagina_html_con_tragamonedas():
+    """La tragamonedas destapa el premio que sorteó la plataforma ({discount}); aceptar sale después de girar."""
+    html = pagina_html(SLOT_MD)
+    assert 'data-tv-slot="40,60"' in html and "<span data-tv-sorteo hidden>{discount}</span>" in html
+    assert '<div class="tv-premio" data-tv-premio="40" hidden>' in html and 'data-tv-premio="60"' in html
+    assert 'data-tv-premio="?" hidden>{price}</p>' in html and "<p data-tv-antes>Завърти горе.</p>" in html
+    assert "data-pp-accept data-tv-tras-giro hidden" in html and "data-pp-decline>" in html
+    assert "Math.random" not in html and "[[" not in html
+    assert html.count("<div") == html.count("</div>")
+    sin = pagina_html("# Gracias\n\n[[aceptar: Да]]\n[[rechazar: Не]]\n")
+    assert "data-tv-slot" not in sin and "data-tv-tras-giro" not in sin
