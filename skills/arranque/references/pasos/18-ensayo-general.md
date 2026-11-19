@@ -5,16 +5,18 @@ Probar de punta a punta el circuito (propuesta, Telegram, Meta en seco, compra y
 
 **Antes de empezar**
 - Pasos 12, 13 y 14 verificados; el servicio late (`trovefy aprobaciones estado`).
-- Una pasarela de pago lista y tu tarjeta para una compra de prueba de US$ 1–5.
+- La compra de prueba es la del producto real, al precio de venta, y la guía `/checkout` (plan 19): tú compras y tú reembolsas en tu panel; trovefy nunca abre el panel.
 - Claude deposita cada propuesta con un comando solo en la línea, sin cadenas ni variables.
 - El montaje del ensayo lleva `solo_validar`: el ejecutor solo valida la campaña en Meta, no crea nada y no exige que la página ni el dataset estén en sus límites (aún no tienes dataset: llega en `/tracking`, fase 2). Los montajes reales sí los exigen.
 
 **Pasos**
 1. Claude deposita un `noop` con `trovefy aprobaciones probar`. Pulsa **Aceptar** en Telegram.
 2. Claude prepara el montaje de prueba con `trovefy arranque ensayo montaje`: escribe en `propuestas/ensayo/` un `crear_estructura_pausada` mínimo con `"solo_validar": true` y una imagen de prueba generada (con su sha256), con la página del paso 05 y la cuenta del paso 06. Después lo deposita con la ruta que imprime: `trovefy buzon depositar <ruta>`. El ejecutor solo pasa la campaña por `validate_only`: nada queda creado ni subido en Meta. Acéptalo en Telegram.
-3. Haz una compra real de prueba de US$ 1–5 en tu tienda y regístrala: `trovefy arranque ensayo compra --pedido <id> --importe 2.00 --moneda USD --pasarela <whop|hotmart|impultienda>`
-4. Reembolsa esa compra en la pasarela y registra: `trovefy arranque ensayo reembolso --pedido <id>`
-5. Pide la verificación: `trovefy arranque verificar 18`
+3. La compra de prueba del producto real la guía `/checkout` (queda en `PRODUCTO.md` o en las evidencias que pegaste: la captura del pedido con `--valor pedido=<número>`). Regístrala en el ensayo sin teclearla otra vez: `trovefy arranque ensayo compra --desde-producto <p-id> --pais <PAIS>`. Tiene que ser al precio de venta del checkout (sustituye al tope de US$ 10 del modo a mano).
+4. Reembolsa esa compra en tu panel, pega la captura del reembolso en `/checkout` (`trovefy checkout evidencia --clave reembolso --desde <captura>`) y regístralo: `trovefy arranque ensayo reembolso --desde-producto <p-id> --pais <PAIS>`.
+5. Pide la verificación: `trovefy arranque verificar 18`. Si dice que falta el noop o el montaje, mira primero si `ledger/auditoria/` tiene la copia del día en que los aceptaste; si no está, repite los pasos 1 y 2 (no gastan).
+
+Modo a mano (sin producto real): `trovefy arranque ensayo compra --pedido <id> --importe 2.00 --moneda USD --pasarela <whop|hotmart|impultienda>` y `trovefy arranque ensayo reembolso --pedido <id>` (tope de US$ 10). Los dos modos no se mezclan en la misma orden.
 
 Los medios reales de `/montar` (bajo `productos/`) son una decisión de la Fase 3; la imagen de `propuestas/ensayo/` solo sirve para este ensayo.
 
@@ -27,7 +29,8 @@ Los medios reales de `/montar` (bajo `productos/`) son una decisión de la Fase 
 - Síntoma: «falta un noop aceptado por Telegram y ejecutado». Arreglo: repite el paso 1 y acéptalo en Telegram.
 - Síntoma: «falta el montaje en validate_only». Arreglo: repite el paso 2 y acéptalo en Telegram.
 - Síntoma: «falta la compra de prueba». Arreglo: paso 3.
-- Síntoma: «falta el reembolso de la compra de prueba …». Arreglo: si solo hiciste la compra, el paso falla hasta registrar el reembolso (paso 4).
+- Síntoma: «falta el reembolso de la compra de prueba …». Arreglo: si solo hiciste la compra, el paso falla hasta registrar el reembolso (paso 4). Una excepción del checkout o de `/listo` por no reembolsar no vale aquí: el 18 exige el reembolso.
+- Síntoma: «no es el precio de venta del checkout». Arreglo: la compra de prueba se hace al precio real; si compraste a otro precio, repite la compra al precio de venta.
 - Síntoma: «la copia de la auditoría no cuadra». Arreglo: no la edites; avisa para revisarla con el ejecutor.
 - Síntoma: «no medido: …». Arreglo: avisa para revisar el registro del ensayo.
 - Síntoma: `trovefy aprobaciones estado` sin latido. Arreglo: `sudo systemctl start trovefy-ejecutor` en la terminal aparte (con los dos tokens ya pegados, paso 13).

@@ -203,7 +203,7 @@ def test_guia_12_y_18():
         assert x in t, x
     assert "systemctl start" not in t and "systemctl restart" not in t  # sin META_TOKEN, servir sale con 2
     t = _t("18-ensayo-general.md")
-    for x in ["noop", '"solo_validar": true', "trovefy buzon depositar", "validate_only", "US$ 1–5", "reembolso",
+    for x in ["noop", '"solo_validar": true', "trovefy buzon depositar", "validate_only", "--desde-producto", "precio de venta", "reembolso",
               "trovefy arranque ensayo compra", "trovefy arranque ensayo reembolso", "trovefy aprobaciones estado"]:
         assert x in t, x
 

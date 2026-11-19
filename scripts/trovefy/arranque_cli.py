@@ -61,15 +61,20 @@ def _configurar(p: argparse.ArgumentParser) -> None:
     ens = e.add_subparsers(dest="ensayo_accion", metavar="<compra|reembolso|montaje>", required=True)
     em = ens.add_parser("montaje", help="prepara el montaje de prueba (solo_validar) en propuestas/ensayo/")
     em.add_argument("--vault", help=_VAULT_AYUDA)
-    ec = ens.add_parser("compra", help="registra la compra de prueba")
-    ec.add_argument("--pedido", required=True, metavar="ID")
-    ec.add_argument("--importe", required=True, help="importe de la prueba, p. ej. 2.00")
-    ec.add_argument("--moneda", required=True, help="código de tres letras, p. ej. USD")
-    ec.add_argument("--pasarela", required=True, help="whop, hotmart o impultienda")
+    ec = ens.add_parser("compra", help="registra la compra de prueba (a mano o --desde-producto)")
+    ec.add_argument("--desde-producto", metavar="P-ID", help="toma la compra real del producto (PRODUCTO.md y lo que "
+                                                             "pegaste en /checkout); va con --pais")
+    ec.add_argument("--pais", help="código del país con --desde-producto (BG…)")
+    ec.add_argument("--pedido", metavar="ID")
+    ec.add_argument("--importe", help="importe de la prueba, p. ej. 2.00")
+    ec.add_argument("--moneda", help="código de tres letras, p. ej. USD")
+    ec.add_argument("--pasarela", help="whop, hotmart o impultienda")
     ec.add_argument("--fecha", help="AAAA-MM-DD (por defecto, hoy)")
     ec.add_argument("--vault", help=_VAULT_AYUDA)
-    er = ens.add_parser("reembolso", help="registra el reembolso de la compra de prueba")
-    er.add_argument("--pedido", required=True, metavar="ID")
+    er = ens.add_parser("reembolso", help="registra el reembolso de la compra de prueba (a mano o --desde-producto)")
+    er.add_argument("--desde-producto", metavar="P-ID", help="toma el reembolso del producto real; va con --pais")
+    er.add_argument("--pais", help="código del país con --desde-producto (BG…)")
+    er.add_argument("--pedido", metavar="ID")
     er.add_argument("--fecha", help="AAAA-MM-DD (por defecto, hoy)")
     er.add_argument("--vault", help=_VAULT_AYUDA)
     b = sub.add_parser("bloqueado", help="marca un paso como bloqueado")
@@ -290,6 +295,14 @@ def _ensayo(vault: Path, args: argparse.Namespace) -> int:
         print(f"Propuesta de prueba lista: {ruta}")
         print(f"Deposítala, sola en la línea: trovefy buzon depositar {ruta}")
         return 0
+    if args.desde_producto is not None:
+        return _ensayo_desde_producto(vault, args)
+    manuales = ("pedido", "importe", "moneda", "pasarela") if args.ensayo_accion == "compra" else ("pedido",)
+    faltan = [f"--{m}" for m in manuales if getattr(args, m) is None]
+    if faltan:
+        return _error(f"faltan {', '.join(faltan)} (o usa --desde-producto P-ID --pais XX)")
+    if args.pais is not None:
+        return _error("--pais va con --desde-producto")
     fecha = args.fecha or datetime.now(ZONA_NEGOCIO).strftime("%Y-%m-%d")
     if args.ensayo_accion == "compra":
         try:
@@ -301,6 +314,35 @@ def _ensayo(vault: Path, args: argparse.Namespace) -> int:
     else:
         registrar_reembolso(vault, args.pedido, fecha)
         que = f"ensayo reembolso: reembolso de {args.pedido}"
+    anadir_log(vault, "arranque", que, [RUTA_ENSAYO])
+    print(f"Registrado: {que}. Comprueba con `trovefy arranque verificar 18`.")
+    return 0
+
+
+def _ensayo_desde_producto(vault: Path, args: argparse.Namespace) -> int:
+    from trovefy.arranque.ensayo import (
+        RUTA_ENSAYO,
+        registrar_compra_desde_producto,
+        registrar_reembolso_desde_producto,
+    )
+
+    manuales = ("pedido", "importe", "moneda", "pasarela", "fecha")
+    if any(getattr(args, m, None) is not None for m in manuales):
+        return _error("usa uno de los dos modos: --desde-producto (con --pais) o --pedido/--importe/--moneda/--pasarela")
+    if not args.pais:
+        return _error("--desde-producto va con --pais (por ejemplo --pais BG)")
+    try:
+        if args.ensayo_accion == "compra":
+            fila = registrar_compra_desde_producto(vault, args.desde_producto, args.pais)
+        else:
+            fila = registrar_reembolso_desde_producto(vault, args.desde_producto, args.pais)
+    except FileNotFoundError as exc:
+        return _error(str(exc))
+    if args.ensayo_accion == "compra":
+        que = (f"ensayo compra: compra de prueba {fila['pedido']} de {args.desde_producto} {args.pais} "
+               f"({fila['importe']} {fila['moneda']}, {fila['pasarela']})")
+    else:
+        que = f"ensayo reembolso: reembolso de {fila['pedido']} ({args.desde_producto} {args.pais})"
     anadir_log(vault, "arranque", que, [RUTA_ENSAYO])
     print(f"Registrado: {que}. Comprueba con `trovefy arranque verificar 18`.")
     return 0

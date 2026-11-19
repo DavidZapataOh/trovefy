@@ -76,7 +76,8 @@ def verificar_ensayo(vault: Path) -> ResultadoVerificacion:
     reembolsados = {r.get("pedido") for r in reg.get("reembolsos", [])}
     if not compras:
         faltas.append(("falta la compra de prueba",
-                       "trovefy arranque ensayo compra --pedido ID --importe 2.00 --moneda USD --pasarela whop"))
+                       ("trovefy arranque ensayo compra --desde-producto <p-id> --pais <PAIS> (la compra real del "
+                       "producto que guía /checkout)")))
     for pedido in compras:
         if pedido not in reembolsados:
             faltas.append((f"falta el reembolso de la compra de prueba {pedido}",

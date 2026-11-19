@@ -50,6 +50,7 @@ Pasos:
 ## Fase 1
 
 - Los pasos 12, 13, 14 y 18 se verifican siempre con `trovefy arranque verificar NN` (sin navegador) y solo cuentan `verificado`.
+- En el 18, la compra y el reembolso son los del producto real: `trovefy arranque ensayo compra|reembolso --desde-producto <p-id> --pais <PAIS>`.
 - En el 18, Claude deposita solo con `trovefy aprobaciones probar` (el noop) y `trovefy buzon depositar <ruta>` con la ruta que imprime `trovefy arranque ensayo montaje`, cada comando solo en la línea.
 - Si el usuario pega un token en el chat, no lo repitas, no lo guardes y no lo uses: dile que lo revoque y genere otro, y que lo pegue él en secretos.env del ejecutor.
 - Claude nunca ejecuta `sudo` ni lee `/home/trovefy-exec/`; esos comandos los escribe el usuario en una terminal aparte.
