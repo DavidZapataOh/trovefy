@@ -24,6 +24,10 @@ acepta como no bloqueante y la lista en la evidencia de ``avanzar_estado`` y en 
 ``compra de prueba registrada`` no admiten excepción (`SIN_EXCEPCION`): sin checkout armado ni una compra real no
 hay nada que vender.
 
+Las mismas excepciones valen en `/listo` (plan 20) para el gate que mide el mismo hecho (`trovefy.listo.EXCEPCION_DE_GATE`).
+`/listo` mide además dos hechos que el cierre no mira (`REQUISITOS_LISTO`: ``utm hasta el checkout`` y ``dominio
+verificado``); su excepción se registra con el mismo subcomando (`trovefy checkout excepcion`) y en el mismo archivo.
+
 Solo lee el vault, salvo `registrar_excepcion` (la decisión) y `cerrar` (el estado, con
 ``trovefy.vault.producto.avanzar_estado``, resolución 1).
 """
@@ -59,6 +63,12 @@ REEMBOLSO = "reembolso registrado"
 ESQUEMA = "esquema de pedidos"
 REQUISITOS: tuple[str, ...] = (TRACKING, EJECUTOR, CHECKOUT, EMBUDO, COMPRA, REEMBOLSO, ESQUEMA)
 SIN_EXCEPCION = frozenset({CHECKOUT, COMPRA})
+# Hechos que solo mide /listo (plan 20, `trovefy.listo.EXCEPCION_DE_GATE`): el cierre del checkout no los mira, pero
+# su excepción se registra igual, con el mismo subcomando y en el mismo archivo de decisiones.
+UTM = "utm hasta el checkout"
+DOMINIO = "dominio verificado"
+REQUISITOS_LISTO: tuple[str, ...] = (UTM, DOMINIO)
+CON_EXCEPCION: tuple[str, ...] = tuple(r for r in REQUISITOS if r not in SIN_EXCEPCION) + REQUISITOS_LISTO
 FUENTES_CHECKOUT = ("mcp", "fuera", "captura")
 RUTA_ESQUEMA = ("config", "esquemas", "impultienda-pedidos.yaml")
 _PRUEBAS_PEGADAS = ("captura", "texto")  # lo que pega el usuario; su palabra sola («dicho») no basta
@@ -99,14 +109,15 @@ def clave(requisito: str) -> str:
 
 
 def resolver_requisito(texto: object) -> str:
-    """El requisito por su nombre (``tracking verificado``) o su clave (``tracking-verificado``); ``ValueError``
-    si no es ninguno de los siete."""
+    """El requisito por su nombre (``tracking verificado``) o su clave (``tracking-verificado``): uno de los siete
+    del cierre o de los que solo mide /listo (`REQUISITOS_LISTO`); ``ValueError`` si no es ninguno."""
     if isinstance(texto, str) and texto.strip():
         buscado = clave(texto)
-        for r in REQUISITOS:
+        for r in (*REQUISITOS, *REQUISITOS_LISTO):
             if clave(r) == buscado:
                 return r
-    raise ValueError(f"requisito desconocido «{texto}»: usa uno de " + ", ".join(f"«{r}»" for r in REQUISITOS))
+    raise ValueError(f"requisito desconocido «{texto}»: usa uno de "
+                     + ", ".join(f"«{r}»" for r in (*REQUISITOS, *REQUISITOS_LISTO)))
 
 
 def _pais(pais: str) -> str:
@@ -175,9 +186,13 @@ def registrar_excepcion(vault: Path, producto: str, pais: str, requisito: str, p
     meta = {"tipo": "decision", "decision": _DECISION, "fecha": hoy.isoformat(),
             "registrada": ahora.isoformat(timespec="seconds"), "fuente": "usuario", "producto": producto,
             "pais": pais, "requisito": nombre, "motivo": motivo, "palabras_del_usuario": palabras}
-    lineas = [f"# Excepción aprobada · {nombre} · {producto} · {pais} ({hoy.isoformat()})", "",
-              (f"El requisito «{nombre}» del cierre del checkout no está en verde y el usuario aprueba cerrar igual. "
-               "No cuenta como verde: el cierre lo lista como excepción."), "",
+    if nombre in REQUISITOS_LISTO:
+        que = (f"El requisito «{nombre}» de /listo no está en verde y el usuario aprueba pasar a listo igual. "
+               "No cuenta como verde: /listo lo lista como excepción.")
+    else:
+        que = (f"El requisito «{nombre}» del cierre del checkout no está en verde y el usuario aprueba cerrar igual. "
+               "No cuenta como verde: el cierre (y /listo, donde mide lo mismo) lo lista como excepción.")
+    lineas = [f"# Excepción aprobada · {nombre} · {producto} · {pais} ({hoy.isoformat()})", "", que, "",
               f"Motivo: {motivo}", "",
               "Palabras del usuario (cita literal):", "",
               *(f"> {x}" if x else ">" for x in palabras.split("\n")), ""]
@@ -208,7 +223,8 @@ def _fecha(valor: object) -> date | None:
 
 
 def excepciones(vault: Path, producto: str, pais: str) -> dict[str, ExcepcionAprobada]:
-    """Las excepciones válidas del producto-país, la más reciente por requisito. Vale solo una completa:
+    """Las excepciones válidas del producto-país, la más reciente por requisito (las del cierre y las de /listo:
+    `CON_EXCEPCION`). Vale solo una completa:
     ``tipo: decision``, ``decision: excepcion_checkout``, ``fuente: usuario``, el producto y el país, un requisito que
     admite excepción, ``motivo`` y ``palabras_del_usuario`` no vacíos y una ``fecha`` AAAA-MM-DD. Lo ilegible se
     salta."""
@@ -228,7 +244,7 @@ def excepciones(vault: Path, producto: str, pais: str) -> dict[str, ExcepcionApr
         if meta.get("producto") != producto or meta.get("pais") != pais:
             continue
         requisito = meta.get("requisito")
-        if requisito not in REQUISITOS or requisito in SIN_EXCEPCION:
+        if requisito not in CON_EXCEPCION:
             continue
         palabras, motivo = meta.get("palabras_del_usuario"), meta.get("motivo")
         if not (isinstance(palabras, str) and palabras.strip() and isinstance(motivo, str) and motivo.strip()):
