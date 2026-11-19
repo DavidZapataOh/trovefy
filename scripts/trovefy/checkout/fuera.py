@@ -514,7 +514,9 @@ def comprobar_fuera(ctx, ajustes: list[Ajuste], pagina: PaginaPublica, indice: d
         estados.append(_precio(ctx, por_clave["producto.front.precio"], base, del_pais, pagina, indice, relecturas))
     estados.append(_idioma(ctx, base, del_pais, pagina))
     if "checkout.campos" in por_clave:
-        estados.append(_campos(por_clave["checkout.campos"], base))
+        # «Ver como <país>» (?edit=1) es la vista del editor y enseña todos los campos aunque estén apagados:
+        # los campos se miden en el checkout tal cual, si se pudo leer.
+        estados.append(_campos(por_clave["checkout.campos"], pagina if plano_ok else base))
     estados.append(EstadoFuera("checkout.bump", "falla" if base.bump else "ok", "sin order bump",
                                "hay order bump" if base.bump else None,
                                "el checkout ofrece un order bump (los vídeos no lo ponen, V1 0:38:35)" if base.bump
