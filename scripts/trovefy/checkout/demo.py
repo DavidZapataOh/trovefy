@@ -14,6 +14,7 @@ escribe en el formulario de pago ni pulsa «pagar».
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -59,7 +60,8 @@ def validar_upsell_demo(url: str, ctx) -> str:
     Devuelve el enlace tal cual (con su token, que no se guarda); ``ValueError`` si no vale."""
     partes = urlsplit((url or "").strip())
     tienda = urlsplit(ctx.tienda or "")
-    if partes.hostname is None or partes.hostname != tienda.hostname:
+    if partes.hostname is None or (partes.hostname != tienda.hostname
+                                   and partes.hostname not in fuera.hosts_de_la_tienda(ctx)):
         raise ValueError(f"el enlace demo no es de la tienda ({tienda.hostname or 'sin tienda'}): no se abre")
     if partes.scheme != tienda.scheme or partes.path.rstrip("/") != RUTA_DEMO:
         raise ValueError(f"el enlace demo tiene que ser {tienda.scheme}://{tienda.hostname}{RUTA_DEMO}?t=…")
@@ -107,6 +109,31 @@ def _precios(texto: str) -> list[tuple[Decimal | None, str | None]]:
     return [fuera.leer_precio(m.group(0)) for m in fuera._PRECIO_MONEDA.finditer(texto)]
 
 
+_MARCA_GUION = re.compile(r"<!--\s*guion:\s*([a-z_]+)\s*-->")
+
+
+def guion_por_texto(ctx, clave: str, texto: str) -> list[str]:
+    """Los puntos del guion de ``upsells/<clave>.md`` cuyo título se ve en ``texto``, en el orden en que aparecen.
+
+    La página publicada no lleva los comentarios ``<!-- guion: … -->`` (el renderizado los quita): cada punto se
+    reconoce por su primera línea (el ``#``/``##`` que lo abre) en el texto visible."""
+    ruta = ruta_pais(ctx) / "upsells" / f"{clave}.md"
+    try:
+        md = ruta.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    visible = " ".join(texto.split())
+    posiciones: list[tuple[int, str]] = []
+    for m in _MARCA_GUION.finditer(md):
+        resto = md[m.end():].lstrip("\n").splitlines()
+        primera = next((x.strip() for x in resto if x.strip()), "")
+        titulo = " ".join(primera.lstrip("#").split())
+        i = visible.find(titulo) if titulo else -1
+        if i >= 0:
+            posiciones.append((i, m.group(1)))
+    return [c for _, c in sorted(posiciones)]
+
+
 def _mirar_upsell(ctx, clave: str, pagina: fuera.PaginaPublica) -> tuple[EstadoPaso, str]:
     pieza = ctx.piezas[clave]
     esperado = pieza.precio.quantize(Decimal("0.01"))
@@ -128,10 +155,11 @@ def _mirar_upsell(ctx, clave: str, pagina: fuera.PaginaPublica) -> tuple[EstadoP
     elif idioma != ctx.idioma:
         problemas.append(f"idioma: sale en «{idioma}»")
     esperadas = [c for c, _ in GUION_UPSELL]
-    faltan = [c for c in esperadas if c not in pagina.guion]
+    guion = list(pagina.guion) or guion_por_texto(ctx, clave, pagina.texto)
+    faltan = [c for c in esperadas if c not in guion]
     if faltan:
         problemas.append(f"guion: faltan {', '.join(faltan)}")
-    elif [c for c in dict.fromkeys(pagina.guion) if c in esperadas] != esperadas:
+    elif [c for c in dict.fromkeys(guion) if c in esperadas] != esperadas:
         problemas.append("guion: los 8 puntos no van en orden")
     if problemas:
         return "falla", "; ".join(problemas + no_medido)

@@ -287,3 +287,25 @@ def test_cli_demo(zz, monkeypatch, capsys):
     assert "tokendemo123" not in capsys.readouterr().out
     assert cli.main(["checkout", "demo", "--producto", P, "--pais", PAIS, "--upsell-demo",
                      "https://otro.example/post-purchase/demo?t=x"]) == 2
+
+
+def test_guion_por_texto_sin_comentarios(zz):
+    """La página publicada no lleva los comentarios del guion: los puntos se reconocen por su título visible."""
+    from trovefy.checkout.demo import guion_por_texto
+
+    _v, ctx = zz
+    md = "".join(f"<!-- guion: {c} -->\n## Título {c}\n\nТекст.\n\n" for c in ("gracias", "problema", "oferta"))
+    (ruta_pais(ctx) / "upsells").mkdir(parents=True, exist_ok=True)
+    (ruta_pais(ctx) / "upsells" / "u1.md").write_text(md, encoding="utf-8")
+    texto = "Título gracias Текст. Título problema Текст. Título oferta"
+    assert guion_por_texto(ctx, "u1", texto) == ["gracias", "problema", "oferta"]
+    assert guion_por_texto(ctx, "u1", "Título oferta  Título gracias") == ["oferta", "gracias"]
+    assert guion_por_texto(ctx, "u2", texto) == []
+
+
+def test_enlace_demo_en_el_dominio_propio(zz):
+    _v, ctx = zz
+    propio = SimpleNamespace(**{**vars(ctx), "landing_hosting": "impultienda",
+                                "landing_url": "https://www.mitienda-demo.test/"})
+    url = "https://mitienda-demo.test/post-purchase/demo?t=abc"
+    assert validar_upsell_demo(url, propio) == url
