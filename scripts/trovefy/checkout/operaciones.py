@@ -35,12 +35,17 @@ from trovefy.checkout.etapas import (
     requiere,
 )
 from trovefy.checkout.receta import (
+    ANTES_DE_GIRAR,
     CONTADOR,
+    FIN_PREMIO,
+    PREMIO,
+    TRAGAMONEDAS,
     VENCIDO,
     Ajuste,
     Llamada,
     _nombre,
     marcadores,
+    premios,
     rellenar,
 )
 from trovefy.embudo.contexto import Contexto
@@ -183,7 +188,45 @@ text-align:center;font-family:var(--fuente-texto),{_SISTEMA};font-weight:700;fon
 font-variant-numeric:tabular-nums}}
 .tv-reloj.tv-fin{{background:#6b7280}}
 .tv-vencido{{margin:0;padding:14px;border-radius:12px;background:#eef0f1;text-align:center;font-weight:600}}
+.tv-slot{{margin:6px 0 4px;padding:18px 14px 16px;border-radius:18px;text-align:center;color:#fff;
+background:linear-gradient(160deg,var(--color-primario),#16302f);box-shadow:0 6px 22px rgba(0,0,0,.25)}}
+.tv-slot-tit{{margin:0 0 12px;font-family:var(--fuente-titulos),{_SISTEMA};font-weight:800;letter-spacing:.12em;
+font-size:14px;color:var(--color-acento)}}
+.tv-rod{{display:flex;gap:8px;justify-content:center;margin:0 0 14px}}
+.tv-rod span{{flex:1;max-width:110px;height:78px;line-height:78px;border-radius:12px;background:#fff;
+color:var(--color-primario);font-size:30px;font-weight:800;overflow:hidden;font-variant-numeric:tabular-nums;
+box-shadow:inset 0 4px 10px rgba(0,0,0,.18)}}
+.tv-rod span.tv-gira{{animation:tv-vib .12s linear infinite}}
+@keyframes tv-vib{{0%{{transform:translateY(-3px)}}50%{{transform:translateY(3px)}}100%{{transform:translateY(-3px)}}}}
+.tv-girar{{width:100%;font:inherit;font-weight:800;font-size:19px;letter-spacing:.04em;border:0;border-radius:12px;
+padding:16px;cursor:pointer;background:var(--color-acento);color:#fff;box-shadow:0 4px 0 rgba(0,0,0,.25)}}
+.tv-girar:disabled{{opacity:.7;cursor:default}}
+.tv-slot-res{{margin:4px 0 0;font-size:22px;font-weight:800}}
+.tv-premio{{margin-top:6px}}
 """
+# La tragamonedas destapa el descuento que la plataforma ya sorteó para esta compra (test A/B de la oferta, token
+# {discount}); no elige nada. Un solo intento: el resultado queda guardado en el navegador. Si el token no trae un
+# premio conocido, no gira: enseña los botones y el precio real ({price}).
+_JS_TRAGAMONEDAS = (
+    "<script>(function(){var s=document.querySelector('[data-tv-slot]');if(!s)return;"
+    "var ops=s.getAttribute('data-tv-slot').split(','),m=(s.querySelector('[data-tv-sorteo]').textContent||'')"
+    ".replace(',','.').match(/\\d+(\\.\\d+)?/),n=m?String(Math.round(+m[0])):'',ok=ops.indexOf(n)>=0,"
+    "rod=s.querySelectorAll('.tv-rod span'),b=s.querySelector('.tv-girar'),res=s.querySelector('.tv-slot-res'),"
+    "k='tv-slot:'+location.pathname+':'+s.getAttribute('data-tv-id'),sim=['7','\\u2605','\\u25C6'];"
+    "function fin(){rod[0].textContent=rod[2].textContent=sim[0];rod[1].textContent='-'+n+'%';"
+    "document.querySelectorAll('[data-tv-antes]').forEach(function(e){e.hidden=true});"
+    "res.textContent='-'+n+' %';res.hidden=false;b.hidden=true;"
+    "document.querySelectorAll('[data-tv-premio=\"'+n+'\"],[data-tv-tras-giro]').forEach(function(e){e.hidden=false})}"
+    "if(!ok){s.hidden=true;document.querySelectorAll('[data-tv-antes]').forEach(function(e){e.hidden=true});"
+    "document.querySelectorAll('[data-tv-premio=\"?\"],[data-tv-tras-giro]')"
+    ".forEach(function(e){e.hidden=false});return}"
+    "var h=0;try{h=localStorage.getItem(k)==='1'}catch(e){}if(h){fin();return}"
+    "b.addEventListener('click',function(){b.disabled=true;var t=0,i=setInterval(function(){t++;"
+    "rod.forEach(function(r,j){r.classList.add('tv-gira');r.textContent=j==1?'-'+ops[t%ops.length]+'%':sim[(t+j)%3]})"
+    "},90);setTimeout(function(){clearInterval(i);rod.forEach(function(r){r.classList.remove('tv-gira')});"
+    "try{localStorage.setItem(k,'1')}catch(e){}fin();setTimeout(function(){var p=document.querySelector("
+    "'[data-tv-premio=\"'+n+'\"]');if(p)p.scrollIntoView({behavior:'smooth',block:'center'})},1600)},2600)})})();"
+    "</script>")
 # El contador cuenta desde la primera vez que el comprador abre ESTA página (se guarda en su navegador: recargar no
 # lo reinicia) y, al llegar a cero, quita el botón de aceptar: la oferta se cierra de verdad.
 _JS_CONTADOR = ("<script>(function(){var r=document.querySelector('[data-tv-reloj]');if(!r)return;"
@@ -230,6 +273,8 @@ def pagina_html(texto_md: str, tokens: dict[str, str] | None = None) -> str | No
         botones.append(f'<p class="tv-vencido" hidden>{_escapar(vencido.group(1))}</p>')
     texto = VENCIDO.sub("", CONTADOR.sub("", texto))
     estado = {"caja": False, "lista": False}
+    maquina = TRAGAMONEDAS.search(texto)
+    con_slot = maquina is not None and premios(maquina) and PREMIO.search(texto) is not None
 
     def cerrar_lista() -> None:
         if estado["lista"]:
@@ -247,10 +292,37 @@ def pagina_html(texto_md: str, tokens: dict[str, str] | None = None) -> str | No
         if not linea:
             continue
         boton = _BOTON.fullmatch(linea)
-        if boton:
+        if con_slot and TRAGAMONEDAS.fullmatch(linea):
+            if not estado["caja"]:
+                abrir("tv-sec")
+            cerrar_lista()
+            m = TRAGAMONEDAS.fullmatch(linea)
+            ops = ",".join(premios(m))
+            sid = hashlib.sha256(texto.encode("utf-8")).hexdigest()[:10]
+            cuerpo.append(f'<div class="tv-slot" data-tv-slot="{_escapar(ops)}" data-tv-id="{sid}">'
+                          '<span data-tv-sorteo hidden>{discount}</span>'
+                          f'<p class="tv-slot-tit">{_escapar(m.group(2))}</p>'
+                          '<div class="tv-rod"><span>?</span><span>?</span><span>?</span></div>'
+                          f'<button type="button" class="tv-girar">{_escapar(m.group(3))}</button>'
+                          '<p class="tv-slot-res" data-tv-txt="" hidden></p></div>')
+            cuerpo.append('<p class="tv-premio" data-tv-premio="?" hidden>{price}</p>')
+        elif con_slot and PREMIO.fullmatch(linea):
+            cerrar_lista()
+            cuerpo.append(f'<div class="tv-premio" data-tv-premio="{PREMIO.fullmatch(linea).group(1)}" hidden>')
+        elif con_slot and FIN_PREMIO.fullmatch(linea):
+            cerrar_lista()
+            cuerpo.append("</div>")
+        elif con_slot and ANTES_DE_GIRAR.fullmatch(linea):
+            if not estado["caja"]:
+                abrir("tv-sec")
+            cerrar_lista()
+            cuerpo.append(f"<p data-tv-antes>{_escapar(ANTES_DE_GIRAR.fullmatch(linea).group(1))}</p>")
+        elif boton:
             si = boton.group(1) == "aceptar"
             clase, atributo = ("tv-si", "data-pp-accept") if si else ("tv-no", "data-pp-decline")
-            botones.append(f'<button type="button" class="{clase}" {atributo}>{_escapar(boton.group(2))}</button>')
+            oculto = " data-tv-tras-giro hidden" if si and con_slot else ""
+            botones.append(f'<button type="button" class="{clase}" {atributo}{oculto}>'
+                           f"{_escapar(boton.group(2))}</button>")
         elif linea.startswith("# "):
             abrir("tv-ok")
             cuerpo.append(f"<h1>{_escapar(linea[2:].strip())}</h1>")
@@ -275,7 +347,8 @@ def pagina_html(texto_md: str, tokens: dict[str, str] | None = None) -> str | No
         cuerpo.append('<div class="tv-sec">')
     cuerpo.extend([cta, "</div>"])
     html = _estilo(tokens) + "\n" + reloj + '<div class="tv-up">\n' + "\n".join(cuerpo) + "\n</div>\n"
-    return html + (_JS_CONTADOR + "\n" if reloj else "")
+    return (html + (_JS_CONTADOR + "\n" if reloj else "")
+            + (_JS_TRAGAMONEDAS + "\n" if con_slot else ""))
 
 
 def _tokens_de(ruta: Path) -> dict[str, str] | None:

@@ -570,3 +570,19 @@ def test_pagina_de_recuperacion_va_a_su_oferta(tmp_path):
     rec = next(a for a in aj if a.clave == "postcompra.u1.pagina_recuperacion")
     assert [ll.argumentos["oferta_id"] for ll in rec.llamadas] == ["<oferta_id:u1r>"] * 2
     assert rec.llamadas[0].argumentos["html"] == "<html:u1r>"
+
+
+def test_guion_upsell_con_tragamonedas():
+    base = _pagina_u1()
+    slot = ("[[tragamonedas: 40, 60 | ЕДИН ОПИТ | Завърти]]\nВъзможни награди: 40 % или 60 %.\n"
+            "[[premio: 40]]\nЦена 11,94 €\n[[/premio]]\n[[premio: 60]]\nЦена 7,96 €\n[[/premio]]\n")
+    assert validar_pagina_upsell(base + slot) == []
+    sin_bloque = slot.replace("[[premio: 60]]\nЦена 7,96 €\n[[/premio]]\n", "")
+    assert any("bloque [[premio" in p for p in validar_pagina_upsell(base + sin_bloque))
+    sin_aviso = slot.replace("Възможни награди: 40 % или 60 %.\n", "")
+    assert any("premios posibles" in p for p in validar_pagina_upsell(base + sin_aviso))
+    assert any("dos premios" in p for p in validar_pagina_upsell(
+        base + "[[tragamonedas: 40 | X | Y]]\n40 %\n[[premio: 40]]\nа\n[[/premio]]\n"))
+    assert any("solo va texto" in p for p in validar_pagina_upsell(
+        base + slot.replace("Цена 7,96 €", "## Заглавие")))
+    assert any("sin [[tragamonedas" in p for p in validar_pagina_upsell(base + "[[premio: 40]]\nа\n[[/premio]]\n"))

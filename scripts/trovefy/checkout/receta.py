@@ -223,7 +223,60 @@ def validar_pagina_upsell(texto_md: str) -> list[str]:
         problemas.append("el [[contador: minutos | texto]] necesita su [[vencido: texto]] (lo que se ve al cerrarse)")
     if any(not 1 <= int(m) <= 60 for m, _ in contadores):
         problemas.append("el contador va de 1 a 60 minutos")
-    return problemas
+    return problemas + _problemas_tragamonedas(texto_md or "")
+
+
+# Tragamonedas del downsell («SLOT · UN SOLO INTENTO», V1 1:13:04) con sorteo de verdad: el descuento lo reparte la
+# plataforma (test A/B de la oferta: cada compra cae al azar en la A o en la B, cada una con su descuento) y la
+# página lo lee del token {discount}; los rodillos solo lo destapan. Cada premio posible lleva su bloque
+# [[premio: N]] … [[/premio]] con su precio, y la página dice cuáles son los premios posibles.
+TRAGAMONEDAS = re.compile(r"^\[\[tragamonedas:\s*([\d,\s]+?)\s*\|\s*([^\]|]+?)\s*\|\s*([^\]|]+?)\s*\]\]$",
+                          re.MULTILINE)
+PREMIO = re.compile(r"^\[\[premio:\s*(\d{1,2})\s*\]\]$", re.MULTILINE)
+FIN_PREMIO = re.compile(r"^\[\[/premio\]\]$", re.MULTILINE)
+# Texto que solo se ve antes de girar («Gira la máquina de arriba para ver tu premio»).
+ANTES_DE_GIRAR = re.compile(r"^\[\[antes-de-girar:\s*([^\]]+?)\s*\]\]$", re.MULTILINE)
+
+
+def premios(marca: re.Match) -> list[str]:
+    """Los descuentos posibles de un ``[[tragamonedas: 40, 60 | …]]``, como texto ("40", "60")."""
+    return [p.strip() for p in marca.group(1).split(",") if p.strip()]
+
+
+def _problemas_tragamonedas(texto: str) -> list[str]:
+    maquinas = list(TRAGAMONEDAS.finditer(texto))
+    bloques = PREMIO.findall(texto)
+    if not maquinas:
+        return ["[[premio: …]] sin [[tragamonedas: …]]"] if bloques or FIN_PREMIO.search(texto) else []
+    if len(maquinas) > 1:
+        return ["como mucho una [[tragamonedas: …]]"]
+    problemas = []
+    posibles = premios(maquinas[0])
+    if len(posibles) < 2 or len(set(posibles)) != len(posibles):
+        problemas.append("la tragamonedas necesita al menos dos premios distintos («40, 60»)")
+    if any(not p.isdigit() or not 5 <= int(p) <= 95 for p in posibles):
+        problemas.append("cada premio de la tragamonedas va de 5 a 95 (% de descuento)")
+    if sorted(bloques) != sorted(posibles):
+        problemas.append("cada premio de la tragamonedas necesita su bloque [[premio: N]] … [[/premio]] (y nada más)")
+    abierto = False
+    for linea in (x.strip() for x in texto.splitlines()):
+        if PREMIO.fullmatch(linea):
+            if abierto:
+                problemas.append("un [[premio: …]] se abre antes de cerrar el anterior")
+            abierto = True
+        elif FIN_PREMIO.fullmatch(linea):
+            if not abierto:
+                problemas.append("un [[/premio]] sin su [[premio: …]]")
+            abierto = False
+        elif abierto and (linea.startswith(("#", "[["))):
+            problemas.append("dentro de un [[premio: …]] solo va texto (ni títulos, ni botones, ni marcas)")
+    if abierto:
+        problemas.append("falta cerrar un [[premio: …]] con [[/premio]]")
+    # Lo que se ve antes de girar: sin la máquina ni los bloques de premio (están ocultos hasta el resultado).
+    visible = re.sub(r"^\[\[premio:.*?^\[\[/premio\]\]$", "", TRAGAMONEDAS.sub("", texto), flags=re.MULTILINE | re.DOTALL)
+    if not all(re.search(rf"(?<!\d){p}\s*%", visible) for p in posibles):
+        problemas.append("antes de girar, la página tiene que decir los premios posibles («40 %», «60 %»)")
+    return list(dict.fromkeys(problemas))
 
 
 _VERSION_LANDING = re.compile(r'data-tf-version="([0-9a-f]{6,64})"')
