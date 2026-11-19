@@ -174,7 +174,7 @@ q=function(x){return document.querySelector(x)},res=q('[data-ts-res]');
 var im=q('.ts-img');if(im){var ch=function(){if(!im.naturalWidth)im.remove()};
 if(im.complete)ch();else{im.addEventListener('error',ch);im.addEventListener('load',ch)}}
 document.querySelectorAll('[data-ts-importe]').forEach(function(e){var t=e.textContent.trim(),
-x=t.match(/^€\s?([\d.,]+)$/);if(x)e.textContent=x[1]+' €'});
+x=t.match(/^\u20ac\s?([\d.,]+)$/);if(x)e.textContent=x[1]+'\u00a0\u20ac'});
 var nom=q('[data-ts-nombre]');if(nom){var v=(nom.getAttribute('data-ts-nombre')||'').trim();
 if(!v||v.indexOf('{')>=0)nom.remove()}
 function reloj(){var r=q('[data-ts-reloj]');if(!r)return;var f=0;try{f=+localStorage.getItem(kr)}catch(e){}
