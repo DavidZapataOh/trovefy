@@ -79,7 +79,7 @@ def test_instalador_simulado_lista_los_pasos():
         "/tmp/v/config/arranque.yaml",
         "trovefy_ejecutor.instalacion limites",
         "setfacl -m u:trovefy-exec:--x /home/david", "setfacl -m u:trovefy-exec:rwx",
-        "d:u:david:rwx", "/tmp/v/raw/telegram/motivos",
+        "d:u:david:rwx", "/tmp/v/raw/telegram/motivos", "/tmp/v/productos",
         "/etc/systemd/system/trovefy-ejecutor.service", "systemctl daemon-reload",
         "systemctl enable trovefy-ejecutor", "trovefy-ejecutor emparejar",
     ]:
@@ -231,3 +231,16 @@ def test_no_arranca_sin_meta_token():
     r = _simular("--vault", "/tmp/v")
     assert r.returncode == 0
     assert "TELEGRAM_CHAT_ID y META_TOKEN" in r.stdout and "comprobar-meta" in r.stdout
+
+
+def test_simulado_productos_solo_lectura():
+    r = _simular("--vault", "/tmp/v")
+    assert r.returncode == 0, r.stderr
+    assert "setfacl -R -m u:trovefy-exec:rX,d:u:trovefy-exec:rX,d:u:david:rwx /tmp/v/productos" in r.stdout
+    for linea in r.stdout.splitlines():
+        if "/tmp/v/productos" in linea:
+            assert "u:trovefy-exec:rwx" not in linea and "u:trovefy-exec:rw" not in linea
+
+
+def test_unidad_no_escribe_en_productos():
+    assert "/productos" not in UNIDAD.read_text()
