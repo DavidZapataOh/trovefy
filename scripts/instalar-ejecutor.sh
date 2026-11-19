@@ -164,6 +164,10 @@ tiene_acls_rw() {
     tiene_acl "$1" "user:$EXEC:rwx" && tiene_acl "$1" "default:user:$EXEC:rwx" \
         && tiene_acl "$1" "default:user:$USUARIO:rwx"
 }
+tiene_acls_r() {
+    tiene_acl "$1" "user:$EXEC:r-x" && tiene_acl "$1" "default:user:$EXEC:r-x" \
+        && tiene_acl "$1" "default:user:$USUARIO:rwx"
+}
 
 # Carpeta de root en /var/spool con dueño y modo exactos.
 asegurar_dir_spool() {
@@ -474,12 +478,15 @@ else
 fi
 CARPETAS_RW=("$VAULT/propuestas" "$VAULT/ledger/auditoria" "$VAULT/raw/telegram" "$VAULT/raw/telegram/motivos")
 CARPETAS_X=("$HOME_USUARIO" "$VAULT" "$VAULT/ledger" "$VAULT/raw")
+# Solo lectura (contrato 10 de la fase 2): /montar (fase 3) lee los medios de productos/<p-id>/. El -R aplica r-X a lo
+# que ya existe; lo nuevo hereda la ACL por defecto, pero solo es legible si se escribe con 0640 (no 0600).
+CARPETAS_R=("$VAULT/productos")
 faltan=()
-for d in "${CARPETAS_RW[@]}"; do
+for d in "${CARPETAS_RW[@]}" "${CARPETAS_R[@]}"; do
     if ((SIMULAR)) || ! como_usuario test -d "$d"; then faltan+=("$d"); fi
 done
 if ((${#faltan[@]})); then cmd "${COMO_USUARIO[@]}" mkdir -p -- "${faltan[@]}"; fi
-for d in "${CARPETAS_X[@]}" "${CARPETAS_RW[@]}"; do exigir_de_usuario "$d"; done
+for d in "${CARPETAS_X[@]}" "${CARPETAS_RW[@]}" "${CARPETAS_R[@]}"; do exigir_de_usuario "$d"; done
 for d in "${CARPETAS_X[@]}"; do
     if consulta "${COMO_USUARIO[*]} getfacl $d (user:$EXEC:--x)" tiene_acl "$d" "user:$EXEC:--x"; then
         nota "$d ya tiene user:$EXEC:--x"
@@ -496,6 +503,21 @@ for d in "${CARPETAS_RW[@]}"; do
 done
 if ((SIMULAR == 0)) && ! { como_exec test -w "$VAULT/propuestas" && como_exec test -x "$VAULT/propuestas"; }; then
     morir "$EXEC no llega a $VAULT/propuestas: revisa los permisos de las carpetas que contienen el vault"
+fi
+for d in "${CARPETAS_R[@]}"; do
+    if consulta "${COMO_USUARIO[*]} getfacl $d (user:$EXEC:r-x y defaults)" tiene_acls_r "$d"; then
+        nota "$d ya tiene las ACL de solo lectura"
+    else
+        cmd "${COMO_USUARIO[@]}" setfacl -R -m "u:$EXEC:rX,d:u:$EXEC:rX,d:u:$USUARIO:rwx" "$d"
+    fi
+done
+if ((SIMULAR == 0)); then
+    if ! { como_exec test -r "$VAULT/productos" && como_exec test -x "$VAULT/productos"; }; then
+        morir "$EXEC no puede leer $VAULT/productos: revisa las ACL"
+    fi
+    if como_exec test -w "$VAULT/productos"; then
+        morir "$EXEC puede escribir en $VAULT/productos: quita esa ACL a mano"
+    fi
 fi
 
 # -- 12. unidad (root, en /etc) --------------------------------------------------------------------------

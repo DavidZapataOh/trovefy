@@ -212,11 +212,12 @@ def _configurar_cierre(sub) -> None:
     ce = sub.add_parser("cerrar", help="los 7 requisitos del checkout; con todo en verde (o con tu excepción), el "
                                        "país pasa a con_checkout")
     _comunes(ce)
-    ex = sub.add_parser("excepcion", help="registra tu aprobación de cerrar sin un requisito en verde, con tus "
-                                          "palabras literales (nunca cuenta como verde)")
+    ex = sub.add_parser("excepcion", help="registra tu aprobación de cerrar (o pasar a listo) sin un requisito en "
+                                          "verde, con tus palabras literales (nunca cuenta como verde)")
     _comunes(ex)
     ex.add_argument("--requisito", required=True,
-                    help="el requisito, por su nombre («tracking verificado») o su clave (tracking-verificado)")
+                    help="el requisito, por su nombre («tracking verificado») o su clave (tracking-verificado); "
+                         "/listo añade «utm hasta el checkout» y «dominio verificado»")
     ex.add_argument("--dicho", required=True,
                     help="las palabras literales del usuario, entre comillas: un mensaje suyo entero")
     ex.add_argument("--motivo", required=True, help="por qué no está en verde, en una frase")
@@ -263,7 +264,7 @@ def _excepcion(args: argparse.Namespace) -> int:
     except (ValueError, OSError) as exc:
         return _error(exc)
     print(f"Excepción registrada con tus palabras: {ruta.relative_to(vault).as_posix()} (no cuenta como verde: "
-          "el cierre la lista como excepción).")
+          "el cierre y /listo la listan como excepción).")
     return 0
 
 

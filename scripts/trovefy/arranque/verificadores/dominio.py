@@ -79,13 +79,17 @@ def evaluar_txt(txt: list[str]) -> ResultadoVerificacion:
     ])
 
 
-def _dominio_guardado(vault: Path) -> str | None:
+def dominio_guardado(vault: Path) -> str | None:
+    """El dominio del paso 07 (``datos.dominio``), normalizado; None si falta o no es un dominio."""
     p = next((p for p in cargar(vault) if p.id == "07"), None)
     valor = p.datos.get("dominio") if p else None
     try:
         return normalizar(valor) if valor else None
     except ValueError:
         return None
+
+
+_dominio_guardado = dominio_guardado  # nombre antiguo, por compatibilidad
 
 
 def _sin_dominio() -> ResultadoVerificacion:
@@ -100,7 +104,7 @@ def _sin_red() -> ResultadoVerificacion:
 
 def verificar_dominio(vault: Path | None = None, consultar: Callable = consultar_doh) -> ResultadoVerificacion:
     vault = vault_root() if vault is None else Path(vault)
-    dominio = _dominio_guardado(vault)
+    dominio = dominio_guardado(vault)
     if dominio is None:
         return _sin_dominio()
     try:
@@ -141,7 +145,7 @@ def _estado_verificado(texto: str, dominio: str) -> bool:
 
 
 def _leer_08(textos: dict[str, str], vault: Path) -> dict[str, str | None]:
-    dominio, texto = _dominio_guardado(vault), textos.get("pagina", "")
+    dominio, texto = dominio_guardado(vault), textos.get("pagina", "")
     if dominio is None or _posicion_dominio(texto, dominio) < 0:
         return {"dominio": None, "estado": None}
     return {"dominio": dominio, "estado": estado_del_dominio(texto, dominio)}
@@ -166,7 +170,7 @@ def verificar_verificacion_meta(
 ) -> ResultadoVerificacion:
     vault = vault_root() if vault is None else Path(vault)
     confirmacion = confirmacion_de(vault, "08", confirmacion)
-    dominio = _dominio_guardado(vault)
+    dominio = dominio_guardado(vault)
     if dominio is None:
         return _sin_dominio()
     try:

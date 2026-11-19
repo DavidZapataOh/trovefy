@@ -41,4 +41,5 @@ Pasos:
    - Si las palabras no son un mensaje suyo, la orden no la registra: nunca escribas tú la aprobación ni la resumas.
    - `checkout completo` y `compra de prueba registrada` no admiten excepción.
    - La excepción nunca cuenta como verde: el cierre la lista como «excepción» con sus palabras, en `PRODUCTO.md` y en `log.md`. Díselo así.
+   - La misma excepción vale después en `/listo` para el gate que mide lo mismo (`reembolso registrado` → gate `reembolso`; `tracking verificado` → la parte de eventos del gate `dataset`). Díselo antes de que la apruebe.
 9. **Presentar.** Lee `productos/<p-id>/checkout/<PAIS>/CHECKOUT.md` y `PRODUCTO.md` y cuéntale: lo verificado y con qué fuente, lo que hizo él a mano, lo «no medido» con su motivo, las excepciones con sus palabras y el estado del país. Lo siguiente es `/listo` (plan 20).
