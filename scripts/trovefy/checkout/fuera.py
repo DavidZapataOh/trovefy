@@ -383,11 +383,22 @@ def nombre_pais(pais: str) -> str:
     return NOMBRES_PAIS.get(pais, pais)
 
 
+def hosts_de_la_tienda(ctx) -> set[str]:
+    """Los hosts que sirven la tienda: el de ``tienda``/``checkout_url`` y, si la landing la sirve Impultienda, el
+    de su dominio propio (con y sin ``www.``)."""
+    hosts = {urlsplit(u).hostname for u in (getattr(ctx, "tienda", None), ctx.checkout_url) if u}
+    if getattr(ctx, "landing_hosting", None) == "impultienda" and getattr(ctx, "landing_url", None):
+        h = urlsplit(ctx.landing_url).hostname
+        if h:
+            hosts |= {h, h.removeprefix("www."), "www." + h.removeprefix("www.")}
+    return {h for h in hosts if h}
+
+
 def _es_checkout(p: PaginaPublica | None, ctx) -> bool:
     if p is None or p.motivo or not p.url_final or not ctx.checkout_url:
         return False
     a, b = urlsplit(p.url_final), urlsplit(ctx.checkout_url)
-    return a.hostname == b.hostname and a.path.rstrip("/") == b.path.rstrip("/")
+    return a.hostname in hosts_de_la_tienda(ctx) and a.path.rstrip("/") == b.path.rstrip("/")
 
 
 def _precio_txt(precio: Decimal | None, moneda: str | None) -> str | None:

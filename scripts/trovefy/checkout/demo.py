@@ -184,7 +184,7 @@ def recorrer(page, ctx, capturas: Path, upsell_demo: str | None, *, ajustes: lis
     page.wait_for_load_state("load", timeout=fuera.TIEMPO_CARGA_MS)
     destino = navegaciones[0] if navegaciones else page.url
     d = urlsplit(destino)
-    en_tienda = d.hostname == tienda.hostname
+    en_tienda = d.hostname == tienda.hostname or d.hostname in fuera.hosts_de_la_tienda(ctx)
     pasos.append(Paso("boton", "ok" if en_tienda else "falla",
                       "lleva a la tienda" if en_tienda else f"lleva a otro sitio ({d.hostname})", _sin_query(destino)))
 
