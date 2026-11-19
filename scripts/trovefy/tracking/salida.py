@@ -11,7 +11,14 @@ from datetime import datetime
 from pathlib import Path
 
 from trovefy.secretos import buscar_secreto
-from trovefy.tracking.modelo import _PAIS, ESTADOS, EVENTOS, Tracking, validar_emisores
+from trovefy.tracking.modelo import (
+    _PAIS,
+    ESTADOS,
+    EVENTOS,
+    Tracking,
+    eventos_exigidos,
+    validar_emisores,
+)
 from trovefy.vault import frontmatter
 from trovefy.vault.escritura import anadir_log, escribir_atomico
 from trovefy.vault.producto import actualizar_producto, ruta_producto, secreto_en
@@ -65,9 +72,13 @@ def _cuerpo(t: Tracking) -> str:
         lineas.append(f"- Ejecutor: dataset en límites {si[e['dataset_permitido']]}, página en límites "
                       f"{si[e['pagina_permitida']]}, lo lee {si[e['lectura_ok']]} ({e['fecha']})")
     lineas += ["", "| Evento | Emisor | Conteo |", "|---|---|---|"]
+    exigidos = eventos_exigidos(t.emisores)
     for e in EVENTOS:
         n = (t.eventos or {}).get(e)
-        lineas.append(f"| {e} | {t.emisores.get(e)} | {'no medido' if n is None else n} |")
+        celda = "no medido" if n is None else str(n)
+        if e not in exigidos:
+            celda += f" (no se exige: {t.emisores.get(e)} no lo envía nunca)"
+        lineas.append(f"| {e} | {t.emisores.get(e)} | {celda} |")
     if t.motivos:
         lineas += ["", "## Motivos", *(f"- {m}" for m in t.motivos)]
     if t.evidencia:

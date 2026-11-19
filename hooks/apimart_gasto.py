@@ -39,6 +39,9 @@ las grafías del vault y los globs, expandidos y como patrón), al modo de ``raw
   tampoco en bloque. Leerlos sí. Y ``trovefy checkout aprobar`` (H2) lo ejecuta solo el usuario en su terminal: se
   deniega cualquier Bash que lo lance (``uv run``, ``python -m``, ``script``, ``unbuffer``, ``expect``, ``pty``,
   ``cli.main([...])``) o importe ``checkout.mcp_cli``/``hay_terminal`` (salvo un segmento de solo lectura/desarrollo).
+- Las excepciones aprobadas por el usuario (``productos/*/decisiones/*-excepcion-*.md``: las del cierre del checkout,
+  plan 19, Tarea 16, y la de R16): solo las escriben ``trovefy checkout excepcion`` y ``trovefy modelar excepcion``
+  con sus palabras; ni Write/Edit/MultiEdit/NotebookEdit ni Bash, tampoco en bloque. Leerlas sí.
 - ``.trovefy/STOP``: crearlo sí; borrarlo o moverlo no (lo quita el usuario).
 - ``git checkout|restore|stash|reset|clean|switch…`` con el vault como directorio (cwd, ``cd``, ``-C``) o
   sobre una ruta del vault cuentan como escritura y se deniegan.
@@ -122,6 +125,9 @@ MOTIVO_GIT = ("git checkout/restore/stash/reset/clean sobre el vault puede reesc
 MOTIVO_CHECKOUT = ("el plan del MCP, su aprobación, el estado, la comprobación, CHECKOUT.md y el historial "
                    "checkout/<PAIS>/mcp/ solo los escribe `trovefy checkout …`: no se crean, editan, mueven ni borran "
                    "a mano")
+MOTIVO_EXCEPCION = ("las excepciones aprobadas (decisiones/*-excepcion-*.md) las aprueba el usuario con sus palabras y "
+                    "solo las escriben `trovefy checkout excepcion` y `trovefy modelar excepcion`: no se crean, editan, "
+                    "mueven ni borran a mano")
 MOTIVO_APROBAR = ("`trovefy checkout aprobar` (tu «sí» al plan del MCP) lo ejecutas tú en tu terminal, fuera de "
                   "Claude, con la frase del resumen: Claude no lo ejecuta (ni con script, unbuffer, expect o pty)")
 
@@ -173,6 +179,8 @@ _QC_NOMBRE = re.compile(r"(?:QC\.md|\.QC\.md\.lock|.*\.pdf)", re.IGNORECASE)
 _CHECKOUT_MCP = tuple(("productos", "*", "checkout", "*", nombre) for nombre in (
     "APROBACION.md", "PLAN-MCP.json", "PLAN-MCP.md", "MCP-ESTADO.json", "COMPROBACION.md", "CHECKOUT.md")) + (
     ("productos", "*", "checkout", "*", "mcp", "**"),)
+# Tarea 16 del 19: una excepción aprobada vale solo con las palabras del usuario; ni Claude ni nadie la escribe a mano.
+_EXCEPCIONES = (("productos", "*", "decisiones", "*-excepcion-*.md"),)
 _QC_MAX_RECORRIDO = 5000
 
 # Clases de escritura de cada ruta alcanzada por un comando.
@@ -474,6 +482,8 @@ def _bash_rutas(original: str, c: str, cwd: str | None) -> str | None:
                 return MOTIVO_QC
             if _toca(partes, _CHECKOUT_MCP, en_bloque):
                 return MOTIVO_CHECKOUT
+            if _toca(partes, _EXCEPCIONES, en_bloque):
+                return MOTIVO_EXCEPCION
             if clase in _QUITA and _toca(partes, _STOP, True):
                 return MOTIVO_STOP
             if any(coincide_patron(partes, p) for p in _PRODUCTO):
@@ -810,6 +820,8 @@ def _escritura(nombre: str, datos: dict, cwd: str | None) -> tuple[str, str]:
         return "deny", MOTIVO_EVIDENCIA
     if any(coincide_patron(partes, p) for p in _CHECKOUT_MCP):
         return "deny", MOTIVO_CHECKOUT
+    if any(coincide_patron(partes, p) for p in _EXCEPCIONES):
+        return "deny", MOTIVO_EXCEPCION
     if len(partes) < 3 or partes[0] != "productos":
         return "allow", ""
     if partes[2] == "entregable" and (partes[-1] == "costes.csv" or partes[-1] in _ARCHIVOS_GASTO):

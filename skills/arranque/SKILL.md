@@ -42,6 +42,11 @@ Pasos:
    `trovefy arranque bloqueado NN --motivo "saltado por el usuario: <riesgo>"`.
 8. **Al terminar el paso**, vuelve a `trovefy arranque siguiente` y propón el que viene.
 
+## Paso 11 (Dataset/píxel, fase 2)
+
+- El paso 11 no se guía desde aquí: **remite a `/trovefy:tracking`**, que da el nombre exacto del dataset y los pasos que hace el usuario (crear el dataset en Meta, pegar el Pixel ID y el token CAPI en su panel). Lee `references/pasos/11-dataset.md` y dile al usuario que lance `/trovefy:tracking <p-id> <PAÍS>` cuando el país esté en `con_landing`.
+- Cuando `/trovefy:tracking` diga que el píxel está puesto, ejecuta `trovefy arranque verificar 11` (sin navegador: lee `TRACKING.md`).
+
 ## Fase 1
 
 - Los pasos 12, 13, 14 y 18 se verifican siempre con `trovefy arranque verificar NN` (sin navegador) y solo cuentan `verificado`.

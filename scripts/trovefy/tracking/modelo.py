@@ -26,6 +26,9 @@ Emisor = Literal["impultienda", "landing", "worker", "ninguno"]
 EMISORES: tuple[str, ...] = ("impultienda", "landing", "worker", "ninguno")
 ESTADOS: tuple[str, ...] = ("pendiente", "dataset", "configurado", "verificado", "no_verificado")
 MAX_NOMBRE = 50
+# Eventos que un emisor no envía nunca porque no existen en su plataforma: no se exigen en Test Events. La tienda de
+# Impultienda no tiene ViewContent (lo documenta Impultienda: su tienda nunca lo envía); InitiateCheckout sí.
+NO_LOS_ENVIA: dict[str, frozenset[str]] = {"impultienda": frozenset({"ViewContent"})}
 
 # Sistema oficial búlgaro de transliteración (Ley de transliteración, 2009).
 _BG = {
@@ -130,6 +133,23 @@ def validar_emisores(tabla: dict) -> list[str]:
         elif emisor == "ninguno" and evento == "Purchase":
             problemas.append("Purchase: sin emisor no hay compra que optimizar")
     return problemas
+
+
+def eventos_exigidos(emisores: dict | None) -> tuple[str, ...]:
+    """Los eventos de §4.9 que tienen que llegar en la prueba: todos menos los que su emisor no envía nunca
+    (`NO_LOS_ENVIA`; ViewContent con la tienda de Impultienda). Sin tabla de emisores, los cuatro."""
+    if not isinstance(emisores, dict):
+        return EVENTOS
+    exigidos = []
+    for evento in EVENTOS:
+        emisor = emisores.get(evento)
+        if isinstance(emisor, (list, tuple, set, frozenset)):
+            distintos = {str(x) for x in emisor}
+            emisor = distintos.pop() if len(distintos) == 1 else None
+        if isinstance(emisor, str) and evento in NO_LOS_ENVIA.get(emisor, frozenset()):
+            continue
+        exigidos.append(evento)
+    return tuple(exigidos)
 
 
 # Llamadas al píxel de Meta en un HTML (L-8): `fbq(` (no «fbqueue»), el script fbevents.js y el <img> de /tr.
