@@ -127,7 +127,7 @@ def test_primera_etapa_con_ids_de_las_lecturas(zz):
 def test_ajuste_sin_herramienta_va_a_mano(zz):
     _, _, plan = _plan(zz, _catalogo_con({"impultienda_precio_por_pais"}))
     manuales = {a.clave for a in plan.manuales}
-    assert {"producto.front.precio", "postcompra.u1.precio", "emails.entrega", "checkout.plantilla"} <= manuales
+    assert {"producto.front.precio", "postcompra.u1.precio", "checkout.plantilla"} <= manuales
     assert "es prohibida" in plan.motivos_manuales["producto.front.precio"]
     assert all(o.herramienta != "impultienda_precio_por_pais" for o in plan.operaciones)
     assert all(e.herramienta != "impultienda_precio_por_pais" for e in plan.pendientes)

@@ -637,7 +637,13 @@ class _Receta:
             validar_email,  # emails importa de este módulo
         )
 
-        claves = ["entrega"] + (["seguimiento_72h"] if self.o.email_72h else [])
+        # El mail de entrega lo arma Impultienda solo (logo, colores y nombre de la tienda), en el idioma del
+        # comprador, y no tiene campos para editar su texto (FAQ «entrega-mails.emails-al-comprador-vista-previa»):
+        # no es un ajuste de la receta. Que llega con el PDF lo prueba la compra de prueba (evidencia
+        # «email-entrega»).
+        self.avisos.append("el email de entrega lo arma Impultienda (no se edita): sale en el idioma del comprador "
+                           "y llega con el PDF; se prueba con la compra de prueba")
+        claves = ["seguimiento_72h"] if self.o.email_72h else []
         for clave in claves:
             ruta = self.emails.get(clave)
             rel = f"checkout/{self.ctx.pais}/emails/{clave}.md"
@@ -648,9 +654,7 @@ class _Receta:
             if problemas:
                 self.avisos.append(f"el email {clave} no vale: {'; '.join(problemas)}")
                 continue
-            motivo = ("lo pegas tú en tu panel: el conector no tiene herramienta para el texto de los emails"
-                      if clave == "entrega" else
-                      "desvío (e), solo con aprobación: pide una reseña a las 72 h")
+            motivo = "desvío (e), solo con aprobación: pide una reseña a las 72 h"
             self.poner(f"emails.{clave}", Path(ruta), motivo, None, False)
 
 
