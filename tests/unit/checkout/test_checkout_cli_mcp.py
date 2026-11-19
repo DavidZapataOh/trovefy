@@ -217,7 +217,7 @@ def test_secuencia_completa_por_etapas(entorno, tmp_path, capsys):
     assert meta["estado"] in ("a_medias", "completo")
     assert meta["catalogo_huella"] and meta["plan_huella"]
     assert "| producto.front.precio | 13.90 |" in cuerpo
-    assert "## A mano" in cuerpo and "emails.entrega" in cuerpo and "checkout.plantilla" in cuerpo
+    assert "## A mano" in cuerpo and "checkout.plantilla" in cuerpo
     assert "no disponible" in cuerpo
     prod, _ = frontmatter.leer(v / "productos" / P / "PRODUCTO.md")
     co = prod["paises"][PAIS]["checkout"]

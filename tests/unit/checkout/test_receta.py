@@ -118,7 +118,8 @@ def test_receta_por_defecto_sigue_a_los_videos(zz):
     assert _por_clave(aj)["tienda.nombre"].valor == "Somatix"
     assert _por_clave(aj)["checkout.campos"].valor == "email,nombre,telefono"  # teléfono: sí (ruling)
     assert _por_clave(aj)["checkout.idioma"].valor == "bg"
-    assert "emails.entrega" in claves and "emails.seguimiento_72h" not in claves
+    assert "emails.entrega" not in claves and "emails.seguimiento_72h" not in claves
+    assert any("lo arma Impultienda" in a for a in av)
     assert not any(c.startswith("downsell.") for c in claves)
     assert any("downsell" in a and "R-c" in a for a in av)
 
@@ -286,11 +287,12 @@ def test_sin_pdf_front_error(tmp_path):
         ajustes_de_checkout(cargar_contexto(v, P, PAIS), MAX, emails, OpcionesReceta("Max"))
 
 
-def test_sin_email_de_entrega_no_medido(zz):
+def test_email_de_entrega_no_es_ajuste(zz):
+    """El mail de entrega no se edita en Impultienda: no se pide ni como ajuste ni como «no medido»."""
     ctx, _ = zz
     aj, av = ajustes_de_checkout(ctx, MAX, {}, OpcionesReceta("Max"))
     assert "emails.entrega" not in {a.clave for a in aj}
-    assert any(a.startswith("no medido") and "entrega" in a for a in av)
+    assert not any(a.startswith("no medido") and "entrega" in a for a in av)
 
 
 def test_email_72h_opcion(zz):
