@@ -81,8 +81,8 @@ def registrar_excepcion_activar(vault: Path, p_id: str, pais: str, gate: str, pa
             "pais": pais, "gate": gate, "motivo": motivo.strip(), "palabras_del_usuario": palabras.strip()}
     cuerpo = "\n".join([
         f"# Activar con excepción · {gate} · {p_id} · {pais} ({hoy})", "",
-        f"El usuario admite activar campañas con la excepción aprobada del gate «{gate}» de /listo. No cuenta como "
-        "verde.", "", f"Motivo: {motivo.strip()}", "", "Palabras del usuario (cita literal):", "",
+        (f"El usuario admite activar campañas con la excepción aprobada del gate «{gate}» de /listo. No cuenta como "
+         "verde."), "", f"Motivo: {motivo.strip()}", "", "Palabras del usuario (cita literal):", "",
         *(f"> {x}" if x else ">" for x in palabras.strip().split("\n")), ""])
     carpeta = _carpeta(vault, p_id)
     carpeta.mkdir(parents=True, exist_ok=True)

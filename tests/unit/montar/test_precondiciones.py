@@ -8,7 +8,11 @@ import pytest
 from trovefy.listo import GATES
 from trovefy.listo.gates import Gate
 from trovefy.listo.veredicto import InformeListo, listo_para_activar
-from trovefy.montar.precondiciones import comprobar, excepciones_para_activar, registrar_excepcion_activar
+from trovefy.montar.precondiciones import (
+    comprobar,
+    excepciones_para_activar,
+    registrar_excepcion_activar,
+)
 from trovefy.vault import frontmatter
 from trovefy.vault.producto import actualizar_producto
 
