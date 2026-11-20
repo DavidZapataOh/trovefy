@@ -364,17 +364,10 @@ test.conjuntos:
   regla: R-007
 
 test.spend_cap_usd:
-  valor: 30
-  fuente: "Usuario (PU-01, 2026-11-09): «matar el producto a los ~US$ 25 sin ventas»; [D-09]"
-  fecha: "2026-11-09"
-  gana_sobre: "100 USD (documento ABO, C1 18:10)"
-  regla: R-007
-
-test.spend_cap_prorroga_usd:
-  valor: 55
-  fuente: "[D-09]"
-  fecha: "2026-11-09"
-  gana_sobre: "—"
+  valor: 100
+  fuente: "C1 0:18:10: «5 conjuntos · 1 anuncio c/u · $5 por anuncio · Techo $100 · Plazo 1 semana» (los vídeos son la ley, 2026-11-19)"
+  fecha: "2026-11-19"
+  gana_sobre: "30 USD con prórroga a 55 (D-09), que no están en los vídeos"
   regla: R-007
 
 roas.apagar:

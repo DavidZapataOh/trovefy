@@ -34,8 +34,8 @@ def tras_montaje(estado: str, resultado: ResultadoLike) -> Paso:
         return Paso("montado")
     if resultado.estado in ("fallida", "discrepancia"):
         if resultado.parcial or resultado.estado == "discrepancia":
-            return Paso(None, ("estado parcial: el ejecutor pudo dejar algo creado en PAUSED; revísalo en el "
-                               "histórico. No se vuelve a montar sin que lo digas.",))
+            return Paso(None, (("estado parcial: el ejecutor pudo dejar algo creado en PAUSED; revísalo en el "
+                                "histórico. No se vuelve a montar sin que lo digas."),))
         return Paso(None, ("el montaje falló sin crear nada: mira el detalle y corrige antes de volver a montar.",))
     return Paso(None, (f"el montaje sigue en {resultado.estado}: espera al ejecutor.",))
 
@@ -47,8 +47,8 @@ def tras_activar(estado: str, resultado: ResultadoLike) -> Paso:
     if resultado.estado == "ejecutada":
         return Paso("test")
     if resultado.estado == "rechazada":
-        return Paso(None, ("rechazaste «Activar»: la campaña sigue en PAUSED (no se borra). Tu motivo queda como "
-                           "veto de los creativos.",), veto=True)
+        return Paso(None, (("rechazaste «Activar»: la campaña sigue en PAUSED (no se borra). Tu motivo queda como "
+                            "veto de los creativos."),), veto=True)
     if resultado.estado == "caducada":
         return Paso(None, ("la propuesta de activar caducó sin tocar nada; cuando quieras: `trovefy montar activar`.",))
     if resultado.estado == "discrepancia":

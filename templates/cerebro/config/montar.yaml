@@ -1,0 +1,21 @@
+# Montaje del test (/montar, plan 22). Cada hoja lleva {valor, fuente, fecha} (resolución 12).
+# Lo que aún no ha decidido el usuario queda con el valor por defecto del plan o en null («no medido»).
+# Claude no edita este archivo sin la palabra del usuario. El techo (US$ 100) y la estructura (5 × US$ 5) viven en
+# config/umbrales.yaml (test.*, regla R-007).
+dsa:
+  # Meta exige beneficiario y pagador en los conjuntos dirigidos a la UE (DSA). Desvío de plataforma: los vídeos no lo
+  # muestran. Escríbelos tal como figuran en Meta (tu nombre o el de la marca); sin ellos no se monta en la UE.
+  beneficiario: {valor: null, fuente: "no medido: lo decide el usuario (pregunta P3 del plan 22)", fecha: "2026-11-20"}
+  pagador: {valor: null, fuente: "no medido: lo decide el usuario (pregunta P3 del plan 22)", fecha: "2026-11-20"}
+salida:
+  hora_local: {valor: "00:00", fuente: "L1 0:58:29: salida programada a las 00:00; en la zona de la cuenta (desvío D2)", fecha: "2026-11-20"}
+  zona: {valor: America/Bogota, fuente: "[D-37]: la cuenta publicitaria está en Bogotá; Meta programa en esa zona", fecha: "2026-11-20"}
+  margen_min_h: {valor: 2, fuente: "añadido (no cambia el método): si faltan menos de 2 h para las 00:00, sale la del día siguiente", fecha: "2026-11-20"}
+plazo_dias: {valor: 7, fuente: "C1 0:18:10: «Techo $100 · Plazo 1 semana»", fecha: "2026-11-20"}
+ubicaciones_excluidas: {valor: [audience_network, threads], fuente: "L1 0:56:40: Audience Network y Threads fuera", fecha: "2026-11-20"}
+# El botón del anuncio sale de la columna cta del manifest.csv (/creativos); este solo se usa si la fila no trae cta.
+cta_por_defecto: {valor: LEARN_MORE, fuente: "§5.2 (ejemplo); el botón lo decide el usuario", fecha: "2026-11-20"}
+segmentacion:
+  # auto: el sexo del avatar de OFERTA.md si es uno solo (L2 0:19:35 «Rumania · Women»); si no, todos.
+  # El usuario puede fijarlo: todos | mujeres | hombres.
+  sexo: {valor: auto, fuente: "L1 0:56:23 (país + idioma, sin edad ni intereses) y L2 0:19:35 (sexo del avatar)", fecha: "2026-11-20"}

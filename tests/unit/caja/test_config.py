@@ -27,8 +27,8 @@ def test_plantilla_carga(tmp_path):
     c = cargar_caja(v)
     assert c.sobres == {"herramientas": 2000, "tests": 28000, "reserva": 20000}
     assert c.capital == 50000
-    assert c.techo_test == 3000
-    assert c.prorroga_hasta == 5500
+    assert c.techo_test == 10000
+    assert c.prorroga_hasta == 10000
     assert c.tope_diario_ejecutor == 5000
     assert c.apimart_aviso == 100
     assert c.reserva_desbloqueada is False

@@ -10,11 +10,11 @@ PLANTILLA = pathlib.Path(__file__).resolve().parents[3] / "templates/cerebro/con
 def test_semilla_carga_y_respeta_pu01():
     u = cargar(PLANTILLA)
     assert u["corte.oferta.sin_ventas_usd"].valor == 25
-    assert u["test.spend_cap_usd"].valor == 30
-    assert u["test.spend_cap_prorroga_usd"].valor == 55
+    assert u["test.spend_cap_usd"].valor == 100
+    assert "test.spend_cap_prorroga_usd" not in u
     assert u["caza.perfil.tomi.c8_min"].valor == 15
     assert u["caza.precio.min_usd"].valor == 10
-    assert len(u) == 68
+    assert len(u) == 67
 
 
 def test_umbral_incompleto_falla_con_nombre(tmp_path):
