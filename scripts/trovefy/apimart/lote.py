@@ -26,12 +26,13 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import stat
 import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -86,6 +87,51 @@ _OBLIGATORIAS = _CLAVES - {"referencias"}
 
 
 @dataclass(frozen=True)
+class Destino:
+    """Dónde va un lote (plan 21, Tarea 4): el entregable de ``/producto`` o una tanda de ``/creativos``.
+
+    ``raiz_libro`` guarda el libro del gasto, los intentos y el cerrojo; ``raiz_medios(pieza)`` es la raíz cuyo
+    ``medios/`` recibe las imágenes; ``tope()`` se lee dentro del cerrojo; ``permiso()`` da el motivo para no
+    enviar nada (``None`` si se puede: el coste aprobado por el usuario, en las tandas).
+    """
+    nombre: str
+    raiz_libro: Path
+    raiz_medios: Callable[[str], Path]
+    pieza_valida: re.Pattern[str]
+    tope: Callable[[], Decimal]
+    skill: str
+    permiso: Callable[[], str | None] = field(default=lambda: None)
+    quien: str | None = None  # cómo se nombra en la alerta de tope (por defecto, el p-id)
+
+
+def destino_entregable(vault: Path, p_id: str, cfg: ConfigProducto | None) -> Destino:
+    """Lo de siempre: ``entregable/``, las piezas de ``rutas.pieza``, el tope de ``tope_de`` y ``/producto``."""
+    vault = Path(vault)
+
+    def tope() -> Decimal:
+        if cfg is None:
+            raise ValueError("falta la configuración del producto para leer el tope")
+        return tope_de(vault, p_id, cfg)
+
+    return Destino("entregable", rutas.entregable(vault, p_id), lambda pieza: rutas.pieza(vault, p_id, pieza).raiz,
+                   rutas.PIEZA, tope, SKILL)
+
+
+ESCENA = re.compile(r"escena")
+
+
+def destino_tanda(vault: Path, p_id: str, pais: str, tanda: str, tope: Decimal,
+                  permiso: Callable[[], str | None] | None = None) -> Destino:
+    """Una tanda de creativos: libro y medios en ``creativos/<PAIS>/<tanda>/`` (las escenas en ``fuente/``)."""
+    rutas.validar_p_id(p_id)
+    if not re.fullmatch(r"[A-Z]{2}", pais or "") or not re.fullmatch(r"t[1-9]\d{0,2}", tanda or ""):
+        raise ValueError(f"país o tanda mal escritos: {pais!r} {tanda!r}")
+    raiz = Path(vault) / "productos" / p_id / "creativos" / pais / tanda
+    return Destino("tanda", raiz, lambda _pieza: raiz / "fuente", ESCENA, lambda: tope, "/creativos",
+                   permiso or (lambda: None), quien=f"{p_id} {pais} {tanda}")
+
+
+@dataclass(frozen=True)
 class ResultadoLote:
     generadas: tuple[str, ...]
     omitidas: tuple[str, ...]
@@ -133,8 +179,8 @@ def _sha(texto: str) -> str:
 
 
 @contextmanager
-def _cerrojo(vault: Path, p_id: str) -> Iterator[None]:
-    ruta = rutas.entregable(vault, p_id) / CERROJO
+def _cerrojo(d: Destino) -> Iterator[None]:
+    ruta = d.raiz_libro / CERROJO
     ruta.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(ruta, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     try:
@@ -144,8 +190,8 @@ def _cerrojo(vault: Path, p_id: str) -> Iterator[None]:
         os.close(fd)  # cerrar suelta el flock
 
 
-def _anotar_intento(vault: Path, p_id: str, intento: str, prompt_sha256: str) -> None:
-    ruta = rutas.entregable(vault, p_id) / INTENTOS
+def _anotar_intento(d: Destino, intento: str, prompt_sha256: str) -> None:
+    ruta = d.raiz_libro / INTENTOS
     linea = json.dumps({"intento": intento, "prompt_sha256": prompt_sha256}, sort_keys=True) + "\n"
     fd = os.open(ruta, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o644)
     with os.fdopen(fd, "a", encoding="utf-8") as f:
@@ -154,8 +200,8 @@ def _anotar_intento(vault: Path, p_id: str, intento: str, prompt_sha256: str) ->
         os.fsync(f.fileno())
 
 
-def _intentos(vault: Path, p_id: str) -> dict[str, str]:
-    ruta = rutas.entregable(vault, p_id) / INTENTOS
+def _intentos(d: Destino) -> dict[str, str]:
+    ruta = d.raiz_libro / INTENTOS
     if not ruta.is_file():
         return {}
     salida = {}
@@ -247,16 +293,16 @@ def _real_positivo(coste: Decimal | None) -> Decimal | None:
 
 
 def _cerrar_tarea(vault: Path, p_id: str, base: FilaCoste, estado: EstadoTarea, prompt_sha256: str,
-                  abrir_publico, ahora: Callable[[], datetime], cuenta: _Cuenta) -> None:
+                  abrir_publico, ahora: Callable[[], datetime], cuenta: _Cuenta, d: Destino) -> None:
     """Anota el final de una tarea sondeada: descarga y registro si está completada."""
     imagen = base.imagen
     if estado.estado == "fallida":
         anotar_coste(vault, p_id, replace(base, fecha=ahora(), estado="fallida", coste_real_usd=estado.coste_real_usd,
-                                          archivo=""))
+                                          archivo=""), d.raiz_libro)
         cuenta.fallidas.append(imagen)
         return
     if estado.estado == "pendiente":
-        anotar_coste(vault, p_id, replace(base, fecha=ahora(), estado="pendiente", archivo=""))
+        anotar_coste(vault, p_id, replace(base, fecha=ahora(), estado="pendiente", archivo=""), d.raiz_libro)
         cuenta.pendientes.append(imagen)
         return
     try:
@@ -266,10 +312,11 @@ def _cerrar_tarea(vault: Path, p_id: str, base: FilaCoste, estado: EstadoTarea, 
     except ErrorApimart:
         # Completada en APIMart pero sin descargar: se reintenta con --reanudar (mismo task_id).
         anotar_coste(vault, p_id, replace(base, fecha=ahora(), estado="pendiente",
-                                          coste_real_usd=_real_positivo(estado.coste_real_usd), archivo=""))
+                                          coste_real_usd=_real_positivo(estado.coste_real_usd), archivo=""),
+                     d.raiz_libro)
         cuenta.pendientes.append(imagen)
         return
-    raiz = rutas.pieza(vault, p_id, base.pieza).raiz
+    raiz = d.raiz_medios(base.pieza)
     archivo = f"{imagen}.png"
     real = _real_positivo(estado.coste_real_usd)  # un coste real de 0 no se cree: cuenta el estimado
     sha = escribir_medio(raiz / CARPETA / archivo, datos, base=Path(vault))  # sha de los bytes PNG escritos
@@ -277,52 +324,57 @@ def _cerrar_tarea(vault: Path, p_id: str, base: FilaCoste, estado: EstadoTarea, 
                     modelo=base.modelo, prompt_sha256=prompt_sha256, proporcion=base.proporcion,
                     resolucion=base.resolucion, coste_usd=real if real is not None else base.coste_estimado_usd,
                     formato_original=formato_original, sha256_original=hashlib.sha256(original).hexdigest())
-    rel = (raiz / CARPETA / archivo).relative_to(rutas.entregable(vault, p_id)).as_posix()
+    rel = (raiz / CARPETA / archivo).relative_to(d.raiz_libro).as_posix()
     anotar_coste(vault, p_id, replace(base, fecha=ahora(), estado="completada", coste_real_usd=real,
-                                      sha256=sha, archivo=rel))
+                                      sha256=sha, archivo=rel), d.raiz_libro)
     cuenta.generadas.append(imagen)
     cuenta.archivos.append(rel)
 
 
-def _log(vault: Path, p_id: str, que: str, cuenta: _Cuenta, ahora: Callable[[], datetime]) -> None:
-    archivos = [f"productos/{p_id}/entregable/costes.csv", *(f"productos/{p_id}/entregable/{a}" for a in cuenta.archivos)]
-    anadir_log(vault, SKILL, que, archivos, ahora=ahora())
+def _log(vault: Path, d: Destino, que: str, cuenta: _Cuenta, ahora: Callable[[], datetime]) -> None:
+    base = d.raiz_libro.relative_to(vault).as_posix()
+    archivos = [f"{base}/costes.csv", *(f"{base}/{a}" for a in cuenta.archivos)]
+    anadir_log(vault, d.skill, que, archivos, ahora=ahora())
 
 
 def generar_imagenes(vault: Path, p_id: str, peticiones: list[PeticionImagen], *, cred: Credenciales,
                      cfg: ConfigProducto, precio: Precio | None, abrir, abrir_publico, dormir=time.sleep,
                      ahora: Callable[[], datetime], simular: bool = False, depositar=fuentes.depositar,
-                     reloj=time.monotonic) -> ResultadoLote:
+                     reloj=time.monotonic, destino: Destino | None = None) -> ResultadoLote:
     """Genera las imágenes de ``peticiones`` dentro del tope del producto. Ver el orden en el módulo.
 
     ``PeticionInvalida`` (antes de tocar nada) si una petición no vale o su resolución no es la del precio.
     """
     vault = Path(vault)
     rutas.validar_p_id(p_id)
+    d = destino or destino_entregable(vault, p_id, cfg)
     cuenta = _cuenta()
     if (vault / ".trovefy" / "STOP").exists():
         return cuenta.resultado(MOTIVO_STOP)
     if precio is None:
         return cuenta.resultado(MOTIVO_SIN_PRECIO)
+    if not simular and (sin_permiso := d.permiso()):
+        return cuenta.resultado(sin_permiso)
     ids = [(p.pieza, p.id) for p in peticiones]
     if len(set(ids)) != len(ids):
         raise PeticionInvalida("hay ids de imagen repetidos en una misma pieza del lote")
     for p in peticiones:
-        validar(p, leer_manifiesto(rutas.pieza(vault, p_id, p.pieza).raiz) if rutas.PIEZA.fullmatch(p.pieza) else {})
+        validar(p, leer_manifiesto(d.raiz_medios(p.pieza)) if d.pieza_valida.fullmatch(p.pieza) else {},
+                d.pieza_valida)
         if p.resolucion != precio.resolucion:
             raise PeticionInvalida(f"{p.id}: el precio medido es de {precio.resolucion}, no de {p.resolucion}")
     estimado = precio.usd_por_imagen
-    with _cerrojo(vault, p_id):
-        tope = tope_de(vault, p_id, cfg)
+    with _cerrojo(d):
+        tope = d.tope()
         simulado = Decimal(0)
         for i, p in enumerate(peticiones):
-            raiz = rutas.pieza(vault, p_id, p.pieza).raiz
+            raiz = d.raiz_medios(p.pieza)
             manifiesto = leer_manifiesto(raiz)
             prompt_sha = _sha(p.prompt)
             if _ya_generada(manifiesto, p):
                 cuenta.omitidas.append(p.id)
                 continue
-            filas = leer_costes(vault, p_id)
+            filas = leer_costes(vault, p_id, d.raiz_libro)
             bloqueo = _bloqueo(filas, p.pieza, p.id)
             if bloqueo == "sin_respuesta":
                 cuenta.bloqueada(p.id)
@@ -338,18 +390,19 @@ def generar_imagenes(vault: Path, p_id: str, peticiones: list[PeticionImagen], *
             try:
                 comprobar_tope(gastado, estimado, tope)
             except TopeSuperado as exc:
-                faltan = 1 + sum(1 for q in peticiones[i + 1:] if _falta(vault, p_id, q, filas))
+                faltan = 1 + sum(1 for q in peticiones[i + 1:] if _falta(d, q, filas))
                 motivo = (f"tope: gastado {exc.gastado} USD + {exc.estimado} USD superaría el tope de {exc.tope} USD; "
                           f"faltan {faltan} imágenes")
                 if simular:
                     return cuenta.resultado(motivo)
                 alerta = avisar_tope(vault, p_id, gastado, tope, faltan, estimado * faltan, ahora(), depositar,
                                      pieza=p.pieza, imagen=p.id, modelo=precio.modelo, resolucion=p.resolucion,
-                                     proporcion=p.proporcion, fuente_precio=precio.fuente)
-                _log(vault, p_id, f"{p_id}: lote de imágenes detenido por el tope de APIMart", cuenta, ahora)
+                                     proporcion=p.proporcion, fuente_precio=precio.fuente, raiz=d.raiz_libro,
+                                     origen=d.skill, quien=d.quien)
+                _log(vault, d, f"{p_id}: lote de imágenes detenido por el tope de APIMart", cuenta, ahora)
                 return cuenta.resultado(motivo, alerta)
             if simular:
-                anotar_coste(vault, p_id, replace(base, estado="simulada"))
+                anotar_coste(vault, p_id, replace(base, estado="simulada"), d.raiz_libro)
                 simulado += estimado
                 continue
             urls: list[str] = []
@@ -358,84 +411,87 @@ def generar_imagenes(vault: Path, p_id: str, peticiones: list[PeticionImagen], *
                     verificado = leer_manifiesto(raiz, verificar=True)
                     refs = [(verificado[r], _leer_referencia(raiz, verificado[r])) for r in p.referencias]
                 except (KeyError, OSError, ValueError) as exc:
-                    _log(vault, p_id, f"{p_id}: lote detenido: referencias que no cuadran con el manifiesto",
+                    _log(vault, d, f"{p_id}: lote detenido: referencias que no cuadran con el manifiesto",
                          cuenta, ahora)
                     return cuenta.resultado(_sin_clave(f"las referencias de {p.id} no cuadran con el manifiesto "
                                                        f"({exc}); no se envió nada", cred))
                 for entrada, datos_ref in refs:
                     if _stop(vault):
-                        return _parar_por_stop(vault, p_id, cuenta, ahora)
+                        return _parar_por_stop(vault, d, p_id, cuenta, ahora)
                     try:
                         urls.append(subir(cred, raiz / CARPETA / entrada["archivo"], vault, abrir, ahora(),
                                           datos=datos_ref))
                     except (ErrorApimart, OSError, ValueError) as exc:
-                        _log(vault, p_id, f"{p_id}: lote detenido al subir referencias", cuenta, ahora)
+                        _log(vault, d, f"{p_id}: lote detenido al subir referencias", cuenta, ahora)
                         return cuenta.resultado(_sin_clave(f"no se pudieron subir las referencias de {p.id}: {exc}; "
                                                            "no se envió nada", cred))
             if _stop(vault):
-                return _parar_por_stop(vault, p_id, cuenta, ahora)
+                return _parar_por_stop(vault, d, p_id, cuenta, ahora)
             # Primero la fila del gasto y después la del prompt (ruling de la Tarea 13): un corte entre las dos
             # deja el gasto registrado; nunca una línea de intento sin su fila en costes.csv.
-            anotar_coste(vault, p_id, base)
-            _anotar_intento(vault, p_id, base.intento, prompt_sha)
+            anotar_coste(vault, p_id, base, d.raiz_libro)
+            _anotar_intento(d, base.intento, prompt_sha)
             try:
                 task_id = enviar(cred, cuerpo_envio(p, precio.modelo, urls), abrir)
             except (ErrorApimart, OSError) as exc:
-                _log(vault, p_id, f"{p_id}: lote detenido: envío sin respuesta", cuenta, ahora)
+                _log(vault, d, f"{p_id}: lote detenido: envío sin respuesta", cuenta, ahora)
                 return cuenta.resultado(_sin_clave(
                     f"envío de {p.id}: {MOTIVO_SIN_RESPUESTA} ({exc}). Cuenta como gastado y no se reenvía solo; "
                     "si en el panel no hay tarea, descártala para reenviarla", cred))
             base = replace(base, task_id=task_id)
-            anotar_coste(vault, p_id, replace(base, fecha=ahora(), estado="enviada"))
+            anotar_coste(vault, p_id, replace(base, fecha=ahora(), estado="enviada"), d.raiz_libro)
             estado = esperar(cred, task_id, abrir, dormir, reloj)
-            _cerrar_tarea(vault, p_id, base, estado, prompt_sha, abrir_publico, ahora, cuenta)
+            _cerrar_tarea(vault, p_id, base, estado, prompt_sha, abrir_publico, ahora, cuenta, d)
         que = "simulación del lote de imágenes" if simular else "lote de imágenes de APIMart"
-        _log(vault, p_id, f"{p_id}: {que} ({len(cuenta.generadas)} generadas, {len(cuenta.omitidas)} omitidas, "
+        _log(vault, d, f"{p_id}: {que} ({len(cuenta.generadas)} generadas, {len(cuenta.omitidas)} omitidas, "
                           f"{len(cuenta.pendientes)} pendientes, {len(cuenta.fallidas)} fallidas)", cuenta, ahora)
     return cuenta.resultado()
 
 
-def _falta(vault: Path, p_id: str, p: PeticionImagen, filas: list[FilaCoste]) -> bool:
+def _falta(d: Destino, p: PeticionImagen, filas: list[FilaCoste]) -> bool:
     """¿Esta petición se enviaría (no está generada ni bloqueada)? Para contar las que faltan."""
-    if _ya_generada(leer_manifiesto(rutas.pieza(vault, p_id, p.pieza).raiz), p):
+    if _ya_generada(leer_manifiesto(d.raiz_medios(p.pieza)), p):
         return False
     return _bloqueo(filas, p.pieza, p.id) is None
 
 
-def _parar_por_stop(vault: Path, p_id: str, cuenta: _Cuenta, ahora: Callable[[], datetime]) -> ResultadoLote:
-    _log(vault, p_id, f"{p_id}: lote de imágenes detenido por STOP", cuenta, ahora)
+def _parar_por_stop(vault: Path, d: Destino, p_id: str, cuenta: _Cuenta,
+                    ahora: Callable[[], datetime]) -> ResultadoLote:
+    _log(vault, d, f"{p_id}: lote de imágenes detenido por STOP", cuenta, ahora)
     return cuenta.resultado(MOTIVO_STOP)
 
 
 def reanudar(vault: Path, p_id: str, *, cred: Credenciales, abrir, abrir_publico, dormir=time.sleep,
-             ahora: Callable[[], datetime], reloj=time.monotonic) -> ResultadoLote:
+             ahora: Callable[[], datetime], reloj=time.monotonic, destino: Destino | None = None) -> ResultadoLote:
     """Sondea los intentos cuya última fila es ``pendiente`` o ``enviada`` con ``task_id`` y completa la
     descarga. Nunca reenvía. Los POST sin respuesta (``enviando``) salen como pendientes con su aviso.
     STOP se mira antes de cada sondeo."""
     vault = Path(vault)
     rutas.validar_p_id(p_id)
+    d = destino or destino_entregable(vault, p_id, None)
     cuenta = _cuenta()
     if _stop(vault):
         return cuenta.resultado(MOTIVO_STOP)
-    with _cerrojo(vault, p_id):
-        prompts = _intentos(vault, p_id)
-        ultimas = list(_ultimas(leer_costes(vault, p_id)).values())
+    with _cerrojo(d):
+        prompts = _intentos(d)
+        ultimas = list(_ultimas(leer_costes(vault, p_id, d.raiz_libro)).values())
         for f in ultimas:
             if f.estado == "enviando":
                 cuenta.bloqueada(f.imagen)
         abiertas = [f for f in ultimas if f.estado in ("pendiente", "enviada") and f.task_id]
         for f in abiertas:
             if _stop(vault):
-                return _parar_por_stop(vault, p_id, cuenta, ahora)
+                return _parar_por_stop(vault, d, p_id, cuenta, ahora)
             estado = esperar(cred, f.task_id, abrir, dormir, reloj)
-            _cerrar_tarea(vault, p_id, f, estado, prompts.get(f.intento, ""), abrir_publico, ahora, cuenta)
+            _cerrar_tarea(vault, p_id, f, estado, prompts.get(f.intento, ""), abrir_publico, ahora, cuenta, d)
         if abiertas:
-            _log(vault, p_id, f"{p_id}: reanuda {len(abiertas)} tareas de APIMart ({len(cuenta.generadas)} generadas)",
+            _log(vault, d, f"{p_id}: reanuda {len(abiertas)} tareas de APIMart ({len(cuenta.generadas)} generadas)",
                  cuenta, ahora)
     return cuenta.resultado()
 
 
-def descartar(vault: Path, p_id: str, pieza: str, imagen: str, *, ahora: Callable[[], datetime]) -> int:
+def descartar(vault: Path, p_id: str, pieza: str, imagen: str, *, ahora: Callable[[], datetime],
+              destino: Destino | None = None) -> int:
     """Descarta el POST sin respuesta de ``pieza``/``imagen`` (``--descartar``): lo marca ``fallida``.
 
     Conserva su estimado en el gasto (pudo cobrarse) y deja que otro lote la reenvíe. Devuelve cuántos
@@ -443,14 +499,15 @@ def descartar(vault: Path, p_id: str, pieza: str, imagen: str, *, ahora: Callabl
     """
     vault = Path(vault)
     rutas.validar_p_id(p_id)
-    with _cerrojo(vault, p_id):
-        bloqueadas = [f for f in _ultimas(leer_costes(vault, p_id)).values()
+    d = destino or destino_entregable(vault, p_id, None)
+    with _cerrojo(d):
+        bloqueadas = [f for f in _ultimas(leer_costes(vault, p_id, d.raiz_libro)).values()
                       if f.pieza == pieza and f.imagen == imagen and f.estado == "enviando"]
         if not bloqueadas:
             raise ValueError(f"{pieza}/{imagen}: no hay ningún envío sin respuesta que descartar")
         for f in bloqueadas:
-            anotar_coste(vault, p_id, replace(f, fecha=ahora(), estado="fallida", coste_real_usd=None))
-        anadir_log(vault, SKILL, f"{p_id}: descarta el envío sin respuesta de {pieza}/{imagen} "
-                                 f"(su estimado sigue contando en el gasto)",
-                   [f"productos/{p_id}/entregable/costes.csv"], ahora=ahora())
+            anotar_coste(vault, p_id, replace(f, fecha=ahora(), estado="fallida", coste_real_usd=None), d.raiz_libro)
+        anadir_log(vault, d.skill, f"{p_id}: descarta el envío sin respuesta de {pieza}/{imagen} "
+                                   f"(su estimado sigue contando en el gasto)",
+                   [(d.raiz_libro / "costes.csv").relative_to(vault).as_posix()], ahora=ahora())
     return len(bloqueadas)

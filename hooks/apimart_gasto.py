@@ -42,6 +42,12 @@ las grafías del vault y los globs, expandidos y como patrón), al modo de ``raw
 - Las excepciones aprobadas por el usuario (``productos/*/decisiones/*-excepcion-*.md``: las del cierre del checkout,
   plan 19, Tarea 16, y la de R16): solo las escriben ``trovefy checkout excepcion`` y ``trovefy modelar excepcion``
   con sus palabras; ni Write/Edit/MultiEdit/NotebookEdit ni Bash, tampoco en bloque. Leerlas sí.
+- Las tandas de creativos (plan 21, Tarea 4): ``trovefy creativos`` también puede llamar a APIMart (tiene su tope y
+  el coste aprobado por el usuario). Su libro (``productos/*/creativos/*/*/{costes.csv,.apimart-intentos.jsonl,
+  .apimart.lock}``), ``QA.md``, ``manifest.csv``, ``TANDA.md`` (guarda la aprobación del coste) y ``medios.json`` solo
+  los escribe ``trovefy creativos``; ``productos/*/creativos/**`` no se borra, mueve ni copia en bloque; y
+  ``decisiones/*-tope-creativos-*.md`` y ``config/creativos.yaml`` no se escriben a mano. Claude solo escribe
+  ``brief.yaml``, ``escenas.yaml`` y ``guiones/*.yaml``.
 - ``.trovefy/STOP``: crearlo sí; borrarlo o moverlo no (lo quita el usuario).
 - ``git checkout|restore|stash|reset|clean|switch…`` con el vault como directorio (cwd, ``cd``, ``-C``) o
   sobre una ruta del vault cuentan como escritura y se deniegan.
@@ -105,6 +111,13 @@ MOTIVO_CLAVE = "claude.env guarda la clave de APIMart: solo la lee `trovefy prod
 MOTIVO_CONF = "~/.config/trovefy guarda las claves: solo lo lee `trovefy …`; ni Read, ni Grep, ni cat"
 MOTIVO_TOPE = "el tope de APIMart solo lo sube `trovefy producto` con la cita literal del usuario"
 MOTIVO_CONFIG = "config/producto.yaml no se edita desde Claude: sus valores los decide el usuario"
+MOTIVO_CONFIG_CREATIVOS = ("config/creativos.yaml no se edita desde Claude: sus topes y precios los decide el "
+                           "usuario")
+MOTIVO_CREATIVOS = ("el libro del gasto, QA.md, manifest.csv, TANDA.md y medios.json de una tanda de creativos solo "
+                    "los escribe `trovefy creativos`; la tanda no se borra, mueve ni copia en bloque. Claude solo "
+                    "escribe brief.yaml, escenas.yaml y guiones/*.yaml")
+MOTIVO_TOPE_CREATIVOS = ("el tope de creativos solo lo fija `trovefy creativos tope` con la cita literal del "
+                         "usuario")
 MOTIVO_PANTALLAS = ("las confirmaciones de pantalla las escribe solo `trovefy landing capturar`, lanzado por el "
                     "usuario en su terminal con la pantalla delante: no se crean, editan, mueven ni borran a mano")
 MOTIVO_CAPTURAR = ("`trovefy landing capturar` (la confirmación de la pantalla) lo ejecuta el usuario en su "
@@ -136,7 +149,7 @@ _MENCION = re.compile(
 _CLAUDE_ENV = re.compile(r"claude\.env", re.IGNORECASE)
 _TOPE = re.compile(r"apimart_tope_usd", re.IGNORECASE)
 _TOPE_SUELTO = re.compile(r"tope", re.IGNORECASE)
-_TROVEFY = re.compile(r"(?:uv\s+run\s+)?trovefy\s+producto(?:\s|$)")
+_TROVEFY = re.compile(r"(?:uv\s+run\s+)?trovefy\s+(?:producto|creativos)(?:\s|$)")
 _TROVEFY_CUALQUIERA = re.compile(r"(?:uv\s+run\s+)?trovefy(?:\s|$)")
 _LECTURA = re.compile(r"(?:uv\s+run\s+(?:pytest|ruff)|ruff|rg|grep|git\s+(?:log|diff|show|commit))(?:\s|$)")
 _OPCION_PELIGROSA = re.compile(r"--(?:pre|pre-glob|output|ext-diff|textconv|exec)\b")
@@ -165,6 +178,14 @@ _LIBRO = (("productos", "*", "entregable", "costes.csv"),
           ("productos", "*", "entregable", "**", "costes.csv"))
 _DECISION = (("productos", "*", "decisiones", "*-tope-apimart.md"),)
 _CONFIG = (("config", "producto.yaml"),)
+_CONFIG_CREATIVOS = (("config", "creativos.yaml"),)
+# Plan 21: lo que solo escribe `trovefy creativos` dentro de una tanda, y la tanda entera en bloque.
+_CREATIVOS = tuple(("productos", "*", "creativos", "*", "*", nombre) for nombre in (
+    "costes.csv", ".apimart-intentos.jsonl", ".apimart.lock", "QA.md", "manifest.csv", "TANDA.md", "medios.json")) + (
+    ("productos", "*", "creativos", "*", "*", "**", "medios.json"),
+    ("productos", "*", "creativos", "*", "*", "**", "costes.csv"))
+_CREATIVOS_BLOQUE = (("productos", "*", "creativos", "**"),)
+_DECISION_CREATIVOS = (("productos", "*", "decisiones", "*-tope-creativos-*.md"),)
 _PANTALLAS = (("config", "pantallas-confirmadas.yaml"),)  # I-1 del plan 18: la confirmación exige un humano
 _EVIDENCIA = (("config", "evidencia", "p05-*"),)  # F1-4 del plan 18: la sonda y las capturas confirmadas
 _STOP = ((".trovefy", "STOP"),)
@@ -474,6 +495,12 @@ def _bash_rutas(original: str, c: str, cwd: str | None) -> str | None:
                 return MOTIVO_TOPE
             if _toca(partes, _CONFIG, en_bloque):
                 return MOTIVO_CONFIG
+            if _toca(partes, _CONFIG_CREATIVOS, en_bloque):
+                return MOTIVO_CONFIG_CREATIVOS
+            if _toca(partes, _CREATIVOS, en_bloque) or (en_bloque and _toca(partes, _CREATIVOS_BLOQUE, True)):
+                return MOTIVO_CREATIVOS
+            if _toca(partes, _DECISION_CREATIVOS, en_bloque):
+                return MOTIVO_TOPE_CREATIVOS
             if _toca(partes, _PANTALLAS, en_bloque):
                 return MOTIVO_PANTALLAS
             if _toca(partes, _EVIDENCIA, en_bloque):
@@ -814,6 +841,12 @@ def _escritura(nombre: str, datos: dict, cwd: str | None) -> tuple[str, str]:
         return "allow", ""
     if partes == ("config", "producto.yaml"):
         return "deny", MOTIVO_CONFIG
+    if partes == ("config", "creativos.yaml"):
+        return "deny", MOTIVO_CONFIG_CREATIVOS
+    if any(coincide_patron(partes, pat) for pat in _CREATIVOS):
+        return "deny", MOTIVO_CREATIVOS
+    if any(coincide_patron(partes, pat) for pat in _DECISION_CREATIVOS):
+        return "deny", MOTIVO_TOPE_CREATIVOS
     if any(coincide_patron(partes, p) for p in _PANTALLAS):
         return "deny", MOTIVO_PANTALLAS
     if any(coincide_patron(partes, p) for p in _EVIDENCIA):
