@@ -66,7 +66,7 @@ def test_bloqueo_sale_1_con_motivos(entorno, monkeypatch, capsys):
 
 
 def test_validar_deposita_solo_validar(entorno):
-    vault, spool = entorno
+    _vault, spool = entorno
     _main("preparar", *_ids("--tanda", "t1"))
     assert _main("validar", *_ids("--tanda", "t1")) == 0
     d = json.loads(_entrada(spool)[0].read_text())
@@ -316,6 +316,7 @@ def test_plazo_vencido_no_renueva(entorno, monkeypatch, capsys):
     import trovefy.montar.tanda as tanda_mod
 
     monkeypatch.setattr(tanda_mod, "_aprobada", lambda *a: (True, None))
+    monkeypatch.setattr("trovefy.montar.precondiciones.DIAS_DATASET", 30)
     monkeypatch.setattr(montar_cli, "_ahora", lambda: AHORA + dt.timedelta(days=9))
     monkeypatch.setattr(montar_cli, "_trm", lambda v, d: TRM.__class__(TRM.cop_por_usd, d, d))
     escribir_spool(vault, AHORA + dt.timedelta(days=9))

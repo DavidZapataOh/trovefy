@@ -237,6 +237,7 @@ def _registrar_montaje(vault: Path, p_id: str, pais: str, estado: str, trafico: 
         paso = tras_montaje("listo", r) if estado == "listo" else None
         aviso = paso.avisos[0] if paso and paso.avisos else "el montaje no terminó: revisa el histórico"
         lineas.append(f"montaje {r.id}: {r.estado}. {aviso} Detalle: {r.detalle}")
+        _guardar_trafico(vault, p_id, pais, trafico, ahora)
         return trafico, estado
     conjuntos, anuncios = _anuncios(r, m)
     imp = m.get("importes") or {}

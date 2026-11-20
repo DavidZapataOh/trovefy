@@ -88,18 +88,19 @@ def bloque_pais(vault: Path, p_id: str, pais: str) -> dict:
 
 
 def _archivo_seguro(vault: Path, carpeta: Path, rel: str, quien: str, *, lectura_grupo: bool = True) -> Path:
-    """La ruta (relativa al vault) existe, es un archivo regular, no es enlace en ningún tramo y cae dentro de la
-    tanda; con ``lectura_grupo``, el ejecutor (grupo trovefy) puede leerla."""
+    """La ruta (relativa al vault) existe, es un archivo regular, no es enlace en ningún tramo y cae dentro de las
+    tandas del país (``creativos/<PAIS>/``: en una renovación, las reservas que entran siguen en su tanda, plan 21);
+    con ``lectura_grupo``, el ejecutor (grupo trovefy) puede leerla."""
     if not rel or rel.startswith("/") or "\\" in rel or any(p in ("", ".", "..") for p in rel.split("/")):
         raise TandaInvalida(f"{quien}: ruta no válida «{rel}» (relativa al vault, sin «..»)")
     ruta = Path(vault) / rel
+    base = carpeta.parent  # creativos/<PAIS>/
     try:
-        dentro = ruta.parent.resolve(strict=True) == carpeta.resolve(strict=True) or (
-            carpeta.resolve(strict=True) in ruta.parent.resolve(strict=True).parents)
+        dentro = base.resolve(strict=True) in ruta.parent.resolve(strict=True).parents
     except OSError:
         raise TandaInvalida(f"{quien}: no existe {rel}") from None
     if not dentro:
-        raise TandaInvalida(f"{quien}: {rel} no está dentro de la tanda {carpeta.name}")
+        raise TandaInvalida(f"{quien}: {rel} no está dentro de las tandas de creativos/{base.name}/")
     actual = Path(vault)
     for parte in Path(rel).parts:
         actual = actual / parte

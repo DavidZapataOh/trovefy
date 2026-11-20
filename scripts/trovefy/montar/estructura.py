@@ -152,9 +152,7 @@ def construir(ctx: ContextoMontaje, piezas: tuple[PiezaTanda, ...], importes: Im
         "conjuntos": [_conjunto(ctx, p, importes, inicio) for p in piezas],
         "unidad": "minima", "moneda": importes.moneda,
     }
-    if ctx.pais in _paises_ue():
-        d["dsa"] = ctx.cfg.dsa()
-    elif ctx.cfg.dsa_beneficiario and ctx.cfg.dsa_pagador:
+    if ctx.pais in _paises_ue() or ctx.cfg.dsa_beneficiario and ctx.cfg.dsa_pagador:
         d["dsa"] = ctx.cfg.dsa()
     if campana_existente is not None:
         if not _NUM.fullmatch(str(campana_existente)):
@@ -190,19 +188,19 @@ def resumen_en_seco(estructura: dict, importes: Importes, piezas: tuple[PiezaTan
         f"Montaje en seco · {ctx.producto} · {ctx.pais}" + (" · renovación en la misma ABO" if renov else ""),
         f"Cuenta: {_fin4(ctx.cuenta)} ({importes.moneda})",
         f"Campaña: {estructura['campana']['nombre']}" + (f" (ya existe: {_fin4(renov)})" if renov else ""),
-        f"Estructura: ABO · {len(conj)} conjunto{'s' if len(conj) != 1 else ''} × 1 anuncio · objetivo Ventas · "
-        f"evento {EVENTO} del dataset {ctx.dataset_nombre}",
+        (f"Estructura: ABO · {len(conj)} conjunto{'s' if len(conj) != 1 else ''} × 1 anuncio · objetivo Ventas · "
+        f"evento {EVENTO} del dataset {ctx.dataset_nombre}"),
         *texto_importes(importes),
-        f"Total diario: {len(conj)} × {importes.diario_conjunto} = {len(conj) * importes.diario_conjunto} "
-        f"{importes.moneda} (US$ {len(conj) * importes.usd_diario})",
+        (f"Total diario: {len(conj)} × {importes.diario_conjunto} = {len(conj) * importes.diario_conjunto} "
+        f"{importes.moneda} (US$ {len(conj) * importes.usd_diario})"),
         f"País: {ctx.pais} · idioma: {ctx.idioma} · sexo: {sexo} · sin edad ni intereses",
-        f"Fuera: {', '.join(estructura['conjuntos'][0]['ubicaciones_excluidas']) or 'ninguna'} · catálogo de "
-        "productos apagado",
+        (f"Fuera: {', '.join(estructura['conjuntos'][0]['ubicaciones_excluidas']) or 'ninguna'} · catálogo de "
+        "productos apagado"),
         f"Página: {_fin4(ctx.pagina_id)} · DSA: " + (
             f"{estructura['dsa']['beneficiario']} / {estructura['dsa']['pagador']}" if "dsa" in estructura
             else "no hace falta (fuera de la UE)"),
-        f"Salida: {inicio.astimezone(ZoneInfo(ctx.cfg.zona)):%Y-%m-%d %H:%M} ({ctx.cfg.zona}) = "
-        f"{inicio.astimezone(ZoneInfo(ctx.zona_pais)):%Y-%m-%d %H:%M} ({ctx.zona_pais})",
+        (f"Salida: {inicio.astimezone(ZoneInfo(ctx.cfg.zona)):%Y-%m-%d %H:%M} ({ctx.cfg.zona}) = "
+        f"{inicio.astimezone(ZoneInfo(ctx.zona_pais)):%Y-%m-%d %H:%M} ({ctx.zona_pais})"),
         "",
         "Anuncios:",
     ]

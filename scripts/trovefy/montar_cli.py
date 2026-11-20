@@ -191,7 +191,12 @@ def _preparar(args, modo: str = "montar") -> int:
     from trovefy.aprobaciones.fuentes import leer_estado
     from trovefy.config.umbrales import valor
     from trovefy.montar import MontajeInvalido, NoMedido, TandaInvalida
-    from trovefy.montar.estructura import cargar_contexto, construir, huella, resumen_en_seco
+    from trovefy.montar.estructura import (
+        cargar_contexto,
+        construir,
+        huella,
+        resumen_en_seco,
+    )
     from trovefy.montar.importes import calcular
     from trovefy.montar.precondiciones import comprobar
     from trovefy.montar.tanda import elegir, leer_tanda
@@ -358,7 +363,7 @@ def _depositar(args, modo: str = "montar") -> int:
     if not pre.ok:
         print("No se deposita: arregla lo marcado con ✗.")
         return 1
-    estado, trafico = _trafico(vault, args.producto, pais)
+    _, trafico = _trafico(vault, args.producto, pais)
     if not renov and trafico.get("montaje"):
         if trafico.get("montaje_estado") in ("fallida", "discrepancia") and trafico.get("historico"):
             print(f"El montaje anterior ({trafico['montaje']}) dejó algo creado (estado parcial): no se vuelve a "
@@ -455,7 +460,7 @@ def _activar(args) -> int:
 
     vault, ahora, pais = _vault(), _reloj(), args.pais.strip().upper()
     try:
-        estado, trafico = _trafico(vault, args.producto, pais)
+        _, trafico = _trafico(vault, args.producto, pais)
     except (FileNotFoundError, ValueError) as exc:
         return _error(exc)
     if trafico.get("activar_estado") != "caducada":
