@@ -1,0 +1,52 @@
+# Catálogo único de rutinas (resolución 23 de la fase 3). Lo instala `trovefy rutinas instalar` (plan 24); este
+# archivo solo trae, por ahora, las entradas de /leer (plan 23). El 24 añade las suyas (caza, vigía, cierres,
+# renovación) sin quitar estas. En las rutinas por país, {pais} y {zona} se sustituyen al instalar.
+# Cada `herramientas` es el --allowedTools de `claude -p`: un subconjunto del allowed-tools de la skill, solo
+# herramientas de lectura de Meta y de Impultienda, sin `economia fijar` (la economía la fija el usuario en sesión).
+
+parte:
+  skill: leer
+  argumentos: "/trovefy:leer --parte --rutina"
+  calendario: "*-*-* 07:30:00 America/Bogota"   # días cerrados de la cuenta (D-37); antes del cierre de las 08:30
+  persistente: true
+  condicion: test_vivo
+  por_pais: false
+  fin: true
+  fuente: "L2 22:40 («8:30 ganancia de ayer» y la ronda «qué apagar y qué prender»); C1 54:20"
+  herramientas: &leer
+    - Read
+    - Write(~/.cache/trovefy/leer/**)
+    - Bash(trovefy leer *)
+    - Bash(trovefy montar registrar *)
+    - Bash(trovefy economia ver)
+    - mcp__meta-ads__ads_get_ad_accounts
+    - mcp__meta-ads__ads_get_field_context
+    - mcp__meta-ads__ads_get_ad_entities
+    - mcp__meta-ads__ads_get_dataset_stats
+    - mcp__impultienda__impultienda_listar_tiendas
+    - mcp__impultienda__impultienda_listar_ventas
+    - mcp__impultienda__impultienda_campanas_utm
+    - mcp__impultienda__impultienda_carritos_abandonados
+    - mcp__impultienda__impultienda_estadisticas
+
+intradia:
+  skill: leer
+  argumentos: "/trovefy:leer --intradia --pais {pais} --rutina"
+  calendario: "*-*-* 00/2:00:00 {zona}"   # cada 2 h, de día y de noche, en la hora del país
+  persistente: false                       # una ronda vieja no sirve
+  condicion: test_vivo
+  por_pais: true
+  fin: true
+  fuente: "S2 14:40 («cada dos horas»); S1 10:27; T3 13:20 (el bot revisa «de día y de noche»); T3 12:35"
+  herramientas: *leer
+
+base:
+  skill: leer
+  argumentos: "/trovefy:leer --base --pais {pais} --rutina"
+  calendario: "*-*-* 23:00:00 {zona}"   # 23:00 del país: todo a la base
+  persistente: false
+  condicion: test_vivo
+  por_pais: true
+  fin: true
+  fuente: "S2 14:40 («11 p.m.… todo en el precio normal»); S1 10:00; C1 56:16"
+  herramientas: *leer
