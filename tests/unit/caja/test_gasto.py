@@ -67,7 +67,7 @@ def test_test_vivo_sin_ledger_no_medido(tmp_path):
     assert g.usd_centavos is None
     assert (
         g.motivo
-        == "no medido: sin gasto registrado de p1 CO (llega con /cierre, Fase 3)"
+        == "no medido: sin gasto registrado de p1 CO (lo escribe /trovefy:cierre)"
     )
 
 

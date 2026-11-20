@@ -1,6 +1,6 @@
 """Gasto de los tests leído del ledger (``ledger/gasto/*.csv``), en centavos de USD.
 
-Formato provisional que adoptará ``/cierre`` (Fase 3): ``fecha,cuenta,campana,gasto,moneda``.
+Formato que escribe ``/cierre`` (plan 24, *upsert* con dos decimales): ``fecha,cuenta,campana,gasto,moneda``.
 El importe usa punto como separador decimal y NUNCA agrupa miles. Un importe COP con exactamente
 tres dígitos tras el punto («83.700») es ambiguo y queda «no medido», jamás se lee como 83,7.
 Cada día se convierte con la TRM **vigente ese día**; sin ella, ese gasto es «no medido». Todo
@@ -94,7 +94,7 @@ def gastos_de_tests(
         if not filas_t:
             motivo = (
                 f"no medido: sin gasto registrado de {t.producto} {t.pais} "
-                "(llega con /cierre, Fase 3)"
+                "(lo escribe /trovefy:cierre)"
             )
             salida.append(GastoTest(t.producto, t.pais, None, motivo))
             continue

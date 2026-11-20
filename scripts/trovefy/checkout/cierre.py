@@ -399,8 +399,8 @@ def _req_reembolso(vault: Path, producto: str, pais: str, compra: dict) -> tuple
 def _req_esquema(vault: Path) -> tuple[Estado, str]:
     ruta = vault.joinpath(*RUTA_ESQUEMA)
     if not ruta.is_file():
-        return None, ("no medido (P-20): falta config/esquemas/impultienda-pedidos.yaml (trovefy checkout "
-                      "esquema-pedidos); no bloquea")
+        return None, ("no medido (P-20): falta config/esquemas/impultienda-pedidos.yaml (trovefy cierre "
+                      "esquema); no bloquea")
     try:
         datos = yaml.safe_load(ruta.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:

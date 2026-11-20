@@ -1,0 +1,3 @@
+orden,fecha,total,moneda,post_compra,metodo_pago
+ORD-0101,2026-11-19,"13,90",EUR,no,impul_pay
+ORD-0102,2026-11-19,7.90,EUR,si,impul_pay

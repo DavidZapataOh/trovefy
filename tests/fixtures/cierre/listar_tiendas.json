@@ -1,0 +1,16 @@
+{
+  "_nota": "Forma de impultienda_listar_tiendas (descripción del catálogo) con ids, nombres y URLs ficticios.",
+  "structuredContent": {
+    "total": 2,
+    "tiendas": [
+      {"id": "00000000-0000-0000-0000-000000000000", "nombre": "Prueba", "tipo": "checkout",
+       "tipo_descripcion": "checkout independiente", "url": "https://prueba.impultienda.example",
+       "subdominio": "prueba", "dominio_propio": null, "dominio_propio_verificado": false, "estado": "activa",
+       "moneda": "EUR", "idioma": "bg", "plan": "max", "logo_url": null, "creada": "2026-11-01"},
+      {"id": "11111111-1111-1111-1111-111111111111", "nombre": "Otra", "tipo": "store",
+       "tipo_descripcion": "tienda clásica", "url": "https://otra.impultienda.example", "subdominio": "otra",
+       "dominio_propio": null, "dominio_propio_verificado": false, "estado": "activa", "moneda": "USD",
+       "idioma": "es", "plan": "max", "logo_url": null, "creada": "2026-10-01"}
+    ]
+  }
+}
