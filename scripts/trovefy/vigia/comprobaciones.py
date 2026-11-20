@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from trovefy.aprobaciones.fuentes import (
     Lectura,
@@ -23,7 +24,7 @@ from trovefy.aprobaciones.fuentes import (
 from trovefy.arranque.verificadores.apimart import BASE_POR_DEFECTO, consultar_saldo
 from trovefy.caja.config import cargar_caja
 from trovefy.referencia import cache as cache_referencia_mod
-from trovefy.rutinas import TIMER_CAZA, directorio_unidades
+from trovefy.rutinas import directorio_unidades
 from trovefy.secretos import RUTA_CLAUDE_ENV, leer_env
 from trovefy.vault.escritura import ZONA_NEGOCIO
 
@@ -35,9 +36,12 @@ DISCO_MIN_LIBRE_PCT = 10  # umbral técnico
 DISCO_MIN_LIBRE_BYTES = 2 << 30  # umbral técnico: 2 GiB
 TOKEN_AVISO = timedelta(days=7)
 META_VIEJA = timedelta(hours=48)
-HORA_CAZA = 7
+MARGEN_CAZA = timedelta(minutes=30)  # la caza de las 06:30 se exige desde las 07:00
+MARGEN_RUTINA = timedelta(minutes=30)
+VENTANA_INTRADIA = timedelta(hours=3)
 MOTIVO_MCP = "no medido: requiere el MCP oficial de Meta (paso 14) o la lectura del ejecutor (Fase 3)"
-_SECCION = re.compile(r"^## .* · (.+?)\s*$", re.MULTILINE)
+_SECCION_HORA = re.compile(r"^## (\d{2}:\d{2}) .*· (.+?)\s*$", re.MULTILINE)
+_CALENDARIO = re.compile(r"^(?:(?P<dias>\S+\.\.\S+) )?\*-\*-\* (?P<h>\d{2}):(?P<m>\d{2}):\d{2}(?: (?P<zona>\S+))?$")
 _ICONO = {"ok": "OK", "info": "INFO", "aviso": "AVISO", "urgente": "URGENTE", "no_medido": "NO MEDIDO"}
 
 
@@ -115,24 +119,93 @@ def avisos_ejecutor(lectura: Lectura) -> list[Comprobacion]:
     return res
 
 
-def rutinas(vault: Path, ahora: datetime, unidades: Path) -> Comprobacion:
-    hoy = ahora.astimezone(ZONA_NEGOCIO)
-    if not (Path(unidades) / TIMER_CAZA).exists():
-        return _nm("rutinas", "la rutina de caza no está instalada")
-    if hoy.weekday() == 6:
-        return Comprobacion("rutinas", "ok", "hoy es domingo: no se espera la caza")
-    if hoy.hour < HORA_CAZA:
-        return Comprobacion("rutinas", "ok", f"aún no son las {HORA_CAZA:02d}:00: la caza de hoy no se exige todavía")
-    log = Path(vault) / "rutinas" / "log" / hoy.date().isoformat() / "caza.md"
+def _secciones(ruta: Path) -> list[tuple[str, str]] | None:
+    """[(HH:MM, estado)] del log de una rutina; None si no existe."""
     try:
-        secciones = _SECCION.findall(log.read_text(encoding="utf-8"))
+        texto = ruta.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return Comprobacion("rutinas", "aviso", "la caza de hoy no dejó su log")
+        return None
+    return _SECCION_HORA.findall(texto)
+
+
+def _hora_programada(r, pais_zona: str | None, hoy: datetime) -> datetime | None:
+    """La hora de hoy (en la zona del negocio) a la que toca la rutina; None si hoy no toca o no es diaria."""
+    m = _CALENDARIO.search(r.calendario)
+    if m is None:
+        return None
+    dias, hh, mm, zona = m.group("dias"), int(m.group("h")), int(m.group("m")), m.group("zona")
+    zona = pais_zona if zona == "{zona}" else zona
+    try:
+        z = ZoneInfo(zona) if zona else ZONA_NEGOCIO
+    except (ZoneInfoNotFoundError, ValueError):
+        z = ZONA_NEGOCIO
+    local = hoy.astimezone(z)
+    prog = local.replace(hour=hh, minute=mm, second=0, microsecond=0)
+    if dias == "Mon..Sat" and prog.weekday() == 6:
+        return None
+    return prog.astimezone(ZONA_NEGOCIO)
+
+
+def _una_rutina(vault: Path, ahora: datetime, inst: str, r, pais: str | None) -> Comprobacion:
+    from trovefy.rutinas import condicion, nombre_log, zona_pais
+
+    nombre = "rutinas" if inst == "caza" else f"rutina {inst}"
+    hoy = ahora.astimezone(ZONA_NEGOCIO)
+    log = Path(vault) / "rutinas" / "log" / hoy.date().isoformat() / f"{nombre_log(r, pais)}.md"
+    try:
+        secciones = _secciones(log)
     except (OSError, UnicodeDecodeError):
-        return _nm("rutinas", "no se pudo leer el log de la caza de hoy")
-    if not secciones or secciones[-1] != "ok":
-        return Comprobacion("rutinas", "aviso", f"la caza de hoy terminó «{secciones[-1] if secciones else 'sin estado'}»")
-    return Comprobacion("rutinas", "ok", "la caza de hoy terminó bien")
+        return _nm(nombre, f"no se pudo leer el log de {inst} de hoy")
+    malas = ("parada", "fallida", "interrumpida")
+    if "/2:" in r.calendario:  # ronda cada 2 h: se exige una en las 3 h previas
+        recientes = [(h, e) for h, e in (secciones or [])
+                     if hoy - hoy.replace(hour=int(h[:2]), minute=int(h[3:5])) <= VENTANA_INTRADIA]
+        if recientes and recientes[-1][1] in malas:
+            return Comprobacion(nombre, "aviso", f"la última ronda de {inst} terminó «{recientes[-1][1]}»")
+        if recientes:
+            return Comprobacion(nombre, "ok", f"la última ronda de {inst} fue a las {recientes[-1][0]}")
+        if r.condicion and condicion(r.nombre, vault, pais, ahora) != 0:
+            return Comprobacion(nombre, "ok", f"{inst}: sin test vivo, no se lanza")
+        return Comprobacion(nombre, "aviso", f"{inst}: ninguna ronda en las últimas 3 h")
+    prog = _hora_programada(r, zona_pais(vault, pais) if pais else None, hoy)
+    if prog is None:
+        if inst == "caza":
+            return Comprobacion(nombre, "ok", "hoy es domingo: no se espera la caza")
+        return Comprobacion(nombre, "ok", f"{inst}: hoy no toca")
+    limite = prog + (MARGEN_CAZA if inst == "caza" else MARGEN_RUTINA)
+    if hoy < limite:
+        return Comprobacion(nombre, "ok", f"aún no son las {limite:%H:%M}: {inst} no se exige todavía")
+    if not secciones:
+        if r.condicion and condicion(r.nombre, vault, pais, ahora) != 0:
+            return Comprobacion(nombre, "ok", f"{inst}: no tocaba hoy (sin test vivo o fuera de su día)")
+        if r.log is None:
+            return Comprobacion(nombre, "ok", f"{inst}: sin fallos registrados hoy")
+        return Comprobacion(nombre, "aviso", f"{inst} de hoy no dejó su log")
+    estado = secciones[-1][1]
+    if estado in malas:
+        return Comprobacion(nombre, "aviso", f"{inst} de hoy terminó «{estado}»")
+    return Comprobacion(nombre, "ok", f"{inst} de hoy terminó bien" + (" (omitida)" if estado == "omitida" else ""))
+
+
+def rutinas(vault: Path, ahora: datetime, unidades: Path) -> list[Comprobacion]:
+    """Una comprobación por rutina instalada (plan 24, Tarea 10)."""
+    from trovefy.rutinas import cargar_catalogo, instaladas, rutina_de_instancia
+
+    insts = instaladas(Path(unidades))
+    if not insts:
+        return [_nm("rutinas", "no hay rutinas instaladas")]
+    try:
+        catalogo = cargar_catalogo()
+    except (OSError, ValueError):
+        return [_nm("rutinas", "no se pudo leer el catálogo de rutinas")]
+    res = []
+    for inst in insts:
+        par = rutina_de_instancia(inst, catalogo)
+        if par is None:
+            res.append(Comprobacion(f"rutina {inst}", "info", "rutina instalada que no está en el catálogo"))
+            continue
+        res.append(_una_rutina(vault, ahora, inst, *par))
+    return res
 
 
 def _coma(d: Decimal) -> str:
@@ -286,7 +359,7 @@ def vigilar(vault: Path, ahora: datetime, fuentes: Fuentes) -> list[Comprobacion
            tokens(ahora, meta), cuenta_meta(meta, ahora),
            apimart(fuentes.ruta_env, aviso, fuentes.abrir_apimart),
            disco(vault, fuentes.uso_disco),
-           rutinas(vault, ahora, fuentes.unidades),
+           *rutinas(vault, ahora, fuentes.unidades),
            impultienda(vault), referencia_cache(ahora, fuentes.cache_referencia, _retencion_referencia(vault)), *no_medidas()]
     return res
 

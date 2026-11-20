@@ -1,0 +1,4 @@
+{
+  "_nota": "Forma de ads_get_ad_accounts con la cuenta ficticia del contrato.",
+  "data": [{"id": "act_0000000000000000", "name": "Cuenta de prueba", "currency": "COP", "timezone_name": "America/Bogota"}]
+}

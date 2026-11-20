@@ -1,8 +1,36 @@
-# Catálogo único de rutinas (resolución 23 de la fase 3). Lo instala `trovefy rutinas instalar` (plan 24); este
-# archivo solo trae, por ahora, las entradas de /leer (plan 23). El 24 añade las suyas (caza, vigía, cierres,
-# renovación) sin quitar estas. En las rutinas por país, {pais} y {zona} se sustituyen al instalar.
-# Cada `herramientas` es el --allowedTools de `claude -p`: un subconjunto del allowed-tools de la skill, solo
-# herramientas de lectura de Meta y de Impultienda, sin `economia fijar` (la economía la fija el usuario en sesión).
+# Catálogo único de rutinas (resolución 23 de la fase 3). Lo instala `trovefy rutinas instalar` (plan 24), que valida
+# cada `herramientas` antes de escribir nada: subconjunto del allowed-tools de la skill, solo lectura de Meta y de
+# Impultienda, nada con sudo, ningún Write fuera de ~/.cache/trovefy/ (salvo los YAML de la tanda en `renovacion`,
+# resolución 25) y nunca --dangerously-skip-permissions.
+# En las rutinas por país, {pais}, {pais_min}, {zona} (config/mercados.yaml) y {producto} (el test vivo de ese país en
+# config/caja.yaml) se sustituyen al instalar. Horas en la zona de la cuenta (America/Bogota, D-37), salvo las del país.
+# `log`: el nombre del log que deja la skill en rutinas/log/<día>/ (lo mira /vigia). `fin: true` añade
+# ExecStopPost=trovefy rutinas fin <nombre>, que deja constancia y avisa si la rutina falla.
+
+caza:
+  skill: cazar
+  argumentos: "/trovefy:cazar --rutina"
+  calendario: "Mon..Sat *-*-* 06:30:00 America/Bogota"   # T2 23:56: «a las 6:30… el domingo lo dejo descansar»
+  persistente: true
+  condicion: null
+  por_pais: false
+  fin: false            # la caza conserva su unidad de siempre (templates/systemd/trovefy-caza.*)
+  plantilla: caza
+  log: caza
+  fuente: "T2 23:56"
+  herramientas: [Read, Bash(trovefy caza *), Bash(trovefy cerebro *)]
+
+vigia:
+  skill: vigia
+  argumentos: "/trovefy:vigia --rutina"
+  calendario: "*-*-* 07:00:00 America/Bogota"   # añadido (no cambia el método): avisa si otra rutina falló
+  persistente: true
+  condicion: null
+  por_pais: false
+  fin: true
+  log: vigia
+  fuente: "añadido (no cambia el método); T3 13:20 el bot «avisa al celular»"
+  herramientas: [Read, Bash(trovefy vigia *)]
 
 parte:
   skill: leer
@@ -12,6 +40,7 @@ parte:
   condicion: test_vivo
   por_pais: false
   fin: true
+  log: leer-parte
   fuente: "L2 22:40 («8:30 ganancia de ayer» y la ronda «qué apagar y qué prender»); C1 54:20"
   herramientas: &leer
     - Read
@@ -29,6 +58,38 @@ parte:
     - mcp__impultienda__impultienda_carritos_abandonados
     - mcp__impultienda__impultienda_estadisticas
 
+cierre:
+  skill: cierre
+  argumentos: "/trovefy:cierre --rutina"
+  calendario: "*-*-* 08:30:00 America/Bogota"   # L2 22:40 «[8:30] Ganancia de ayer en Meta»
+  persistente: true
+  condicion: null
+  por_pais: false
+  fin: true
+  log: cierre
+  fuente: "L2 22:40"
+  herramientas: &cierre
+    - Read
+    - Bash(trovefy cierre *)
+    - Write(~/.cache/trovefy/cierre/**)
+    - mcp__meta-ads__ads_get_ad_accounts
+    - mcp__meta-ads__ads_get_ad_entities
+    - mcp__impultienda__impultienda_listar_tiendas
+    - mcp__impultienda__impultienda_listar_ventas
+    - mcp__impultienda__impultienda_campanas_utm
+
+cierre-noche:
+  skill: cierre
+  argumentos: "/trovefy:cierre --rutina --noche"
+  calendario: "*-*-* 23:30:00 America/Bogota"   # C1 0:50:20 «23:30 Cierre de caja contra la pasarela»; C1 1:03:31
+  persistente: false                            # un corte de las 23:30 que sale de mañana ya no sirve: manda el de 08:30
+  condicion: null
+  por_pais: false
+  fin: true
+  log: cierre-noche
+  fuente: "C1 0:50:20, C2 13:55, C1 1:03:31"
+  herramientas: *cierre
+
 intradia:
   skill: leer
   argumentos: "/trovefy:leer --intradia --pais {pais} --rutina"
@@ -37,6 +98,7 @@ intradia:
   condicion: test_vivo
   por_pais: true
   fin: true
+  log: "leer-intradia-{pais_min}"
   fuente: "S2 14:40 («cada dos horas»); S1 10:27; T3 13:20 (el bot revisa «de día y de noche»); T3 12:35"
   herramientas: *leer
 
@@ -48,5 +110,26 @@ base:
   condicion: test_vivo
   por_pais: true
   fin: true
+  log: "leer-base-{pais_min}"
   fuente: "S2 14:40 («11 p.m.… todo en el precio normal»); S1 10:00; C1 56:16"
   herramientas: *leer
+
+renovacion:
+  skill: creativos
+  argumentos: "/trovefy:creativos {producto} --pais {pais} --renovar --rutina"
+  calendario: "*-*-* 20:00:00 America/Bogota"   # cada 48 h desde t0 (lo decide la condición): sale a las 00:00
+  persistente: true
+  condicion: renovacion   # test vivo, día impar desde t0 (48 h) y dentro del plazo de 1 semana
+  por_pais: true
+  fin: true
+  log: null               # la skill no deja log propio: /vigia mira solo si falló
+  fuente: "T3 18:55 («En ABO, cada 48 h · 2 creativos nuevos como mínimo»); L2 28:02; L2 22:40"
+  herramientas:           # contrato 7 del plan 21 (la renovación monta con `trovefy montar renovacion`)
+    - Read
+    - Glob
+    - Agent
+    - Write(productos/*/creativos/*/*/brief.yaml)
+    - Write(productos/*/creativos/*/*/escenas.yaml)
+    - Write(productos/*/creativos/*/*/guiones/*.yaml)
+    - Bash(trovefy creativos *)
+    - Bash(trovefy montar renovacion *)

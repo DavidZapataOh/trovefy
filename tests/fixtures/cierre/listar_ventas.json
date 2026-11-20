@@ -1,0 +1,19 @@
+{
+  "_nota": "Forma de impultienda_listar_ventas (descripción del catálogo) con órdenes y totales ficticios. ORD-0003 es la compra de prueba.",
+  "structuredContent": {
+    "periodo": {"desde": "2026-11-13", "hasta": "2026-11-19", "timezone": "America/Bogota"},
+    "cantidad_ventas": 3,
+    "cantidad_post_compra": 1,
+    "ingresos": [{"moneda": "EUR", "total": 41.70, "cantidad": 4}],
+    "ticket_promedio": [{"moneda": "EUR", "valor": 13.90}],
+    "detalle": {
+      "total": 4, "count": 4, "offset": 0, "has_more": false,
+      "ventas": [
+        {"orden": "ORD-0001", "fecha": "2026-11-19T10:15:00-05:00", "total": "13.90", "moneda": "EUR", "metodo_pago": "impul_pay", "post_compra": false},
+        {"orden": "ORD-0002", "fecha": "2026-11-19T10:16:00-05:00", "total": "7.90", "moneda": "EUR", "metodo_pago": "impul_pay", "post_compra": true},
+        {"orden": "ORD-0003", "fecha": "2026-11-18T12:00:00-05:00", "total": "13.90", "moneda": "EUR", "metodo_pago": "impul_pay", "post_compra": false},
+        {"orden": "ORD-0004", "fecha": "2026-11-18T21:40:00-05:00", "total": 6.00, "moneda": "EUR", "metodo_pago": "impul_pay", "post_compra": false}
+      ]
+    }
+  }
+}

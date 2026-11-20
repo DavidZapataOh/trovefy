@@ -1,0 +1,12 @@
+[Unit]
+Description=Trovefy: rutina {instancia} ({calendario})
+
+[Timer]
+OnCalendar={calendario}
+# Persistent=true: si a su hora el equipo (WSL) estaba apagado, se lanza al arrancar. Las rondas que caducan
+# (intradía, base, cierre de las 23:30) van con Persistent=false: una ronda vieja no sirve.
+Persistent={persistente}
+Unit=trovefy-{instancia}.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,8 @@
+{
+  "_nota": "Respuesta con otra forma: sin detalle.ventas[].orden ni fecha (lo que haría un cambio del MCP).",
+  "structuredContent": {
+    "periodo": {"desde": "2026-11-19", "hasta": "2026-11-19", "timezone": "America/Bogota"},
+    "detalle": {"has_more": false, "offset": 0,
+                "ventas": [{"id_venta": "X1", "importe": "13.90", "moneda": "EUR", "email": "comprador@ejemplo.invalid"}]}
+  }
+}

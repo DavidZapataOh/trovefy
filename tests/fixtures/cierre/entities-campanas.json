@@ -1,0 +1,10 @@
+{
+  "_nota": "Sintética, con la forma de docs/notas/leer-campos-meta.md: ads_get_ad_entities nivel campaña, un día. Ids ficticios.",
+  "currency": "COP",
+  "ad_entities": [
+    {"id": "120000000000000001", "name": "PRUEBA ZZ | G1 | ABO | 18-11-26", "level": "campaign",
+     "effective_status": "ACTIVE",
+     "insights": {"data": [{"date_start": "2026-11-19", "date_stop": "2026-11-19", "amount_spent": "99200",
+                            "impressions": "6000", "omni_purchase": "1", "omni_purchase_values": "13.9"}]}}
+  ]
+}
