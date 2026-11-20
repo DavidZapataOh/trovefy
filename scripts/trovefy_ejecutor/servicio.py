@@ -92,7 +92,7 @@ from .limites import (
     limites_a_dict,
 )
 from .modelo import Propuesta
-from .montaje import montar
+from .montaje import EXT_IMAGEN, _Fallo, _leer_medio, _resolver, montar
 from .reloj import ZONA_COT, base_caducidad, caducidad, en_silencio, recordatorios
 from .render import (
     MAX_RESUMEN,
@@ -126,6 +126,8 @@ _SIN_LECTURA_VIVA = frozenset({"noop", "limite_ejecutor"})
 _ERRORES_TELEGRAM = (ErrorTelegram, ErrorRedTelegram, ValueError)
 _TOCA_META = frozenset(TIPOS_INGERIBLES - {"noop", "limite_ejecutor", "alerta"})
 DESFASE_MAX_S = 300
+MAX_MINIATURA = 10 * 1024 * 1024  # una miniatura del álbum de «Activar» (plan 22, Tarea 6)
+MAX_ALBUM = 10
 VIGENCIA_DESFASE = timedelta(minutes=10)  # una medida más vieja no vale para ejecutar
 CLAVE_DESFASE = "desfase_reloj"
 AVISO_DESFASE = ("{id}: reloj desfasado ({s} s): ejecuta `sudo hwclock -s`. No se ejecutó nada; la propuesta "
@@ -654,6 +656,7 @@ class Ejecutor:
         if not decision.enviar or chat is None or not clave:
             self.almacen.actualizar_datos(id, "recibida", en_cola=True, texto=texto)
             return
+        self._enviar_album(id, fila.propuesta, chat, ahora)
         try:
             mid = self._tg_enviar(chat, texto, botones_propuesta(id, chat, clave), sonido=decision.sonido)
         except _ERRORES_TELEGRAM as e:
@@ -663,6 +666,58 @@ class Ejecutor:
         self.ritmo.anotar_envio(ahora)
         self.almacen.guardar_mensaje(id, chat, mid)
         self._transicion(id, "recibida", "enviada", texto=texto, enviada_en=ahora.isoformat(), en_cola=False)
+
+    # -- álbum de «Activar campaña» (plan 22, Tarea 6; [D-33]) ------------------------------------------
+    def _leer_miniatura(self, ruta: str) -> bytes | None:
+        """Miniatura de la tanda dentro del vault, sin seguir enlaces y ≤ 10 MB; None si no vale (se omite)."""
+        vault = self.rutas.vault
+        if vault is None or not isinstance(ruta, str):
+            return None
+        try:
+            real = _resolver(vault, ruta)
+            if real != vault.resolve(strict=True) / ruta or real.suffix.lower() not in EXT_IMAGEN:
+                return None  # algún componente es un enlace simbólico, o no es una imagen
+            if real.stat().st_size > MAX_MINIATURA:
+                return None
+            contenido = _leer_medio(real, ruta)
+        except (_Fallo, OSError, ValueError):
+            return None
+        return contenido if 0 < len(contenido) <= MAX_MINIATURA else None
+
+    def _fotos_album(self, p: Propuesta) -> list[tuple[str, bytes | str]]:
+        anuncios = (p.evidencia or {}).get("anuncios") if p.tipo == "activar" else None
+        if not isinstance(anuncios, (list, tuple)):
+            return []
+        fotos: list[tuple[str, bytes | str]] = []
+        for a in anuncios:
+            if len(fotos) >= MAX_ALBUM:
+                break
+            if not hasattr(a, "get"):
+                continue
+            foto: bytes | str | None = self._leer_miniatura(a.get("miniatura")) if a.get("miniatura") else None
+            url = a.get("miniatura_url")
+            if foto is None and isinstance(url, str) and url.startswith("https://"):
+                foto = url
+            if foto is not None:
+                fotos.append((self._limpio(a.get("nombre") or "")[:64], foto))
+        return fotos
+
+    def _enviar_album(self, id: str, p: Propuesta, chat: int, ahora: datetime) -> None:
+        """Antes del mensaje con botones de un «Activar» de montaje, las miniaturas de sus anuncios. Una sola vez
+        por propuesta; si falla, se anota y el mensaje con botones sale igual."""
+        clave = f"album:{id}"
+        if p.tipo != "activar" or self.almacen.leer_kv(clave):
+            return
+        fotos = self._fotos_album(p)
+        if not fotos:
+            return
+        try:
+            self.telegram.enviar_album(chat, fotos)
+        except _ERRORES_TELEGRAM as e:
+            self._anotar_error("telegram", e)
+            return
+        self.almacen.poner_kv(clave, ahora.isoformat())
+        self.ritmo.anotar_envio(ahora)
 
     def _despachar_alerta(self, fila: FilaPropuesta) -> None:
         p, ahora = fila.propuesta, self.reloj()

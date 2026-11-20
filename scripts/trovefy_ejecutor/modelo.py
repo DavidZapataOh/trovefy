@@ -71,6 +71,8 @@ class Anuncio:
     descripcion: str
     cta: str
     url: str
+    url_tags: str | None = None
+    miniatura: str | None = None  # ruta relativa al vault; no se sube a Meta (solo el álbum de «Activar»)
 
 
 @dataclass(frozen=True)
@@ -82,6 +84,8 @@ class Conjunto:
     evento: str
     ubicaciones_excluidas: tuple[str, ...]
     anuncios: tuple[Anuncio, ...]
+    inicio: str | None = None  # ISO 8601 con zona → start_time
+    generos: tuple[int, ...] | None = None  # Meta: 1 hombres, 2 mujeres
 
 
 @dataclass(frozen=True)
@@ -95,6 +99,12 @@ class Campana:
 
 
 @dataclass(frozen=True)
+class Dsa:
+    beneficiario: str
+    pagador: str
+
+
+@dataclass(frozen=True)
 class Estructura:
     pagina_id: str
     dataset_id: str
@@ -104,6 +114,8 @@ class Estructura:
     unidad: str
     moneda: str
     solo_validar: bool = False
+    dsa: Dsa | None = None
+    campana_existente: str | None = None
 
 
 @dataclass(frozen=True)

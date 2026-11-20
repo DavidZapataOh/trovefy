@@ -223,15 +223,58 @@ def _caduca(vivo: DatosRender) -> str:
     return f"Caduca: {cuando} (hora Colombia)"
 
 
+# (texto, título) máximos de cada línea de anuncio en «Activar campaña»; si no cabe, se prueba el siguiente.
+_RECORTES_ANUNCIO = ((80, 40), (40, 40), (0, 40), (0, 20), (0, 0))
+
+
+def _anuncios_evidencia(p: Propuesta) -> list:
+    if p.tipo != "activar" or not p.evidencia:
+        return []
+    anuncios = p.evidencia.get("anuncios")
+    if not isinstance(anuncios, (list, tuple)):
+        return []
+    return [a for a in anuncios if hasattr(a, "get")][:10]
+
+
+def _lineas_anuncios(anuncios: list, texto_max: int, titulo_max: int) -> list[str]:
+    out = []
+    for a in anuncios:
+        partes = [limpiar_texto(str(a.get("nombre") or "?"), 64)]
+        if titulo_max:
+            partes.append(f"“{limpiar_texto(str(a.get('titulo') or ''), titulo_max)}”")
+        if texto_max:
+            partes.append(limpiar_texto(str(a.get("texto") or ""), texto_max))
+        vista = a.get("vista_previa")
+        enlace = limpiar_texto(vista, 300) if isinstance(vista, str) and vista.startswith("https://") else "no medido"
+        partes.append(f"vista previa: {enlace}")
+        out.append(" · ".join(x for x in partes if x))
+    return out
+
+
 def render_propuesta(p: Propuesta, vivo: DatosRender) -> str:
     if p.tipo == "alerta":
         return render_alerta(p)
     if p.tipo in ("agenda", "regla_meta"):
         raise ValueError("tipo no soportado aún (P-07)")
+    anuncios = _anuncios_evidencia(p)
+    if not anuncios:
+        return _render_propuesta(p, vivo, [])
+    texto = ""
+    for texto_max, titulo_max in _RECORTES_ANUNCIO:
+        texto = _render_propuesta(p, vivo, _lineas_anuncios(anuncios, texto_max, titulo_max), lanzar=False)
+        if largo_telegram(texto) <= MAX_PROPUESTA:
+            return texto
+    raise MensajeDemasiadoLargo(f"{largo_telegram(texto)} unidades (máximo {MAX_PROPUESTA})")
+
+
+def _render_propuesta(p: Propuesta, vivo: DatosRender, lineas_anuncios: list[str], lanzar: bool = True) -> str:
     lineas = [f"{p.id} · {_titulo(p, vivo)} · prioridad {p.prioridad}"]
     ctx = _linea_contexto(p, vivo)
     if ctx:
         lineas.append(ctx)
+    if lineas_anuncios:
+        lineas.append(f"Anuncios ({len(lineas_anuncios)}):")
+        lineas += lineas_anuncios
     if p.tipo == "limite_ejecutor":
         lineas += _lineas_limite(p, vivo)
     elif p.tipo != "noop":
@@ -248,7 +291,7 @@ def render_propuesta(p: Propuesta, vivo: DatosRender) -> str:
         lineas.append(f"Reinicia aprendizaje: {'sí' if p.reinicia_aprendizaje else 'no'} · {_caduca(vivo)}")
     texto = "\n".join(lineas)
     n = largo_telegram(texto)
-    if n > MAX_PROPUESTA:
+    if n > MAX_PROPUESTA and lanzar:
         raise MensajeDemasiadoLargo(f"{n} unidades (máximo {MAX_PROPUESTA})")
     return texto
 

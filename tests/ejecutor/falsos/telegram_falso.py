@@ -6,6 +6,8 @@ import json
 import threading
 import time
 from dataclasses import dataclass
+from email.parser import BytesParser
+from email.policy import HTTP
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Self
 
@@ -164,6 +166,20 @@ class TelegramFalso:
                                                     "edit_date": int(time.time())}}
             if metodo == "answerCallbackQuery":
                 return 200, {"ok": True, "result": True}
+            if metodo == "sendPhoto":
+                if "photo" not in p:
+                    return self._error(400, "Bad Request: there is no photo in the request")
+                return 200, {"ok": True, "result": self._crear({"chat_id": p.get("chat_id"), "text": None})}
+            if metodo == "sendMediaGroup":
+                media = p.get("media")
+                if not isinstance(media, list) or not 2 <= len(media) <= 10:
+                    return self._error(400, "Bad Request: wrong number of media")
+                for m in media:
+                    ref = str(m.get("media", ""))
+                    if ref.startswith("attach://") and ref[len("attach://"):] not in p.get("_archivos", {}):
+                        return self._error(400, "Bad Request: wrong file attached")
+                return 200, {"ok": True, "result": [self._crear({"chat_id": p.get("chat_id"), "text": None})
+                                                    for _ in media]}
         return self._error(404, "Not Found")
 
     def _crear(self, p: dict) -> dict:
@@ -200,10 +216,15 @@ class TelegramFalso:
 
             def do_POST(self):
                 n = int(self.headers.get("Content-Length") or 0)
-                try:
-                    p = json.loads(self.rfile.read(n) or b"{}")
-                except ValueError:
-                    p = {}
+                crudo = self.rfile.read(n)
+                tipo = self.headers.get("Content-Type") or ""
+                if tipo.startswith("multipart/form-data"):
+                    p = _multipart(tipo, crudo)
+                else:
+                    try:
+                        p = json.loads(crudo or b"{}")
+                    except ValueError:
+                        p = {}
                 partes = self.path.split("/")
                 if len(partes) != 3 or partes[1] != f"bot{fake.token}":
                     res: tuple[int, dict] | None = fake._error(401, "Unauthorized")
@@ -222,3 +243,23 @@ class TelegramFalso:
                 self.wfile.write(datos)
 
         return H
+
+
+def _multipart(tipo: str, crudo: bytes) -> dict:
+    """Lo justo de multipart/form-data: campos de texto (los JSON, decodificados) y, en ``_archivos``, el tamaño
+    de cada archivo; un campo de archivo queda además como ``"<archivo>"``."""
+    msg = BytesParser(policy=HTTP).parsebytes(f"Content-Type: {tipo}\r\n\r\n".encode() + crudo)
+    p: dict = {"_archivos": {}}
+    for parte in msg.iter_parts():
+        nombre = parte.get_param("name", header="content-disposition")
+        datos = parte.get_payload(decode=True) or b""
+        if parte.get_filename():
+            p["_archivos"][nombre] = len(datos)
+            p[nombre] = "<archivo>"
+            continue
+        texto = datos.decode("utf-8")
+        try:
+            p[nombre] = json.loads(texto)
+        except ValueError:
+            p[nombre] = texto
+    return p

@@ -199,3 +199,51 @@ def test_gasto_tras_desconocido_nunca_cero():
     vivo = DatosRender(COP, T(14, 5), T(14, 50), V.valores, gasto_desconocido=True, tope_cuenta=200000)
     lineas = render_propuesta(cargar_propuesta(d.presupuesto_cop()), vivo).splitlines()
     assert "Gasto diario total de la cuenta tras el cambio: desconocido / tope 200.000" in lineas
+
+
+# -- plan 22, Tarea 6: «Activar campaña» con una línea por anuncio --------------------------------------------------
+CAMPANA = "120000000000001"
+
+
+def _activar(anuncios=None):
+    ops = [{"entidad": "campaign", "id": CAMPANA, "campo": "status", "de_esperado": "PAUSED", "a": "ACTIVE"}]
+    datos = {"version": 1, "id": "P-20261112-800", "tipo": "activar", "creada": "2026-11-12T14:00:00-05:00",
+             "origen": "trovefy-ejecutor", "cuenta": "act_0000000000000000", "producto": "p-0099-prueba-abc123",
+             "pais": "ZZ", "operaciones": ops, "motivo": "Activar campaña PRUEBA ZZ | G1 | ABO | 12-11-26"}
+    if anuncios is not None:
+        datos["evidencia"] = {"montaje": "P-20261112-002", "medios": [], "anuncios": anuncios}
+    return cargar_propuesta(datos)
+
+
+def _anuncio(i: int, texto: str = "Texto largo del anuncio " * 6) -> dict:
+    return {"nombre": f"AD0{i} G1 calma", "texto": texto[:125], "titulo": "Título del anuncio",
+            "vista_previa": f"https://fb.me/prueba-{i}" if i != 3 else None, "miniatura": None, "miniatura_url": None}
+
+
+VIVO_ACT = DatosRender(COP, T(14, 5), T(14, 50), {("campaign", CAMPANA, "status"): "PAUSED"},
+                       {CAMPANA: "PRUEBA ZZ | G1"})
+
+
+def test_render_activar_lineas_por_anuncio():
+    txt = render_propuesta(_activar([_anuncio(i) for i in range(1, 6)]), VIVO_ACT)
+    lineas = [ln for ln in txt.splitlines() if ln.startswith("AD0")]
+    assert len(lineas) == 5 and "Anuncios (5):" in txt
+    assert lineas[0].startswith("AD01 G1 calma · “Título del anuncio” · Texto largo")
+    assert lineas[0].endswith("vista previa: https://fb.me/prueba-1")
+    assert lineas[2].endswith("vista previa: no medido")
+    assert all(len(ln) < 200 for ln in lineas)
+    assert CAMPANA not in txt and "act_0000000000000000" not in txt
+
+
+def test_render_activar_recorta_textos_si_no_cabe():
+    largo = "x" * 125
+    anuncios = [dict(_anuncio(i, largo), nombre=f"AD{i:02d} " + "n" * 50, titulo="t" * 40,
+                     vista_previa="https://fb.me/" + "v" * 180) for i in range(1, 11)]
+    txt = render_propuesta(_activar(anuncios), VIVO_ACT)
+    assert len(txt) <= 3800 and len([ln for ln in txt.splitlines() if ln.startswith("AD")]) == 10
+
+
+def test_activar_sin_montaje_no_cambia():
+    sin = render_propuesta(_activar(), VIVO_ACT)
+    vacio = render_propuesta(_activar([]), VIVO_ACT)
+    assert sin == vacio and "Anuncios" not in sin and len(sin.splitlines()) == 6
