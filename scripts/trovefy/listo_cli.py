@@ -29,7 +29,7 @@ def _configurar(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("producto", metavar="P-ID", help="p-id del producto (p-0001-…)")
     parser.add_argument("--pais", required=True, help="código del país en mayúsculas (BG, RO…)")
     parser.add_argument("--para-activar", action="store_true",
-                        help="exige los once gates en ok, sin excepciones (fase 3, antes de activar)")
+                        help="exige los once gates en ok, salvo las excepciones que admitiste para activar (fase 3)")
     parser.add_argument("--vault", help="ruta del cerebro (por defecto TROVEFY_VAULT o ~/trovefy-cerebro)")
 
 
@@ -60,9 +60,16 @@ def _ejecutar(args: argparse.Namespace) -> int:
         print("Lo que falta:")
         print("\n".join(faltan))
     if args.para_activar:
-        if veredicto.listo_para_activar(informe):
+        from trovefy.montar.precondiciones import excepciones_para_activar
+
+        admitidas = frozenset(excepciones_para_activar(vault, args.producto, args.pais))
+        if veredicto.listo_para_activar(informe, admitidas):
+            if admitidas & {g.clave for g in informe.gates if g.estado == "excepcion"}:
+                print("Para activar: pasa con las excepciones que admitiste para activar ("
+                      + ", ".join(sorted(admitidas)) + ").")
             return 0
-        print("Para activar faltan los once gates en ok (sin excepciones, creativos revisados) y el BE medido.")
+        print("Para activar faltan los once gates en ok (solo las excepciones que admitiste con `trovefy montar "
+              "excepcion`, creativos revisados) y el BE medido.")
         return 1
     return 0 if informe.pasa else 1
 
