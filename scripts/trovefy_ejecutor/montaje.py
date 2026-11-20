@@ -28,6 +28,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from trovefy_ejecutor.auditoria import EV_EJECUCION, Auditoria, redactar
+from trovefy_ejecutor.dinero import Moneda, formatear
 from trovefy_ejecutor.ejecutar import Resultado, siguiente_id
 from trovefy_ejecutor.esquema import PropuestaInvalida, cargar_propuesta
 from trovefy_ejecutor.estado import Almacen
@@ -57,6 +58,13 @@ IDIOMAS_META: dict[str, int] = {
     "bg": 37, "ro": 32, "ru": 17, "uk": 52, "en": 1001, "pt": 1005, "fr": 1003, "de": 5, "it": 10,
     "pl": 15, "es": 1002,
 }
+# Única mejora automática de Meta que se apaga: mostrar productos del catálogo junto al anuncio (L1 1:03:43: «no me
+# gusta que se muestre el catálogo de productos ni en la CBO ni en la ABO»). Clave de
+# ``degrees_of_freedom_spec.creative_features_spec`` según la referencia de Advantage+ creative de la Marketing
+# API (developers.facebook.com/docs/marketing-api/creative/advantage-creative, consultada de memoria el
+# 2026-11-20; no se pudo releer en línea): ``product_extensions``. Se confirma con validate_only en R5 (plan 22).
+CATALOGO_OPT_OUT = "product_extensions"
+MAX_EVIDENCIA_ANUNCIOS = 10
 _SIN_NUMERO = "sin número libre 800–899 hoy: crea la propuesta a mano"
 _REVISA = "puede haberse creado: revísalo en Ads Manager antes de volver a montar"
 
@@ -115,13 +123,15 @@ class _Ids:
     anuncios: dict[str, str] = field(default_factory=dict)
     creativos: dict[str, str] = field(default_factory=dict)
     medios: dict[str, str] = field(default_factory=dict)
+    vistas_previas: dict[str, str] = field(default_factory=dict)
 
     def algo(self) -> bool:
         return bool(self.campana or self.conjuntos or self.anuncios or self.creativos or self.medios)
 
     def a_dict(self) -> dict:
         return {"campana": self.campana, "conjuntos": dict(self.conjuntos), "anuncios": dict(self.anuncios),
-                "creativos": dict(self.creativos), "medios": dict(self.medios)}
+                "creativos": dict(self.creativos), "medios": dict(self.medios),
+                "vistas_previas": dict(self.vistas_previas)}
 
     def resumen(self) -> str:
         partes = [f"campaña {self.campana}"] if self.campana else []
@@ -266,20 +276,47 @@ def _plataformas(excluidas: tuple[str, ...], nombre: str) -> list[str] | None:
     return quedan
 
 
-def _preparar_meta(p: Propuesta, graph) -> dict[str, int]:
+def _preparar_meta(p: Propuesta, graph) -> tuple[dict[str, int], int]:
+    """(idioma → clave de Meta, offset de la moneda de la cuenta leída). Sin búsquedas: la tabla es fija."""
     e = p.estructura
     info = graph.cuenta(p.cuenta)
     if info.offset is None:
         raise _Fallo(f"moneda sin offset confirmado (P-21): {info.currency or '?'}", error="moneda")
     if info.currency != e.moneda:
         raise _Fallo(f"moneda {e.moneda} distinta de la de la cuenta ({info.currency})", error="moneda")
-    if e.solo_validar:
-        return {}  # los idiomas solo se usan en los conjuntos, que solo_validar nunca construye ni envía
     locales: dict[str, int] = {}
     for cj in e.conjuntos:
         for codigo in cj.idiomas:
             locales[codigo] = IDIOMAS_META[codigo]  # clave fijada: sin búsqueda (_preparar_forma ya exigió la tabla)
-    return locales
+    return locales, info.offset
+
+
+def _preparar_existente(p: Propuesta, graph, almacen: Almacen) -> None:
+    """Renovación (``campana_existente``): la campaña existe, es de esta cuenta y la creó Trovefy. Solo lee."""
+    cid = p.estructura.campana_existente
+    if cid is None:
+        return
+    try:
+        r = graph.leer(cid, ["account_id", "status", "effective_status", "objective", "name"])
+    except ErrorGraph as ex:
+        raise _Fallo(f"campaña existente {cid}: no se pudo leer ({_texto_error(ex)})", error=clasificar(ex)) from None
+    cuenta = p.cuenta.removeprefix("act_") if isinstance(p.cuenta, str) else None
+    if not isinstance(r, dict) or str(r.get("account_id") or "") != cuenta:
+        raise _Fallo(f"campaña existente {cid}: no es de la cuenta de la propuesta; no se toca")
+    if almacen.ultimo_cambio(cid, "estructura") is None:
+        raise _Fallo(f"campaña existente {cid}: no la creó Trovefy (no está en su registro); no se toca")
+
+
+def _mismo_instante(leido: object, pedido: str) -> bool:
+    if not isinstance(leido, str):
+        return False
+    try:
+        a, b = datetime.fromisoformat(leido), datetime.fromisoformat(pedido)
+    except ValueError:
+        return False
+    if a.utcoffset() is None or b.utcoffset() is None:
+        return False
+    return a == b
 
 
 # -- datos que se envían (status siempre PAUSED) ------------------------------------------------
@@ -304,8 +341,14 @@ def _datos_conjunto(e: Estructura, cj, campana_id: str, locales: dict[str, int])
                    "optimization_goal": "OFFSITE_CONVERSIONS",
                    "promoted_object": {"pixel_id": e.dataset_id, "custom_event_type": cj.evento},
                    "targeting": targeting, "status": "PAUSED"}
+    if cj.generos:
+        targeting["genders"] = list(cj.generos)
     if e.campana.tipo_presupuesto == "ABO":
         datos.update(daily_budget=cj.daily_budget, bid_strategy=e.campana.bid_strategy)
+    if cj.inicio is not None:
+        datos["start_time"] = cj.inicio
+    if e.dsa is not None:
+        datos.update(dsa_beneficiary=e.dsa.beneficiario, dsa_payor=e.dsa.pagador)
     return datos
 
 
@@ -319,16 +362,22 @@ def _datos_creativo(e: Estructura, a, medio: str, video: bool, miniatura: str | 
         spec = {"page_id": e.pagina_id,
                 "link_data": {"image_hash": medio, "link": a.url, "message": a.texto, "name": a.titulo,
                               "description": a.descripcion, "call_to_action": cta}}
-    return {"name": a.nombre, "object_story_spec": spec}
+    datos: dict = {"name": a.nombre, "object_story_spec": spec,
+                   "degrees_of_freedom_spec": {"creative_features_spec": {CATALOGO_OPT_OUT: {"enroll_status": "OPT_OUT"}}}}
+    if a.url_tags is not None:
+        datos["url_tags"] = a.url_tags
+    return datos
 
 
 # -- el montaje ----------------------------------------------------------------------------------
 class _Montaje:
     def __init__(self, p: Propuesta, graph, almacen: Almacen, auditoria: Auditoria,
-                 ahora: Callable[[], datetime], esperar: Callable[[float], None]):
+                 ahora: Callable[[], datetime], esperar: Callable[[float], None], offset: int | None = None):
         self.p, self.e, self.graph = p, p.estructura, graph
         self.almacen, self.auditoria, self.ahora, self.esperar = almacen, auditoria, ahora, esperar
+        self.offset = offset
         self.ids = _Ids()
+        self.miniaturas: dict[str, str] = {}  # ref del vídeo → miniatura https que dio Meta
         self.notas: list[str] = []
         self.completo = False  # True cuando se crearon todos los objetos de la estructura
 
@@ -452,14 +501,17 @@ class _Montaje:
     def montar(self, prep: _Preparado) -> None:
         e, cuenta = self.e, self.p.cuenta
         medios: dict[str, str] = {}
-        miniaturas: dict[str, str] = {}
+        miniaturas = self.miniaturas
         for ref, a in prep.archivos.items():
             medios[ref] = self._subir(a)
             if a.video:
                 miniaturas[ref] = self._esperar_video(ref, medios[ref])
-        campana = self._crear(cuenta, "campaigns", _datos_campana(e), f"campaña {e.campana.nombre}")
-        self.ids.campana = campana
-        self._cadencia(campana)
+        if e.campana_existente is not None:
+            campana = e.campana_existente  # renovación: conjuntos nuevos en la misma campaña, que no se toca
+        else:
+            campana = self._crear(cuenta, "campaigns", _datos_campana(e), f"campaña {e.campana.nombre}")
+            self.ids.campana = campana
+            self._cadencia(campana)
         for cj in e.conjuntos:
             sid = self._crear(cuenta, "adsets", _datos_conjunto(e, cj, campana, prep.locales),
                               f"conjunto {cj.nombre}")
@@ -478,52 +530,133 @@ class _Montaje:
         self.completo = True
 
     def releer(self) -> tuple[list[str], list[str]]:
-        """Devuelve (no PAUSED, otras discrepancias). Cualquier duda cuenta como discrepancia."""
+        """Devuelve (no PAUSED, otras discrepancias). Cualquier duda cuenta como discrepancia. La vista previa de
+        cada anuncio se guarda si Meta la da; si no, «no medido» (no es discrepancia)."""
         e = self.e
         cbo = e.campana.tipo_presupuesto == "CBO"
-        objetos: list[tuple[str, str, dict]] = []
-        importes_c = {"spend_cap": e.campana.spend_cap} | ({"daily_budget": e.campana.daily_budget} if cbo else {})
-        objetos.append((f"campaña {self.ids.campana}", self.ids.campana, importes_c))
+        # (desc, id, campos que se comparan tal cual, start_time pedido, nombre del anuncio)
+        objetos: list[tuple[str, str, dict, str | None, str | None]] = []
+        if e.campana_existente is None:
+            importes_c = {"spend_cap": e.campana.spend_cap} | ({"daily_budget": e.campana.daily_budget} if cbo else {})
+            objetos.append((f"campaña {self.ids.campana}", self.ids.campana, importes_c, None, None))
         for cj in e.conjuntos:
-            objetos.append((f"conjunto {cj.nombre} {self.ids.conjuntos[cj.nombre]}", self.ids.conjuntos[cj.nombre],
-                            {} if cbo else {"daily_budget": cj.daily_budget}))
+            sid = self.ids.conjuntos[cj.nombre]
+            campos: dict = {} if cbo else {"daily_budget": cj.daily_budget}
+            if e.dsa is not None:
+                campos["dsa_beneficiary"] = e.dsa.beneficiario
+            objetos.append((f"conjunto {cj.nombre} {sid}", sid, campos, cj.inicio, None))
             for a in cj.anuncios:
-                objetos.append((f"anuncio {a.nombre} {self.ids.anuncios[a.nombre]}", self.ids.anuncios[a.nombre], {}))
+                objetos.append((f"anuncio {a.nombre} {self.ids.anuncios[a.nombre]}", self.ids.anuncios[a.nombre], {},
+                                None, a.nombre))
         no_paused: list[str] = []
         otras: list[str] = []
-        for desc, oid, importes in objetos:
+        for desc, oid, comparar, inicio, anuncio in objetos:
+            pedir = ["status", "effective_status", *comparar]
+            if inicio is not None:
+                pedir.append("start_time")
+            if anuncio is not None:
+                pedir.append("preview_shareable_link")
             try:
-                r = self.graph.leer(oid, ["status", "effective_status", *importes])
+                r = self.graph.leer(oid, pedir)
             except DetenidoPorStop:
                 raise
             except Exception as ex:  # noqa: BLE001
                 otras.append(f"{desc}: no se pudo releer ({_texto_error(ex)}): estado desconocido")
                 continue
-            status = r.get("status") if isinstance(r, dict) else None
-            efectivo = r.get("effective_status") if isinstance(r, dict) else None
+            r = r if isinstance(r, dict) else {}
+            status, efectivo = r.get("status"), r.get("effective_status")
             if status != "PAUSED" or not isinstance(efectivo, str) or efectivo == "ACTIVE":
                 no_paused.append(f"{desc}: status {status}, effective_status {efectivo}")
-            for campo, pedido in importes.items():
-                leido = r.get(campo) if isinstance(r, dict) else None
+            for campo, pedido in comparar.items():
+                leido = r.get(campo)
                 if str(leido) != str(pedido):
                     otras.append(f"{desc}: {campo} {leido}, pedido {pedido}")
+            if inicio is not None and not _mismo_instante(r.get("start_time"), inicio):
+                otras.append(f"{desc}: start_time {r.get('start_time')}, pedido {inicio}")
+            if anuncio is not None:
+                vista = r.get("preview_shareable_link")
+                if isinstance(vista, str) and vista.startswith("https://"):
+                    self.ids.vistas_previas[anuncio] = vista
+                else:
+                    self.notas.append(f"vista previa de {anuncio}: no medido (Meta no la dio)")
+        for cj in e.conjuntos:
+            for a in cj.anuncios:
+                if a.url_tags is None or a.nombre not in self.ids.creativos:
+                    continue
+                cid = self.ids.creativos[a.nombre]
+                try:
+                    r = self.graph.leer(cid, ["url_tags"])
+                except DetenidoPorStop:
+                    raise
+                except Exception as ex:  # noqa: BLE001
+                    otras.append(f"creativo {a.nombre} {cid}: no se pudo releer ({_texto_error(ex)})")
+                    continue
+                leido = r.get("url_tags") if isinstance(r, dict) else None
+                if leido != a.url_tags:
+                    otras.append(f"creativo {a.nombre} {cid}: url_tags distintos de los pedidos")
         return no_paused, otras
+
+    def _motivo_activar(self) -> str:
+        e = self.e
+        try:
+            moneda: Moneda | None = Moneda(e.moneda, self.offset) if self.offset is not None else None
+        except ValueError:
+            moneda = None
+
+        def f(n: int | None) -> str:
+            if n is None:
+                return "?"
+            return formatear(n, moneda) if moneda is not None else f"{n} {e.moneda}"
+
+        if e.campana.tipo_presupuesto == "CBO":
+            diario = f"{f(e.campana.daily_budget)}/día (CBO)"
+        else:
+            presupuestos = [cj.daily_budget for cj in e.conjuntos]
+            if len(set(presupuestos)) == 1:
+                diario = f"{len(presupuestos)} × {f(presupuestos[0])}/día"
+            else:
+                diario = f"{len(presupuestos)} conjuntos, {f(sum(x or 0 for x in presupuestos))}/día en total"
+        if e.campana_existente is not None:
+            texto = (f"Activar campaña {e.campana.nombre}: {diario} (conjuntos nuevos en la misma campaña, "
+                     f"montaje {self.p.id})")
+        else:
+            texto = (f"Activar campaña {e.campana.nombre}: {diario}, techo {f(e.campana.spend_cap)} "
+                     f"(creada en PAUSED, montaje {self.p.id})")
+        return texto if len(texto) <= 1000 else texto[:999] + "…"
+
+    def _evidencia_anuncios(self) -> list[dict]:
+        rutas = {m.ref: m.ruta for m in self.e.medios}
+        videos = {m.ref for m in self.e.medios if Path(m.ruta).suffix.lower() in EXT_VIDEO}
+        salida: list[dict] = []
+        for cj in self.e.conjuntos:
+            for a in cj.anuncios:
+                if len(salida) >= MAX_EVIDENCIA_ANUNCIOS:
+                    return salida
+                miniatura = a.miniatura if a.miniatura is not None else (
+                    None if a.medio in videos else rutas.get(a.medio))
+                salida.append({"nombre": a.nombre, "texto": a.texto[:125], "titulo": a.titulo[:40],
+                               "vista_previa": self.ids.vistas_previas.get(a.nombre), "miniatura": miniatura,
+                               "miniatura_url": self.miniaturas.get(a.medio)})
+        return salida
 
     def activar(self) -> tuple[dict | None, str | None]:
         momento = self.ahora()
         nuevo_id = siguiente_id(self.almacen, momento)
         if nuevo_id is None:
             return None, _SIN_NUMERO
-        ops = [{"entidad": "campaign", "id": self.ids.campana, "campo": "status", "de_esperado": "PAUSED",
-                "a": "ACTIVE"}]
+        ops = []
+        if self.e.campana_existente is None:
+            ops.append({"entidad": "campaign", "id": self.ids.campana, "campo": "status", "de_esperado": "PAUSED",
+                        "a": "ACTIVE"})
         ops += [{"entidad": "adset", "id": i, "campo": "status", "de_esperado": "PAUSED", "a": "ACTIVE"}
                 for i in self.ids.conjuntos.values()]
         ops += [{"entidad": "ad", "id": i, "campo": "status", "de_esperado": "PAUSED", "a": "ACTIVE"}
                 for i in self.ids.anuncios.values()]
         datos: dict = {"version": 1, "id": nuevo_id, "tipo": "activar", "creada": momento.isoformat(),
                        "origen": ORIGEN, "cuenta": self.p.cuenta, "operaciones": ops,
-                       "motivo": f"activar el montaje {self.p.id} (creado en PAUSED)",
-                       "evidencia": {"montaje": self.p.id, "medios": [m.ruta for m in self.e.medios]}}
+                       "motivo": self._motivo_activar(),
+                       "evidencia": {"montaje": self.p.id, "medios": [m.ruta for m in self.e.medios],
+                                     "anuncios": self._evidencia_anuncios()}}
         if self.p.producto is not None:
             datos["producto"] = self.p.producto
         if self.p.pais is not None:
@@ -564,7 +697,8 @@ def montar(p: Propuesta, graph, almacen: Almacen, auditoria: Auditoria, vault: P
     try:
         _preparar_forma(p)
         archivos = _preparar_medios(e, vault)
-        locales = _preparar_meta(p, graph)
+        locales, offset = _preparar_meta(p, graph)
+        _preparar_existente(p, graph, almacen)
     except _Fallo as f:
         return _rechazo(p, auditoria, f.detalle, f.error)
     except ErrorGraph as ex:
@@ -576,18 +710,28 @@ def montar(p: Propuesta, graph, almacen: Almacen, auditoria: Auditoria, vault: P
     except Exception as ex:  # noqa: BLE001 — toda salida es un Resultado
         return _rechazo(p, auditoria, f"preparación fallida: {_texto_error(ex)}")
 
-    m = _Montaje(p, graph, almacen, auditoria, ahora, esperar)
-    # 2) validate_only de la campaña (sin crear nada; con solo_validar se acaba aquí).
+    m = _Montaje(p, graph, almacen, auditoria, ahora, esperar, offset)
+    # 2) validate_only de la campaña (sin crear nada; con solo_validar se acaba aquí). En una renovación
+    #    (campana_existente) la campaña ya existe: se validan sus conjuntos nuevos, que ya tienen padre.
     try:
-        m.validar(p.cuenta, "campaigns", _datos_campana(e), f"campaña {e.campana.nombre}")
+        if e.campana_existente is None:
+            m.validar(p.cuenta, "campaigns", _datos_campana(e), f"campaña {e.campana.nombre}")
+        else:
+            for cj in e.conjuntos:
+                m.validar(p.cuenta, "adsets", _datos_conjunto(e, cj, e.campana_existente, locales),
+                          f"conjunto {cj.nombre}")
     except _Fallo as f:
         m.anotar(e.solo_validar, False, f"fallida: {f.detalle}; no se subió ni se creó nada")
         return Resultado("fallida", redactar(f.detalle), error=f.error)
     except Exception as ex:  # noqa: BLE001
         return _rechazo(p, auditoria, f"validate_only falló: {_texto_error(ex)}")
     if e.solo_validar:
-        detalle = ("solo validar: la campaña pasa validate_only; los conjuntos y anuncios no se pueden validar "
-                   "sin crear sus padres, así que no se validaron; no se subió ni se creó nada")
+        if e.campana_existente is None:
+            detalle = ("solo validar: la campaña pasa validate_only; los conjuntos y anuncios no se pueden validar "
+                       "sin crear sus padres, así que no se validaron; no se subió ni se creó nada")
+        else:
+            detalle = ("solo validar: los conjuntos nuevos pasan validate_only en la campaña existente; los anuncios "
+                       "no se pueden validar sin crear sus conjuntos; no se subió ni se creó nada")
         m.anotar(True, True, f"ejecutada: {detalle}")
         return Resultado("ejecutada", detalle)
 

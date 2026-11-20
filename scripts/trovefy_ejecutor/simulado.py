@@ -466,6 +466,7 @@ class _Mundo:
                                "anuncios": [{"nombre": "AD01", "medio": "img01", "texto": "Texto",
                                              "titulo": "Titulo", "descripcion": "Descripcion",
                                              "cta": "LEARN_MORE", "url": "https://example.com/bg"}]}],
+                "dsa": {"beneficiario": "Beneficiario Prueba", "pagador": "Pagador Prueba"},
                 "unidad": "minima", "moneda": "COP"}
 
 

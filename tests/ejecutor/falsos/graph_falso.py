@@ -64,6 +64,7 @@ class GraphFalso:
     video_listo_tras: int | None = 2  # lecturas de status hasta "ready"; None = nunca
     video_error: bool = False  # el vídeo queda en "error"
     miniatura: str = "https://scontent.example/miniatura.jpg"
+    dar_vista_previa: bool = True  # False: Meta no devuelve preview_shareable_link
 
     def __post_init__(self) -> None:
         self._reales = 0  # escrituras reales ya aplicadas
@@ -237,6 +238,13 @@ class GraphFalso:
         nuevo = str(self._siguiente_id)
         self._siguiente_id += 1
         obj = dict(normal)
+        # Como Meta: cada objeto sabe de qué cuenta es (sin «act_»), heredada del padre.
+        if padre.startswith("act_"):
+            obj.setdefault("account_id", padre.removeprefix("act_"))
+        elif padre in self.objetos and "account_id" in self.objetos[padre]:
+            obj.setdefault("account_id", self.objetos[padre]["account_id"])
+        if arista == "ads" and self.dar_vista_previa:
+            obj["preview_shareable_link"] = f"https://fb.me/prueba-{nuevo}"
         if "status" in obj:
             if self.estado_tras_crear is not None:
                 obj["status"] = self.estado_tras_crear

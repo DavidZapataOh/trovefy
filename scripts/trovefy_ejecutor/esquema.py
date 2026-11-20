@@ -11,7 +11,7 @@ import copy
 import re
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from .dinero import es_importe
@@ -21,6 +21,7 @@ from .modelo import (
     Anuncio,
     Campana,
     Conjunto,
+    Dsa,
     Estructura,
     Medio,
     Operacion,
@@ -209,6 +210,16 @@ SHA256_RE = r"[0-9a-f]{64}"
 CODIGO_RE = r"[A-Z][A-Z0-9_]{0,59}"
 UBICACION_RE = r"[a-z][a-z0-9_]{0,59}"
 NIVELES = ("info", "aviso", "urgente")
+# Los 27 Estados miembros de la UE: Meta exige beneficiario y pagador (DSA) en los conjuntos dirigidos a ellos.
+# Fuente: https://european-union.europa.eu/principles-countries-history/eu-countries_es y
+# https://www.facebook.com/business/help/1006130410938690 (DSA, beneficiario y pagador), leídos el 2026-11-20.
+PAISES_UE: frozenset[str] = frozenset({
+    "AT", "BE", "BG", "CY", "CZ", "DE", "DK", "EE", "ES", "FI", "FR", "GR", "HR", "HU", "IE", "IT", "LT", "LU",
+    "LV", "MT", "NL", "PL", "PT", "RO", "SE", "SI", "SK"})
+# url_tags: pares clave=valor separados por «&»; admite las macros de Meta ({{campaign.name}}…) y «|» (§4.9).
+_PAR_URL_TAGS = re.compile(r"[A-Za-z0-9_.\-]+=[^&\s=]+")
+MARGEN_INICIO = timedelta(minutes=5)
+MAX_INICIO = timedelta(days=7)
 
 
 def _exacto(obj: Any, nombre: str, obligatorias: tuple[str, ...], opcionales: tuple[str, ...] = ()) -> dict:
@@ -261,8 +272,20 @@ def _validar_medio(m: Any) -> Medio:
     return Medio(ref, ruta, sha)
 
 
+def _url_tags(a: dict) -> str | None:
+    if "url_tags" not in a:
+        return None
+    v = _cadena(a, "url_tags", 1, 1000)
+    if any(c.isspace() for c in v) or "access_token" in v.lower():
+        raise _err("url_tags no puede llevar espacios ni access_token")
+    if not all(_PAR_URL_TAGS.fullmatch(par) for par in v.split("&")):
+        raise _err("url_tags debe ser pares clave=valor separados por &")
+    return v
+
+
 def _validar_anuncio(a: Any, refs: set[str]) -> Anuncio:
-    a = _exacto(a, "anuncio", ("nombre", "medio", "texto", "titulo", "descripcion", "cta", "url"))
+    a = _exacto(a, "anuncio", ("nombre", "medio", "texto", "titulo", "descripcion", "cta", "url"),
+                ("url_tags", "miniatura"))
     nombre = _cadena(a, "nombre", 1, 200)
     medio = _cadena(a, "medio", patron=REF_RE)
     if medio not in refs:
@@ -274,12 +297,40 @@ def _validar_anuncio(a: Any, refs: set[str]) -> Anuncio:
     url = _cadena(a, "url", 9, 2000)
     if not url.startswith("https://") or any(c.isspace() for c in url):
         raise _err("url debe empezar por https:// y no llevar espacios")
-    return Anuncio(nombre, medio, texto, titulo, descripcion, cta, url)
+    tags = _url_tags(a)
+    miniatura = _ruta_vault(a["miniatura"], "miniatura") if "miniatura" in a else None
+    return Anuncio(nombre, medio, texto, titulo, descripcion, cta, url, tags, miniatura)
 
 
-def _validar_conjunto(c: Any, abo: bool, refs: set[str]) -> Conjunto:
+def _inicio(c: dict, creada: datetime) -> str | None:
+    if "inicio" not in c:
+        return None
+    v = c["inicio"]
+    if not isinstance(v, str) or len(v) > 40:
+        raise _err("inicio debe ser texto ISO 8601 con zona")
+    try:
+        f = datetime.fromisoformat(v)
+    except ValueError:
+        raise _err(f"inicio no es ISO 8601: {v!r}") from None
+    if f.tzinfo is None or f.utcoffset() is None:
+        raise _err("inicio sin zona horaria (se exige desfase, p. ej. -05:00)")
+    if not creada - MARGEN_INICIO <= f <= creada + MAX_INICIO:
+        raise _err("inicio fuera de rango: entre la creación de la propuesta y 7 días después")
+    return v
+
+
+def _generos(c: dict) -> tuple[int, ...] | None:
+    if "generos" not in c:
+        return None
+    g = _lista(c, "generos", 1, 2)
+    if not all(type(x) is int and x in (1, 2) for x in g) or len(set(g)) != len(g):
+        raise _err("generos debe ser una lista sin repetir de 1 (hombres) y/o 2 (mujeres)")
+    return tuple(g)
+
+
+def _validar_conjunto(c: Any, abo: bool, refs: set[str], creada: datetime) -> Conjunto:
     c = _exacto(c, "conjunto", ("nombre", "paises", "idiomas", "evento", "ubicaciones_excluidas", "anuncios"),
-                ("daily_budget",))
+                ("daily_budget", "inicio", "generos"))
     nombre = _cadena(c, "nombre", 1, 200)
     if abo:
         if "daily_budget" not in c:
@@ -300,7 +351,8 @@ def _validar_conjunto(c: Any, abo: bool, refs: set[str]) -> Conjunto:
     if not all(isinstance(x, str) and re.fullmatch(UBICACION_RE, x) for x in ubic):
         raise _err("ubicaciones_excluidas debe ser una lista de identificadores en minúsculas")
     anuncios = tuple(_validar_anuncio(a, refs) for a in _lista(c, "anuncios", 1, 50))
-    return Conjunto(nombre, presupuesto, tuple(paises), tuple(idiomas), evento, tuple(ubic), anuncios)
+    return Conjunto(nombre, presupuesto, tuple(paises), tuple(idiomas), evento, tuple(ubic), anuncios,
+                    _inicio(c, creada), _generos(c))
 
 
 def _validar_campana(c: Any) -> Campana:
@@ -324,7 +376,12 @@ def _validar_campana(c: Any) -> Campana:
     return Campana(nombre, objetivo, tipo, tope, puja, presupuesto)
 
 
-def _validar_estructura(datos: dict) -> Estructura:
+def _validar_dsa(d: Any) -> Dsa:
+    d = _exacto(d, "dsa", ("beneficiario", "pagador"))
+    return Dsa(_cadena(d, "beneficiario", 1, 200), _cadena(d, "pagador", 1, 200))
+
+
+def _validar_estructura(datos: dict, creada: datetime) -> Estructura:
     for k in ("pagina_id", "dataset_id", "medios", "campana", "conjuntos", "unidad", "moneda"):
         if k not in datos:
             raise _err(f"falta el campo {k}")
@@ -336,14 +393,18 @@ def _validar_estructura(datos: dict) -> Estructura:
         raise _err("ref de medios repetida")
     campana = _validar_campana(datos["campana"])
     abo = campana.tipo_presupuesto == "ABO"
-    conjuntos = tuple(_validar_conjunto(c, abo, set(refs)) for c in _lista(datos, "conjuntos", 1, 20))
+    conjuntos = tuple(_validar_conjunto(c, abo, set(refs), creada) for c in _lista(datos, "conjuntos", 1, 20))
     if datos["unidad"] != "minima" or not isinstance(datos["unidad"], str):
         raise _err('unidad debe ser "minima"')
     moneda = _cadena(datos, "moneda", 3, 3, r"[A-Z]{3}")
     solo = datos.get("solo_validar", False)
     if type(solo) is not bool:
         raise _err("solo_validar debe ser booleano (true o false)")
-    return Estructura(pagina, dataset, medios, campana, conjuntos, "minima", moneda, solo)
+    dsa = _validar_dsa(datos["dsa"]) if "dsa" in datos else None
+    if dsa is None and any(p in PAISES_UE for cj in conjuntos for p in cj.paises):
+        raise _err("dsa (beneficiario y pagador) es obligatorio en conjuntos dirigidos a la UE")
+    existente = _cadena(datos, "campana_existente", patron=ENTIDAD_ID_RE) if "campana_existente" in datos else None
+    return Estructura(pagina, dataset, medios, campana, conjuntos, "minima", moneda, solo, dsa, existente)
 
 
 def _validar_alerta(datos: dict) -> Alerta:
@@ -380,7 +441,8 @@ def cargar_propuesta(datos: dict) -> Propuesta:
         permitidas = COMUNES | {"nivel", "titulo", "texto", "adjuntos", "prioridad", "expira_en_min"}
     elif tipo == "crear_estructura_pausada":
         permitidas = COMUNES | {"producto", "pais", "cuenta", "pagina_id", "dataset_id", "medios", "campana",
-                                "conjuntos", "unidad", "moneda", "solo_validar", "prioridad", "expira_en_min"}
+                                "conjuntos", "unidad", "moneda", "solo_validar", "dsa", "campana_existente",
+                                "prioridad", "expira_en_min"}
     else:
         permitidas = COMUNES | OPCIONALES | {"cuenta", "operaciones", "motivo"}
     for k in datos:
@@ -417,7 +479,7 @@ def cargar_propuesta(datos: dict) -> Propuesta:
     reinicia = _opcional_tipado(datos, "reinicia_aprendizaje", lambda v: type(v) is bool, "debe ser booleano")
     if tipo == "crear_estructura_pausada":
         return Propuesta(**base, cuenta=cuenta, producto=producto, pais=pais, operaciones=(), evidencia=None,
-                         reinicia_aprendizaje=False, estructura=_validar_estructura(datos))
+                         reinicia_aprendizaje=False, estructura=_validar_estructura(datos, creada))
     ops = datos.get("operaciones")
     if not isinstance(ops, list) or not 1 <= len(ops) <= 40:
         raise _err("operaciones debe ser una lista de 1 a 40 elementos")
@@ -440,8 +502,14 @@ def _plano(v: Any) -> Any:
     return v
 
 
-def _sin_none(d: dict) -> dict:
-    return {k: v for k, v in _plano(d).items() if v is not None}
+def _sin_none(d: Any) -> Any:
+    """Quita los ``None`` en profundidad (también dentro de los anuncios de un conjunto)."""
+    d = _plano(d)
+    if isinstance(d, dict):
+        return {k: _sin_none(v) for k, v in d.items() if v is not None}
+    if isinstance(d, list):
+        return [_sin_none(x) for x in d]
+    return d
 
 
 def volcar_propuesta(p: Propuesta) -> dict:
@@ -462,6 +530,10 @@ def volcar_propuesta(p: Propuesta) -> dict:
                  unidad=e.unidad, moneda=e.moneda)
         if e.solo_validar:
             d["solo_validar"] = True
+        if e.dsa is not None:
+            d["dsa"] = asdict(e.dsa)
+        if e.campana_existente is not None:
+            d["campana_existente"] = e.campana_existente
     elif p.tipo != "noop":
         d["operaciones"] = [{k: _plano(v) for k, v in
                              (("entidad", o.entidad), ("id", o.id), ("campo", o.campo),

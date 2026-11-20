@@ -71,3 +71,75 @@ def test_alerta_adjuntos_y_limites():
                  alerta(extra=1)):
         with pytest.raises(PropuestaInvalida):
             cargar_propuesta(malo)
+
+
+# -- plan 22, Tarea 5: campos para un montaje real en la UE ---------------------------------------------------------
+UTM = ("utm_source=fb&utm_medium=paid&utm_campaign={{campaign.name}}|{{campaign.id}}"
+       "&utm_term={{adset.name}}|{{adset.id}}&utm_content={{ad.name}}|{{ad.id}}")
+
+
+def _completa() -> dict:
+    d = estructura()
+    cj = d["conjuntos"][0]
+    cj.update(inicio="2026-11-13T00:00:00-05:00", generos=[2])
+    cj["anuncios"][0].update(url_tags=UTM, miniatura="productos/p-0001/creativos/BG/t1/AD01.jpg")
+    d["campana_existente"] = "120000000000001"
+    return d
+
+
+def test_volcar_y_cargar_ida_y_vuelta():
+    p = cargar_propuesta(_completa())
+    cj = p.estructura.conjuntos[0]
+    assert cj.inicio == "2026-11-13T00:00:00-05:00" and cj.generos == (2,)
+    assert cj.anuncios[0].url_tags == UTM and p.estructura.dsa.beneficiario == "Beneficiario Prueba"
+    assert p.estructura.campana_existente == "120000000000001"
+    v = volcar_propuesta(p)
+    assert cargar_propuesta(v) == p and "None" not in str(v)
+    # sin los campos nuevos, el volcado no los inventa
+    v2 = volcar_propuesta(cargar_propuesta(estructura()))
+    assert "inicio" not in v2["conjuntos"][0] and "url_tags" not in v2["conjuntos"][0]["anuncios"][0]
+
+
+def test_dsa_obligatorio_en_la_ue():
+    d = estructura()
+    del d["dsa"]
+    with pytest.raises(PropuestaInvalida, match="dsa"):
+        cargar_propuesta(d)
+    d["conjuntos"][0]["paises"] = ["NO"]  # fuera de la UE no hace falta
+    assert cargar_propuesta(d).estructura.dsa is None
+
+
+@pytest.mark.parametrize("mutar, motivo", [
+    (lambda d: d["dsa"].update(otro="x"), "campo no permitido"),
+    (lambda d: d["dsa"].update(pagador=""), "pagador"),
+    (lambda d: d["conjuntos"][0].update(inicio="2026-11-13T00:00:00"), "zona"),
+    (lambda d: d["conjuntos"][0].update(inicio="2026-11-30T00:00:00-05:00"), "rango"),
+    (lambda d: d["conjuntos"][0].update(inicio="2026-11-10T00:00:00-05:00"), "rango"),
+    (lambda d: d["conjuntos"][0].update(generos=[3]), "generos"),
+    (lambda d: d["conjuntos"][0].update(generos=[1, 1]), "generos"),
+    (lambda d: d["conjuntos"][0]["anuncios"][0].update(url_tags=UTM + "&access_token=x"), "access_token"),
+    (lambda d: d["conjuntos"][0]["anuncios"][0].update(url_tags="utm source=fb"), "espacios"),
+    (lambda d: d["conjuntos"][0]["anuncios"][0].update(url_tags="utm_source"), "clave=valor"),
+    (lambda d: d["conjuntos"][0]["anuncios"][0].update(url_tags="a=1&&b=2"), "clave=valor"),
+    (lambda d: d["conjuntos"][0]["anuncios"][0].update(miniatura="../fuera.jpg"), "miniatura"),
+    (lambda d: d.update(campana_existente="act_1"), "campana_existente"),
+])
+def test_campos_nuevos_rechazos(mutar, motivo):
+    d = estructura()
+    mutar(d)
+    with pytest.raises(PropuestaInvalida, match=motivo):
+        cargar_propuesta(d)
+
+
+def test_url_tags_con_token_rechazado():
+    d = estructura()
+    d["conjuntos"][0]["anuncios"][0]["url_tags"] = "utm_source=fb&ACCESS_TOKEN=abc"
+    with pytest.raises(PropuestaInvalida, match="access_token"):
+        cargar_propuesta(d)
+
+
+def test_inicio_sin_zona_rechazado():
+    d = estructura()
+    d["conjuntos"][0]["inicio"] = "2026-11-13T00:00:00"
+    with pytest.raises(PropuestaInvalida, match="zona"):
+        cargar_propuesta(d)

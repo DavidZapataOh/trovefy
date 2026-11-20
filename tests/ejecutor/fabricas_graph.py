@@ -101,7 +101,7 @@ def estructura(**cambios) -> Propuesta:
     camp.update({k: v for k, v in cambios.pop("campana", {}).items() if k != "status"})
     est = {"pagina_id": PAGINA, "dataset_id": DATASET, "medios": (medio(), medio_video()),
            "campana": Campana(**camp), "conjuntos": (conjunto(),), "unidad": "minima", "moneda": "COP",
-           "solo_validar": False}
+           "solo_validar": False, "dsa": None, "campana_existente": None}
     for k in list(cambios):
         if k in est:
             est[k] = cambios.pop(k)
