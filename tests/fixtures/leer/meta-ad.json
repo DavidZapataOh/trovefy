@@ -1,0 +1,13 @@
+{
+  "_nota": "Sintética, con la forma de docs/notas/leer-campos-meta.md. Sustituir por la respuesta real saneada en la Tarea 0.",
+  "currency": "COP",
+  "data": [
+    {"id": "5000000000000001", "name": "AD01 G1 mapa", "level": "ad", "campaign_id": "3333333333333333",
+     "adset_id": "4000000000000001", "effective_status": "ACTIVE"},
+    {"id": "5000000000000002", "name": "AD02 G1 villano", "level": "ad", "campaign_id": "3333333333333333",
+     "adset_id": "4000000000000002", "effective_status": "DISAPPROVED"},
+    {"id": "5000000000000003", "name": "AD03 G1 sueño", "level": "ad", "campaign_id": "3333333333333333",
+     "adset_id": "4000000000000003", "effective_status": "ACTIVE",
+     "actions": [{"action_type": "omni_purchase", "value": "1"}]}
+  ]
+}
