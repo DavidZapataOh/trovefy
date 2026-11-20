@@ -137,9 +137,12 @@ def avanzar_estado(vault: Path, p_id: str, pais: str, desde: str, hacia: str, ev
     vault = Path(vault)
     ahora = _con_zona(ahora)
     pais = _pais(pais)
-    if desde not in ESTADOS_FASE2[:-1] or hacia != ESTADOS_FASE2[ESTADOS_FASE2.index(desde) + 1]:
+    from trovefy.estado import permitida
+
+    en_fase2 = desde in ESTADOS_FASE2[:-1] and hacia == ESTADOS_FASE2[ESTADOS_FASE2.index(desde) + 1]
+    if not en_fase2 and not permitida(desde, hacia):
         raise ValueError(f"paso no permitido: {desde} → {hacia} (los estados van en orden: "
-                         f"{' → '.join(ESTADOS_FASE2)})")
+                         f"{' → '.join(ESTADOS_FASE2)}, y después los de trovefy.estado.TRANSICIONES)")
     evidencias = _evidencias(evidencia)
     ruta, meta, cuerpo = _leer(vault, p_id)
     paises = meta.get("paises") if isinstance(meta.get("paises"), dict) else {}
