@@ -445,11 +445,51 @@ NO_APLICA_CREATIVOS = "no aplica hasta la fase 3: aún no hay creativos"
 
 
 def gate_creativos(f: FichaPais) -> Gate:
-    """Decisión del plan 20: sin ``creativos/<PAIS>/`` (o vacía) no aplica; con archivos, falla hasta que exista la
-    revisión del ``revisor`` (fase 3). Nunca se pone en verde solo."""
+    """Plan 21, Tarea 12: sin ``creativos/<PAIS>/`` (o vacía) no aplica (la fase 2 sigue pasando). Con carpeta, ``ok``
+    solo con la tanda vigente cerrada, sin nada por rehacer, ``manifest.csv`` y cada pieza con el mismo ``sha256``
+    que se cerró, y en ``QA.md`` la automática, el ``revisor``, el ``nativo`` y Whisper (cada vídeo) en ``ok`` sobre
+    la tanda actual. Nunca se pone en verde solo."""
+    import csv
+    import hashlib
+
+    from trovefy.creativos import registro
+
     c = "creativos"
     carpeta = f.carpeta / "creativos" / f.pais
     if not carpeta.is_dir() or not any(carpeta.iterdir()):
         return Gate(c, "no_aplica", NO_APLICA_CREATIVOS)
-    return falla(c, "hay creativos sin la revisión del revisor: su contrato es de la fase 3", cubre=False)
+    bloque = f.datos.get("creativos") if isinstance(f.datos.get("creativos"), dict) else {}
+    vigente = bloque.get("vigente")
+    tandas = bloque.get("tandas") if isinstance(bloque.get("tandas"), dict) else {}
+    tanda = tandas.get(vigente) if isinstance(vigente, str) else None
+    arreglo = "/trovefy:creativos"
+    if not isinstance(tanda, dict):
+        return falla(c, "hay creativos sin cerrar: /creativos", arreglo=arreglo, cubre=False)
+    pendientes = [r for r in tanda.get("rehacer") or [] if isinstance(r, dict) and not r.get("resuelto")]
+    if pendientes:
+        detalle = "; ".join(f"{', '.join(r.get('ads') or [])} ({r.get('motivo')})" for r in pendientes)
+        return falla(c, f"faltan por rehacer: {detalle}", arreglo=arreglo, cubre=False)
+    if not tanda.get("cerrada"):
+        return falla(c, f"hay creativos sin cerrar: /creativos ({vigente})", arreglo=arreglo, cubre=False)
+    dir_tanda = carpeta / vigente
+    manifiesto = dir_tanda / "manifest.csv"
+    try:
+        crudo = manifiesto.read_bytes()
+    except OSError:
+        return falla(c, f"falta {vigente}/manifest.csv", arreglo=arreglo, cubre=False)
+    if hashlib.sha256(crudo).hexdigest() != tanda.get("manifest_sha256"):
+        return falla(c, "la tanda cambió después de cerrarla (manifest.csv)", arreglo=arreglo, cubre=False)
+    vault = _vault(f)
+    piezas = []
+    for fila in csv.DictReader(crudo.decode("utf-8").splitlines()):
+        ruta = vault / fila.get("archivo", "")
+        if registro.sha_archivo(ruta) != fila.get("sha256"):
+            return falla(c, f"la tanda cambió después de cerrarla ({fila.get('id')})", arreglo=arreglo, cubre=False)
+        piezas.append((fila.get("id", ""), fila.get("tipo", "")))
+    est = registro.estado(dir_tanda, piezas)
+    if not est.ok:
+        return falla(c, "QA de la tanda sin terminar: " + "; ".join(est.faltan()), arreglo=arreglo, cubre=False)
+    rel = f"creativos/{f.pais}/{vigente}"
+    return ok(c, f"tanda {vigente} cerrada y revisada ({len(piezas)} piezas)",
+              [f"{rel}/QA.md", f"{rel}/{est.hoja}" if est.hoja else f"{rel}/qc"])
 

@@ -52,6 +52,21 @@ correcta. Ejemplos: «по-добре от нула» → «по-добре от
 No conviertas en error lo que en una ronda anterior diste por bueno: si el texto no cambió, tampoco
 cambia tu juicio.
 
+## Tanda de creativos
+
+Si lo que recibes son los textos de una tanda de anuncios (`qc/textos-t<N>-v<K>.html`), cada anuncio es una
+`<section id="ad-NN">` con su texto principal, título, descripción, gancho, subtítulos y guion de voz. Revisa
+todo como arriba y, además:
+
+- **Guion de voz.** Lo va a leer una voz en el idioma del país: el precio va **en palabras**, como lo diría
+  un nativo («тринадесет евро и деветдесет цента»), nunca en cifras; las siglas y las marcas, como se dicen.
+- **Subtítulos y gancho.** Cortos y naturales; el gancho se entiende solo.
+- **Expresiones de riesgo.** Si te pasan la lista `qa.expresiones_riesgo.<idioma>` de `config/creativos.yaml`,
+  marca como error cualquier frase del anuncio que señale un atributo personal de quien mira o prometa dinero
+  (Meta suele rechazarlas). Si la lista falta, dilo en una línea `~ ` y propón las expresiones del idioma.
+
+En la salida, el lugar es el `id` de la sección: `ad-NN`.
+
 ## Lo que nunca haces
 
 - Nunca reescribes el texto entero ni editas archivos: das la cita y la corrección; el arreglo lo hace otro.
@@ -64,6 +79,8 @@ Una línea por error, con este formato exacto:
 ```
 - <s-NN|portada|ficha-id> · «cita breve» · <corrección>
 ```
+
+(En una tanda de creativos, el lugar es `ad-NN`.)
 
 Una línea por sugerencia, con el mismo formato pero empezando por `~ `:
 

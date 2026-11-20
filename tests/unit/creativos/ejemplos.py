@@ -134,5 +134,44 @@ def guion_video(plantilla: str = "broll_voz", segmentos: int = 4, segundos: floa
     return {"plantilla": plantilla, "gancho": "Не можеш да заспиш вечер?",
             "clip_gancho": {"prompt": "primer plano de un reloj a las 3 de la mañana", "segundos": 3},
             "segmentos": segs, "cierre": {"texto": "Ruta Calma 3R · 13,90 €", "cta": "Натисни бутона отдолу",
-                                          "segundos": 3},
+                                          "segundos": 3,
+                                          "texto_voz": "Само тринадесет евро и деветдесет цента."},
             "voz": True, **extra}
+
+
+def jpeg(ancho: int = 1080, alto: int = 1350) -> bytes:
+    buf = io.BytesIO()
+    Image.new("RGB", (ancho, alto), (240, 230, 220)).save(buf, "JPEG", quality=90)
+    return buf.getvalue()
+
+
+MP4_FALSO = b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 64
+
+
+def info_buena(_ruta) -> dict:
+    return {"ancho": 1080, "alto": 1920, "codec": "h264", "pix_fmt": "yuv420p", "audio": "aac", "fps": 30.0,
+            "duracion": 26.0, "bytes": 1000, "faststart": True}
+
+
+def tanda_buena(vault: Path, tanda: str = "t1"):
+    """Una tanda t1 completa: brief.yaml, guiones de los vídeos y las 10 piezas registradas en medios.json."""
+    from trovefy.creativos.brief import cargar_ficha
+    from trovefy.creativos.config import cargar_config
+    from trovefy.creativos.contexto import cargar_contexto, ruta_tanda
+    from trovefy.creativos.estaticos import escribir_pieza
+
+    carpeta = ruta_tanda(vault, P, PAIS, tanda)
+    (carpeta / "guiones").mkdir(parents=True, exist_ok=True)
+    datos = brief_ok()
+    (carpeta / "brief.yaml").write_text(yaml.safe_dump(datos, allow_unicode=True), encoding="utf-8")
+    ctx, cfg = cargar_contexto(vault, P, PAIS), cargar_config(vault)
+    ficha = cargar_ficha(carpeta, ctx, cfg)
+    for e in ficha.elegidos:
+        b = ficha.brief(e.ad)
+        if b.tipo == "video":
+            (carpeta / "guiones" / f"{e.ad}.yaml").write_text(
+                yaml.safe_dump(guion_video(b.formato), allow_unicode=True), encoding="utf-8")
+            escribir_pieza(vault, carpeta, e.ad, MP4_FALSO + e.ad.encode(), "mp4", tipo="video")
+        else:
+            escribir_pieza(vault, carpeta, e.ad, jpeg(), "jpg", tipo="imagen")
+    return ctx, cfg, ficha, carpeta

@@ -215,9 +215,12 @@ def orden_plantilla(guion: GuionVideo, entradas: Entradas, cfg: ConfigCreativos,
                     hasta_s: float | None = None) -> list[str]:
     """Argumentos de ffmpeg para montar ``guion`` (pura). ``hasta_s`` corta la salida (la prueba del gancho)."""
     total = guion.duracion
-    if not cfg.duracion_s[0] <= total <= cfg.duracion_s[1]:
+    if hasta_s is None and not cfg.duracion_s[0] <= total <= cfg.duracion_s[1]:
         raise VideoInvalido(f"{guion.ad}: dura {total:g} s; debe durar de {cfg.duracion_s[0]} a {cfg.duracion_s[1]} s")
-    comprobar_voz(guion, entradas)
+    if hasta_s is None:
+        comprobar_voz(guion, entradas)
+    elif "g" not in entradas.voces:
+        raise VideoInvalido(f"{guion.ad}: falta la voz del gancho (trovefy creativos voz --solo-gancho)")
     if entradas.musica is None:
         raise VideoInvalido(f"{guion.ad}: falta la música de la tanda (L2 15:25): trovefy creativos musica")
     w, h, fps = cfg.video_ancho, cfg.video_alto, cfg.fps
@@ -384,3 +387,13 @@ def tira_pdf(pdf: Path, paginas: tuple[int, ...], salida: Path, ancho: int, corr
     tira.save(salida, "PNG")
     return salida
 
+
+
+def guion_prueba(guion: GuionVideo, cfg: ConfigCreativos) -> GuionVideo:
+    """Solo el gancho y, detrás, un fondo de color hasta ``prueba_gancho_s`` (la prueba de 5 s, §4.12 paso 5)."""
+    from dataclasses import replace
+
+    g = guion.partes[0]
+    resto = max(0.5, cfg.prueba_gancho_s - g.segundos)
+    relleno = replace(guion.partes[-1], texto_voz="", texto_pantalla="", segundos=resto)
+    return replace(guion, partes=(g, relleno))
