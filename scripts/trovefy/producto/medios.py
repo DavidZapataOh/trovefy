@@ -25,8 +25,8 @@ from typing import Any, Literal
 from trovefy.vault.producto import secreto_en
 
 MODO_MEDIO = 0o640
-ORIGENES = ("apimart", "propio")
-EXTENSIONES = (".png", ".jpg", ".jpeg", ".webp", ".pdf")
+ORIGENES = ("apimart", "propio", "elevenlabs")  # elevenlabs: voz de los vídeos (plan 21)
+EXTENSIONES = (".png", ".jpg", ".jpeg", ".webp", ".pdf", ".mp4", ".wav", ".mp3", ".m4a")
 CARPETA = "medios"
 MANIFIESTO = "medios.json"
 _CAMPOS = ("archivo", "sha256", "origen")
@@ -109,8 +109,8 @@ def escribir_medio(ruta: Path, datos: bytes, *, base: Path | None = None) -> str
 # --- manifiesto ----------------------------------------------------------------------------------
 
 
-def ruta_manifiesto(raiz: Path) -> Path:
-    return Path(raiz) / CARPETA / MANIFIESTO
+def ruta_manifiesto(raiz: Path, carpeta: str = CARPETA) -> Path:
+    return Path(raiz) / carpeta / MANIFIESTO
 
 
 def _abrir_sin_enlace(ruta: Path, que: str) -> int:
@@ -122,11 +122,11 @@ def _abrir_sin_enlace(ruta: Path, que: str) -> int:
         raise
 
 
-def _hash_medio(raiz: Path, archivo: str) -> str:
+def _hash_medio(raiz: Path, archivo: str, carpeta: str = CARPETA) -> str:
     """sha256 de ``<raíz>/medios/<archivo>``: sin seguir enlaces, archivo regular y modo 0640."""
-    que = f"el medio {CARPETA}/{archivo}"
+    que = f"el medio {carpeta}/{archivo}"
     try:
-        fd = _abrir_sin_enlace(Path(raiz) / CARPETA / archivo, que)
+        fd = _abrir_sin_enlace(Path(raiz) / carpeta / archivo, que)
     except FileNotFoundError:
         raise ValueError(f"{que} no existe") from None
     with os.fdopen(fd, "rb") as f:
@@ -169,7 +169,7 @@ def _validar(id_: Any, archivo: Any, sha256: Any, origen: Any, datos: dict[str, 
     _sin_float(datos, id_)
 
 
-def leer_manifiesto(raiz: Path, *, verificar: bool = False) -> dict[str, dict]:
+def leer_manifiesto(raiz: Path, *, verificar: bool = False, carpeta: str = CARPETA) -> dict[str, dict]:
     """Entradas del manifiesto por id; ``{}`` si aún no existe.
 
     Cada id y cada entrada pasan las mismas comprobaciones que en :func:`registrar_medio`; con
@@ -177,10 +177,10 @@ def leer_manifiesto(raiz: Path, *, verificar: bool = False) -> dict[str, dict]:
     ``ValueError`` en la primera entrada mala, si el manifiesto está roto o si hay un enlace por medio.
     """
     raiz = Path(raiz)
-    if not carpeta_segura(raiz.parent, raiz / CARPETA, crear=False):
+    if not carpeta_segura(raiz.parent, raiz / carpeta, crear=False):
         return {}
     try:
-        fd = _abrir_sin_enlace(ruta_manifiesto(raiz), f"{CARPETA}/{MANIFIESTO}")
+        fd = _abrir_sin_enlace(ruta_manifiesto(raiz, carpeta), f"{carpeta}/{MANIFIESTO}")
     except FileNotFoundError:
         return {}
     with os.fdopen(fd, "rb") as f:
@@ -199,7 +199,7 @@ def leer_manifiesto(raiz: Path, *, verificar: bool = False) -> dict[str, dict]:
             raise ValueError(f"{CARPETA}/{MANIFIESTO}: a «{id_}» le falta {', '.join(faltan)}")
         resto = {k: v for k, v in entrada.items() if k not in _CAMPOS}
         _validar(id_, entrada["archivo"], entrada["sha256"], entrada["origen"], resto)
-        if verificar and _hash_medio(raiz, entrada["archivo"]) != entrada["sha256"]:
+        if verificar and _hash_medio(raiz, entrada["archivo"], carpeta) != entrada["sha256"]:
             raise ValueError(f"el sha256 de {CARPETA}/{entrada['archivo']} no coincide con el manifiesto")
     return datos
 
@@ -210,8 +210,9 @@ def _json(valor: Any) -> Any:
     raise TypeError(f"no se puede guardar en {MANIFIESTO}: {type(valor).__name__}")
 
 
-def registrar_medio(raiz: Path, id_: str, archivo: str, sha256: str, origen: Literal["apimart", "propio"],
-                    *, base: Path | None = None, **datos: Any) -> None:
+def registrar_medio(raiz: Path, id_: str, archivo: str, sha256: str,
+                    origen: Literal["apimart", "propio", "elevenlabs"], *, base: Path | None = None,
+                    carpeta: str = CARPETA, **datos: Any) -> None:
     """Añade o reemplaza la entrada ``id_`` del manifiesto de ``raiz``.
 
     ``archivo`` es un nombre suelto (png, jpg, jpeg, webp o pdf) dentro de ``<raíz>/medios/``: un
@@ -228,10 +229,10 @@ def registrar_medio(raiz: Path, id_: str, archivo: str, sha256: str, origen: Lit
     raiz = Path(raiz)
     base = raiz.parent if base is None else Path(base)
     _validar(id_, archivo, sha256, origen, datos)
-    if not carpeta_segura(base, raiz / CARPETA, crear=False):
-        raise ValueError(f"el medio {CARPETA}/{archivo} no existe")
-    if _hash_medio(raiz, archivo) != sha256:
-        raise ValueError(f"el sha256 de {CARPETA}/{archivo} no coincide con el archivo")
+    if not carpeta_segura(base, raiz / carpeta, crear=False):
+        raise ValueError(f"el medio {carpeta}/{archivo} no existe")
+    if _hash_medio(raiz, archivo, carpeta) != sha256:
+        raise ValueError(f"el sha256 de {carpeta}/{archivo} no coincide con el archivo")
     try:
         entrada = json.loads(json.dumps({"archivo": archivo, "sha256": sha256, "origen": origen, **datos},
                                         default=_json))
@@ -240,7 +241,7 @@ def registrar_medio(raiz: Path, id_: str, archivo: str, sha256: str, origen: Lit
                          else f"no se puede guardar en {MANIFIESTO}: {exc}") from None
     if secreto_en(entrada):
         raise ValueError("el medio trae algo con forma de secreto; no se guarda")
-    manifiesto = leer_manifiesto(raiz)
+    manifiesto = leer_manifiesto(raiz, carpeta=carpeta)
     manifiesto[id_] = entrada
     texto = json.dumps(manifiesto, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    _escribir(ruta_manifiesto(raiz), texto.encode("utf-8"), base)
+    _escribir(ruta_manifiesto(raiz, carpeta), texto.encode("utf-8"), base)

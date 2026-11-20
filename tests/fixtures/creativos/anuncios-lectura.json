@@ -1,0 +1,5 @@
+[
+  {"nombre": "AD01 G1 сън без хапчета", "ad_id": "<ad_id>", "estado": "MANTENER", "gasto": "4.10", "ventas": 1, "pi": 3, "roas_neto": "1.2", "ctr": "1.4", "hook_rate": null, "retencion": null, "ventana": "2026-11-21/2026-11-23", "fiabilidad": "media"},
+  {"nombre": "AD02 G1 пет минути вечер", "ad_id": "<ad_id>", "estado": "CANDIDATO", "gasto": "4.80", "ventas": 2, "pi": 4, "roas_neto": "2.1", "ctr": "1.9", "hook_rate": null, "retencion": null, "ventana": "2026-11-21/2026-11-23", "fiabilidad": "media"},
+  {"nombre": "AD03 G1 спри мислите", "ad_id": "<ad_id>", "estado": "APAGAR", "gasto": "3.00", "ventas": 0, "pi": 0, "roas_neto": "0", "ctr": "0.6", "hook_rate": null, "retencion": null, "ventana": "2026-11-21/2026-11-23", "fiabilidad": "media"}
+]

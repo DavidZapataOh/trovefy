@@ -84,12 +84,14 @@ class EstadoTarea:
     motivo: str | None
 
 
-def validar(p: PeticionImagen, manifiesto: dict) -> None:
+def validar(p: PeticionImagen, manifiesto: dict, pieza_valida: re.Pattern[str] = PIEZA) -> None:
     """Proporción y resolución válidas, 4k solo en ``PROPORCIONES_4K``, prompt de 1 a 4000 caracteres,
     como mucho 15 referencias y todas en el manifiesto con origen ``apimart`` o ``propio``."""
     if not isinstance(p.id, str) or not _ID.fullmatch(p.id):
         raise PeticionInvalida(f"id de imagen mal escrito: «{p.id}» (minúsculas, cifras y guiones; hasta 40)")
-    if not isinstance(p.pieza, str) or not PIEZA.fullmatch(p.pieza):
+    if not isinstance(p.pieza, str) or not pieza_valida.fullmatch(p.pieza):
+        if pieza_valida is not PIEZA:
+            raise PeticionInvalida(f"{p.id}: pieza «{p.pieza}» no vale en este lote")
         raise PeticionInvalida(f"{p.id}: pieza «{p.pieza}» no es principal, bono-N, bump, u1, u2, u3 ni downsell")
     if p.resolucion not in RESOLUCIONES:
         raise PeticionInvalida(f"{p.id}: resolución «{p.resolucion}» no es {', '.join(RESOLUCIONES)}")
@@ -202,7 +204,7 @@ def leer_tarea(task_id: str, datos: dict) -> EstadoTarea:
 
 
 def esperar(cred: Credenciales, task_id: str, abrir=abrir_sin_redireccion, dormir=time.sleep,
-            reloj=time.monotonic) -> EstadoTarea:
+            reloj=time.monotonic, *, ruta: str = "/v1/tasks/{}", leer=None) -> EstadoTarea:
     """Sondea ``GET /v1/tasks/{task_id}`` con *backoff* hasta ``completada``, ``fallida`` o el límite.
 
     Al pasar ``SONDEO_LIMITE_S`` devuelve ``pendiente``. La red o el servidor caídos
@@ -216,7 +218,7 @@ def esperar(cred: Credenciales, task_id: str, abrir=abrir_sin_redireccion, dormi
     fallos = 0
     while True:
         try:
-            datos = pedir_json(cred, "GET", f"/v1/tasks/{quote(task_id, safe='')}", abrir=abrir)
+            datos = pedir_json(cred, "GET", ruta.format(quote(task_id, safe="")), abrir=abrir)
         except (SinRed, ErrorServidor, Limitado):
             fallos += 1
             if fallos >= FALLOS_SEGUIDOS_MAX:
@@ -228,7 +230,7 @@ def esperar(cred: Credenciales, task_id: str, abrir=abrir_sin_redireccion, dormi
             return EstadoTarea(task_id, "pendiente", None, None, f"{_limpio(exc)}; se reanuda con --reanudar")
         else:
             fallos = 0
-            estado = leer_tarea(task_id, datos)
+            estado = (leer or leer_tarea)(task_id, datos)
             if estado.estado != "pendiente":
                 return estado
         if reloj() - inicio >= SONDEO_LIMITE_S:

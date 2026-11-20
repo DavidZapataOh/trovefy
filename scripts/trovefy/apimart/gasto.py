@@ -87,8 +87,10 @@ class FilaCoste:
 assert [f.name for f in fields(FilaCoste)] == CABECERA
 
 
-def ruta_costes(vault: Path, p_id: str) -> Path:
-    return entregable(vault, p_id) / ARCHIVO
+def ruta_costes(vault: Path, p_id: str, raiz: Path | None = None) -> Path:
+    """El libro del entregable o, con ``raiz`` (el destino de una tanda de creativos), el de esa carpeta."""
+    validar_p_id(p_id)
+    return (entregable(vault, p_id) if raiz is None else Path(raiz)) / ARCHIVO
 
 
 def _con_zona(ahora: datetime) -> datetime:
@@ -152,13 +154,13 @@ def _leer(texto: str) -> list[FilaCoste]:
     return [_desde_texto(celdas, n) for n, celdas in enumerate(filas[1:], start=2)]
 
 
-def leer_costes(vault: Path, p_id: str) -> list[FilaCoste]:
+def leer_costes(vault: Path, p_id: str, raiz: Path | None = None) -> list[FilaCoste]:
     """Filas de ``costes.csv`` (``[]`` si el producto aún no gastó nada).
 
     Falla cerrado: si existe ``.apimart-intentos.jsonl`` (ya hubo envíos) y ``costes.csv`` falta o está
     vacío, el registro del gasto se perdió o se vació: ``CostesCorruptos``, nunca «cero gastado».
     """
-    ruta = ruta_costes(vault, p_id)
+    ruta = ruta_costes(vault, p_id, raiz)
     intentos = (ruta.parent / INTENTOS).exists()
     if not ruta.is_file():
         if intentos:
@@ -175,7 +177,7 @@ def leer_costes(vault: Path, p_id: str) -> list[FilaCoste]:
     return _leer(texto)
 
 
-def anotar_coste(vault: Path, p_id: str, fila: FilaCoste) -> None:
+def anotar_coste(vault: Path, p_id: str, fila: FilaCoste, raiz: Path | None = None) -> None:
     """Añade ``fila`` al final de ``costes.csv`` (con la cabecera si está vacío), bajo ``flock``.
 
     Antes de escribir relee el archivo entero: si está corrupto lanza ``CostesCorruptos`` y no toca nada.
@@ -191,7 +193,7 @@ def anotar_coste(vault: Path, p_id: str, fila: FilaCoste) -> None:
         raise ValueError(f"la fila de costes trae algo con forma de secreto ({nombre}); no se guarda")
     salida = io.StringIO()
     csv.writer(salida, lineterminator="\n").writerow(celdas)
-    ruta = ruta_costes(vault, p_id)
+    ruta = ruta_costes(vault, p_id, raiz)
     ruta.parent.mkdir(parents=True, exist_ok=True)
     fd = os.open(ruta, os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o644)
     with os.fdopen(fd, "r+", encoding="utf-8", newline="") as f:
@@ -245,13 +247,16 @@ def _coma(v: Decimal, decimales: str) -> str:
     return str(Decimal(v).quantize(Decimal(decimales))).replace(".", ",")
 
 
-def alerta_tope(p_id: str, gastado: Decimal, tope: Decimal, faltan: int, estimado: Decimal) -> dict:
+def alerta_tope(p_id: str, gastado: Decimal, tope: Decimal, faltan: int, estimado: Decimal, *,
+                origen: str = SKILL, quien: str | None = None) -> dict:
     """Alerta del buzón (§5.2): ``estimado`` es lo que costarían las ``faltan`` imágenes que no se generan."""
     imagenes = "imagen" if faltan == 1 else "imágenes"
-    texto = (f"{p_id}: gastado {_coma(gastado, '0.0001')} USD de {_coma(tope, '0.01')}. "
+    if origen != SKILL:
+        imagenes = "pieza" if faltan == 1 else "piezas"
+    texto = (f"{quien or p_id}: gastado {_coma(gastado, '0.0001')} USD de {_coma(tope, '0.01')}. "
              f"Faltan {faltan} {imagenes} (≈ {_coma(estimado, '0.0001')} USD). "
              "No se generó nada más. Subir el tope es decisión tuya.")
-    return {"tipo": "alerta", "origen": SKILL, "nivel": "aviso", "titulo": "Tope de APIMart alcanzado",
+    return {"tipo": "alerta", "origen": origen, "nivel": "aviso", "titulo": "Tope de APIMart alcanzado",
             "texto": texto}
 
 
@@ -265,7 +270,8 @@ ALERTA_NO_DEPOSITADA = "alerta no depositada"
 
 def avisar_tope(vault: Path, p_id: str, gastado: Decimal, tope: Decimal, faltan: int, estimado: Decimal,
                 ahora: datetime, depositar: Callable = fuentes.depositar, *, pieza: str = "", imagen: str = "",
-                modelo: str = "", resolucion: str = "", proporcion: str = "", fuente_precio: str = "") -> str | None:
+                modelo: str = "", resolucion: str = "", proporcion: str = "", fuente_precio: str = "",
+                raiz: Path | None = None, origen: str = SKILL, quien: str | None = None) -> str | None:
     """Deposita la alerta de tope (una por producto y día) y la deja anotada en filas ``tope``; devuelve su id.
 
     La marca (fila ``tope`` «alerta (depositando)») se escribe **antes** de depositar: si algo falla
@@ -276,7 +282,7 @@ def avisar_tope(vault: Path, p_id: str, gastado: Decimal, tope: Decimal, faltan:
     ahora = _con_zona(ahora)
     hoy = _dia(ahora)
     ultimas: dict[str, FilaCoste] = {}
-    for f in leer_costes(vault, p_id):
+    for f in leer_costes(vault, p_id, raiz):
         if f.estado == "tope":
             ultimas[f.intento] = f
     if any(_dia(f.fecha) == hoy and f.archivo != ALERTA_NO_DEPOSITADA for f in ultimas.values()):
@@ -286,13 +292,14 @@ def avisar_tope(vault: Path, p_id: str, gastado: Decimal, tope: Decimal, faltan:
         modelo=modelo, resolucion=resolucion, proporcion=proporcion, estado="tope",
         coste_estimado_usd=estimado, coste_real_usd=None, fuente_precio=fuente_precio, sha256="",
         archivo=ALERTA_DEPOSITANDO)
-    anotar_coste(vault, p_id, marca)
+    anotar_coste(vault, p_id, marca, raiz)
     try:
-        id_ = depositar(Path(vault), alerta_tope(p_id, gastado, tope, faltan, estimado), lambda: ahora)
+        id_ = depositar(Path(vault), alerta_tope(p_id, gastado, tope, faltan, estimado, origen=origen, quien=quien),
+                        lambda: ahora)
     except BuzonNoDisponible:
-        anotar_coste(vault, p_id, replace(marca, archivo=ALERTA_NO_DEPOSITADA))
+        anotar_coste(vault, p_id, replace(marca, archivo=ALERTA_NO_DEPOSITADA), raiz)
         return None
-    anotar_coste(vault, p_id, replace(marca, archivo=f"alerta {id_}"))
+    anotar_coste(vault, p_id, replace(marca, archivo=f"alerta {id_}"), raiz)
     return id_
 
 

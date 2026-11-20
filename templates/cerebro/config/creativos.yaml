@@ -1,0 +1,82 @@
+# Creativos (/creativos): la tanda de test como la de los vídeos. Cada hoja lleva {valor, fuente, fecha}
+# (resolución 12). Los topes y los precios los decide el usuario: Claude no edita este archivo.
+# Un precio en null es «no medido»: esa pieza no se envía hasta que se mida (P-11).
+tanda:
+  piezas: {valor: 10, fuente: "L1 0:43:47: 10 anuncios por país", fecha: "2026-11-19"}
+  videos_sin_mezcla: {valor: 7, fuente: "C2 6:50: «siete creativos en video y tres en imagen, porque es exactamente lo que Facebook pide»", fecha: "2026-11-19"}
+  imagenes_sin_mezcla: {valor: 3, fuente: "C2 6:50", fecha: "2026-11-19"}
+  al_test: {valor: 5, fuente: "C1 0:18:10: «5 conjuntos · 1 anuncio c/u»", fecha: "2026-11-19"}
+  reserva: {valor: 5, fuente: "T3 18:55: las que entran en las renovaciones", fecha: "2026-11-19"}
+  briefs_candidatos: {valor: 20, fuente: "§4.12 paso 3; añadido (no cambia el método): son textos y solo se producen 10", fecha: "2026-11-19"}
+mezcla:
+  seguir_referencia: {valor: true, fuente: "L1 46:54: «85 % imágenes» → 8 imágenes y 2 vídeos", fecha: "2026-11-19"}
+plantillas:
+  broll_voz:
+    descripcion: {valor: "clips que cortan cada 1,5 s, voz, subtítulos karaoke y título-gancho", fuente: "L2 16:01", fecha: "2026-11-19"}
+    coste_tanda_usd: {valor: "1.00", fuente: "L2 16:01: ≈ US$ 1 la tanda de 7", fecha: "2026-11-19"}
+  ugc:
+    descripcion: {valor: "una persona generada habla con labios sincronizados", fuente: "L2 16:01", fecha: "2026-11-19"}
+    coste_tanda_usd: {valor: "1.30", fuente: "L2 16:01: ≈ US$ 1,30, salen 4–6", fecha: "2026-11-19"}
+  claymation:
+    descripcion: {valor: "plastilina en stop-motion + voz en off; personifica al villano", fuente: "L2 16:01", fecha: "2026-11-19"}
+    coste_tanda_usd: {valor: "1.10", fuente: "L2 16:01: ≈ US$ 1,10", fecha: "2026-11-19"}
+  3d:
+    descripcion: {valor: "3D tipo Pixar en 4 capítulos que explican un mecanismo", fuente: "L2 16:01", fecha: "2026-11-19"}
+    coste_tanda_usd: {valor: "1.10", fuente: "L2 16:01: ≈ US$ 1,10", fecha: "2026-11-19"}
+formatos_extra_video: {valor: [scroll_pdf, zoom_lento, objeto_que_habla, cara_en_circulo, pantalla_dividida, antes_despues], fuente: "L2 16:10 y L1 56:40 (imágenes fijas con zoom lento + clip corto de gancho)", fecha: "2026-11-19"}
+reparto_videos:
+  por_defecto: {valor: [scroll_pdf, zoom_lento], fuente: "sin dato de /watch: scroll del PDF (5 ventas el primer día, L2 16:10) y zoom lento con clip de gancho (L1 56:40)", fecha: "2026-11-19"}
+formatos_estaticos: {valor: [tipografico, ficha_del_producto, mockup, escena, pantalla_dividida, antes_despues_del_uso, meme], fuente: "L1 56:40: «calendario… tipográfica sin foto… meme del perro»", fecha: "2026-11-19"}
+hooks: {valor: [sujeto_dolor, sujeto_resultado, momento_de_uso, objecion, mecanismo, villano, contraste_de_uso], fuente: "L2 15:25 «sujeto + dolor o resultado»; ángulos de Trusa, L2 3:52", fecha: "2026-11-19"}
+texto:
+  principal_visible: {valor: 125, fuente: "§4.12: las primeras 125 letras se sostienen solas", fecha: "2026-11-19"}
+  principal_max: {valor: 500, fuente: "copy largo de L1 56:40", fecha: "2026-11-19"}
+  titulo_max: {valor: 40, fuente: "§4.12", fecha: "2026-11-19"}
+  descripcion_max: {valor: 30, fuente: "§4.12", fecha: "2026-11-19"}
+cta_por_defecto: {valor: LEARN_MORE, fuente: "§5.2 (ejemplo); el botón lo decide el usuario", fecha: "2026-11-19"}
+imagen:
+  ancho: {valor: 1080, fuente: "§4.12 (4:5, un solo medio por anuncio, L1 1:02:20)", fecha: "2026-11-19"}
+  alto: {valor: 1350, fuente: "§4.12", fecha: "2026-11-19"}
+video:
+  ancho: {valor: 1080, fuente: "L2 15:25", fecha: "2026-11-19"}
+  alto: {valor: 1920, fuente: "L2 15:25", fecha: "2026-11-19"}
+  duracion_min_s: {valor: 20, fuente: "§4.12", fecha: "2026-11-19"}
+  duracion_max_s: {valor: 30, fuente: "§4.12; «29-30 s», L1 56:40", fecha: "2026-11-19"}
+  fps: {valor: 30, fuente: "diseñador", fecha: "2026-11-19"}
+  gancho_s: {valor: 3, fuente: "§4.12 paso 4: texto grande los 3 primeros segundos", fecha: "2026-11-19"}
+  prueba_gancho_s: {valor: 5, fuente: "§4.12 paso 5; «gancho de 0 a 5 s», S1 8:30", fecha: "2026-11-19"}
+  corte_broll_s: {valor: "1.5", fuente: "L2 16:01: clips que cortan cada 1,5 s", fecha: "2026-11-19"}
+  zona_segura_arriba_pct: {valor: 14, fuente: "diseñador; se comprueba con la vista previa de Meta del plan 22", fecha: "2026-11-19"}
+  zona_segura_abajo_pct: {valor: 35, fuente: "diseñador; se comprueba con la vista previa de Meta del plan 22", fecha: "2026-11-19"}
+  musica_db: {valor: -18, fuente: "diseñador: música por debajo de la voz", fecha: "2026-11-19"}
+  voz: {valor: siempre, fuente: "L2 15:25: «02 Voz, imágenes, música, clips»", fecha: "2026-11-19"}
+  musica: {valor: siempre, fuente: "L2 15:25", fecha: "2026-11-19"}
+  clip_gancho: {valor: true, fuente: "L1 56:40: «un clip corto de gancho con texto grande»", fecha: "2026-11-19"}
+qa:
+  whisper_similitud_min: {valor: "0.925", fuente: "C1 51:00: «Whisper contra el texto, 0,925 de similitud»", fecha: "2026-11-19"}
+  idiomas_candidatos: {valor: [bg, ru, mk, sr, en, es], fuente: "trovefy.idioma.detectar", fecha: "2026-11-19"}
+  # Expresiones que Meta suele rechazar (atributos personales de quien mira, promesas de dinero), por idioma.
+  # La lista la escribe y revisa el agente nativo con el usuario; sin lista del idioma → «no medido».
+  expresiones_riesgo: {valor: {}, fuente: "no medido: la lista por idioma la revisa el nativo (§4.12 paso 6)", fecha: "2026-11-19"}
+gasto:
+  tope_tanda_usd: {valor: "6.00", fuente: "las cuatro plantillas ≈ US$ 4,50 (L2 16:01) + clip de gancho y voz ≈ US$ 0,45 por vídeo de formato extra (L1 56:40) + imágenes ≈ US$ 0,04 (L1 56:40) + música no medida; lo aprueba el usuario", fecha: "2026-11-19"}
+  tope_renovacion_usd: {valor: "2.00", fuente: "≥ 2 piezas con una plantilla ≈ US$ 1,10–1,30 (L2 16:01); «la segunda tanda sale casi gratis» (L2 15:25); lo aprueba el usuario", fecha: "2026-11-19"}
+apimart:
+  modelos_imagen: {valor: [gpt-image-2], fuente: "los de config/producto.yaml (P-11)", fecha: "2026-11-19"}
+  resolucion: {valor: 1k, fuente: "los de config/producto.yaml", fecha: "2026-11-19"}
+  modelo_tts: {valor: gpt-4o-mini-tts, fuente: "docs.apimart.ai/en/api-reference/audios/tts (POST /v1/audio/speech), leído el 2026-11-20", fecha: "2026-11-20"}
+  voz_tts: {valor: nova, fuente: "docs.apimart.ai/en/api-reference/audios/tts (alloy, echo, fable, onyx, nova, shimmer); se elige la de mejor Whisper (C1 51:00)", fecha: "2026-11-20"}
+  precio_tts_usd_1000_caracteres: {valor: null, fuente: "no medido: docs.apimart.ai no publica el precio del TTS; se mide antes de producir", fecha: "2026-11-20"}
+  modelo_video: {valor: null, fuente: "no medido: elegir en docs.apimart.ai (POST /v1/videos/generations, p. ej. seedance-2.0)", fecha: "2026-11-20"}
+  resolucion_video: {valor: 720p, fuente: "docs.apimart.ai seedance-2.0: 480p, 720p, 1080p", fecha: "2026-11-20"}
+  precio_video_usd_segundo: {valor: null, fuente: "no medido: docs.apimart.ai no publica el precio por segundo; se mide antes de producir", fecha: "2026-11-20"}
+  modelo_musica: {valor: suno, fuente: "docs.apimart.ai/en/api-reference/audios/suno/generation (POST /v1/music/generations)", fecha: "2026-11-20"}
+  version_musica: {valor: v6, fuente: "docs.apimart.ai suno: v6, v6-wild, v6-mini", fecha: "2026-11-20"}
+  precio_musica_usd_pista: {valor: null, fuente: "no medido: docs.apimart.ai no publica el precio de Suno; se mide antes de producir", fecha: "2026-11-20"}
+  licencia_musica_comercial: {valor: null, fuente: "no medido: la documentación de Suno en APIMart no dice nada del uso comercial; sin licencia comprobada, la música la aporta el usuario con su licencia", fecha: "2026-11-20"}
+elevenlabs:
+  plan: {valor: null, fuente: "https://elevenlabs.io/pricing (Starter US$ 6/mes, 30.000 créditos, leído el 2026-11-19); lo elige y contrata el usuario", fecha: "2026-11-19"}
+  coste_mensual_usd: {valor: null, fuente: "https://elevenlabs.io/pricing; lo confirma el usuario", fecha: "2026-11-19"}
+  caracteres_mes: {valor: null, fuente: "https://elevenlabs.io/pricing (1 crédito = 1 carácter); lo confirma el usuario", fecha: "2026-11-19"}
+  modelo: {valor: eleven_multilingual_v2, fuente: "documentación de ElevenLabs: modelo multilingüe; se confirma con el búlgaro antes de usarlo", fecha: "2026-11-19"}
+  voz_id: {valor: null, fuente: "la elige el usuario en su cuenta de ElevenLabs", fecha: "2026-11-19"}

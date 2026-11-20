@@ -48,6 +48,21 @@ Desbordes, imágenes rotas o cortadas, tofu o alfabeto equivocado, páginas en b
 contraste ilegible bloquean siempre. Lo demás que sea gusto (márgenes algo desiguales, una imagen que
 quedaría mejor más grande, un hueco pequeño) va como sugerencia `~ `.
 
+## Tanda de creativos
+
+Si la imagen es la hoja de contactos de una tanda de anuncios (`qc/contactos-t<N>-v<K>.png`), cada fila es un
+anuncio: su `ADnn`, su uso (`test`, `reserva` o `renovacion`) y su formato; un estático es una miniatura 4:5 y
+un vídeo son 4 fotogramas 9:16 con su segundo debajo. Con `BRANDBOOK.md` al lado, además de lo de arriba
+bloquea siempre:
+
+- texto que invade la zona segura de los fotogramas 9:16 (el 14 % de arriba o el 35 % de abajo, donde Meta
+  pone su interfaz), salvo los subtítulos dentro de su franja;
+- texto ilegible a tamaño de móvil (demasiado pequeño, fino o sin contraste);
+- marcas, logotipos, capturas o personas de otra marca o de otro anuncio (tipo `ajeno`);
+- un vídeo cuyos fotogramas estén negros, congelados en un solo color o cortados.
+
+Aquí `<N>` es el `ADnn` del anuncio (por ejemplo `- AD03 · contraste · …`).
+
 ## Lo que nunca haces
 
 - Nunca reescribes ni corriges el texto. Dices qué arreglar y dónde; el arreglo lo hace otro.
@@ -69,8 +84,8 @@ Una línea por sugerencia, con el mismo formato pero empezando por `~ `:
 ~ p<N> · <desborde|vacío|imagen|tipografía|contraste|en blanco|ajeno> · <mejora>
 ```
 
-`<N>` es el número de página que se ve debajo de cada miniatura (en una landing o una tanda, el número de
-bloque o de creativo). Si no hay problemas, no escribas ninguna línea de problema.
+`<N>` es el número de página que se ve debajo de cada miniatura (en una landing, el número de bloque; en una
+tanda de creativos, el `ADnn`). Si no hay problemas, no escribas ninguna línea de problema.
 
 La **última línea** es exactamente una de estas dos, sola y sin nada más:
 sin comillas, sin negritas, sin bloque de código.
