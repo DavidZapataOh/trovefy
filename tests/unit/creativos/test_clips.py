@@ -13,12 +13,10 @@ from trovefy.producto.medios import escribir_medio, leer_manifiesto, registrar_m
 
 from .ejemplos import AHORA, PAIS, P, crear_vault, guion_video, png
 from .falsos import CRED, APIMartFalso, publico, wav
-from .test_voz import ajustar
+from .test_voz import SIN_PRECIOS, ajustar
 
-VIDEO = [("modelo_video: {valor: null", "modelo_video: {valor: seedance-2.0"),
-         ("precio_video_usd_segundo: {valor: null", 'precio_video_usd_segundo: {valor: "0.02"')]
-MUSICA = [("licencia_musica_comercial: {valor: null", "licencia_musica_comercial: {valor: true"),
-          ("precio_musica_usd_pista: {valor: null", 'precio_musica_usd_pista: {valor: "0.10"')]
+VIDEO = [("modelo_video", "seedance-2.0"), ("precio_video_usd_segundo", '"0.02"')]
+MUSICA = [("licencia_musica_comercial", "true"), ("precio_musica_usd_pista", '"0.10"')]
 
 
 def _api(falso):
@@ -65,8 +63,7 @@ def test_clips_sin_coste_aprobado_no_envia(base):
 
 def test_sin_precio_de_video_no_medido(base):
     vault, carpeta = base
-    from trovefy.creativos.config import cargar_config
-    r, falso, _ = _clips(vault, carpeta, cargar_config(vault))
+    r, falso, _ = _clips(vault, carpeta, ajustar(vault, *SIN_PRECIOS))
     assert not falso.rutas and r[0].motivo.startswith("no medido")
 
 

@@ -1,27 +1,27 @@
 ---
 tipo: regla
 id: R-006
-titulo: Corte de oferta sin ventas (PU-01)
-fecha: 2026-11-09
-fuente: "Usuario (PU-01, 2026-11-09); diseño §0 punto 6, §4.1 y §8.0; C1 1:24:15"
-umbrales: [corte.oferta.sin_ventas_usd, corte.oferta.factor_cpa_be]
+titulo: Corte de oferta sin ventas
+fecha: 2026-11-19
+fuente: "C1 1:24:15 («un promedio de US$ 25»); C1 1:38:00; C1 34:25; T3 11:22; corrección del 2026-11-19 («los vídeos son la ley»)"
+umbrales: [corte.oferta.sin_ventas_usd]
 estado: vigente
 ---
 
-# R-006 · Corte de oferta sin ventas (PU-01)
+# R-006 · Corte de oferta sin ventas
 
 ## Regla
 
-El usuario lo dijo así: «matar el producto a los ~US$ 25 sin ventas». Una oferta con 0 ventas muere al llegar a min(`corte.oferta.sin_ventas_usd` (25) US$, `corte.oferta.factor_cpa_be` (2) × CPA_BE), **sin esperar ningún plazo** y haga el tiempo que haga desde la activación. Manda el gasto (`precedencia_corte: gasto`). Con ventas, al llegar al techo prorrogado, un ROAS neto acumulado inferior a `roas.apagar` (1,4) también corta.
+Una oferta con 0 ventas se propone pausar al llegar a `corte.oferta.sin_ventas_usd` (25) US$ gastados en total desde la activación, **sin esperar ningún plazo** y a cualquier hora, también en la ronda intradía. Manda la tienda: una sola venta real la salva aunque el píxel diga 0. Con ventas, pasadas las 72 h (R-011), un ROAS neto acumulado inferior a `roas.apagar` (1,4) también corta, solo con el día cerrado.
 
 ## Por qué
 
-Había un conflicto entre tres reglas: la guarda de 72 h, el corte sin ventas hacia los US$ 25 y un techo de US$ 50. El usuario lo resolvió a favor del gasto. Con US$ 500 en total, cada test sin ventas debe costar lo menos posible. El factor sustituye al 3× CPA_BE del HTML.
+Es lo que hacen los vídeos: «son $25 por producto… un promedio» (C1 1:24:15; «puede ser menos», C1 1:38:00). La regla anterior (PU-01) cortaba a min(US$ 25, 2 × CPA_BE); el factor no está en los vídeos y se quitó el 2026-11-19. Si quieres recuperarlo, dilo con `/recordar` y se repone como umbral con tus palabras.
 
 ## Cómo se aplica
 
-`/leer` compara el gasto acumulado de la oferta con el corte y, si no hay ventas, propone apagarla al buzón. Es el segundo corte por gasto acumulado que admite el día en curso. Las 72 h (R-011) solo protegen a ofertas con ventas. Esta regla no se reabre sin una nueva decisión explícita del usuario.
+`/leer` compara el gasto acumulado de la campaña (en USD, con la TRM del día del gasto) con el corte y, si la tienda no tiene ventas, deposita la propuesta de pausar la campaña con prioridad alta; la ejecuta el ejecutor tras tu Aceptar. Sin TRM el gasto es «no medido» y no se propone nada por importe. Las 72 h (R-011) solo protegen a ofertas con ventas.
 
 ## Fuente
 
-Usuario (PU-01, 2026-11-09), diseño §0 punto 6 y §8.0. Fila «Corte de oferta» de §4.1 y C1 1:24:15.
+C1 1:24:15 y C1 1:38:00; C1 34:25 y T3 11:22 para la rama con ventas.

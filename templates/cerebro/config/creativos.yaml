@@ -66,14 +66,14 @@ apimart:
   resolucion: {valor: 1k, fuente: "los de config/producto.yaml", fecha: "2026-11-19"}
   modelo_tts: {valor: gpt-4o-mini-tts, fuente: "docs.apimart.ai/en/api-reference/audios/tts (POST /v1/audio/speech), leído el 2026-11-20", fecha: "2026-11-20"}
   voz_tts: {valor: nova, fuente: "docs.apimart.ai/en/api-reference/audios/tts (alloy, echo, fable, onyx, nova, shimmer); se elige la de mejor Whisper (C1 51:00)", fecha: "2026-11-20"}
-  precio_tts_usd_1000_caracteres: {valor: null, fuente: "no medido: docs.apimart.ai no publica el precio del TTS; se mide antes de producir", fecha: "2026-11-20"}
-  modelo_video: {valor: null, fuente: "no medido: elegir en docs.apimart.ai (POST /v1/videos/generations, p. ej. seedance-2.0)", fecha: "2026-11-20"}
+  precio_tts_usd_1000_caracteres: {valor: "0.015", fuente: "estimado; APIMart no publica el precio del TTS en apimart.ai/pricing (leído el 2026-11-20); se toma el de lista de gpt-4o-mini-tts de OpenAI (≈ US$ 0,015 por minuto de voz ≈ 1.000 caracteres) y se confirma con el cargo de la primera llamada", fecha: "2026-11-20"}
+  modelo_video: {valor: seedance-2.0, fuente: "https://apimart.ai/pricing (leído el 2026-11-20)", fecha: "2026-11-20"}
   resolucion_video: {valor: 720p, fuente: "docs.apimart.ai seedance-2.0: 480p, 720p, 1080p", fecha: "2026-11-20"}
-  precio_video_usd_segundo: {valor: null, fuente: "no medido: docs.apimart.ai no publica el precio por segundo; se mide antes de producir", fecha: "2026-11-20"}
+  precio_video_usd_segundo: {valor: "0.04", fuente: "https://apimart.ai/pricing: seedance-2.0 desde US$ 0,04/s (leído el 2026-11-20)", fecha: "2026-11-20"}
   modelo_musica: {valor: suno, fuente: "docs.apimart.ai/en/api-reference/audios/suno/generation (POST /v1/music/generations)", fecha: "2026-11-20"}
   version_musica: {valor: v6, fuente: "docs.apimart.ai suno: v6, v6-wild, v6-mini", fecha: "2026-11-20"}
-  precio_musica_usd_pista: {valor: null, fuente: "no medido: docs.apimart.ai no publica el precio de Suno; se mide antes de producir", fecha: "2026-11-20"}
-  licencia_musica_comercial: {valor: null, fuente: "no medido: la documentación de Suno en APIMart no dice nada del uso comercial; sin licencia comprobada, la música la aporta el usuario con su licencia", fecha: "2026-11-20"}
+  precio_musica_usd_pista: {valor: "0.0625", fuente: "https://apimart.ai/model/suno: 0,5 créditos/gen ≈ US$ 0,05 (Gold), 0,625 ≈ US$ 0,0625 (oficial); se toma el oficial (leído el 2026-11-20)", fecha: "2026-11-20"}
+  licencia_musica_comercial: {valor: null, fuente: "no comprobada: https://apimart.ai/model/suno dice \"Commercial usage rights depend on Suno's terms\" (leído el 2026-11-20); sin licencia comprobada, la música sale de una biblioteca con licencia comercial o la aporta el usuario", fecha: "2026-11-20"}
 elevenlabs:
   plan: {valor: null, fuente: "https://elevenlabs.io/pricing (Starter US$ 6/mes, 30.000 créditos, leído el 2026-11-19); lo elige y contrata el usuario", fecha: "2026-11-19"}
   coste_mensual_usd: {valor: null, fuente: "https://elevenlabs.io/pricing; lo confirma el usuario", fecha: "2026-11-19"}

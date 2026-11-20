@@ -1,0 +1,20 @@
+{
+  "_nota": "Sintética, con la forma documentada de impultienda_campanas_utm nivel anuncio (config/impultienda_tools.json). Sin datos personales.",
+  "structuredContent": {
+    "periodo": {"desde": "2026-11-19", "hasta": "2026-11-19", "timezone": "America/Bogota"},
+    "nivel": "anuncio",
+    "utm": {
+      "nivel": "anuncio", "moneda": "EUR", "fx_incompleto": false, "filas_omitidas": 0,
+      "filas": [
+        {"utm_source": "fb", "utm_medium": "paid", "utm_campaign": "PRUEBA ZZ | G1 | ABO | 19-11-26|3333333333333333",
+         "anuncio": "AD03 G1 sueño|5000000000000003", "ventas": 1, "post_compra": 0, "ingresos": 13.90,
+         "ticket_promedio": 13.90},
+        {"utm_source": "fb", "utm_medium": "paid", "utm_campaign": "OTRA | G1 | ABO | 01-11-26|9999999999999999",
+         "anuncio": "AD01 G1 otra|5999999999999999", "ventas": 3, "post_compra": 0, "ingresos": 41.70,
+         "ticket_promedio": 13.90}
+      ],
+      "con_utm": {"ventas": 4, "ingresos": 55.60}, "sin_utm": {"ventas": 0, "ingresos": 0}
+    },
+    "meta_ads": {"disponible": false, "motivo": "sintética"}
+  }
+}

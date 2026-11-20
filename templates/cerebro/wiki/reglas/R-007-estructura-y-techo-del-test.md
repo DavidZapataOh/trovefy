@@ -4,7 +4,7 @@ id: R-007
 titulo: Estructura y techo del test
 fecha: 2026-11-19
 fuente: "C1 0:18:10 («5 conjuntos · 1 anuncio c/u · $5 por anuncio · Techo $100 · Plazo 1 semana»); Diseño §4.1; [D-08]; corrección del 2026-11-19 («los vídeos son la ley»)"
-umbrales: [test.presupuesto_conjunto_usd, test.conjuntos, test.spend_cap_usd, cuenta.limite_gasto_inicial_usd]
+umbrales: [test.presupuesto_conjunto_usd, test.conjuntos, test.spend_cap_usd, test.plazo_dias, cuenta.limite_gasto_inicial_usd]
 estado: vigente
 ---
 
@@ -12,7 +12,7 @@ estado: vigente
 
 ## Regla
 
-El test es ABO: `test.conjuntos` (5) conjuntos × 1 anuncio × `test.presupuesto_conjunto_usd` (5) US$/día, es decir, US$ 25/día por producto-país, con 5 anuncios de reserva para las renovaciones cada 48 h. El techo es `test.spend_cap_usd` (100) US$ por producto-país, aplicado como `spend_cap` de la campaña (en la moneda de la cuenta, a la baja con la TRM del día), y el plazo es de 1 semana. No hay prórroga. La cuenta publicitaria arranca con un límite de gasto de `cuenta.limite_gasto_inicial_usd` (250) US$.
+El test es ABO: `test.conjuntos` (5) conjuntos × 1 anuncio × `test.presupuesto_conjunto_usd` (5) US$/día, es decir, US$ 25/día por producto-país, con 5 anuncios de reserva para las renovaciones cada 48 h. El techo es `test.spend_cap_usd` (100) US$ por producto-país, aplicado como `spend_cap` de la campaña (en la moneda de la cuenta, a la baja con la TRM del día), y el plazo es de `test.plazo_dias` (7) días desde la salida: cumplido sin pasar a candidato, `/leer` propone pausar la campaña. No hay prórroga. La cuenta publicitaria arranca con un límite de gasto de `cuenta.limite_gasto_inicial_usd` (250) US$.
 
 ## Por qué
 

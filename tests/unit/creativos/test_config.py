@@ -1,5 +1,6 @@
 """config/creativos.yaml y su lector (plan 21, Tarea 1)."""
 
+import re
 from decimal import Decimal
 
 import pytest
@@ -49,9 +50,22 @@ def test_iniciar_no_pisa(tmp_path):
     assert ruta.read_text(encoding="utf-8") == "tocado"
 
 
-def test_modelos_tts_vacio_es_no_medido():
+def test_precios_medidos_en_la_plantilla():
     cfg = cargar_plantilla()
-    assert cfg.precio_tts_usd_1000 is None  # no medido: no se envía nada hasta medirlo
+    assert cfg.precio_tts_usd_1000 == Decimal("0.015") and cfg.modelo_video == "seedance-2.0"
+    assert cfg.precio_video_usd_segundo == Decimal("0.04") and cfg.precio_musica_usd_pista == Decimal("0.0625")
+    assert cfg.licencia_musica_comercial is None  # no comprobada: la música no sale de Suno
+
+
+def test_precio_en_null_es_no_medido():
+    # Un precio en null es «no medido»: no se envía nada hasta medirlo (P-11).
+    texto = TEXTO
+    for clave in ("precio_tts_usd_1000_caracteres", "precio_video_usd_segundo", "precio_musica_usd_pista",
+                  "modelo_video"):
+        texto, n = re.subn(rf"({clave}: \{{valor: )(\"[^\"]*\"|[^,]*)", r"\g<1>null", texto)
+        assert n == 1, clave
+    cfg = cargar_texto(texto)
+    assert cfg.precio_tts_usd_1000 is None
     assert cfg.precio_video_usd_segundo is None and cfg.precio_musica_usd_pista is None
     assert cfg.modelo_video is None
 

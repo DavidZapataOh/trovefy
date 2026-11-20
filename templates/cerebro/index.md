@@ -9,7 +9,7 @@ Catálogo: una línea por página. Es lo primero que se lee.
 - [[wiki/reglas/R-003-nota-y-decision-de-caza]] — Nota y decisión de caza
 - [[wiki/reglas/R-004-hueco-por-pais]] — Hueco por país y elección de país
 - [[wiki/reglas/R-005-corte-de-anuncio]] — Corte de anuncio
-- [[wiki/reglas/R-006-corte-de-oferta-sin-ventas]] — Corte de oferta sin ventas (PU-01)
+- [[wiki/reglas/R-006-corte-de-oferta-sin-ventas]] — Corte de oferta sin ventas
 - [[wiki/reglas/R-007-estructura-y-techo-del-test]] — Estructura y techo del test
 - [[wiki/reglas/R-008-roas-para-apagar-y-escalar]] — ROAS para apagar y escalar
 - [[wiki/reglas/R-009-pre-escala]] — Pre-escala
@@ -17,6 +17,7 @@ Catálogo: una línea por página. Es lo primero que se lee.
 - [[wiki/reglas/R-011-paciencia-de-72-h]] — Paciencia de 72 h
 - [[wiki/reglas/R-012-caza-de-pocos-en-pocos]] — Caza de pocos en pocos
 - [[wiki/reglas/R-013-ranking-de-anuncios-de-referencia]] — Ranking de anuncios de referencia
+- [[wiki/reglas/R-014-diagnostico-por-etapa]] — Diagnóstico por etapa
 
 ## Caza
 

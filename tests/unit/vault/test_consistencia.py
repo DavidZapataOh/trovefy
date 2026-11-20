@@ -26,11 +26,11 @@ def test_clave_inexistente_se_detecta(tmp_path):
     assert any("corte.anuncio.gasto_usd" in x for x in problemas)
 
 
-def test_claude_md_lista_las_13_reglas_y_17_duras(tmp_path):
+def test_claude_md_lista_las_14_reglas_y_17_duras(tmp_path):
     v = tmp_path / "v"; crear_vault(v)
     t = (v / "CLAUDE.md").read_text()
     bloque = t.split("<!-- REGLAS:INICIO -->")[1].split("<!-- REGLAS:FIN -->")[0]
-    assert len(re.findall(r"^- \[\[R-\d{3}-", bloque, re.MULTILINE)) == 13
+    assert len(re.findall(r"^- \[\[R-\d{3}-", bloque, re.MULTILINE)) == 14
     assert len(re.findall(r"^\d+\. \*\*", t, re.MULTILINE)) == 17
 
 
@@ -58,20 +58,21 @@ def test_r005_aplica_a_todo_anuncio_y_cita_esperar():
     raiz = Path(__file__).resolve().parents[3] / "templates" / "cerebro"
     t = (raiz / "wiki/reglas/R-005-corte-de-anuncio.md").read_text(encoding="utf-8")
     assert "No aplica a ofertas con ventas" not in t
-    assert "§4.13" in t and "corte.anuncio.impresiones_min" in t
-    assert "corte.anuncio.impresiones_min" in (raiz / "config/umbrales.yaml").read_text(encoding="utf-8")
+    assert "§4.13" in t and "C1 20:05" in t and "corte.anuncio.pi_visitas_min" in t
+    # Sin la guarda de 1.000 impresiones: no está en los vídeos (corrección del 2026-11-19).
+    assert "impresiones_min" not in t
+    assert "corte.anuncio.impresiones_min" not in (raiz / "config/umbrales.yaml").read_text(encoding="utf-8")
 
 
-def test_r005_esperar_usa_o_no_ni():
+def test_r005_esperar_solo_por_gasto():
     from pathlib import Path
-    raiz =Path(__file__).resolve().parents[3] / "templates" / "cerebro"
+    raiz = Path(__file__).resolve().parents[3] / "templates" / "cerebro"
     t = (raiz / "wiki/reglas/R-005-corte-de-anuncio.md").read_text(encoding="utf-8")
     regla = t.split("## Regla")[1].split("## ")[0]
     frase = next(f for f in regla.split(". ") if "ESPERAR" in f)
-    assert not re.search(r"\bni\b", frase), frase
-    partes = re.split(r"`corte\.anuncio\.impresiones_min`", frase)
-    assert len(partes) == 2 and "`corte.anuncio.gasto_usd`" in partes[0], frase
-    assert re.search(r"\s\*{0,2}o\*{0,2}\s", partes[0]), frase
+    assert "`corte.anuncio.gasto_usd`" in frase and "impresiones" not in frase, frase
+    apagar = next(f for f in regla.split(". ") if "se propone pausar" in f)
+    assert re.search(r"\s\*{0,2}o\*{0,2}\s", apagar), apagar  # cualquiera de las ramas apaga (C1 20:05)
 
 
 def test_valores_desactualizados_comparte_implementacion(tmp_path):

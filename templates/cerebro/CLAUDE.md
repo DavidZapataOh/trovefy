@@ -40,7 +40,7 @@ Las reglas nuevas se añaden con `/recordar` como `R-nnn`; aquí solo aparece su
 - [[R-003-nota-y-decision-de-caza]] Nota y decisión de caza
 - [[R-004-hueco-por-pais]] Hueco por país y elección de país
 - [[R-005-corte-de-anuncio]] Corte de anuncio
-- [[R-006-corte-de-oferta-sin-ventas]] Corte de oferta sin ventas (PU-01)
+- [[R-006-corte-de-oferta-sin-ventas]] Corte de oferta sin ventas
 - [[R-007-estructura-y-techo-del-test]] Estructura y techo del test
 - [[R-008-roas-para-apagar-y-escalar]] ROAS para apagar y escalar
 - [[R-009-pre-escala]] Pre-escala
@@ -48,4 +48,5 @@ Las reglas nuevas se añaden con `/recordar` como `R-nnn`; aquí solo aparece su
 - [[R-011-paciencia-de-72-h]] Paciencia de 72 h
 - [[R-012-caza-de-pocos-en-pocos]] Caza de pocos en pocos
 - [[R-013-ranking-de-anuncios-de-referencia]] Ranking de anuncios de referencia
+- [[R-014-diagnostico-por-etapa]] Diagnóstico por etapa
 <!-- REGLAS:FIN -->

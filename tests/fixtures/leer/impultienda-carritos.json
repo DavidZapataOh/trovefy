@@ -1,0 +1,18 @@
+{
+  "_nota": "Sintética, con la forma documentada de impultienda_carritos_abandonados (config/impultienda_tools.json). Sin datos personales.",
+  "structuredContent": {
+    "periodo": {"desde": "2026-11-19", "hasta": "2026-11-19", "timezone": "America/Bogota"},
+    "total_carritos": 1,
+    "por_estado": {"abandonado": 0, "pendiente": 0, "rechazado": 1, "en_proceso": 0, "voucher_pendiente": 0},
+    "abandono_real": {
+      "sesiones_checkout": 9, "ventas": 1, "intentos_fallidos": 1, "sin_comprar": 8, "tasa_compra_pct": 11.1,
+      "por_origen": [
+        {"utm_source": "fb", "utm_campaign": "PRUEBA ZZ | G1 | ABO | 19-11-26|3333333333333333",
+         "sesiones_checkout": 7, "ventas": 1, "intentos_fallidos": 1, "sin_comprar": 6},
+        {"utm_source": "fb", "utm_campaign": "OTRA | G1 | ABO | 01-11-26|9999999999999999",
+         "sesiones_checkout": 2, "ventas": 0, "intentos_fallidos": 0, "sin_comprar": 2}
+      ],
+      "origenes_omitidos": 0
+    }
+  }
+}

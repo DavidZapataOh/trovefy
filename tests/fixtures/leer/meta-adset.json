@@ -1,0 +1,21 @@
+{
+  "_nota": "Sintética, con la forma de docs/notas/leer-campos-meta.md. Sustituir por la respuesta real saneada en la Tarea 0 (ids ficticios del contrato 11).",
+  "currency": "COP",
+  "ad_entities": [
+    {"id": "4000000000000001", "name": "AD01 G1 mapa", "level": "adset", "campaign_id": "3333333333333333",
+     "effective_status": "ACTIVE", "daily_budget": "20000",
+     "insights": {"data": [{"date_start": "2026-11-19", "date_stop": "2026-11-19", "amount_spent": "18280",
+                            "impressions": "1500", "link_click": "28", "landing_page_view": "12",
+                            "omni_initiated_checkout": "0", "omni_purchase": "0", "omni_purchase_values": "0"}]}},
+    {"id": "4000000000000002", "name": "AD02 G1 villano", "level": "adset", "campaign_id": "3333333333333333",
+     "effective_status": "ACTIVE", "daily_budget": "20000",
+     "insights": {"data": [{"date_start": "2026-11-19", "date_stop": "2026-11-19", "amount_spent": "17080",
+                            "impressions": "1400", "link_click": "35", "landing_page_view": "13",
+                            "omni_initiated_checkout": "1", "omni_purchase": "0", "omni_purchase_values": "0"}]}},
+    {"id": "4000000000000003", "name": "AD03 G1 sueño", "level": "adset", "campaign_id": "3333333333333333",
+     "effective_status": "ACTIVE", "daily_budget": "20000",
+     "insights": {"data": [{"date_start": "2026-11-19", "date_stop": "2026-11-19", "amount_spent": "22320",
+                            "impressions": "1800", "link_click": "40", "landing_page_view": "22",
+                            "omni_initiated_checkout": "4", "omni_purchase": "1", "omni_purchase_values": "13.90"}]}}
+  ]
+}
