@@ -12,6 +12,7 @@ from trovefy.creativos.contexto import ruta_tanda
 from .ejemplos import AHORA, PAIS, P, brief_ok, crear_vault, guion_video
 from .falsos import CLAVE, explota
 from .test_manifest import cerrada
+from .test_voz import SIN_PRECIOS, ajustar
 
 
 @pytest.fixture
@@ -53,6 +54,7 @@ def test_nueva_brief_y_coste_sin_medir(entorno, monkeypatch, capsys):
                  (10, "scroll_pdf")):
         (carpeta / "guiones" / f"AD{n:02d}.yaml").write_text(yaml.safe_dump(guion_video(f), allow_unicode=True),
                                                              encoding="utf-8")
+    ajustar(vault, *SIN_PRECIOS)
     capsys.readouterr()
     assert _correr("coste", *BASE, "--tanda", "t1") == 1  # precios de APIMart sin medir
     out = capsys.readouterr().out

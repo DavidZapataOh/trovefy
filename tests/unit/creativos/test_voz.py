@@ -1,5 +1,6 @@
 """Voz en todos los vídeos con APIMart o ElevenLabs, con coste aprobado (plan 21, Tarea 6)."""
 
+import re
 from decimal import Decimal
 
 import pytest
@@ -16,19 +17,23 @@ from .falsos import wav
 
 
 def ajustar(vault, *pares):
+    """Fija `valor` de cada hoja `(clave, valor_yaml)` en el creativos.yaml del vault, sea cual sea el de la plantilla."""
     ruta = vault / RELATIVA
     texto = ruta.read_text(encoding="utf-8")
-    for a, b in pares:
-        assert a in texto, a
-        texto = texto.replace(a, b)
+    for clave, valor in pares:
+        patron = re.compile(rf"^(\s+{re.escape(clave)}: \{{valor: )(\"[^\"]*\"|[^,]*)(,)", re.MULTILINE)
+        texto, n = patron.subn(lambda m, v=valor: m.group(1) + v + m.group(3), texto)
+        assert n == 1, clave
     ruta.write_text(texto, encoding="utf-8")
     return cargar_config(vault)
 
 
-TTS = ('precio_tts_usd_1000_caracteres: {valor: null', 'precio_tts_usd_1000_caracteres: {valor: "0.015"')
-EL = [("plan: {valor: null", "plan: {valor: Starter"), ("coste_mensual_usd: {valor: null", 'coste_mensual_usd: {valor: "6"'),
-      ("caracteres_mes: {valor: null", "caracteres_mes: {valor: 30000"),
-      ("voz_id: {valor: null", "voz_id: {valor: abcdefgh12345678")]
+TTS = ("precio_tts_usd_1000_caracteres", '"0.015"')
+SIN_TTS = ("precio_tts_usd_1000_caracteres", "null")  # «no medido»: no se envía nada hasta medirlo
+SIN_PRECIOS = [SIN_TTS, ("modelo_video", "null"), ("precio_video_usd_segundo", "null"),
+               ("precio_musica_usd_pista", "null")]
+EL = [("plan", "Starter"), ("coste_mensual_usd", '"6"'), ("caracteres_mes", "30000"),
+      ("voz_id", "abcdefgh12345678")]
 
 
 @pytest.fixture
@@ -66,7 +71,7 @@ def _generar(vault, carpeta, cfg, precio, llamadas, **kw):
 
 def test_sin_precio_tts_pasa_a_elevenlabs(base):
     vault, carpeta = base
-    cfg = ajustar(vault, *EL)
+    cfg = ajustar(vault, SIN_TTS, *EL)
     est = coste.Estimacion((coste.Partida("voz ElevenLabs", 400, "carácter", Decimal("0.0002"), "plan"),))
     _aprobar(vault, est)
     precio, motivo = voz.elegir_proveedor(vault, cfg, carpeta)
@@ -76,13 +81,13 @@ def test_sin_precio_tts_pasa_a_elevenlabs(base):
 
 def test_sin_ningun_proveedor_no_medido(base):
     vault, carpeta = base
-    precio, motivo = voz.elegir_proveedor(vault, cargar_config(vault), carpeta)
+    precio, motivo = voz.elegir_proveedor(vault, ajustar(vault, SIN_TTS), carpeta)
     assert precio is None and motivo.startswith("no medido")
 
 
 def test_elevenlabs_sin_aprobacion_no_envia(base):
     vault, carpeta = base
-    cfg = ajustar(vault, *EL)
+    cfg = ajustar(vault, SIN_TTS, *EL)
     _aprobar(vault)  # aprobado sin ElevenLabs
     precio, motivo = voz.elegir_proveedor(vault, cfg, carpeta)
     assert precio is None and "ElevenLabs sin aprobar" in motivo
