@@ -137,9 +137,12 @@ def avanzar_estado(vault: Path, p_id: str, pais: str, desde: str, hacia: str, ev
     vault = Path(vault)
     ahora = _con_zona(ahora)
     pais = _pais(pais)
-    if desde not in ESTADOS_FASE2[:-1] or hacia != ESTADOS_FASE2[ESTADOS_FASE2.index(desde) + 1]:
+    from trovefy.estado import permitida
+
+    en_fase2 = desde in ESTADOS_FASE2[:-1] and hacia == ESTADOS_FASE2[ESTADOS_FASE2.index(desde) + 1]
+    if not en_fase2 and not permitida(desde, hacia):
         raise ValueError(f"paso no permitido: {desde} → {hacia} (los estados van en orden: "
-                         f"{' → '.join(ESTADOS_FASE2)})")
+                         f"{' → '.join(ESTADOS_FASE2)}, y después los de trovefy.estado.TRANSICIONES)")
     evidencias = _evidencias(evidencia)
     ruta, meta, cuerpo = _leer(vault, p_id)
     paises = meta.get("paises") if isinstance(meta.get("paises"), dict) else {}
@@ -156,6 +159,26 @@ def avanzar_estado(vault: Path, p_id: str, pais: str, desde: str, hacia: str, ev
     bloque["historial"] = historial
     meta["paises"] = {**paises, pais: bloque}
     return _guardar(vault, ruta, meta, cuerpo, skill, f"{p_id} {pais}: {desde} → {hacia}", ahora)
+
+
+def sustituir_clave_pais(vault: Path, p_id: str, pais: str, clave: str, valor: object, skill: str,
+                         ahora: datetime, *, archivos_log: Sequence[str] = ()) -> Path:
+    """Sustituye entera ``paises.<PAIS>.<clave>`` (sin fusionar): para bloques que su dueño reescribe completos,
+    como ``trafico`` de `/montar` (plan 22). Nunca ``estado`` ni ``historial``. Sin cambios, no escribe."""
+    vault = Path(vault)
+    ahora = _con_zona(ahora)
+    pais = _pais(pais)
+    if clave in _PROTEGIDAS or not isinstance(clave, str) or not clave:
+        raise ValueError(f"paises.{pais}.{clave} no se sustituye con esta función")
+    ruta, meta, cuerpo = _leer(vault, p_id)
+    paises = dict(meta.get("paises")) if isinstance(meta.get("paises"), dict) else {}
+    bloque = dict(paises.get(pais)) if isinstance(paises.get(pais), dict) else {}
+    if bloque.get(clave) == valor:
+        return ruta
+    bloque[clave] = copy.deepcopy(valor)
+    paises[pais] = bloque
+    meta["paises"] = paises
+    return _guardar(vault, ruta, meta, cuerpo, skill, f"{p_id} {pais}: actualiza {clave}", ahora, archivos_log)
 
 
 def _fusionar(base: dict, cambios: dict, camino: str) -> dict:

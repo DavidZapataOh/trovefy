@@ -71,7 +71,7 @@ def test_cli_iniciar_y_ver(entorno, capsys):
     capsys.readouterr()
     assert cli.main(["caja", "ver"]) == 0
     out = capsys.readouterr().out
-    assert "Caja: tests 280 de 280 (huecos: 9)" in out
+    assert "Caja: tests 280 de 280 (huecos: 2)" in out
     assert (vault / "wiki" / "analisis" / "caja.md").is_file()
     assert "· caja · ver caja" in (vault / "log.md").read_text(encoding="utf-8")
 

@@ -13,6 +13,7 @@ import re
 import time
 import urllib.error
 import urllib.request
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -29,6 +30,8 @@ _TIMEOUT_CALLBACK = 3.0
 _INTENTOS_429 = 3
 _RETRY_AFTER_MAX = 60
 _PAUSA_CHAT = 1.0
+MAX_ALBUM = 10  # sendMediaGroup admite de 2 a 10 elementos
+_MAX_PIE = 64
 
 
 def largo_telegram(texto: str) -> int:
@@ -115,12 +118,16 @@ class ClienteTelegram:
     def _limpiar(self, texto: str) -> str:
         return redactar(str(texto).replace(self._token, "***"))
 
-    def _llamar(self, metodo: str, params: dict[str, Any], timeout: float) -> Any:
+    def _llamar(self, metodo: str, params: dict[str, Any], timeout: float,
+                archivos: dict[str, tuple[str, bytes]] | None = None) -> Any:
+        """POST a la Bot API: JSON o, con ``archivos``, multipart/form-data (los ``params`` van como campos de
+        texto; los que no son texto, en JSON)."""
         url = f"{self._base}/bot{self._token}/{metodo}"
-        cuerpo = json.dumps(params).encode("utf-8")
-        req = urllib.request.Request(
-            url, data=cuerpo, method="POST", headers={"Content-Type": "application/json"}
-        )
+        if archivos:
+            cuerpo, tipo = _multipart(params, archivos)
+        else:
+            cuerpo, tipo = json.dumps(params).encode("utf-8"), "application/json"
+        req = urllib.request.Request(url, data=cuerpo, method="POST", headers={"Content-Type": tipo})
         del url
         http_error: int | None = None
         crudo: bytes | None = None
@@ -148,7 +155,8 @@ class ClienteTelegram:
             raise ErrorRedTelegram("respuesta demasiado grande")
         return self._resultado(crudo)
 
-    def _con_429(self, metodo: str, params: dict[str, Any], timeout: float, chat_id: int | None = None) -> Any:
+    def _con_429(self, metodo: str, params: dict[str, Any], timeout: float, chat_id: int | None = None,
+                 archivos: dict[str, tuple[str, bytes]] | None = None) -> Any:
         for intento in range(1, _INTENTOS_429 + 1):
             if chat_id is not None:
                 previo = self.ultimo_envio.get(chat_id)
@@ -158,7 +166,7 @@ class ClienteTelegram:
                         self._dormir(falta)
                 self.ultimo_envio[chat_id] = self._reloj()
             try:
-                return self._llamar(metodo, params, timeout)
+                return self._llamar(metodo, params, timeout, archivos)
             except ErrorTelegram as e:
                 ra = e.retry_after
                 if e.codigo != 429 or ra is None or ra > _RETRY_AFTER_MAX or intento == _INTENTOS_429:
@@ -258,8 +266,78 @@ class ClienteTelegram:
                 return
             raise
 
+    def enviar_album(self, chat_id: int, fotos: list[tuple[str, bytes | str]]) -> list[int]:
+        """(plan 22, [D-33]) Miniaturas de «Activar»: 1 foto → ``sendPhoto``; 2–10 → ``sendMediaGroup``. Cada foto
+        es ``(nombre, contenido)``: bytes (se suben por multipart) o una URL ``https://``. El pie es como mucho el
+        nombre del anuncio, limpio y corto: nunca texto libre. Devuelve los ``message_id``."""
+        if not fotos:
+            return []
+        if len(fotos) > MAX_ALBUM:
+            raise ValueError(f"álbum de {len(fotos)} fotos (máximo {MAX_ALBUM})")
+        medios: list[dict[str, Any]] = []
+        archivos: dict[str, tuple[str, bytes]] = {}
+        for i, (nombre, foto) in enumerate(fotos):
+            if isinstance(foto, (bytes, bytearray)):
+                if not foto:
+                    raise ValueError("foto vacía")
+                clave = f"foto{i}"
+                archivos[clave] = (f"{clave}.jpg", bytes(foto))
+                media = f"attach://{clave}"
+            elif isinstance(foto, str) and foto.startswith("https://") and not any(c.isspace() for c in foto):
+                media = foto
+            else:
+                raise ValueError("cada foto va en bytes o como URL https://")
+            item: dict[str, Any] = {"type": "photo", "media": media}
+            pie = _pie(nombre)
+            if pie:
+                item["caption"] = pie
+            medios.append(item)
+        if len(medios) == 1:
+            m = medios[0]
+            params: dict[str, Any] = {"chat_id": chat_id, "disable_notification": True}
+            una = {"photo": next(iter(archivos.values()))} if archivos else None
+            if una is None:
+                params["photo"] = m["media"]
+            if "caption" in m:
+                params["caption"] = m["caption"]
+            res = self._con_429("sendPhoto", params, _TIMEOUT_NORMAL, chat_id, una)
+            if not isinstance(res, dict) or not isinstance(res.get("message_id"), int):
+                raise ErrorRedTelegram("sendPhoto con forma inesperada")
+            return [res["message_id"]]
+        params = {"chat_id": chat_id, "media": medios, "disable_notification": True}
+        res = self._con_429("sendMediaGroup", params, _TIMEOUT_NORMAL, chat_id, archivos or None)
+        if not isinstance(res, list) or not all(isinstance(x, dict) and isinstance(x.get("message_id"), int)
+                                                for x in res):
+            raise ErrorRedTelegram("sendMediaGroup con forma inesperada")
+        return [x["message_id"] for x in res]
+
     def responder_callback(self, callback_id: str, texto: str = "") -> None:
         params: dict[str, Any] = {"callback_query_id": callback_id}
         if texto:
             params["text"] = texto
         self._llamar("answerCallbackQuery", params, _TIMEOUT_CALLBACK)
+
+
+def _pie(nombre: str) -> str:
+    """Pie de foto: solo el nombre del anuncio, sin controles ni saltos, como mucho ``_MAX_PIE`` caracteres."""
+    limpio = " ".join("".join(c for c in str(nombre) if c.isprintable()).split())
+    return limpio[:_MAX_PIE]
+
+
+def _multipart(params: dict[str, Any], archivos: dict[str, Any]) -> tuple[bytes, str]:
+    """multipart/form-data: ``params`` como campos (texto tal cual; lo demás en JSON) y ``archivos`` como
+    ``{campo: bytes}`` o ``{campo: (nombre, bytes)}``."""
+    limite = f"trovefy-{uuid.uuid4().hex}"
+    partes: list[bytes] = []
+    for k, v in params.items():
+        if v is None:
+            continue
+        valor = v if isinstance(v, str) else json.dumps(v)
+        partes.append(f'--{limite}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n'.encode()
+                      + valor.encode("utf-8") + b"\r\n")
+    for campo, dato in archivos.items():
+        nombre, contenido = dato if isinstance(dato, tuple) else (f"{campo}.jpg", dato)
+        partes.append(f'--{limite}\r\nContent-Disposition: form-data; name="{campo}"; filename="{nombre}"\r\n'
+                      "Content-Type: image/jpeg\r\n\r\n".encode() + contenido + b"\r\n")
+    partes.append(f"--{limite}--\r\n".encode())
+    return b"".join(partes), f"multipart/form-data; boundary={limite}"

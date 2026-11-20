@@ -48,6 +48,7 @@ def estructura(**cambios) -> dict:
                            "anuncios": [{"nombre": "AD01 G1 mapa", "medio": "img01", "texto": "Texto del anuncio",
                                          "titulo": "Titulo", "descripcion": "Descripcion", "cta": "LEARN_MORE",
                                          "url": "https://somatikalab.com/bg?utm_source=fb"}]}],
+            "dsa": {"beneficiario": "Beneficiario Prueba", "pagador": "Pagador Prueba"},
             "unidad": "minima", "moneda": "COP"}
     base.update(copy.deepcopy(cambios))
     return base

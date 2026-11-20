@@ -100,6 +100,9 @@ def test_caja_sin_huecos_falla(tmp_path):
 
 def test_caja_dos_tests_vivos_no_caben(tmp_path):
     vault = vault_con_caja(tmp_path)
+    caja = vault / "config" / "caja.yaml"  # techo pequeño: aquí se prueba el tope diario, no los huecos
+    caja.write_text(caja.read_text().replace("techo_usd: 100, prorroga_hasta_usd: 100",
+                                             "techo_usd: 30, prorroga_hasta_usd: 55"))
     ledger = vault / "ledger" / "gasto"
     ledger.mkdir(parents=True)
     (ledger / "2026-11.csv").write_text("fecha,cuenta,campana,gasto,moneda\n"

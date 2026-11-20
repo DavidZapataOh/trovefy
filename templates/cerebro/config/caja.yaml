@@ -1,7 +1,7 @@
 # Caja: sobres de efectivo en USD (el dinero real se guarda en centavos al cargarlo).
 capital_usd: 500                 # [U]
 sobres_usd: {herramientas: 20, tests: 280, reserva: 200}   # §4.17
-test: {techo_usd: 30, prorroga_hasta_usd: 55, diario_usd: 25}   # D-09, PU-01
+test: {techo_usd: 100, prorroga_hasta_usd: 100, diario_usd: 25}   # C1 0:18:10 «Techo $100» (sin prórroga)
 prescala_diario_usd: 20          # D-36
 tope_diario_ejecutor_usd: 50     # D-36 (el ejecutor lo aplica en COP por cuenta, D-37)
 reserva_desbloqueada: false      # true solo tras CANDIDATO → PRE_ESCALA (§4.17)

@@ -59,10 +59,13 @@ class InformeListo:
                    for g in self.gates)
 
 
-def listo_para_activar(informe: InformeListo) -> bool:
-    """Los once gates en ``ok`` (sin ``no_aplica`` ni excepciones) y el BE medido: el criterio para activar
-    campañas (fase 3, ``montado → TEST``), siempre sobre una evaluación nueva."""
-    return (tuple(g.clave for g in informe.gates) == GATES and all(g.estado == "ok" for g in informe.gates)
+def listo_para_activar(informe: InformeListo, admitidas: frozenset[str] = frozenset()) -> bool:
+    """Los once gates en ``ok`` (nunca ``no_aplica``) y el BE medido: el criterio para activar campañas (fase 3,
+    ``montado → test``), siempre sobre una evaluación nueva. ``admitidas`` (plan 22, Tarea 4): gates cuya excepción
+    aprobada el usuario admitió **también para activar** (``decisiones/*-activar-con-excepcion-<gate>.md``); un gate
+    en ``excepcion`` solo pasa si está ahí. Sin ``admitidas``, igual que antes: ninguna excepción."""
+    return (tuple(g.clave for g in informe.gates) == GATES
+            and all(g.estado == "ok" or (g.estado == "excepcion" and g.clave in admitidas) for g in informe.gates)
             and informe.be_medido)
 
 

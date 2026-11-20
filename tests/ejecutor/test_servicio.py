@@ -203,6 +203,7 @@ def estructura(id: str = "P-20261112-002", **c) -> dict:
                         "anuncios": [{"nombre": "AD01", "medio": "img01", "texto": "Texto", "titulo": "Titulo",
                                       "descripcion": "Descripcion", "cta": "LEARN_MORE",
                                       "url": "https://example.com/bg"}]}],
+         "dsa": {"beneficiario": "Beneficiario Prueba", "pagador": "Pagador Prueba"},
          "unidad": "minima", "moneda": "COP"}
     d.update(copy.deepcopy(c))
     return d
