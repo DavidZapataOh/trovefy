@@ -70,6 +70,28 @@ def vault_montar(tmp_path: Path) -> Path:
     return vault
 
 
+def copia_ejecutor(vault: Path, id_: str, tipo: str, estado: str, *, ids: dict | None = None, detalle: str = "",
+                   parcial: bool = False, texto: str = "", fecha: str = "2026-11-20T11:00:00-05:00") -> Path:
+    """``propuestas/<id>.md`` con la misma forma que escribe ``CopiaVault.resultado`` del ejecutor."""
+    lineas = ["---", "tipo: propuesta-resultado", f"id: {id_}", f"tipo_propuesta: {tipo}", f"estado: {estado}",
+              f"fecha: {fecha}", "callback_id: null", f"parcial: {'true' if parcial else 'false'}", "---", "",
+              texto or f"{id_} · {tipo}", "", "Fuente de verdad: la base del ejecutor.", "", f"Detalle: {detalle}"]
+    if ids:
+        lineas += ["", "ids_creados:", *(f"- {k}: {v}" for k, v in ids.items())]
+    ruta = vault / "propuestas" / f"{id_}.md"
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    ruta.write_text("\n".join(lineas) + "\n", encoding="utf-8")
+    return ruta
+
+
+def ids_montaje(nombres: list[str], campana: str = "9000001") -> dict:
+    conjuntos = {n: str(9100001 + i) for i, n in enumerate(nombres)}
+    anuncios = {n: str(9200001 + i) for i, n in enumerate(nombres)}
+    return {"campana": campana, "conjuntos": conjuntos, "anuncios": anuncios,
+            "creativos": {n: str(9300001 + i) for i, n in enumerate(nombres)}, "medios": {},
+            "vistas_previas": {n: f"https://fb.me/prueba-{i}" for i, n in enumerate(nombres)}}
+
+
 def manifest_filas(vault: Path, tanda: str = "t1") -> tuple[Path, list[dict]]:
     import csv
 

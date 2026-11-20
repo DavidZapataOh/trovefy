@@ -168,9 +168,13 @@ def _dataset(vault: Path, p_id: str, pais: str, ahora: datetime, pre: Precondici
 
 
 def comprobar(vault: Path, p_id: str, pais: str, ahora: datetime, fuentes, *,
-              evaluar: Callable | None = None, renovacion: bool = False) -> Precondiciones:
+              evaluar: Callable | None = None, modo: str = "montar") -> Precondiciones:
     """Las precondiciones, sin cortar en la primera. ``evaluar`` (para las pruebas) sustituye a
-    ``trovefy.listo.veredicto.evaluar``. Con ``renovacion``, el país debe estar en ``test`` o ``candidato``."""
+    ``trovefy.listo.veredicto.evaluar``. ``modo``: ``montar`` (el test), ``renovacion`` (el país en ``test`` o
+    ``candidato``) o ``activar`` (un «Activar» de Claude tras caducar el del ejecutor: el país en ``montado``)."""
+    if modo not in ("montar", "renovacion", "activar"):
+        raise ValueError(f"modo desconocido: {modo}")
+    renovacion = modo == "renovacion"
     from trovefy.listo import veredicto
 
     vault = Path(vault)
@@ -184,6 +188,11 @@ def comprobar(vault: Path, p_id: str, pais: str, ahora: datetime, fuentes, *,
             pre.bien(f"estado {estado}: se puede renovar")
         else:
             pre.mal(f"estado {estado or 'sin estado'}: la renovación es para un test vivo (test o candidato)")
+    elif modo == "activar":
+        if estado == "montado":
+            pre.bien("estado montado")
+        else:
+            pre.mal(f"estado {estado or 'sin estado'}: solo se activa un montaje en montado")
     elif estado == "listo":
         pre.bien("estado listo")
     elif estado == "montado" and vetado(trafico, vault):
@@ -221,7 +230,7 @@ def comprobar(vault: Path, p_id: str, pais: str, ahora: datetime, fuentes, *,
     tracking = bloque.get("tracking") if isinstance(bloque.get("tracking"), dict) else {}
     _dataset(vault, p_id, pais, ahora, pre, tracking.get("dataset_id"))
     # 5) ningún montaje vivo
-    if not renovacion and trafico.get("montaje"):
+    if modo == "montar" and trafico.get("montaje"):
         est = _estado_propuesta(vault, trafico.get("montaje"))
         if est in (None, "recibida", "enviada", "aceptada", "ejecutando"):
             pre.mal(f"hay un montaje en curso ({trafico['montaje']}): espera a que el ejecutor termine")
