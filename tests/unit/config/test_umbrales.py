@@ -7,14 +7,16 @@ from trovefy.config.umbrales import UmbralFaltante, UmbralInvalido, cargar, valo
 PLANTILLA = pathlib.Path(__file__).resolve().parents[3] / "templates/cerebro/config/umbrales.yaml"
 
 
-def test_semilla_carga_y_respeta_pu01():
+def test_semilla_carga_como_los_videos():
     u = cargar(PLANTILLA)
-    assert u["corte.oferta.sin_ventas_usd"].valor == 25
+    assert u["corte.oferta.sin_ventas_usd"].valor == 25  # C1 1:24:15, sin el factor de CPA_BE de PU-01
+    assert "corte.oferta.factor_cpa_be" not in u and "corte.anuncio.impresiones_min" not in u
+    assert u["corte.anuncio.pi_visitas_min"].valor == 0.15 and u["test.plazo_dias"].valor == 7
     assert u["test.spend_cap_usd"].valor == 100
     assert "test.spend_cap_prorroga_usd" not in u
     assert u["caza.perfil.tomi.c8_min"].valor == 15
     assert u["caza.precio.min_usd"].valor == 10
-    assert len(u) == 67
+    assert len(u) == 77
 
 
 def test_umbral_incompleto_falla_con_nombre(tmp_path):

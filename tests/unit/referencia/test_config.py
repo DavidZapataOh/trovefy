@@ -1,4 +1,5 @@
 import os
+import re
 
 import pytest
 from trovefy.config.umbrales import UmbralFaltante, cargar
@@ -13,18 +14,19 @@ from trovefy.vault.reglas import consistencia
 
 
 def _vault_antiguo(destino):
-    """Vault con R-001…R-012: la plantilla sin los bloques referencia.* ni R-013."""
+    """Vault con R-001…R-012: la plantilla sin los bloques referencia.* ni diagnostico.*, ni R-013 ni R-014."""
     crear_vault(destino)
     u = destino / "config/umbrales.yaml"
     texto = u.read_text(encoding="utf-8")
     i = texto.index("referencia.")
-    u.write_text(texto[:i].rstrip("\n") + "\n", encoding="utf-8")
-    for p in (destino / "wiki/reglas").glob("R-013-*.md"):
+    texto = re.sub(r"^diagnostico\.[a-z_]+:\n(?:  .*\n)+\n?", "", texto[:i], flags=re.MULTILINE)
+    u.write_text(texto.rstrip("\n") + "\n", encoding="utf-8")
+    for p in (destino / "wiki/reglas").glob("R-01[34]-*.md"):
         p.unlink()
     for nombre in ("CLAUDE.md", "index.md"):
         f = destino / nombre
         f.write_text("".join(ln for ln in f.read_text(encoding="utf-8").splitlines(True)
-                             if "R-013" not in ln), encoding="utf-8")
+                             if "R-013" not in ln and "R-014" not in ln), encoding="utf-8")
     return destino
 
 

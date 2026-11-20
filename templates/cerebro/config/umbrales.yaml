@@ -328,25 +328,18 @@ corte.anuncio.cpc_max_usd:
   gana_sobre: "—"
   regla: R-005
 
-corte.anuncio.impresiones_min:
-  valor: 1000
-  fuente: "Diseño §4.13 (Anuncio: ESPERAR)"
-  fecha: "2026-11-09"
-  gana_sobre: "—"
+corte.anuncio.pi_visitas_min:
+  valor: 0.15
+  fuente: "C1 54:20: «1 pago iniciado de 13. Muy debajo del 15 %» → OFF (AD2 con US$ 4,27)"
+  fecha: "2026-11-19"
+  gana_sobre: "la guarda de 1.000 impresiones (diseño §4.13), que no está en los vídeos"
   regla: R-005
 
 corte.oferta.sin_ventas_usd:
   valor: 25
-  fuente: "Usuario (PU-01, 2026-11-09): «matar el producto a los ~US$ 25 sin ventas»; C1 1:24:15"
-  fecha: "2026-11-09"
-  gana_sobre: "3× CPA_BE (HTML); 72 h"
-  regla: R-006
-
-corte.oferta.factor_cpa_be:
-  valor: 2
-  fuente: "Usuario (PU-01, 2026-11-09): «matar el producto a los ~US$ 25 sin ventas»; C1 1:24:15"
-  fecha: "2026-11-09"
-  gana_sobre: "3× (HTML)"
+  fuente: "C1 1:24:15: «un promedio de US$ 25» (los vídeos son la ley, 2026-11-19)"
+  fecha: "2026-11-19"
+  gana_sobre: "min(US$ 25, 2 × CPA_BE) de PU-01, que no está en los vídeos"
   regla: R-006
 
 test.presupuesto_conjunto_usd:
@@ -370,6 +363,13 @@ test.spend_cap_usd:
   gana_sobre: "30 USD con prórroga a 55 (D-09), que no están en los vídeos"
   regla: R-007
 
+test.plazo_dias:
+  valor: 7
+  fuente: "C1 0:18:10: «Techo $100 · Plazo 1 semana»"
+  fecha: "2026-11-19"
+  gana_sobre: "prórroga a US$ 55 (D-09), que no está en los vídeos"
+  regla: R-007
+
 roas.apagar:
   valor: 1.4
   fuente: "CLAUDE.md del vídeo (C1 34:25)"
@@ -391,25 +391,53 @@ preescala.min_ventas:
   gana_sobre: "10 ventas (Santino)"
   regla: R-009
 
-surf.paso_pct:
-  valor: 0.30
-  fuente: "T3; playbook HTML"
-  fecha: "2026-11-09"
-  gana_sobre: "×2 (T3)"
+surf.cada_h:
+  valor: 2
+  fuente: "S1 10:27–11:30: «cada 2 horas»; S2 14:10: «50 % cada 2 hs»"
+  fecha: "2026-11-19"
+  gana_sobre: "+30 %/h (T3 12:35)"
   regla: R-010
 
-surf.paso_max_pct:
-  valor: 0.50
-  fuente: "fluxo (idea); diseño §4.1"
-  fecha: "2026-11-09"
+surf.roas_subir:
+  valor: 2.0
+  fuente: "S1 10:27: «si tiene más de ROAS de dos, lo vas a duplicar»; T3 12:35"
+  fecha: "2026-11-19"
   gana_sobre: "—"
   regla: R-010
 
-surf.cadencia_min_h:
+surf.factor_subir:
   valor: 2
-  fuente: "Diseño §4.1"
-  fecha: "2026-11-09"
-  gana_sobre: "+30 %/h (T3)"
+  fuente: "S1 11:10: «Presupuesto ×2 — ROAS mayor a 2»; T3 12:35: «×2 el presupuesto»"
+  fecha: "2026-11-19"
+  gana_sobre: "+30 % por paso con tope +50 % (diseño §4.1)"
+  regla: R-010
+
+surf.roas_bajar:
+  valor: 1.75
+  fuente: "S2 14:10: «1.75 −50 %»; S2 13:36"
+  fecha: "2026-11-19"
+  gana_sobre: "—"
+  regla: R-010
+
+surf.factor_bajar:
+  valor: 0.5
+  fuente: "S2 14:10: «1.75 −50 %»"
+  fecha: "2026-11-19"
+  gana_sobre: "—"
+  regla: R-010
+
+surf.base_hora:
+  valor: 23
+  fuente: "S2 14:40: «11 p.m. vas a poner… todo en el precio normal»; S1 10:00; C1 56:16"
+  fecha: "2026-11-19"
+  gana_sobre: "—"
+  regla: R-010
+
+surf.base_usd:
+  valor: 5
+  fuente: "C1 0:18:10: «$5 por anuncio» (la base del conjunto en el test)"
+  fecha: "2026-11-19"
+  gana_sobre: "—"
   regla: R-010
 
 paciencia.con_ventas_h:
@@ -418,6 +446,48 @@ paciencia.con_ventas_h:
   fecha: "2026-11-09"
   gana_sobre: "—"
   regla: R-011
+
+diagnostico.ctr_min:
+  valor: 0.015
+  fuente: "S1 10:00: «CTR > 1,5 %»"
+  fecha: "2026-11-19"
+  gana_sobre: "—"
+  regla: R-014
+
+diagnostico.llegada_min:
+  valor: 0.80
+  fuente: "S1 10:00: «llegan a la página > 80 % de los clics»"
+  fecha: "2026-11-19"
+  gana_sobre: "—"
+  regla: R-014
+
+diagnostico.conversion_pagina_min:
+  valor: 0.02
+  fuente: "S1 10:00: «la página convierte > 2 %»"
+  fecha: "2026-11-19"
+  gana_sobre: "—"
+  regla: R-014
+
+diagnostico.pi_a_compra_min:
+  valor: 0.125
+  fuente: "L2 19:15: «46 pagos iniciados contra 6 ventas: 1 de cada 8»"
+  fecha: "2026-11-19"
+  gana_sobre: "—"
+  regla: R-014
+
+diagnostico.pi_min:
+  valor: 16
+  fuente: "L2 19:15 (1 de cada 8 necesita al menos 2 ventas posibles: 16 pagos iniciados); añadido (no cambia el método)"
+  fecha: "2026-11-19"
+  gana_sobre: "—"
+  regla: R-014
+
+diagnostico.clics_min:
+  valor: 300
+  fuente: "fase 12 del playbook potenciado: 300 clics sin venta descartan el 1 %; añadido (no cambia el método)"
+  fecha: "2026-11-19"
+  gana_sobre: "—"
+  regla: R-014
 
 cuenta.limite_gasto_inicial_usd:
   valor: 250
