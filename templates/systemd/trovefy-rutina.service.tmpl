@@ -1,0 +1,12 @@
+[Unit]
+Description=Trovefy: rutina {instancia} ({argumentos})
+
+[Service]
+Type=oneshot
+WorkingDirectory={vault}
+Environment="TROVEFY_VAULT={vault}"
+Environment="PATH={path}"
+# Un Claude colgado no bloquea la siguiente ronda.
+TimeoutStartSec=45min
+{exec_condition}ExecStart={claude} -p "{argumentos}" --allowedTools "{herramientas}"
+{exec_stop_post}

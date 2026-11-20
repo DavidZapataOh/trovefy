@@ -52,11 +52,11 @@ def test_registro_de_la_rutina(tmp_path):
     crear_vault(v)
     rutinas.registrar_ejecucion(v, "caza", date(2026, 11, 10), "Resumen uno", ok=True)
     carpeta = v / "rutinas/log/2026-11-10"
-    assert (carpeta / "ok").exists() and "Resumen uno" in (carpeta / "caza.md").read_text()
+    assert (carpeta / "caza.ok").exists() and "Resumen uno" in (carpeta / "caza.md").read_text()
     rutinas.registrar_ejecucion(v, "caza", date(2026, 11, 10), "Resumen dos: parada", ok=False)
     texto = (carpeta / "caza.md").read_text()
     assert "Resumen uno" in texto and "Resumen dos" in texto
-    assert not (carpeta / "ok").exists()  # la última ejecución se paró: /vigia lo ve
+    assert not (carpeta / "caza.ok").exists()  # la última ejecución se paró: /vigia lo ve
 
 
 def test_plantilla_caza_yaml_se_copia():
