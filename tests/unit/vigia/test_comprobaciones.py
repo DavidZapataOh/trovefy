@@ -155,24 +155,24 @@ def _timer(tmp_path):
 
 def test_rutina_caza_falto(tmp_path):
     u = _timer(tmp_path)
-    assert c.rutinas(tmp_path, AHORA, u).nivel == "aviso"
+    assert c.rutinas(tmp_path, AHORA, u)[0].nivel == "aviso"
     log = tmp_path / "rutinas" / "log" / "2026-11-12"
     log.mkdir(parents=True)
     (log / "caza.md").write_text("# Rutina caza\n\n## 06:31 COT · ok\n\nx\n\n## 06:50 COT · parada\n")
-    assert c.rutinas(tmp_path, AHORA, u).nivel == "aviso"
+    assert c.rutinas(tmp_path, AHORA, u)[0].nivel == "aviso"
     (log / "caza.md").write_text("# Rutina caza\n\n## 06:31 COT · ok\n\nx\n")
-    assert c.rutinas(tmp_path, AHORA, u).nivel == "ok"
+    assert c.rutinas(tmp_path, AHORA, u)[0].nivel == "ok"
 
 
 def test_rutina_antes_de_las_siete_y_sin_timer(tmp_path):
     u = _timer(tmp_path)
-    assert c.rutinas(tmp_path, AHORA.replace(hour=6, minute=45), u).nivel == "ok"
-    assert c.rutinas(tmp_path, AHORA, tmp_path / "vacia").nivel == "no_medido"
+    assert c.rutinas(tmp_path, AHORA.replace(hour=6, minute=45), u)[0].nivel == "ok"
+    assert c.rutinas(tmp_path, AHORA, tmp_path / "vacia")[0].nivel == "no_medido"
 
 
 def test_domingo_no_espera_caza(tmp_path):
     domingo = datetime(2026, 11, 15, 10, 0, tzinfo=COT)
-    assert c.rutinas(tmp_path, domingo, _timer(tmp_path)).nivel == "ok"
+    assert c.rutinas(tmp_path, domingo, _timer(tmp_path))[0].nivel == "ok"
 
 
 def test_impultienda(tmp_path):

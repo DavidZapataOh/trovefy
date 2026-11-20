@@ -21,5 +21,6 @@ Pasos:
 
 0. **¿Estás en el cerebro?** Lee `config/umbrales.yaml` en el directorio actual. Si no existe, dile al usuario que cierre Claude Code, ejecute `cd ~/trovefy-cerebro` (o la carpeta de `TROVEFY_VAULT`) y vuelva a abrirlo allí, y **para**.
 1. **Ejecutar.** Corre `trovefy vigia`. En la rutina (`--rutina`) corre `trovefy vigia --rutina`: deja el informe en `rutinas/log/<día>/vigia.md`, no hagas preguntas. Si el usuario solo quiere mirar, sin avisos a Telegram, añade `--sin-alerta`.
+   El informe trae una línea por rutina instalada: una que no dejó su log a su hora o terminó «parada» o «fallida» es un aviso; las que no se lanzan porque no hay test vivo no lo son.
 2. **Presentar en este orden:** primero lo urgente, luego los avisos, al final lo no medido con su motivo. Sé breve.
 3. **Cerrar.** Para cada problema, di qué skill o paso lo arregla. No lo arregles tú ni propongas atajos.
