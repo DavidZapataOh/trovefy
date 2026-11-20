@@ -60,7 +60,7 @@ def test_rutina_deja_registro(vault, monkeypatch):
     monkeypatch.setattr(orquestador, "ejecutar", lambda *a, **k: ejecucion_ejemplo())
     monkeypatch.setattr(orquestador, "hoy_negocio", lambda: date(2026, 11, 10))
     assert cli.main(["caza", "ejecutar", "--modo", "vigilar", "--region", "europa", "--rutina"]) == 0
-    assert (vault / "rutinas/log/2026-11-10/ok").exists()
+    assert (vault / "rutinas/log/2026-11-10/caza.ok").exists()
     assert "Búsquedas" in (vault / "rutinas/log/2026-11-10/caza.md").read_text()
 
 
@@ -69,7 +69,7 @@ def test_rutina_parada_no_deja_ok(vault, monkeypatch):
     monkeypatch.setattr(orquestador, "ejecutar", lambda *a, **k: replace(ejecucion_ejemplo(), parada="bloqueo"))
     monkeypatch.setattr(orquestador, "hoy_negocio", lambda: date(2026, 11, 10))
     assert cli.main(["caza", "ejecutar", "--modo", "vigilar", "--region", "europa", "--rutina"]) == 1
-    assert not (vault / "rutinas/log/2026-11-10/ok").exists()
+    assert not (vault / "rutinas/log/2026-11-10/caza.ok").exists()
 
 
 def test_hueco_cli(vault, monkeypatch, capsys):
@@ -142,7 +142,7 @@ def test_rutina_con_cuota_agotada_termina_bien(vault, monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "PARADA" not in out and "Cuota del día agotada" in out
     assert "Sin evaluar: 3 candidatas: 1 por el tope" in out and "2 porque no quedaban búsquedas hoy" in out
-    assert (vault / "rutinas/log/2026-11-10/ok").exists()
+    assert (vault / "rutinas/log/2026-11-10/caza.ok").exists()
 
 
 def test_racha_de_errores_es_interrupcion_no_parada(vault, monkeypatch, capsys):
@@ -153,7 +153,7 @@ def test_racha_de_errores_es_interrupcion_no_parada(vault, monkeypatch, capsys):
     assert cli.main(["caza", "ejecutar", "--modo", "vigilar", "--rutina"]) == 3
     out = capsys.readouterr().out
     assert "PARADA" not in out and "INTERRUMPIDA" in out
-    assert not (vault / "rutinas/log/2026-11-10/ok").exists()
+    assert not (vault / "rutinas/log/2026-11-10/caza.ok").exists()
     assert "interrumpida" in (vault / "rutinas/log/2026-11-10/caza.md").read_text()
 
 
@@ -203,7 +203,7 @@ def test_rutina_omitida_si_otra_caza_esta_en_curso(vault, monkeypatch, capsys):
     monkeypatch.setattr(orquestador, "ejecutar", ocupado)
     monkeypatch.setattr(orquestador, "hoy_negocio", lambda: date(2026, 11, 10))
     assert cli.main(["caza", "ejecutar", "--modo", "vigilar", "--rutina"]) == 4
-    assert not (vault / "rutinas/log/2026-11-10/ok").exists()
+    assert not (vault / "rutinas/log/2026-11-10/caza.ok").exists()
     assert "omitida: otra caza en curso" in (vault / "rutinas/log/2026-11-10/caza.md").read_text()
     assert cli.main(["caza", "ejecutar", "--modo", "vigilar"]) == 2  # sin --rutina: error normal
 
