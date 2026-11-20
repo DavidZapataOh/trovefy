@@ -69,6 +69,9 @@ class TelegramSimulado:
         self._siguiente_mensaje = 1
         self._siguiente_callback = 1
         self._ultima_fecha: int | None = None
+        self.albumes: list[list[tuple[str, bytes | str]]] = []  # álbumes de «Activar» (plan 22), aparte
+        self.orden: list[str] = []  # "album" | "mensaje", en el orden en que se enviaron
+        self.fallar_album: bool = False
 
     def __repr__(self) -> str:
         return f"TelegramSimulado(chat_id={self.chat_id}, mensajes={len(self.mensajes)})"
@@ -83,10 +86,22 @@ class TelegramSimulado:
         mid = self._siguiente_mensaje
         self._siguiente_mensaje += 1
         self.mensajes[mid] = {"chat_id": chat_id, "texto": texto, "botones": botones, "sonido": sonido}
+        self.orden.append("mensaje")
         if responde_a is not None:
             self.mensajes[mid]["responde_a"] = responde_a
         self._ultima_fecha = int(self._ahora().timestamp())
         return mid
+
+    def enviar_album(self, chat_id: int, fotos: list[tuple[str, bytes | str]]) -> list[int]:
+        if self.fallar_album:
+            raise ErrorTelegram(400, "Bad Request: wrong file")
+        if not 1 <= len(fotos) <= 10:
+            raise ValueError(f"álbum de {len(fotos)} fotos")
+        self.albumes.append(list(fotos))
+        self.orden.append("album")
+        primero = self._siguiente_mensaje
+        self._siguiente_mensaje += len(fotos)
+        return list(range(primero, primero + len(fotos)))
 
     def editar(self, chat_id: int, message_id: int, texto: str,
                botones: list[list[Boton]] | None = None) -> None:
